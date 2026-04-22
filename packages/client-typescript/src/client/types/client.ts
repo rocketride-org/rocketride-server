@@ -192,4 +192,10 @@ export interface RocketRideClientConfig {
 
 	/** Client version sent during auth (e.g. "0.9.4") */
 	clientVersion?: string;
+
+	/** Connect to a specific runtime instance by ID */
+	runtimeId?: string;
+
+	/** Connect to a runtime instance on a specific port */
+	runtimePort?: number;
 }

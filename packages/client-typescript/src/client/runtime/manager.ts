@@ -43,12 +43,74 @@ export class RuntimeManager {
 	 *
 	 * Returns [uri, weStarted] where weStarted indicates whether this
 	 * manager spawned the instance.
+	 *
+	 * Targeting options:
+	 * - `instanceId` — look up a specific instance, start if stopped, fail if not found
+	 * - `port` — reuse a running instance on that port
+	 * - Neither — existing auto-discovery behavior
 	 */
-	async ensureRunning(): Promise<[string, boolean]> {
+	async ensureRunning(opts?: { instanceId?: string; port?: number }): Promise<[string, boolean]> {
 		const db = new StateDB();
 		db.open();
 
 		try {
+			// ── Instance targeting ──────────────────────────────────
+			if (opts?.instanceId) {
+				const target = db.get(opts.instanceId);
+				if (!target) {
+					throw new Error(`Runtime instance ${opts.instanceId} not found`);
+				}
+				// Already running?
+				if (target.pid && target.port && (await RuntimeManager.isRuntimeHealthy(target.port))) {
+					this._port = target.port;
+					this.instanceId = target.id;
+					this._weStarted = false;
+					return [this.uri!, false];
+				}
+				// Need to start it
+				const binary = runtimeBinary(target.version);
+				if (!existsSync(binary)) {
+					throw new Error(`Runtime binary not found for v${target.version}`);
+				}
+				const port = opts.port ?? (await findAvailablePort());
+				const pid = spawnRuntime(binary, port, target.id);
+				const stderrLog = join(logsDir(target.id), 'stderr.log');
+				try {
+					await waitReady(pid, stderrLog);
+				} catch (e) {
+					await stopRuntime(pid);
+					db.register(target.id, 0, 0, target.version, 'sdk', 0, 'stopped');
+					throw e;
+				}
+				db.register(target.id, pid, port, target.version, 'sdk');
+				this._pid = pid;
+				this._port = port;
+				this.instanceId = target.id;
+				this._weStarted = true;
+				this._version = target.version;
+				this.registerSignalHandlers();
+				return [this.uri!, true];
+			}
+
+			// ── Port targeting ──────────────────────────────────────
+			if (opts?.port) {
+				if (await RuntimeManager.isRuntimeHealthy(opts.port)) {
+					this._port = opts.port;
+					this._weStarted = false;
+					// Try to find matching instance in DB for bookkeeping
+					const all = db.getAll();
+					for (const inst of all) {
+						if (inst.port === opts.port) {
+							this.instanceId = inst.id;
+							break;
+						}
+					}
+					return [this.uri!, false];
+				}
+				throw new Error(`No healthy runtime found on port ${opts.port}`);
+			}
+
+			// ── Default auto-discovery ──────────────────────────────
 			// 1. Check for an existing live instance
 			const existing = db.findRunning();
 			if (existing) {

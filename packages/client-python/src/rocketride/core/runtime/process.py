@@ -58,6 +58,7 @@ async def spawn_runtime(
                 stdout=stdout_fh,
                 stderr=stderr_fh,
                 env=env,
+                cwd=str(binary_path.parent),
                 creationflags=0x08000000 | 0x00000200,
             )
         else:
@@ -66,6 +67,7 @@ async def spawn_runtime(
                 stdout=stdout_fh,
                 stderr=stderr_fh,
                 env=env,
+                cwd=str(binary_path.parent),
                 start_new_session=True,
             )
     except Exception as e:

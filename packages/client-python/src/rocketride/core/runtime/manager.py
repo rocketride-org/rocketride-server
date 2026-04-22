@@ -49,19 +49,73 @@ class RuntimeManager:
             return None
         return f'http://127.0.0.1:{self._port}'
 
-    async def ensure_running(self) -> Tuple[str, bool]:
+    async def ensure_running(
+        self,
+        *,
+        instance_id: str | None = None,
+        port: int | None = None,
+    ) -> Tuple[str, bool]:
         """Ensure a runtime instance is running.
 
         Returns (uri, we_started) where we_started indicates whether
         this manager spawned the instance (and is therefore responsible
         for teardown).
+
+        Targeting options:
+        - ``instance_id`` — look up a specific instance, start if stopped
+        - ``port`` — reuse a running instance on that port
+        - Neither — existing auto-discovery behavior
         """
         async with StateDB() as db:
+            # ── Instance targeting ──────────────────────────────────
+            if instance_id:
+                target = await db.get(instance_id)
+                if not target:
+                    raise RuntimeError(f'Runtime instance {instance_id} not found')
+                # Already running?
+                if target['pid'] and target['port'] and await self._is_runtime_healthy(target['port']):
+                    self._port = target['port']
+                    self._instance_id = target['id']
+                    self._we_started = False
+                    return (self.uri, False)
+                # Need to start it
+                binary = runtime_binary(target['version'])
+                if not binary.exists():
+                    raise RuntimeError(f'Runtime binary not found for v{target["version"]}')
+                spawn_port = port or find_available_port()
+                pid = await spawn_runtime(binary, spawn_port, target['id'])
+                try:
+                    await wait_healthy(spawn_port, pid=pid)
+                except Exception:
+                    await stop_runtime(pid)
+                    await db.register(target['id'], 0, 0, target['version'], 'sdk', desired_state='stopped')
+                    raise
+                await db.register(target['id'], pid, spawn_port, target['version'], 'sdk')
+
+                self._port = spawn_port
+                self._instance_id = target['id']
+                self._we_started = True
+                self._register_signal_handlers()
+                return (self.uri, True)
+
+            # ── Port targeting ──────────────────────────────────────
+            if port:
+                if await self._is_runtime_healthy(port):
+                    self._port = port
+                    self._we_started = False
+                    # Try to find matching instance in DB for bookkeeping
+                    all_instances = await db.get_all()
+                    for inst in all_instances:
+                        if inst['port'] == port:
+                            self._instance_id = inst['id']
+                            break
+                    return (self.uri, False)
+                raise RuntimeError(f'No healthy runtime found on port {port}')
+
+            # ── Default auto-discovery ──────────────────────────────
             # 1. Check for an existing live instance
             existing = await db.find_running()
             if existing:
-                # Verify the runtime is actually healthy (PID alive doesn't
-                # guarantee it's *our* runtime — PIDs get recycled on Windows)
                 if await self._is_runtime_healthy(existing['port']):
                     self._port = existing['port']
                     self._instance_id = existing['id']
@@ -76,25 +130,24 @@ class RuntimeManager:
 
             # 3. Spawn
             logger.info('Auto-spawning a local runtime')
-            port = find_available_port()
+            spawn_port = find_available_port()
             existing_row = await db.find_by_version(self._version)
-            instance_id = existing_row['id'] if existing_row else await db.next_id()
+            new_instance_id = existing_row['id'] if existing_row else await db.next_id()
 
-            pid = await spawn_runtime(binary, port, instance_id)
+            pid = await spawn_runtime(binary, spawn_port, new_instance_id)
 
             # 4. Wait for the runtime to be healthy before registering
             try:
-                await wait_healthy(port, pid=pid)
+                await wait_healthy(spawn_port, pid=pid)
             except Exception:
-                # Kill the orphaned process and register as stopped
                 await stop_runtime(pid)
-                await db.register(instance_id, 0, 0, self._version, 'sdk', desired_state='stopped')
+                await db.register(new_instance_id, 0, 0, self._version, 'sdk', desired_state='stopped')
                 raise
 
-            await db.register(instance_id, pid, port, self._version, 'sdk')
+            await db.register(new_instance_id, pid, spawn_port, self._version, 'sdk')
 
-        self._port = port
-        self._instance_id = instance_id
+        self._port = spawn_port
+        self._instance_id = new_instance_id
         self._we_started = True
 
         # Register cleanup handlers

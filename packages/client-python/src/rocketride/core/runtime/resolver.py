@@ -148,3 +148,61 @@ async def resolve_docker_tag(version_spec: str) -> str:
 
     # Explicit version — return as-is
     return version_spec
+
+
+async def list_compatible_versions(
+    compat_range: Optional[str] = None,
+    include_prerelease: bool = False,
+) -> list[dict]:
+    """Return all runtime versions matching the compat range, sorted descending.
+
+    Each entry is a dict with keys: version, prerelease, published_at.
+    """
+    if compat_range is None:
+        compat_range = get_compat_range()
+
+    spec = SpecifierSet(compat_range)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            _GITHUB_API,
+            headers={'Accept': 'application/vnd.github+json'},
+            params={'per_page': 100},
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeNotFoundError(f'Failed to query GitHub releases (HTTP {resp.status})')
+            releases = await resp.json()
+
+    from .platform import _base_version
+
+    results: list[dict] = []
+    for release in releases:
+        tag = release.get('tag_name', '')
+        match = _TAG_PATTERN.match(tag)
+        if not match:
+            continue
+        version_str = match.group(1)
+        is_prerelease = '-prerelease' in version_str or '-beta' in version_str or '-alpha' in version_str or '-rc' in version_str or release.get('prerelease', False)
+
+        if not include_prerelease and is_prerelease:
+            continue
+
+        base = _base_version(version_str)
+        try:
+            v = Version(base)
+        except Exception:
+            continue
+        if v not in spec:
+            continue
+
+        results.append(
+            {
+                'version': version_str,
+                'prerelease': is_prerelease,
+                'published_at': release.get('published_at', ''),
+            }
+        )
+
+    # Sort descending by base version
+    results.sort(key=lambda r: Version(_base_version(r['version'])), reverse=True)
+    return results

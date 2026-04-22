@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
-import { satisfies, maxSatisfying, valid as semverValid, compare } from 'semver';
+import { satisfies, maxSatisfying, valid as semverValid, compare, rcompare } from 'semver';
 import { RuntimeNotFoundError } from '../exceptions/index.js';
 import { normalizeVersion } from './platform.js';
 
@@ -116,4 +116,74 @@ export async function resolveDockerTag(versionSpec: string): Promise<string> {
 	});
 
 	return candidates[0];
+}
+
+// ── Version listing ─────────────────────────────────────────────────
+
+export interface VersionInfo {
+	version: string;
+	prerelease: boolean;
+	publishedAt: string;
+}
+
+/**
+ * Return all runtime versions from GitHub releases that match the given
+ * compatibility range, sorted descending (newest first).
+ *
+ * When `includePrerelease` is false (default), versions with a `-prerelease`
+ * suffix are excluded.
+ */
+export async function listCompatibleVersions(compatRange?: string, includePrerelease?: boolean): Promise<VersionInfo[]> {
+	const range = compatRange ?? getCompatRange();
+
+	const resp = await fetch(GITHUB_API + '?per_page=100', {
+		headers: { Accept: 'application/vnd.github+json' },
+	});
+	if (!resp.ok) {
+		throw new RuntimeNotFoundError(`Failed to query GitHub releases (HTTP ${resp.status})`);
+	}
+	const releases: Array<{ tag_name: string; published_at?: string; prerelease?: boolean }> = await resp.json();
+
+	const results: VersionInfo[] = [];
+	for (const release of releases) {
+		const match = TAG_PATTERN.exec(release.tag_name);
+		if (!match) continue;
+		const v = match[1];
+		const isPrerelease = v.includes('-prerelease') || v.includes('-beta') || v.includes('-alpha') || v.includes('-rc') || !!release.prerelease;
+
+		if (!includePrerelease && isPrerelease) continue;
+
+		// Strip prerelease suffix for semver range check
+		const baseV = v
+			.replace(/-prerelease$/, '')
+			.replace(/-beta$/, '')
+			.replace(/-alpha$/, '')
+			.replace(/-rc.*$/, '');
+
+		if (!semverValid(baseV)) continue;
+		if (!satisfies(baseV, range)) continue;
+
+		results.push({
+			version: v,
+			prerelease: isPrerelease,
+			publishedAt: release.published_at ?? '',
+		});
+	}
+
+	// Sort descending by semver base
+	results.sort((a, b) => {
+		const baseA = a.version
+			.replace(/-prerelease$/, '')
+			.replace(/-beta$/, '')
+			.replace(/-alpha$/, '')
+			.replace(/-rc.*$/, '');
+		const baseB = b.version
+			.replace(/-prerelease$/, '')
+			.replace(/-beta$/, '')
+			.replace(/-alpha$/, '')
+			.replace(/-rc.*$/, '');
+		return rcompare(baseA, baseB);
+	});
+
+	return results;
 }

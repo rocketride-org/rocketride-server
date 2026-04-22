@@ -13,18 +13,14 @@
  */
 
 import { Command } from 'commander';
-import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { satisfies, valid as semverValid, rcompare } from 'semver';
 
-import { downloadRuntime } from '../../client/runtime/downloader.js';
-import { rocketrideHome, runtimesDir, runtimeBinary, logsDir } from '../../client/runtime/paths.js';
-import { normalizeVersion } from '../../client/runtime/platform.js';
-import { findAvailablePort } from '../../client/runtime/ports.js';
-import { spawnRuntime, stopRuntime, waitReady } from '../../client/runtime/process.js';
-import { getCompatRange, resolveCompatibleVersion, resolveDockerTag } from '../../client/runtime/resolver.js';
-import { StateDB, InstanceRecord, isPidAlive, isRuntimeProcess, getProcessMemory } from '../../client/runtime/state.js';
+import { logsDir } from '../../client/runtime/paths.js';
+import { StateDB, InstanceRecord, isRuntimeProcess, getProcessMemory } from '../../client/runtime/state.js';
 import { DockerRuntime } from '../../client/runtime/docker.js';
+import { RuntimeService } from '../../client/runtime/service.js';
+import { getCompatRange } from '../../client/runtime/resolver.js';
 
 // ── UI helpers ──────────────────────────────────────────────────────
 
@@ -92,12 +88,13 @@ export function registerRuntimeCommand(program: Command): void {
 		.option('--local', 'Install as Local type (manual start/stop)')
 		.option('--docker', 'Pull and run as a Docker container')
 		.option('--port <port>', 'Explicit host port for Docker installs', parseInt)
+		.option('--new', 'Create a new instance even if one exists for this version')
 		.action(async (version, opts) => {
 			if (opts.local && opts.docker) {
 				console.log('--local and --docker are mutually exclusive');
 				process.exit(1);
 			}
-			const code = await cmdInstall(version ?? null, opts.force ?? false, opts.local ?? false, opts.docker ?? false, opts.port ?? null);
+			const code = await cmdInstall(version ?? null, opts.force ?? false, opts.local ?? false, opts.docker ?? false, opts.port ?? null, opts.new ?? false);
 			if (code === 0) {
 				console.log();
 				await cmdList();
@@ -113,6 +110,15 @@ export function registerRuntimeCommand(program: Command): void {
 			const code = await cmdDelete(id, opts.purge ?? false);
 			console.log();
 			await cmdList();
+			process.exit(code);
+		});
+
+	runtime
+		.command('versions')
+		.description('List available runtime versions')
+		.option('--prerelease', 'Include pre-release versions')
+		.action(async (opts) => {
+			const code = await cmdVersions(opts.prerelease ?? false);
 			process.exit(code);
 		});
 
@@ -299,497 +305,131 @@ async function cmdList(): Promise<number> {
 }
 
 async function cmdStart(instanceId: string | null, explicitPort: number | null, versionArg: string | null): Promise<number> {
-	let version = versionArg ? normalizeVersion(versionArg) : null;
-
-	const db = new StateDB();
-	db.open();
-
+	const service = new RuntimeService();
 	try {
-		if (!instanceId && version) {
-			const existing = db.findByVersion(version);
-			if (existing) {
-				instanceId = existing.id;
-			} else {
-				console.log(`No instance found for version ${version}.`);
-				console.log('Use "rocketride runtime install" to create one first.');
-				return 1;
-			}
-		} else if (!instanceId) {
-			const all = db.getAll();
-			if (all.length > 0) {
-				instanceId = all[0].id;
-			} else {
-				console.log('No runtime instances found.');
-				console.log('Use "rocketride runtime install" to create one first.');
-				return 1;
-			}
-		}
-
-		const existing = db.get(instanceId);
-		if (!existing) {
-			console.log(`No instance found with id: ${instanceId}`);
-			console.log('Use "rocketride runtime install" to create a new instance first.');
-			return 1;
-		}
-
-		// Refuse to start if already running
-		if (existing.pid && isPidAlive(existing.pid)) {
-			console.log(`Instance ${instanceId} is already running (PID ${existing.pid}, port ${existing.port})`);
-			return 1;
-		}
-
-		const instType = existing.type || 'Local';
-
-		// Docker start
-		if (instType === 'Docker') {
-			console.log(`Starting Docker runtime ${instanceId}...`);
-			const docker = new DockerRuntime();
-			let dockerPort = existing.port;
-			try {
-				docker.start(instanceId);
-			} catch (e: unknown) {
-				const msg = String(e);
-				if (msg.includes('404') || msg.includes('No such container')) {
-					console.log('Container was removed outside the CLI. Re-installing...');
-					dockerPort = existing.port || (await findAvailablePort());
-					try {
-						docker.install(existing.version, instanceId, dockerPort);
-					} catch (e2) {
-						console.log(`Failed to re-install Docker container: ${e2}`);
-						return 1;
-					}
-				} else {
-					console.log(`Failed to start Docker container: ${e}`);
-					return 1;
-				}
-			}
-			db.register(instanceId, 0, dockerPort, existing.version, existing.owner, existing.restart_count ?? 0, 'running', 'Docker');
-			console.log('Started.');
-			return 0;
-		}
-
-		if (!version) version = existing.version;
-
-		// Resolve version if still unknown
-		if (!version) {
-			const compat = getCompatRange();
-			const runtimesRoot = join(rocketrideHome(), 'runtimes');
-			const installed: Array<[string, string]> = [];
-			if (existsSync(runtimesRoot)) {
-				for (const entry of readdirSync(runtimesRoot)) {
-					const entryPath = join(runtimesRoot, entry);
-					try {
-						if (!statSync(entryPath).isDirectory()) continue;
-					} catch {
-						continue;
-					}
-					if (!semverValid(entry)) continue;
-					if (!satisfies(entry, compat)) continue;
-					if (!existsSync(runtimeBinary(entry))) continue;
-					installed.push([entry, entry]);
-				}
-			}
-			if (installed.length > 0) {
-				installed.sort((a, b) => rcompare(a[0], b[0]));
-				version = installed[0][1];
-				console.log(`Using installed runtime v${version}`);
-			} else {
-				console.log('No compatible runtime installed. Downloading...');
-				version = await resolveCompatibleVersion(compat);
-				await downloadRuntime(version);
-				console.log(`Downloaded runtime v${version}`);
-			}
-		}
-
-		const binary = runtimeBinary(version);
-		if (!existsSync(binary)) {
-			console.log(`Runtime binary not found for v${version}. Run: rocketride runtime install ${version}`);
-			return 1;
-		}
-
-		const port = explicitPort ?? (await findAvailablePort());
-
-		// Track restarts
-		let restartCount = 0;
-		const prevCount = existing.restart_count ?? 0;
-		const logFile = join(logsDir(instanceId), 'stdout.log');
-		const hasRunBefore = prevCount > 0 || existsSync(logFile);
-		restartCount = hasRunBefore ? prevCount + 1 : 0;
-
-		console.log(`Starting runtime v${version} on port ${port} (id: ${instanceId})...`);
-		const pid = spawnRuntime(binary, port, instanceId);
-
-		// Release the DB lock before waiting
-		db.close();
-
-		try {
-			const stderrLog = join(logsDir(instanceId), 'stderr.log');
-			await waitReady(pid, stderrLog, undefined, (line) => printProgress(`  ${line}`));
-			endProgress(`Runtime v${version} is online (port ${port}, PID ${pid})`);
-
-			const db2 = new StateDB();
-			db2.open();
-			try {
-				db2.register(instanceId, pid, port, version, 'cli', restartCount, 'running');
-			} finally {
-				db2.close();
-			}
-			return 0;
-		} catch (e) {
-			console.log(`\nRuntime started but health check failed: ${e}`);
-			await stopRuntime(pid);
-			const db2 = new StateDB();
-			db2.open();
-			try {
-				db2.register(instanceId, 0, 0, version, 'cli', restartCount, 'stopped');
-			} finally {
-				db2.close();
-			}
-			return 1;
-		}
-	} finally {
-		// db may already be closed if we released it above
-		try {
-			db.close();
-		} catch {
-			/* already closed */
-		}
+		const inst = await service.start(instanceId, {
+			port: explicitPort ?? undefined,
+			version: versionArg ?? undefined,
+			onProgress: (msg) => printProgress(msg),
+		});
+		endProgress(`Runtime v${inst.version} is online (port ${inst.port}, PID ${inst.pid})`);
+		return 0;
+	} catch (e) {
+		endProgress('');
+		console.log(String((e as Error).message ?? e));
+		return 1;
 	}
 }
 
 async function cmdStop(instanceId: string): Promise<number> {
-	const db = new StateDB();
-	db.open();
+	const service = new RuntimeService();
 	try {
-		const inst = db.get(instanceId);
-		if (!inst) {
-			console.log(`No instance found with id: ${instanceId}`);
-			return 1;
-		}
-
-		const instType = inst.type || 'Local';
-
-		if (instType === 'Docker') {
-			console.log(`Stopping Docker runtime ${instanceId}...`);
-			const docker = new DockerRuntime();
-			try {
-				docker.stop(instanceId);
-			} catch (e) {
-				console.log(`Failed to stop Docker container: ${e}`);
-				return 1;
-			}
-			db.register(instanceId, 0, inst.port, inst.version, inst.owner, inst.restart_count ?? 0, 'stopped', 'Docker');
-		} else {
-			console.log(`Stopping runtime ${instanceId} (PID: ${inst.pid})...`);
-			await stopRuntime(inst.pid);
-			db.register(instanceId, 0, 0, inst.version, inst.owner, inst.restart_count ?? 0, 'stopped', instType);
-		}
-
+		console.log(`Stopping runtime ${instanceId}...`);
+		await service.stop(instanceId);
 		console.log('Stopped.');
 		return 0;
-	} finally {
-		db.close();
+	} catch (e) {
+		console.log(String((e as Error).message ?? e));
+		return 1;
 	}
 }
 
-async function cmdInstall(versionArg: string | null, force: boolean, useLocal: boolean, useDocker: boolean, explicitPort: number | null): Promise<number> {
-	let version = versionArg ? normalizeVersion(versionArg) : null;
-
+async function cmdInstall(versionArg: string | null, force: boolean, useLocal: boolean, useDocker: boolean, explicitPort: number | null, allowNew: boolean): Promise<number> {
 	const instType = useDocker ? 'Docker' : useLocal ? 'Local' : 'Service';
-
-	// ── Docker install ──────────────────────────────────────────────
-	if (useDocker) {
-		const docker = new DockerRuntime();
-		const dockerErr = docker.checkDockerStatus();
-		if (dockerErr) {
-			console.log(dockerErr);
-			return 1;
-		}
-
-		const versionSpec = version || 'latest';
-		console.log(`Resolving Docker image tag for "${versionSpec}"...`);
-		const imageTag = await resolveDockerTag(versionSpec);
-
-		const port = explicitPort ?? (await findAvailablePort());
-
-		const db = new StateDB();
-		db.open();
-		try {
-			const existingDocker = db.findByVersionAndType(imageTag, 'Docker');
-			if (existingDocker) {
-				console.log(`Docker runtime v${imageTag} is already installed (id: ${existingDocker.id})`);
-				return 0;
-			}
-			const instanceId = db.nextId();
-
-			console.log(`Installing Docker runtime (tag: ${imageTag}, port: ${port}, id: ${instanceId})`);
-			try {
-				docker.install(imageTag, instanceId, port, (msg) => {
-					process.stdout.write(`\r${msg}`);
-				});
-				console.log(); // newline after progress
-			} catch (e) {
-				console.log(`\nDocker install failed: ${e}`);
-				return 1;
-			}
-
-			db.register(instanceId, 0, port, imageTag, 'cli', 0, 'running', 'Docker');
-			console.log(`Installed Docker runtime (id: ${instanceId})`);
-			return 0;
-		} finally {
-			db.close();
-		}
-	}
-
-	// ── Local / Service install ─────────────────────────────────────
-
-	// Resolve keyword specs
-	if (version === 'latest' || version === 'prerelease') {
-		console.log(`Resolving ${version} version...`);
-		version = await resolveDockerTag(version);
-	}
-
-	if (version) {
-		const binary = runtimeBinary(version);
-		const db = new StateDB();
-		db.open();
-		try {
-			const existing = db.findByVersionAndType(version, instType);
-			if (existsSync(binary) && existing) {
-				console.log(`Runtime v${version} (${instType}) is already installed (id: ${existing.id})`);
-				return 0;
-			}
-		} finally {
-			db.close();
-		}
-
-		// Validate compat range (unless --force)
-		if (!force) {
-			const compat = getCompatRange();
-			const baseV = version
-				.replace(/-prerelease$/, '')
-				.replace(/-beta$/, '')
-				.replace(/-alpha$/, '')
-				.replace(/-rc.*$/, '');
-			if (semverValid(baseV) && !satisfies(baseV, compat)) {
-				console.log(`Runtime v${version} is not compatible with this SDK (requires ${compat})`);
-				console.log('Use --force to install anyway.');
-				return 1;
-			}
-		}
-	} else {
-		console.log('Resolving latest compatible version...');
-		const compat = getCompatRange();
-		version = await resolveCompatibleVersion(compat);
-	}
-
-	const binary = runtimeBinary(version);
-	if (!existsSync(binary)) {
-		try {
-			await downloadRuntime(version, {
-				onProgress: (downloaded, total) => {
-					const dlStr = formatSize(downloaded);
-					if (total) {
-						const pct = Math.floor((downloaded * 100) / total);
-						const totalStr = formatSize(total);
-						printProgress(`Downloading runtime v${version}... ${pct}% (${dlStr}/${totalStr})`);
-					} else {
-						printProgress(`Downloading runtime v${version}... ${dlStr}`);
-					}
-				},
-				onPhase: (phase) => {
-					if (phase === 'extracting') {
-						endProgress(`Extracting runtime v${version}...`);
-					}
-				},
-			});
-		} catch (e) {
-			endProgress('');
-			console.log(`\n${e}`);
-			return 1;
-		}
-	}
-
-	// Register in state DB
-	const db = new StateDB();
-	db.open();
-	let instanceId: string;
+	const service = new RuntimeService();
 	try {
-		const existing = db.findByVersionAndType(version, instType);
-		instanceId = existing ? existing.id : db.nextId();
-		db.register(instanceId, 0, 0, version, 'cli', 0, 'stopped', instType);
-	} finally {
-		db.close();
+		const inst = await service.install({
+			version: versionArg ?? undefined,
+			type: instType,
+			force,
+			port: explicitPort ?? undefined,
+			allowDuplicate: allowNew,
+			onProgress: (msg) => {
+				// Download progress uses \r, others use newline
+				if (msg.includes('Downloading') || msg.includes('Extracting')) {
+					printProgress(msg);
+				} else {
+					endProgress(msg);
+				}
+			},
+		});
+		endProgress(`Installed runtime v${inst.version} (id: ${inst.id})`);
+		return 0;
+	} catch (e) {
+		endProgress('');
+		console.log(String((e as Error).message ?? e));
+		return 1;
 	}
-
-	console.log(`Installed runtime v${version} (id: ${instanceId})`);
-
-	// Service type auto-starts
-	if (instType === 'Service') {
-		const port = await findAvailablePort();
-		console.log(`Starting service on port ${port}...`);
-		const pid = spawnRuntime(binary, port, instanceId);
-		try {
-			const stderrLog = join(logsDir(instanceId), 'stderr.log');
-			await waitReady(pid, stderrLog, undefined, (line) => printProgress(`  ${line}`));
-			endProgress(`Runtime v${version} is online (port ${port}, PID ${pid})`);
-
-			const db2 = new StateDB();
-			db2.open();
-			try {
-				db2.register(instanceId, pid, port, version, 'cli', 0, 'running', 'Service');
-			} finally {
-				db2.close();
-			}
-		} catch (e) {
-			console.log(`\nAuto-start failed: ${e}`);
-			console.log(`Start manually: rocketride runtime start ${instanceId}`);
-			await stopRuntime(pid);
-			const db2 = new StateDB();
-			db2.open();
-			try {
-				db2.register(instanceId, 0, 0, version, 'cli', 0, 'stopped', 'Service');
-			} finally {
-				db2.close();
-			}
-			return 1;
-		}
-	}
-
-	return 0;
 }
 
 async function cmdDelete(instanceId: string, purge: boolean): Promise<number> {
-	const db = new StateDB();
-	db.open();
+	const service = new RuntimeService();
 	try {
-		let inst = db.get(instanceId);
-		// Try as version string
-		if (!inst) {
-			inst = db.findByVersion(instanceId, true);
-			if (inst) instanceId = inst.id;
-		}
-		if (!inst) {
-			console.log(`No instance found with id or version: ${instanceId}`);
-			return 1;
-		}
+		await service.delete(instanceId, {
+			purge,
+			onProgress: (msg) => console.log(msg),
+		});
+		return 0;
+	} catch (e) {
+		console.log(String((e as Error).message ?? e));
+		return 1;
+	}
+}
 
-		const pid = inst.pid;
-		const version = inst.version;
-		const instType = inst.type || 'Local';
-		const alreadyDeleted = !!inst.deleted;
+async function cmdVersions(includePrerelease: boolean): Promise<number> {
+	const service = new RuntimeService();
+	try {
+		const versions = await service.listVersions({ includePrerelease });
 
-		const removeLogDir = async () => {
-			const logDir = logsDir(instanceId);
-			if (!existsSync(logDir)) return;
-			for (let attempt = 0; attempt < 5; attempt++) {
-				try {
-					rmSync(logDir, { recursive: true, force: true });
-					return;
-				} catch {
-					if (attempt < 4) await sleep(1000);
-					else console.log(`Warning: could not remove ${logDir} — files may still be locked.`);
-				}
-			}
-		};
+		const useColor = process.stdout.isTTY ?? false;
+		const BOLD = useColor ? '\x1b[1m' : '';
+		const GREEN = useColor ? '\x1b[38;2;80;220;100m' : '';
+		const DIM = useColor ? '\x1b[2m' : '';
+		const RESET = useColor ? '\x1b[0m' : '';
 
-		// ── Docker delete ───────────────────────────────────────────
-		if (instType === 'Docker') {
-			const docker = new DockerRuntime();
-			if (purge) {
-				console.log(`Purging Docker runtime ${instanceId}...`);
-				try {
-					docker.remove(instanceId, true);
-				} catch (e) {
-					console.log(`Failed to remove Docker container: ${e}`);
-					return 1;
-				}
-				await removeLogDir();
-				db.unregister(instanceId);
-				console.log(`Purged Docker instance ${instanceId} (container and image removed).`);
-			} else {
-				if (alreadyDeleted) {
-					console.log(`Instance ${instanceId} is already deleted. Use --purge to remove the image.`);
-					return 0;
-				}
-				console.log(`Removing Docker runtime ${instanceId}...`);
-				try {
-					docker.remove(instanceId, false);
-				} catch (e) {
-					console.log(`Failed to remove Docker container: ${e}`);
-					return 1;
-				}
-				await removeLogDir();
-				db.softDelete(instanceId);
-				console.log(`Deleted Docker instance ${instanceId} (container removed, image kept).`);
-			}
+		const compat = getCompatRange();
+		console.log(`${BOLD}RocketRide Runtime Versions${RESET} ${DIM}(compatible: ${compat})${RESET}\n`);
+
+		if (versions.length === 0) {
+			console.log('  No compatible versions found.');
 			return 0;
 		}
 
-		// ── Local / Service delete ──────────────────────────────────
-		if (purge) {
-			// Stop if running
-			if (pid && isPidAlive(pid)) {
-				console.log(`Stopping running runtime ${instanceId}...`);
-				await stopRuntime(pid);
-			}
+		// Build rows
+		const header = ['VERSION', 'STATUS'];
+		const rows: string[][] = [];
 
-			// Check if other instances use same binary
-			const allInstances = db.getAll();
-			let versionInUse = false;
-			for (const other of allInstances) {
-				if (other.id === instanceId) continue;
-				if (other.version === version && other.pid && isPidAlive(other.pid)) {
-					versionInUse = true;
-					break;
+		for (const v of versions) {
+			const parts: string[] = [];
+			if (v.instances.length > 0) {
+				for (const inst of v.instances) {
+					const status = inst.running ? 'running' : 'stopped';
+					parts.push(`${status} (id: ${inst.id}${inst.running ? `, port ${inst.port}` : ''})`);
 				}
+			} else if (v.installed) {
+				parts.push('installed');
+			} else {
+				parts.push('available');
 			}
+			rows.push([v.version, parts.join(', ')]);
+		}
 
-			// Remove binary directory
-			const versionDir = runtimesDir(version);
-			if (versionInUse) {
-				console.log(`Keeping runtime v${version} binary (still in use by another instance).`);
-			} else if (existsSync(versionDir)) {
-				for (let attempt = 0; attempt < 5; attempt++) {
-					try {
-						rmSync(versionDir, { recursive: true, force: true });
-						console.log(`Removed runtime v${version} from ${versionDir}`);
-						break;
-					} catch {
-						if (attempt < 4) {
-							await sleep(1000);
-						} else {
-							console.log(`Could not remove ${versionDir} — files may still be locked.`);
-							console.log('The instance record has NOT been removed. Try again shortly.');
-							return 1;
-						}
-					}
-				}
-			}
+		// Compute widths
+		const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
 
-			await removeLogDir();
-			db.unregister(instanceId);
-			console.log(`Purged instance ${instanceId}.`);
-		} else {
-			// Soft delete
-			if (alreadyDeleted) {
-				console.log(`Instance ${instanceId} is already deleted. Use --purge to remove the binary.`);
-				return 0;
-			}
-
-			if (pid && isPidAlive(pid)) {
-				console.log(`Stopping running runtime ${instanceId}...`);
-				await stopRuntime(pid);
-			}
-
-			await removeLogDir();
-			db.softDelete(instanceId);
-			console.log(`Deleted instance ${instanceId}.`);
+		console.log(`  ${header.map((h, i) => `${BOLD}${h.padEnd(widths[i])}${RESET}`).join('    ')}`);
+		for (const row of rows) {
+			const versionStr = row[0].padEnd(widths[0]);
+			const statusStr = row[1];
+			const isInstalled = statusStr.includes('installed') || statusStr.includes('running') || statusStr.includes('stopped');
+			const color = isInstalled ? GREEN : DIM;
+			console.log(`  ${versionStr}    ${color}${statusStr}${RESET}`);
 		}
 
 		return 0;
-	} finally {
-		db.close();
+	} catch (e) {
+		console.log(String((e as Error).message ?? e));
+		return 1;
 	}
 }
 

@@ -114,6 +114,7 @@ from .core.exceptions import (
     RuntimeManagementError,
     RuntimeNotFoundError,
 )
+from .core.runtime.service import RuntimeService
 
 from .core.constants import (
     CONST_DEFAULT_SERVICE,
@@ -177,5 +178,6 @@ __all__ = [
     'TASK_TOKENS',
     'TraceInfo',
     'TransportCallbacks',
+    'RuntimeService',
     'UPLOAD_RESULT',
 ]

@@ -185,10 +185,12 @@ class RocketRideClient(
         # auto-spawn if it's unreachable.
         self._runtime_manager = None  # type: Optional['RuntimeManager']
         self._runtime_we_started = False
+        self._runtime_id = kwargs.get('runtime_id', None)
+        self._runtime_port = kwargs.get('runtime_port', None)
 
-        if not uri:
+        if not uri or self._runtime_id or self._runtime_port:
             env_uri = self._env.get('ROCKETRIDE_URI', '')
-            if env_uri:
+            if env_uri and not uri:
                 uri = env_uri
             # Always prepare auto-spawn as a fallback
             from .core.runtime.manager import RuntimeManager
@@ -272,7 +274,10 @@ class RocketRideClient(
 
             # No reachable URI — auto-spawn
             if not self._uri:
-                uri, we_started = await self._runtime_manager.ensure_running()
+                uri, we_started = await self._runtime_manager.ensure_running(
+                    instance_id=self._runtime_id,
+                    port=self._runtime_port,
+                )
                 self._runtime_we_started = we_started
                 from .mixins.connection import ConnectionMixin
 
