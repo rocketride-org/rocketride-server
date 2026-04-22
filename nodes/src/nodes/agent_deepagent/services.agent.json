@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.agent_deepagent.deepagent_agent",
 	"prefix": "agent",
-	"description": ["Single-agent execution using LangChain DeepAgents.", "Adds strategic planning, persistent state, and long-context management on top of LangChain.", "Connect DeepAgent Subagent nodes via the deepagent invoke channel for hierarchical delegation.", "Can be invoked as a tool (`<nodeId>.run_agent`) by other agents."],
+	"description": ["Single-agent execution using Deep Agents.", "Adds strategic planning, persistent state, and long-context management on top of LangChain.", "Connect Deep Agent Subagent nodes via the deepagent invoke channel for hierarchical delegation.", "Can be invoked as a tool (`<nodeId>.run_agent`) by other agents."],
 	"icon": "deepagent.svg",
 	"documentation": "https://docs.rocketride.org",
 	"invoke": {

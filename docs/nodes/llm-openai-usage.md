@@ -7,14 +7,14 @@ structured extraction, and chat-based interactions.
 
 ```json
 {
-  "id": "llm_node",
-  "type": "llm_openai",
-  "label": "Text Analysis",
-  "config": {
-    "model": "gpt-4o",
-    "apikey_env": "ROCKETRIDE_APIKEY_OPENAI",
-    "system": "You are a helpful assistant. Return concise, structured answers."
-  }
+	"id": "llm_node",
+	"type": "llm_openai",
+	"label": "Text Analysis",
+	"config": {
+		"model": "gpt-4o",
+		"apikey_env": "ROCKETRIDE_OPENAI_KEY",
+		"system": "You are a helpful assistant. Return concise, structured answers."
+	}
 }
 ```
 
@@ -24,26 +24,26 @@ The `llm_openai` node works with any OpenAI-compatible API via `base_url_env`:
 
 ```json
 {
-  "id": "deepseek_node",
-  "type": "llm_openai",
-  "label": "DeepSeek Analysis",
-  "config": {
-    "model": "deepseek-ai/DeepSeek-V3.2",
-    "base_url_env": "GMI_BASE",
-    "api_key_env": "GMI_API_KEY",
-    "system": "Extract financial signals as structured JSON."
-  }
+	"id": "deepseek_node",
+	"type": "llm_openai",
+	"label": "DeepSeek Analysis",
+	"config": {
+		"model": "deepseek-ai/DeepSeek-V3.2",
+		"base_url_env": "GMI_BASE",
+		"api_key_env": "GMI_API_KEY",
+		"system": "Extract financial signals as structured JSON."
+	}
 }
 ```
 
 Providers tested with `llm_openai`:
 
-| Provider | `base_url_env` value | Notes |
-|---|---|---|
-| OpenAI | *(omit — uses default)* | `gpt-4o`, `gpt-4o-mini`, etc. |
-| GMI Cloud | `https://api.gmi-serving.com/v1/chat/completions` | 40+ models including DeepSeek, Qwen, MiniMax |
-| Ollama | `http://localhost:11434/v1` | Local models |
-| Azure OpenAI | Your Azure endpoint | Requires `api_version` config |
+| Provider     | `base_url_env` value                              | Notes                                        |
+| ------------ | ------------------------------------------------- | -------------------------------------------- |
+| OpenAI       | _(omit — uses default)_                           | `gpt-4o`, `gpt-4o-mini`, etc.                |
+| GMI Cloud    | `https://api.gmi-serving.com/v1/chat/completions` | 40+ models including DeepSeek, Qwen, MiniMax |
+| Ollama       | `http://localhost:11434/v1`                       | Local models                                 |
+| Azure OpenAI | Your Azure endpoint                               | Requires `api_version` config                |
 
 ## Structured JSON Output
 
@@ -52,14 +52,14 @@ prompt that instructs the model to return JSON:
 
 ```json
 {
-  "id": "extractor",
-  "type": "llm_openai",
-  "config": {
-    "model": "gpt-4o",
-    "apikey_env": "ROCKETRIDE_APIKEY_OPENAI",
-    "system": "Extract the following fields as valid JSON: {company_name, revenue, industry, risk_level}. Return only the JSON object, no prose.",
-    "expectJson": true
-  }
+	"id": "extractor",
+	"type": "llm_openai",
+	"config": {
+		"model": "gpt-4o",
+		"apikey_env": "ROCKETRIDE_OPENAI_KEY",
+		"system": "Extract the following fields as valid JSON: {company_name, revenue, industry, risk_level}. Return only the JSON object, no prose.",
+		"expectJson": true
+	}
 }
 ```
 
@@ -70,18 +70,18 @@ consensus extraction or model evaluation:
 
 ```json
 {
-  "nodes": [
-    {"id": "input",   "type": "source/webhook",    "config": {}},
-    {"id": "model_a", "type": "llm_openai",        "config": {"model": "gpt-4o", "apikey_env": "OPENAI_KEY", "system": "..."}},
-    {"id": "model_b", "type": "llm_openai",        "config": {"model": "deepseek-ai/DeepSeek-V3.2", "base_url_env": "GMI_BASE", "api_key_env": "GMI_API_KEY", "system": "..."}},
-    {"id": "merge",   "type": "preprocessor_code", "config": {"language": "python", "code": "import json; a=json.loads(input_a); b=json.loads(input_b); return json.dumps({'model_a': a, 'model_b': b})"}}
-  ],
-  "edges": [
-    {"source": "input",   "target": "model_a"},
-    {"source": "input",   "target": "model_b"},
-    {"source": "model_a", "target": "merge"},
-    {"source": "model_b", "target": "merge"}
-  ]
+	"nodes": [
+		{ "id": "input", "type": "source/webhook", "config": {} },
+		{ "id": "model_a", "type": "llm_openai", "config": { "model": "gpt-4o", "apikey_env": "OPENAI_KEY", "system": "..." } },
+		{ "id": "model_b", "type": "llm_openai", "config": { "model": "deepseek-ai/DeepSeek-V3.2", "base_url_env": "GMI_BASE", "api_key_env": "GMI_API_KEY", "system": "..." } },
+		{ "id": "merge", "type": "preprocessor_code", "config": { "language": "python", "code": "import json; a=json.loads(input_a); b=json.loads(input_b); return json.dumps({'model_a': a, 'model_b': b})" } }
+	],
+	"edges": [
+		{ "source": "input", "target": "model_a" },
+		{ "source": "input", "target": "model_b" },
+		{ "source": "model_a", "target": "merge" },
+		{ "source": "model_b", "target": "merge" }
+	]
 }
 ```
 
@@ -93,10 +93,10 @@ Set `modelTotalTokens` to cap total token usage per invocation:
 
 ```json
 {
-  "config": {
-    "model": "gpt-4o",
-    "modelTotalTokens": 4096
-  }
+	"config": {
+		"model": "gpt-4o",
+		"modelTotalTokens": 4096
+	}
 }
 ```
 
@@ -104,7 +104,7 @@ Set `modelTotalTokens` to cap total token usage per invocation:
 
 ```
 # OpenAI
-ROCKETRIDE_APIKEY_OPENAI=sk-...
+ROCKETRIDE_OPENAI_KEY=sk-...
 
 # GMI Cloud
 GMI_API_KEY=your_key

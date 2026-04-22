@@ -3,7 +3,7 @@ pre-commit:
   commands:
     gitleaks:
       tags: security
-      run: gitleaks protect --verbose --staged --config .gitleaks.toml || true
+      run: gitleaks protect --verbose --redact --staged --config .gitleaks.toml
     eslint:
       glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
       run: npx eslint {staged_files}

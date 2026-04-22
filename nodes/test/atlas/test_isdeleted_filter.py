@@ -26,10 +26,6 @@ import pytest
 # Mock heavy dependencies BEFORE importing the atlas module
 # ---------------------------------------------------------------------------
 
-mock_depends_mod = types.ModuleType('depends')
-mock_depends_mod.depends = lambda *a, **kw: None
-sys.modules.setdefault('depends', mock_depends_mod)
-
 for mod_name in (
     'pymongo',
     'pymongo.collection',
@@ -70,41 +66,6 @@ class DocFilter:
 # Stub out ai.common.* so atlas.py can import without the full AI package
 # ---------------------------------------------------------------------------
 
-mock_ai_schema = types.ModuleType('ai.common.schema')
-mock_ai_schema.DocFilter = DocFilter
-mock_ai_schema.Doc = MagicMock()
-mock_ai_schema.DocMetadata = MagicMock()
-mock_ai_schema.QuestionText = MagicMock()
-
-mock_ai_store = types.ModuleType('ai.common.store')
-
-
-class FakeDocumentStoreBase:
-    """Stand-in base class so Store can inherit without real infra."""
-
-    def __init__(self, provider, connConfig, bag):
-        """Initialize stub store base (arguments unused)."""
-        self.vectorSize = 0
-        self.modelName = ''
-        self.threshold_search = 0.5
-
-    def doesCollectionExist(self, modelName=None):
-        return True
-
-
-mock_ai_store.DocumentStoreBase = FakeDocumentStoreBase
-
-mock_ai_config = types.ModuleType('ai.common.config')
-mock_ai_config.Config = MagicMock()
-
-for mod_name, mod_obj in [
-    ('ai', types.ModuleType('ai')),
-    ('ai.common', types.ModuleType('ai.common')),
-    ('ai.common.schema', mock_ai_schema),
-    ('ai.common.store', mock_ai_store),
-    ('ai.common.config', mock_ai_config),
-]:
-    sys.modules.setdefault(mod_name, mod_obj)
 
 # Mock pydantic at module level (atlas.py imports ValidationError)
 mock_pydantic = types.ModuleType('pydantic')
@@ -156,6 +117,7 @@ def store():
             s = Store('atlas', {}, {})
             s.collection = mock_collection
             s.database = mock_db
+            s.doesCollectionExist = lambda *_a, **_kw: True
             yield s
 
 

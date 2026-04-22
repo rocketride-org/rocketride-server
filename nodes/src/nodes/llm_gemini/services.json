@@ -315,5 +315,26 @@
 			"title": "Gemini",
 			"properties": ["gemini.profile"]
 		}
-	]
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing.
+	//		Runs against a local test server with mocked google.genai so no
+	//		real API key is required. ROCKETRIDE_MOCK must point to nodes/test/mocks.
+	//
+	"test": {
+		"profiles": ["gemini-2.5-flash"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

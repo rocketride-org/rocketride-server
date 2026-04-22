@@ -1,11 +1,6 @@
 # Plugin Qwen (DashScope OpenAI-compatible)
 openai
 langchain-openai
-transformers
-tokenizers
-
-# HuggingFace deps
-huggingface-hub
 
 # LangChain deps
 langchain-core

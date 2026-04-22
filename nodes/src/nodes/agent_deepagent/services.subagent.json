@@ -1,5 +1,5 @@
 {
-	"title": "DeepAgent Subagent",
+	"title": "Deep Agent Subagent",
 	"protocol": "agent_deepagent_subagent://",
 	"classType": ["deepagent"],
 	"capabilities": ["invoke"],
@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.agent_deepagent.deepagent_subagent",
 	"prefix": "agent",
-	"description": ["Managed DeepAgent sub-agent. Must be wired into a DeepAgent node via the deepagent channel.", "Cannot be invoked directly — has no questions lane."],
+	"description": ["Managed Deep Agent subagent. Must be wired into a Deep Agent node via the deepagent channel.", "Cannot be invoked directly — has no questions lane."],
 	"icon": "deepagent.svg",
 	"documentation": "https://docs.rocketride.org",
 	"invoke": {
@@ -89,7 +89,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "DeepAgent Subagent",
+			"title": "Deep Agent Subagent",
 			"properties": ["agent_deepagent_subagent.default"]
 		}
 	]

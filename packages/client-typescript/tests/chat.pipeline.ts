@@ -24,112 +24,102 @@
 
 /**
  * Creates a dynamically configured LLM component based on available API keys.
- * 
+ *
  * This function checks environment variables for LLM provider API keys in priority order
  * and returns the appropriate component configuration. The priority order ensures
  * consistent behavior when multiple API keys are available.
- * 
+ *
  * Priority Order:
- * 1. OpenAI (ROCKETRIDE_APIKEY_OPENAI) - Uses GPT-4 with 128K context
- * 2. Anthropic (ROCKETRIDE_APIKEY_ANTHROPIC) - Uses Claude-3 Sonnet
- * 3. Gemini (ROCKETRIDE_APIKEY_GEMINI) - Uses Gemini Pro model
- * 4. Ollama (ROCKETRIDE_HOST_OLLAMA) - Uses local Ollama server
- * 
+ * 1. OpenAI (ROCKETRIDE_OPENAI_KEY) - Uses GPT-4 with 128K context
+ * 2. Anthropic (ROCKETRIDE_ANTHROPIC_KEY) - Uses Claude-3 Sonnet
+ * 3. Gemini (ROCKETRIDE_GEMINI_KEY) - Uses Gemini Pro model
+ * 4. Ollama (ROCKETRIDE_OLLAMA_HOST) - Uses local Ollama server
+ *
  * @returns {Object} LLM component configuration object with provider-specific settings
  * @throws {Error} When no valid API keys are found in environment variables
  */
 function createLLMComponent() {
-	const openaiKey = process.env.ROCKETRIDE_APIKEY_OPENAI;
-	const anthropicKey = process.env.ROCKETRIDE_APIKEY_ANTHROPIC;
-	const geminiKey = process.env.ROCKETRIDE_APIKEY_GEMINI;
-	const ollamaHost = process.env.ROCKETRIDE_HOST_OLLAMA;
+	const openaiKey = process.env.ROCKETRIDE_OPENAI_KEY;
+	const anthropicKey = process.env.ROCKETRIDE_ANTHROPIC_KEY;
+	const geminiKey = process.env.ROCKETRIDE_GEMINI_KEY;
+	const ollamaHost = process.env.ROCKETRIDE_OLLAMA_HOST;
 
 	if (openaiKey) {
 		return {
-			id: "llm_openai_1",
-			provider: "llm_openai",
+			id: 'llm_openai_1',
+			provider: 'llm_openai',
 			config: {
-				profile: "openai-5",
-				"openai-5": { apikey: openaiKey }
+				profile: 'openai-5',
+				'openai-5': { apikey: openaiKey },
 			},
-			input: [{ lane: "questions", from: "chat_1" }]
+			input: [{ lane: 'questions', from: 'chat_1' }],
 		};
-	}
-	else if (anthropicKey) {
+	} else if (anthropicKey) {
 		return {
-			id: "llm_anthropic_1",
-			provider: "llm_anthropic",
+			id: 'llm_anthropic_1',
+			provider: 'llm_anthropic',
 			config: {
-				profile: "claude-3_7-sonnet",
-				"claude-3-sonnet": { apikey: anthropicKey }
+				profile: 'claude-3_7-sonnet',
+				'claude-3-sonnet': { apikey: anthropicKey },
 			},
-			input: [{ lane: "questions", from: "chat_1" }]
+			input: [{ lane: 'questions', from: 'chat_1' }],
 		};
-	}
-	else if (geminiKey) {
+	} else if (geminiKey) {
 		return {
-			id: "llm_gemini_1",
-			provider: "llm_gemini",
+			id: 'llm_gemini_1',
+			provider: 'llm_gemini',
 			config: {
-				profile: "gemini-1_5-pro",
-				"gemini-1_5-pro": { apikey: geminiKey }
+				profile: 'gemini-1_5-pro',
+				'gemini-1_5-pro': { apikey: geminiKey },
 			},
-			input: [{ lane: "questions", from: "chat_1" }]
+			input: [{ lane: 'questions', from: 'chat_1' }],
 		};
-	}
-	else if (ollamaHost) {
+	} else if (ollamaHost) {
 		return {
-			id: "llm_ollama_1",
-			provider: "llm_ollama",
+			id: 'llm_ollama_1',
+			provider: 'llm_ollama',
 			config: {
-				profile: "llama3_3",
-				llama3_3: { serverbase: ollamaHost }
+				profile: 'llama3_3',
+				llama3_3: { serverbase: ollamaHost },
 			},
-			input: [{ lane: "questions", from: "chat_1" }]
+			input: [{ lane: 'questions', from: 'chat_1' }],
 		};
-	}
-	else {
-		throw new Error(
-			"No LLM API key found. Please set one of the following environment variables:\n" +
-			"- ROCKETRIDE_APIKEY_OPENAI (for OpenAI GPT-4)\n" +
-			"- ROCKETRIDE_APIKEY_ANTHROPIC (for Anthropic Claude)\n" +
-			"- ROCKETRIDE_APIKEY_GEMINI (for Google Gemini)\n" +
-			"- ROCKETRIDE_HOST_OLLAMA (for Ollama)"
-		);
+	} else {
+		throw new Error('No LLM API key found. Please set one of the following environment variables:\n' + '- ROCKETRIDE_OPENAI_KEY (for OpenAI GPT-4)\n' + '- ROCKETRIDE_ANTHROPIC_KEY (for Anthropic Claude)\n' + '- ROCKETRIDE_GEMINI_KEY (for Google Gemini)\n' + '- ROCKETRIDE_OLLAMA_HOST (for Ollama)');
 	}
 }
 
 /**
  * Get the chat pipeline configuration.
- * 
+ *
  * This function creates the pipeline lazily on demand, avoiding the need
  * for LLM API keys to be present at module load time.
- * 
+ *
  * @returns Complete pipeline configuration for chat-based LLM interactions
  */
 export function getChatPipeline() {
 	const llmComponent = createLLMComponent();
-	
+
 	return {
 		components: [
 			{
-				id: "chat_1",
-				provider: "chat",
+				id: 'chat_1',
+				provider: 'chat',
 				config: {
 					hideForm: true,
-					mode: "Source",
-					type: "chat"
+					mode: 'Source',
+					type: 'chat',
 				},
 			},
 			llmComponent,
 			{
-				id: "response_1",
-				provider: "response",
+				id: 'response_1',
+				provider: 'response',
 				config: { lanes: [] },
-				input: [{ lane: "answers", from: llmComponent.id }]
-			}
+				input: [{ lane: 'answers', from: llmComponent.id }],
+			},
 		],
-		source: "chat_1",
-		project_id: "8b866c3b-6c76-42d7-8091-301be3dce0f2"
+		source: 'chat_1',
+		project_id: '8b866c3b-6c76-42d7-8091-301be3dce0f2',
 	};
 }

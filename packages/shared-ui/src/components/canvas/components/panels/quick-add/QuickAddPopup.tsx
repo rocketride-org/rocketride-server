@@ -18,7 +18,7 @@ import { Search } from 'lucide-react';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { IService, IServiceCapabilities, IServiceLane } from '../../../types';
-import { getOutputLaneDisplayValues } from '../../../util/helpers';
+import { getOutputLaneDisplayValues, renameInvokeType } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { getIconPath } from '../../../util/get-icon-path';
 import { commonStyles } from '../../../../../themes/styles';
@@ -371,7 +371,7 @@ export default function QuickAddPopup(): ReactElement | null {
 						inputRef={searchRef}
 						size="small"
 						fullWidth
-						placeholder={mode === 'invoke' ? (isSource ? `Add ${invokeKey ?? 'invoke'} provider...` : 'Add invoker...') : `Add ${laneType} ${isSource ? 'consumer' : 'producer'}...`}
+						placeholder={mode === 'invoke' ? (isSource ? `Add ${renameInvokeType(invokeKey ?? 'invoke')} provider...` : 'Add invoker...') : `Add ${laneType} node...`}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						InputProps={{
