@@ -69,6 +69,7 @@ from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_account import AccountCommands
+from .commands.cmd_billing import BillingCommands
 from ai.account.models import AccountInfo, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -94,6 +95,7 @@ class TaskConn(
     DebugCommands,
     MiscCommands,
     AccountCommands,
+    BillingCommands,
     DAPConn,
 ):
     """
@@ -126,6 +128,8 @@ class TaskConn(
     - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
+    - BillingCommands: Account billing (stub in OSS; SaaS overlays the
+                       real wallet + subscription implementation)
     - DAPConn: Base DAP protocol implementation and transport handling
 
     Attributes:
@@ -178,6 +182,7 @@ class TaskConn(
         DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
+        BillingCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id
