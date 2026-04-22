@@ -425,40 +425,8 @@
 					"properties": ["openai.openai-5-nano"]
 				},
 				{
-					"value": "gpt-4-turbo",
-					"properties": ["openai.gpt-4-turbo"]
-				},
-				{
-					"value": "o3",
-					"properties": ["openai.o3"]
-				},
-				{
-					"value": "o3-mini",
-					"properties": ["openai.o3-mini"]
-				},
-				{
-					"value": "gpt-5-chat-latest",
-					"properties": ["openai.gpt-5-chat-latest"]
-				},
-				{
-					"value": "gpt-5-1-chat-latest",
-					"properties": ["openai.gpt-5-1-chat-latest"]
-				},
-				{
-					"value": "gpt-4-1",
-					"properties": ["openai.gpt-4-1"]
-				},
-				{
-					"value": "gpt-5-3-chat-latest",
-					"properties": ["openai.gpt-5-3-chat-latest"]
-				},
-				{
 					"value": "gpt-3-5-turbo",
 					"properties": ["openai.gpt-3-5-turbo"]
-				},
-				{
-					"value": "o1",
-					"properties": ["openai.o1"]
 				},
 				{
 					"value": "gpt-3-5-turbo-16k",
@@ -469,57 +437,57 @@
 					"properties": ["openai.gpt-4"]
 				},
 				{
-					"value": "gpt-4-1-nano",
-					"properties": ["openai.gpt-4-1-nano"]
-				},
-				{
-					"value": "o4-mini",
-					"properties": ["openai.o4-mini"]
+					"value": "gpt-4-1",
+					"properties": ["openai.gpt-4-1"]
 				},
 				{
 					"value": "gpt-4-1-mini",
 					"properties": ["openai.gpt-4-1-mini"]
 				},
 				{
+					"value": "gpt-4-1-nano",
+					"properties": ["openai.gpt-4-1-nano"]
+				},
+				{
+					"value": "gpt-4-turbo",
+					"properties": ["openai.gpt-4-turbo"]
+				},
+				{
+					"value": "gpt-5-1-chat-latest",
+					"properties": ["openai.gpt-5-1-chat-latest"]
+				},
+				{
 					"value": "gpt-5-2-chat-latest",
 					"properties": ["openai.gpt-5-2-chat-latest"]
+				},
+				{
+					"value": "gpt-5-3-chat-latest",
+					"properties": ["openai.gpt-5-3-chat-latest"]
+				},
+				{
+					"value": "gpt-5-chat-latest",
+					"properties": ["openai.gpt-5-chat-latest"]
+				},
+				{
+					"value": "o1",
+					"properties": ["openai.o1"]
+				},
+				{
+					"value": "o3",
+					"properties": ["openai.o3"]
+				},
+				{
+					"value": "o3-mini",
+					"properties": ["openai.o3-mini"]
+				},
+				{
+					"value": "o4-mini",
+					"properties": ["openai.o4-mini"]
 				}
 			]
 		},
-		"openai.gpt-4-turbo": {
-			"object": "gpt-4-turbo",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.o3": {
-			"object": "o3",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.o3-mini": {
-			"object": "o3-mini",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.gpt-5-chat-latest": {
-			"object": "gpt-5-chat-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.gpt-5-1-chat-latest": {
-			"object": "gpt-5-1-chat-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.gpt-4-1": {
-			"object": "gpt-4-1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.gpt-5-3-chat-latest": {
-			"object": "gpt-5-3-chat-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
 		"openai.gpt-3-5-turbo": {
 			"object": "gpt-3-5-turbo",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.o1": {
-			"object": "o1",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"openai.gpt-3-5-turbo-16k": {
@@ -530,20 +498,52 @@
 			"object": "gpt-4",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"openai.gpt-4-1-nano": {
-			"object": "gpt-4-1-nano",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai.o4-mini": {
-			"object": "o4-mini",
+		"openai.gpt-4-1": {
+			"object": "gpt-4-1",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"openai.gpt-4-1-mini": {
 			"object": "gpt-4-1-mini",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
+		"openai.gpt-4-1-nano": {
+			"object": "gpt-4-1-nano",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.gpt-4-turbo": {
+			"object": "gpt-4-turbo",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.gpt-5-1-chat-latest": {
+			"object": "gpt-5-1-chat-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
 		"openai.gpt-5-2-chat-latest": {
 			"object": "gpt-5-2-chat-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.gpt-5-3-chat-latest": {
+			"object": "gpt-5-3-chat-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.gpt-5-chat-latest": {
+			"object": "gpt-5-chat-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.o1": {
+			"object": "o1",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.o3": {
+			"object": "o3",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.o3-mini": {
+			"object": "o3-mini",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.o4-mini": {
+			"object": "o4-mini",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
