@@ -140,29 +140,29 @@ class BillingCommands(DAPConn):
             subcommand = repr(subcommand)
 
         if subcommand not in _KNOWN_SUBCOMMANDS:
-            # Unknown subcommand — separate error code so SaaS clients can
-            # distinguish "typo" from "backend not wired up". We encode the
-            # failure in the response body rather than using build_error /
-            # kwargs that build_response doesn't accept (per DAP base API).
-            return self.build_response(
-                request,
-                body={
-                    'success':    False,
-                    'code':       'unknown_subcommand',
-                    'subcommand': subcommand,
-                    'message':    f'unknown rrext_account_billing subcommand: {subcommand!r}',
-                },
-            )
+            # Unknown subcommand — use build_error so the DAP envelope-
+            # level `success` field is False. build_response would emit
+            # `success: true` at the envelope, making generic clients
+            # that only check the top-level field miss the failure.
+            # A structured body is attached for clients that *do* want
+            # to distinguish "typo" from "backend not wired up".
+            message = f'unknown rrext_account_billing subcommand: {subcommand!r}'
+            response = self.build_error(request, message)
+            response['body'] = {
+                'code':       'unknown_subcommand',
+                'subcommand': subcommand,
+                'message':    message,
+            }
+            return response
 
         # Known subcommand, no backend to dispatch it to — signal
-        # "not_configured" explicitly. The SaaS overlay replaces this
-        # class entirely and never hits this path.
-        return self.build_response(
-            request,
-            body={
-                'success':    False,
-                'code':       'not_configured',
-                'subcommand': subcommand,
-                'message':    'billing not configured on this deployment',
-            },
-        )
+        # "not_configured" with DAP-level failure. The SaaS overlay
+        # replaces this class entirely and never hits this path.
+        message = 'billing not configured on this deployment'
+        response = self.build_error(request, message)
+        response['body'] = {
+            'code':       'not_configured',
+            'subcommand': subcommand,
+            'message':    message,
+        }
+        return response
