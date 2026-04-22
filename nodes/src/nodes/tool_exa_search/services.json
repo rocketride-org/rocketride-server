@@ -132,17 +132,14 @@
 	//	tested here, not live API calls.
 	//
 	"test": {
-		"profiles": {
-			"default": {
-				"title": "Exa Search Test",
-				"apikey": "test-key",
-				"numResults": 5,
-				"useAutoprompt": false,
-				"searchType": "auto",
-				"includeText": true
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test query"
 			}
-		},
-		"outputs": ["results"]
+		]
 	},
 	//
 	// Required:

@@ -45,7 +45,7 @@ Test Configuration:
     Tests use environment variables for configuration:
     - ROCKETRIDE_URI: Server URI (defaults to http://localhost:5565)
     - ROCKETRIDE_APIKEY: Authentication key (defaults to 'MYAPIKEY')
-    - Various LLM API keys for chat tests (ROCKETRIDE_APIKEY_OPENAI, etc.)
+    - Various LLM API keys for chat tests (ROCKETRIDE_OPENAI_KEY, etc.)
 
 Running Tests:
     pytest tests/RocketRideClient_test.py -v          # Verbose output
@@ -77,15 +77,15 @@ load_dotenv(PROJECT_ROOT / '.env')
 # Skip chat tests when no LLM API key is available
 # fmt: off
 HAS_LLM_KEY = bool(
-    os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
-    or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
-    or os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
-    or os.environ.get('ROCKETRIDE_HOST_OLLAMA')
+    os.environ.get('ROCKETRIDE_OPENAI_KEY')
+    or os.environ.get('ROCKETRIDE_ANTHROPIC_KEY')
+    or os.environ.get('ROCKETRIDE_GEMINI_KEY')
+    or os.environ.get('ROCKETRIDE_OLLAMA_HOST')
 )
 # fmt: on
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
-    reason='Skipped: no LLM API key set (need ROCKETRIDE_APIKEY_OPENAI, ROCKETRIDE_APIKEY_ANTHROPIC, ROCKETRIDE_APIKEY_GEMINI, or ROCKETRIDE_HOST_OLLAMA)',
+    reason='Skipped: no LLM API key set (need ROCKETRIDE_OPENAI_KEY, ROCKETRIDE_ANTHROPIC_KEY, ROCKETRIDE_GEMINI_KEY, or ROCKETRIDE_OLLAMA_HOST)',
 )
 
 # Import from rocketride

@@ -26,12 +26,6 @@ _ROOT = Path(__file__).resolve().parents[3]
 _MOCKS_DIR = _ROOT / 'nodes' / 'test' / 'mocks'
 
 _STUB_MODULE_NAMES = (
-    'depends',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.store',
-    'ai.common.config',
     'pinecone',
     'pinecone.grpc',
 )
@@ -43,52 +37,6 @@ def _install_stubs() -> None:
     The pinecone/pinecone.grpc modules are resolved via sys.path from the
     existing mock infrastructure instead of being stubbed inline.
     """
-    # depends -- no-op
-    mod_depends = types.ModuleType('depends')
-    mod_depends.depends = lambda *_a, **_kw: None
-    sys.modules['depends'] = mod_depends
-
-    # ai.common.* stubs
-    ai_pkg = types.ModuleType('ai')
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    schema_mod = types.ModuleType('ai.common.schema')
-    store_mod = types.ModuleType('ai.common.store')
-    config_mod = types.ModuleType('ai.common.config')
-
-    class Doc:
-        pass
-
-    class DocFilter:
-        pass
-
-    class DocMetadata:
-        pass
-
-    class QuestionText:
-        pass
-
-    class DocumentStoreBase:
-        def __init__(self, *_a: object, **_kw: object) -> None:
-            pass
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(_provider: object, _connConfig: object) -> dict:
-            return {}
-
-    schema_mod.Doc = Doc
-    schema_mod.DocFilter = DocFilter
-    schema_mod.DocMetadata = DocMetadata
-    schema_mod.QuestionText = QuestionText
-    store_mod.DocumentStoreBase = DocumentStoreBase
-    config_mod.Config = Config
-
-    sys.modules['ai'] = ai_pkg
-    sys.modules['ai.common'] = common_pkg
-    sys.modules['ai.common.schema'] = schema_mod
-    sys.modules['ai.common.store'] = store_mod
-    sys.modules['ai.common.config'] = config_mod
 
 
 @contextmanager

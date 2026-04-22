@@ -508,16 +508,7 @@ def mock_engine_libs():
     mock_util = MagicMock()
     mock_util.outputEntry = Mock()
     mock_util.outputException = Mock()
-    
-    # Install mocks
-    sys.modules['engLib'] = mock_englib
-    sys.modules['rocketlib'] = mock_rocketlib
-    sys.modules['ai'] = mock_ai
-    sys.modules['ai.common'] = mock_ai_common
-    sys.modules['ai.common.schema'] = mock_ai_schema
-    sys.modules['depends'] = mock_depends
-    sys.modules['util'] = mock_util
-    
+
     yield {
         'engLib': mock_englib,
         'rocketlib': mock_rocketlib,
@@ -529,13 +520,6 @@ def mock_engine_libs():
         'Answer': MockAnswer,
         'Entry': MockEntry,
     }
-    
-    # Restore original modules
-    for mod_name, original in original_modules.items():
-        if original is not None:
-            sys.modules[mod_name] = original
-        elif mod_name in sys.modules:
-            del sys.modules[mod_name]
 
 
 # ============================================================================

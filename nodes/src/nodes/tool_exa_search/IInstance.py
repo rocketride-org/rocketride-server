@@ -112,7 +112,6 @@ class IInstance(IInstanceBase):
             },
         },
         description='Search the web using Exa semantic search. Provide a natural language query to find relevant web pages. Returns structured results with title, URL, text content, relevance score, and published date.',
-        summary='Searches the web using Exa semantic search API',
     )
     def exa_search(self, args):
         """Search the web using Exa semantic search."""

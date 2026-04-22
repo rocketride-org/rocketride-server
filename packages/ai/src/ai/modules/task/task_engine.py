@@ -1556,6 +1556,10 @@ class Task(DAPBase):
             subprocess_env = os.environ.copy()
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
 
+            # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
+            if self._pipeline.get('avoidMocks'):
+                subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,

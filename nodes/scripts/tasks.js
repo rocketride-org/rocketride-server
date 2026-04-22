@@ -139,7 +139,8 @@ function makeRunPytestAction(options = {}) {
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`
+                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 
             // Use absolute paths since cwd is dist/server
@@ -182,7 +183,7 @@ function makeRunPytestAction(options = {}) {
 
             // Allow filtering tests by marker or pattern
             const markers = options.markers;
-            const pattern = options.pattern;
+            const pattern = options.pytestPattern;
             if (markers) {
                 pytestArgs.push('-m', markers);
             }

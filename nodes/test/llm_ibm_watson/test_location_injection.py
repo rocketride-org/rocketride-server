@@ -27,8 +27,8 @@ def _load_validate_location():
     """Load _validate_location from ibm_watson.py, stubbing runtime deps."""
     # Create lightweight stubs for packages that are unavailable in tests
     stub_names = [
-        'ai', 'ai.common', 'ai.common.chat', 'ai.common.config',
-        'ibm_watsonx_ai', 'ibm_watsonx_ai.foundation_models',
+        'ibm_watsonx_ai',
+        'ibm_watsonx_ai.foundation_models',
         'ibm_watsonx_ai.foundation_models.schema',
     ]
     saved = {}
@@ -36,10 +36,6 @@ def _load_validate_location():
         saved[name] = sys.modules.get(name)
         stub = types.ModuleType(name)
         # Provide dummy classes that the module-level references need
-        if name == 'ai.common.chat':
-            stub.ChatBase = type('ChatBase', (), {})
-        if name == 'ai.common.config':
-            stub.Config = type('Config', (), {})
         if name == 'ibm_watsonx_ai':
             stub.Credentials = type('Credentials', (), {})
         if name == 'ibm_watsonx_ai.foundation_models':
@@ -67,13 +63,25 @@ _validate_location = _load_validate_location()
 
 # ---- Tests for valid locations -------------------------------------------
 
+
 class TestValidLocations:
     """All known IBM Cloud regions must be accepted."""
 
-    @pytest.mark.parametrize('loc', [
-        'au-syd', 'br-sao', 'ca-tor', 'eu-de', 'eu-es',
-        'eu-gb', 'jp-osa', 'jp-tok', 'us-east', 'us-south',
-    ])
+    @pytest.mark.parametrize(
+        'loc',
+        [
+            'au-syd',
+            'br-sao',
+            'ca-tor',
+            'eu-de',
+            'eu-es',
+            'eu-gb',
+            'jp-osa',
+            'jp-tok',
+            'us-east',
+            'us-south',
+        ],
+    )
     def test_valid_location_accepted(self, loc):
         url = _validate_location(loc)
         assert url == f'https://{loc}.ml.cloud.ibm.com'
@@ -81,18 +89,22 @@ class TestValidLocations:
 
 # ---- Tests for SSRF / injection payloads ---------------------------------
 
+
 class TestSSRFInjection:
     """Malicious location values must be rejected."""
 
-    @pytest.mark.parametrize('payload', [
-        'attacker.com/x#',               # fragment injection
-        'attacker.com/x?',               # query injection
-        'evil.com:443/path#',            # port + fragment
-        'evil.com@legitimate.com',       # userinfo injection
-        '../../../etc/passwd',           # path traversal
-        'us-south.ml.cloud.ibm.com#',   # full domain with fragment
-        'attacker.com\\@ibm.com',        # backslash injection
-    ])
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            'attacker.com/x#',  # fragment injection
+            'attacker.com/x?',  # query injection
+            'evil.com:443/path#',  # port + fragment
+            'evil.com@legitimate.com',  # userinfo injection
+            '../../../etc/passwd',  # path traversal
+            'us-south.ml.cloud.ibm.com#',  # full domain with fragment
+            'attacker.com\\@ibm.com',  # backslash injection
+        ],
+    )
     def test_ssrf_payload_rejected(self, payload):
         with pytest.raises(ValueError, match='Invalid location format'):
             _validate_location(payload)
@@ -100,21 +112,26 @@ class TestSSRFInjection:
 
 # ---- Tests for unknown but well-formed locations -------------------------
 
+
 class TestUnknownLocation:
     """Locations that pass regex but are not in the allowlist must fail."""
 
-    @pytest.mark.parametrize('loc', [
-        'us-west',
-        'eu-fr',
-        'ap-southeast',
-        'test-region',
-    ])
+    @pytest.mark.parametrize(
+        'loc',
+        [
+            'us-west',
+            'eu-fr',
+            'ap-southeast',
+            'test-region',
+        ],
+    )
     def test_unknown_region_rejected(self, loc):
         with pytest.raises(ValueError, match='Unknown IBM Cloud location'):
             _validate_location(loc)
 
 
 # ---- Tests for empty / placeholder values --------------------------------
+
 
 class TestEmptyAndPlaceholder:
     """Empty strings and the UI placeholder must be rejected."""
@@ -138,18 +155,22 @@ class TestEmptyAndPlaceholder:
 
 # ---- Tests for regex enforcement -----------------------------------------
 
+
 class TestRegexEnforcement:
     """Values with disallowed characters must be rejected by the regex."""
 
-    @pytest.mark.parametrize('bad', [
-        'US-SOUTH',           # uppercase
-        'us south',           # space
-        'us_south',           # underscore
-        'us.south',           # dot
-        '-us-south',          # leading hyphen
-        'us-south-',          # trailing hyphen
-        'us--south',          # double hyphen (passes regex but not allowlist)
-    ])
+    @pytest.mark.parametrize(
+        'bad',
+        [
+            'US-SOUTH',  # uppercase
+            'us south',  # space
+            'us_south',  # underscore
+            'us.south',  # dot
+            '-us-south',  # leading hyphen
+            'us-south-',  # trailing hyphen
+            'us--south',  # double hyphen (passes regex but not allowlist)
+        ],
+    )
     def test_invalid_format_rejected(self, bad):
         with pytest.raises(ValueError, match='Invalid location format|Unknown IBM Cloud'):
             _validate_location(bad)
