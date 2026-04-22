@@ -144,14 +144,6 @@
 				"modelOutputTokens": 8192, // openrouter
 				"apikey": ""
 			},
-			"claude-3-7-sonnet": {
-				"title": "Anthropic: Claude 3.7 Sonnet",
-				"model": "claude-3-7-sonnet",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 200000, // openrouter
-				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
-			},
 			"claude-3-haiku": {
 				"title": "Anthropic: Claude 3 Haiku",
 				"model": "claude-3-haiku",
@@ -286,10 +278,6 @@
 					"properties": ["anthropic.claude-3-5-haiku"]
 				},
 				{
-					"value": "claude-3-7-sonnet",
-					"properties": ["anthropic.claude-3-7-sonnet"]
-				},
-				{
 					"value": "claude-3-haiku",
 					"properties": ["anthropic.claude-3-haiku"]
 				},
@@ -321,10 +309,6 @@
 		},
 		"anthropic.claude-3-5-haiku": {
 			"object": "claude-3-5-haiku",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-3-7-sonnet": {
-			"object": "claude-3-7-sonnet",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-3-haiku": {
