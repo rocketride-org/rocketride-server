@@ -58,14 +58,42 @@ private:
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		When non-empty, `callMethods` skips every bound instance
-    ///		whose `pipeType.id` does not match this value. Used by
-    ///		`flow_if_else` to fan out to a single downstream branch.
-    ///		Default empty == current broadcast behaviour.
+    ///		Per-call target filter. When non-empty, `callMethods`
+    ///		short-circuits every bound instance whose `pipeType.id`
+    ///		does not match this value, producing a single-target
+    ///		dispatch instead of the default broadcast.
+    ///
+    ///		Default (empty) leaves dispatch behaviour byte-for-byte
+    ///		identical to the pre-filter implementation — existing
+    ///		pipelines that never call `setTargetFilter` are
+    ///		unaffected.
+    ///
+    ///		Used by conditional routers (e.g. `flow_if_else`,
+    ///		`flow_switch`) to steer a chunk to a specific downstream
+    ///		branch. Python sets the filter via
+    ///		`IServiceFilterInstance::setTargetFilter(nodeId)` before
+    ///		emitting the payload, then clears it (empty string) after
+    ///		to restore broadcast mode.
+    ///
+    ///	@note
+    ///		Not thread-safe. The Binder assumes single-threaded
+    ///		dispatch per pipeline. If multi-threaded dispatch is ever
+    ///		introduced, this member must be protected by a mutex or
+    ///		promoted to `thread_local`, and the empty-check inside
+    ///		`callMethods` needs matching synchronisation.
+    ///
+    ///	@note
+    ///		Single-target only. If a future feature needs to fan out
+    ///		to a *subset* of downstream nodes in parallel, promote
+    ///		this to `std::unordered_set<std::string>` and update the
+    ///		guard in `callMethods` accordingly.
     //-----------------------------------------------------------------
     std::string m_targetFilter;
 
 public:
+    /// Set the per-call dispatch filter. Pass an empty string to restore
+    /// broadcast behaviour. See `m_targetFilter` docs for lifecycle and
+    /// thread-safety constraints.
     void setTargetFilter(const std::string &nodeId) noexcept { m_targetFilter = nodeId; }
 
     static constexpr std::array<const char *, 15> MethodNames = {

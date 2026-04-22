@@ -61,6 +61,29 @@ import { useFlowProject } from './FlowProjectContext';
 import { resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 
+/**
+ * Derive the concrete lane + optional branch from a pair of lane handle IDs.
+ *
+ * Handle formats accepted:
+ *   source-<lane>                 target-<lane>                 concrete ↔ concrete
+ *   source-<lane>-<branch>        target-<lane>                 branched source
+ *   source-any[-<branch>]         target-<lane>                 wildcard source
+ *   source-<lane>[-<branch>]      target-any                    wildcard target
+ *
+ * The concrete lane comes from whichever side isn't `"any"`. The branch (if
+ * any) comes from the source side. Returns empty strings / undefined when a
+ * handle is missing so callers can fall through to their error paths.
+ */
+const resolveEdgeLane = (sourceHandle?: string | null, targetHandle?: string | null): { lane: string; branch?: string } => {
+	const sourceParts = sourceHandle?.split('-') ?? [];
+	const targetParts = targetHandle?.split('-') ?? [];
+	const sourceLaneToken = sourceParts[1] ?? '';
+	const targetLaneToken = targetParts[1] ?? '';
+	const sourceBranch = sourceParts.length > 2 ? sourceParts.slice(2).join('-') : undefined;
+	const lane = sourceLaneToken === 'any' ? targetLaneToken : sourceLaneToken;
+	return { lane, branch: sourceBranch };
+};
+
 // =============================================================================
 // Quick-add state (click handle → popup → create + connect)
 // =============================================================================
@@ -524,11 +547,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				return valid;
 			}
 
-			// Lane validation — source lane type must match target lane type
-			// Handle IDs are "source-{type}" and "target-{type}"
+			// Lane validation — source lane type must match target lane type.
+			// Handle IDs are "source-{type}" and "target-{type}", with the
+			// special sentinel `"any"` emitted by wildcard-lane nodes
+			// (e.g. flow_if_else) that accept/emit any content type. An `any`
+			// handle is compatible with any concrete lane on the other side.
 			const sourceLaneType = sourceHandle?.split('-')?.[1];
 			const targetLaneType = targetHandle?.split('-')?.[1];
-			const valid = sourceLaneType === targetLaneType;
+			const valid = sourceLaneType === targetLaneType || sourceLaneType === 'any' || targetLaneType === 'any';
 
 			return valid;
 		},
@@ -566,9 +592,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 								};
 							} else {
 								// Remove matching lane input by source + lane (+ branch if present)
-								const parts = edgeToRemove.sourceHandle?.split('-') ?? [];
-								const lane = parts[1] ?? '';
-								const branch = parts.length > 2 ? parts.slice(2).join('-') : undefined;
+								const { lane, branch } = resolveEdgeLane(edgeToRemove.sourceHandle, edgeToRemove.targetHandle);
 								const input: IInputConnection[] = nd.input || [];
 								updated = {
 									...updated,
@@ -584,7 +608,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 					});
 
 					// Rebuild edges from the cleaned node data
-					const computedEdges = getEdgesFromNodes(updatedNodes as INode[]);
+					const computedEdges = getEdgesFromNodes(updatedNodes as INode[], servicesJson);
 					setEdges(computedEdges);
 
 					return updatedNodes;
@@ -623,12 +647,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 							},
 						};
 					} else {
-						// Lane (data-flow) connection. Branched source nodes use
-						// handles shaped `source-<lane>-<branch>` (e.g. source-text-then);
-						// un-branched nodes use `source-<lane>`. Extract both parts.
-						const parts = params.sourceHandle?.split('-') ?? [];
-						const lane = parts[1] ?? '';
-						const branch = parts.length > 2 ? parts.slice(2).join('-') : undefined;
+						// Lane (data-flow) connection. Handle shapes:
+						//   source-<lane>              target-<lane>              concrete ↔ concrete
+						//   source-<lane>-<branch>     target-<lane>              branched source
+						//   source-any[-<branch>]      target-<lane>              wildcard source
+						//   source-<lane>[-<branch>]   target-any                 wildcard target
+						const { lane, branch } = resolveEdgeLane(params.sourceHandle, params.targetHandle);
 						const input: IInputConnection[] = nd.input || [];
 						const newEntry: IInputConnection = branch ? { lane, from: params.source, branch } : { lane, from: params.source };
 						return {
@@ -641,7 +665,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 					}
 				});
 
-				const computedEdges = getEdgesFromNodes(updatedNodes as INode[]);
+				const computedEdges = getEdgesFromNodes(updatedNodes as INode[], servicesJson);
 				setEdges(computedEdges);
 
 				return updatedNodes;
@@ -807,7 +831,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			};
 
 			const allNodes = [...nodes, node];
-			const allEdges = getEdgesFromNodes(allNodes as unknown as INode[]);
+			const allEdges = getEdgesFromNodes(allNodes as unknown as INode[], servicesJson);
 			loadCanvas(allNodes, allEdges);
 
 			// Notify host immediately with the new project state.
@@ -938,7 +962,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(project: IProject) => {
 			const newNodes = getNodesFromProject(project);
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
-			const newEdges = getEdgesFromNodes(sortedNodes);
+			const newEdges = getEdgesFromNodes(sortedNodes, servicesJson);
 
 			loadCanvas(sortedNodes, newEdges);
 

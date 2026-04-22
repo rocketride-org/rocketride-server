@@ -47,7 +47,7 @@ import { IServiceCatalog, IServiceLane, INodeData, INodeLayout } from '../../../
 
 import { LaneHandle } from '../../../handles';
 import { useFlow } from '../../../../hooks';
-import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes, getKnownContentLanes, expandWildcardLanes } from '../../../../util/helpers';
+import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import InsideLines from './InsideLines';
 
@@ -108,13 +108,9 @@ const RedAsterisk = (
 // Component
 // =============================================================================
 
-export default function NodeLanes({ nodeId, lanes: rawLanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
+export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
 	const { edges, servicesJson: _servicesJson, setQuickAddState } = useFlow();
 	const servicesJson = useMemo(() => (_servicesJson ?? {}) as IServiceCatalog, [_servicesJson]);
-
-	// Expand `"*"` wildcard lanes into the full set of content lanes known
-	// to the catalog. Non-wildcard maps pass through unchanged.
-	const lanes = useMemo(() => expandWildcardLanes(rawLanes, getKnownContentLanes(servicesJson)), [rawLanes, servicesJson]);
 
 	// Service-level display fields looked up from catalog at render time
 	const service = servicesJson[data.provider];
@@ -125,7 +121,23 @@ export default function NodeLanes({ nodeId, lanes: rawLanes, layout, data, isGro
 		setBoxEl(node);
 	}, []);
 
+	// A wildcard-lanes node (e.g. flow_if_else) declares `{"*": […]}` and
+	// accepts/emits any content type at runtime. It renders as a single
+	// "any" input port (no per-type fanout) + one output port per branch
+	// (labelled with the branch name) — or a single "any" output if no
+	// branches are declared. Branch names come from `service.branches`
+	// when available; for wildcard nodes we default to ["then", "else"]
+	// so the UI stays useful even before the engine catalog is rebuilt.
+	const isWildcard = Boolean(lanes && '*' in lanes);
+	const branchNames = useMemo<string[]>(() => {
+		if (service?.branches?.length) return service.branches;
+		return isWildcard ? ['then', 'else'] : [];
+	}, [service, isWildcard]);
+
 	const inputLanes = useMemo(() => {
+		if (isWildcard) {
+			return [{ type: 'any', targetId: 'target-any', label: 'any' }];
+		}
 		const _inputLanes = Object.keys(lanes ?? {});
 		return _inputLanes
 			.map((lane: string) => ({
@@ -134,21 +146,34 @@ export default function NodeLanes({ nodeId, lanes: rawLanes, layout, data, isGro
 				label: renameLanes(lane),
 			}))
 			.sort((a, b) => a.label.localeCompare(b.label));
-	}, [lanes]);
+	}, [lanes, isWildcard]);
 
 	const outputLanes = useMemo(() => {
+		if (isWildcard) {
+			// Wildcard node: one port per branch, or a single "any" port.
+			const entries =
+				branchNames.length > 0
+					? branchNames.map((branch) => ({
+							type: 'any',
+							required: false,
+							sourceId: `source-any-${branch}`,
+							label: branch,
+							branch,
+						}))
+					: [{ type: 'any', required: false, sourceId: 'source-any', label: 'any' }];
+			return inputLanes.map(() => entries);
+		}
+
 		const uniqueKeys = new Set<string>();
 		const outputLanesByKey = new Map<string, { type: string; required: boolean; sourceId: string; label: string; branch?: string }>();
-		const branches = service?.branches ?? [];
 
 		inputLanes.forEach((inputLane: { type: string; targetId: string; label: string }) => {
 			const sortedOutputLaneList = sortOutputLanes(lanes[inputLane?.type]);
 			sortedOutputLaneList.forEach((outputLane) => {
 				const { type, required, sourceId, label } = getOutputLaneDisplayValues(outputLane);
-				if (branches.length > 0) {
-					// Conditional router: render one port per (type, branch) pair.
-					// Each branch gets its own handle ID so edges preserve the branch identity.
-					for (const branch of branches) {
+				if (branchNames.length > 0) {
+					// Concrete-lane branched node: render one port per (type, branch) pair.
+					for (const branch of branchNames) {
 						const key = `${type}-${branch}`;
 						if (!uniqueKeys.has(key)) {
 							uniqueKeys.add(key);
@@ -170,7 +195,7 @@ export default function NodeLanes({ nodeId, lanes: rawLanes, layout, data, isGro
 
 		const deduplicatedLanes = Array.from(outputLanesByKey.values()).sort((a, b) => a.label.localeCompare(b.label));
 		return inputLanes.map(() => deduplicatedLanes);
-	}, [lanes, inputLanes, service]);
+	}, [lanes, inputLanes, branchNames, isWildcard]);
 
 	const isInputConnected = useCallback((targetId: string) => edges.some((edge) => edge.targetHandle === targetId && edge.target === nodeId), [edges, nodeId]);
 

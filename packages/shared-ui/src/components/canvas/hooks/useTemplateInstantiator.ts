@@ -177,7 +177,7 @@ export function useTemplateInstantiator() {
 
 			// Merge existing + new nodes and compute edges, then load via loadCanvas
 			const allNodes = [...currentNodes, ...newNodes];
-			const edges = getEdgesFromNodes(allNodes as unknown as INode[]);
+			const edges = getEdgesFromNodes(allNodes as unknown as INode[], servicesJson);
 			loadCanvas(allNodes, edges);
 
 			// Track new IDs so the post-ready effect can update internals + fitView

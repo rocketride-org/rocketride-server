@@ -913,6 +913,11 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(control, &IServiceFilterInstance::cb_control,
                 py::arg("classType"), py::arg("control"),
                 py::arg("nodeId") = "")
+        // Exposes per-call dispatch targeting to Python. Conditional
+        // routers (e.g. `flow_if_else`) invoke `instance.setTargetFilter(id)`
+        // before emitting a chunk so the engine routes it to a single
+        // downstream node. See Binder::m_targetFilter for semantics and
+        // threading constraints.
         .PYBIND(setTargetFilter, &IServiceFilterInstance::cb_setTargetFilter)
         .PYBIND(open, &IServiceFilterInstance::cb_open)
         .PYBIND(writeTagBeginObject,
