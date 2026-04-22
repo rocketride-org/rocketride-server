@@ -488,11 +488,11 @@ def patch(
         # Repair existing field objects that are missing llm.cloud.modelSource
         _repair_field_objects(fields)
 
-        for key in _added:
+        for key in sorted(_added):
             profile = updated_profiles.get(key, {})
             _update_fields_for_added(fields, ns, key, profile, _protected)
 
-        for key in _deprecated:
+        for key in sorted(_deprecated):
             _update_fields_for_deprecated(fields, ns, key, _protected)
 
         new_fields_str = _serialize_fields(fields, indent_level=f_indent)
