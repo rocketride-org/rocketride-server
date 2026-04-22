@@ -46,10 +46,11 @@ class VideoFrameExtractor(AVIReader):
 
         # Determine fps setting
         self._fps = config.get('fps', 1.0)
+
         if self._fps >= 1:
             fps_string = f'fps={int(self._fps)}'
         else:
-            fps_string = f'fps=1/{int(1 / self._fps)}'
+            fps_string = f'fps=1/{round(1 / self._fps)}'
 
         # Common ffmpeg args
         args = [
