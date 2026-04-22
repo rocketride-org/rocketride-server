@@ -185,15 +185,21 @@ export class RuntimeManager {
 		this._port = null;
 	}
 
-	private static async isRuntimeHealthy(port: number): Promise<boolean> {
+	static async isRuntimeHealthyUri(uri: string): Promise<boolean> {
+		let normalized = uri;
+		if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+			normalized = `http://${normalized}`;
+		}
 		try {
-			const resp = await fetch(`http://127.0.0.1:${port}`, {
-				signal: AbortSignal.timeout(2000),
-			});
+			const resp = await fetch(normalized, { signal: AbortSignal.timeout(2000) });
 			return resp.ok;
 		} catch {
 			return false;
 		}
+	}
+
+	private static async isRuntimeHealthy(port: number): Promise<boolean> {
+		return RuntimeManager.isRuntimeHealthyUri(`http://127.0.0.1:${port}`);
 	}
 
 	/**

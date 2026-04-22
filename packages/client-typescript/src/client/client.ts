@@ -273,6 +273,14 @@ export class RocketRideClient extends DAPClient {
 	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
 	private _didNotifyConnected: boolean = false;
 
+	// ── Auto-spawn runtime fields ──
+	private _runtimeManager: any | null = null;
+	private _runtimeWeStarted: boolean = false;
+	private _runtimeId?: string;
+	private _runtimePort?: number;
+	private _envUri: string = '';
+	private _autoSpawnEligible: boolean = false;
+
 	/**
 	 * Creates a new RocketRideClient instance.
 	 *
@@ -336,7 +344,21 @@ export class RocketRideClient extends DAPClient {
 			}
 		}
 
-		const { auth = config.auth || clientEnv.ROCKETRIDE_APIKEY, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, maxRetryTime, module } = config;
+		const { auth = config.auth || clientEnv.ROCKETRIDE_APIKEY, onEvent, onConnected, onDisconnected, onConnectError, persist, maxRetryTime, module } = config;
+
+		// Compute runtime targeting and URI resolution using locals (super() must come first)
+		const cfgRuntimeId = config.runtimeId;
+		const cfgRuntimePort = config.runtimePort;
+		const explicitUri = config.uri;
+		const envUri = clientEnv.ROCKETRIDE_URI || '';
+		const autoSpawnEligible = !isBrowser && (!explicitUri || !!cfgRuntimeId || !!cfgRuntimePort);
+
+		let resolvedUri: string;
+		if (autoSpawnEligible) {
+			resolvedUri = envUri; // may be empty — connect() will handle
+		} else {
+			resolvedUri = explicitUri || envUri || CONST_DEFAULT_WEB_CLOUD;
+		}
 
 		// Create unique client identifier
 		const clientName = module || `CLIENT-${clientId++}`;
@@ -344,8 +366,18 @@ export class RocketRideClient extends DAPClient {
 		// Initialize the DAPClient without a transport; transport is created in _internalConnect (CONNECTION_LOGIC.md §3)
 		super(clientName, undefined, config);
 
+		// Store auto-spawn state
+		this._runtimeId = cfgRuntimeId;
+		this._runtimePort = cfgRuntimePort;
+		this._autoSpawnEligible = autoSpawnEligible;
+		if (autoSpawnEligible) this._envUri = envUri;
+
 		// Store connection details and environment
-		this._setUri(uri);
+		if (resolvedUri) {
+			this._setUri(resolvedUri);
+		} else {
+			this._uri = '';
+		}
 		this._setAuth(auth);
 		this._env = clientEnv;
 
@@ -550,9 +582,15 @@ export class RocketRideClient extends DAPClient {
 		// Apply optional overrides so they're used for this connect
 		if (uri !== undefined) {
 			this._setUri(uri);
+			this._autoSpawnEligible = false;
 		}
 		if (auth !== undefined) {
 			this._setAuth(auth);
+		}
+
+		// Auto-spawn if eligible and runtime not already started by a previous connect()
+		if (this._autoSpawnEligible && !this._runtimeWeStarted) {
+			await this._ensureRuntime();
 		}
 
 		this._manualDisconnect = false;
@@ -583,6 +621,16 @@ export class RocketRideClient extends DAPClient {
 
 		if (this._transport && this.isConnected()) {
 			await this._internalDisconnect();
+		}
+
+		// Teardown auto-spawned runtime
+		if (this._runtimeManager && this._runtimeWeStarted) {
+			try {
+				await this._runtimeManager.teardown();
+			} catch {
+				/* best-effort */
+			}
+			this._runtimeWeStarted = false;
 		}
 	}
 
@@ -727,6 +775,61 @@ export class RocketRideClient extends DAPClient {
 			readFile: (path: string, encoding: string) => Promise<string>;
 			stat: (path: string) => Promise<{ size: number }>;
 		};
+	}
+
+	// ============================================================================
+	// AUTO-SPAWN RUNTIME METHODS
+	// ============================================================================
+
+	/**
+	 * Lazily load RuntimeManager to avoid pulling native deps into browser bundles.
+	 */
+	private async _loadRuntimeManager(): Promise<typeof import('./runtime/manager.js').RuntimeManager> {
+		try {
+			const req = (0, eval)('require') as undefined | ((m: string) => any);
+			if (typeof req === 'function') {
+				const { resolve } = req('path');
+				const mod = req(resolve(__dirname, 'runtime', 'manager.js'));
+				if (mod?.RuntimeManager) return mod.RuntimeManager;
+			}
+		} catch {
+			/* fall through */
+		}
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (s: string) => Promise<any>;
+		const mod = await dynamicImport('./runtime/manager.js');
+		return mod.RuntimeManager;
+	}
+
+	/**
+	 * Ensure a local runtime is available, mirroring Python SDK `__aenter__` logic.
+	 *
+	 * If an env URI was configured, health-check it first (3 attempts, 1s apart).
+	 * Falls back to auto-spawn via RuntimeManager.ensureRunning().
+	 */
+	private async _ensureRuntime(): Promise<void> {
+		const RuntimeManagerClass = await this._loadRuntimeManager();
+		this._runtimeManager = new RuntimeManagerClass();
+
+		// If env URI was set, health-check before falling back to auto-spawn
+		if (this._uri && this._envUri) {
+			for (let i = 0; i < 3; i++) {
+				if (await RuntimeManagerClass.isRuntimeHealthyUri(this._envUri)) {
+					this._runtimeManager = null; // env URI healthy, no auto-spawn needed
+					return;
+				}
+				if (i < 2) await new Promise((r) => setTimeout(r, 1000));
+			}
+			this.debugMessage(`ROCKETRIDE_URI (${this._envUri}) unreachable after 3 attempts, falling back to auto-spawn`);
+			this._uri = '';
+		}
+
+		// Auto-spawn
+		const [uri, weStarted] = await this._runtimeManager.ensureRunning({
+			instanceId: this._runtimeId,
+			port: this._runtimePort,
+		});
+		this._runtimeWeStarted = weStarted;
+		this._setUri(uri);
 	}
 
 	// ============================================================================
