@@ -239,8 +239,14 @@ export const getNodesFromProject = (project: IProject): INode[] => {
  * // => [Edge, Edge, ...]
  * ```
  */
-export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
+export const getEdgesFromNodes = (nodes: INodeLike[], servicesJson?: IServiceCatalog): Edge[] => {
 	const edges: Edge[] = [];
+
+	// Pre-compute which providers declare wildcard lanes so we can rebuild
+	// `target-any` / `source-any[-branch]` handles for those nodes at load
+	// time (mirroring how NodeLanes.tsx renders them).
+	const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+	const isWildcardProvider = (provider: string | undefined): boolean => Boolean(provider && servicesJson?.[provider]?.lanes && '*' in (servicesJson[provider].lanes as Record<string, unknown>));
 
 	for (const node of nodes) {
 		const { data } = node;
@@ -268,16 +274,21 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 		// -----------------------------------------------------------------
 		if (data.input?.length) {
 			data.input.forEach((input: IInputConnection) => {
-				// When the source declares branches (e.g. flow_if_else),
-				// the handle ID includes the branch so each branch port stays distinct.
-				const sourceHandle = input.branch ? `source-${input.lane}-${input.branch}` : `source-${input.lane}`;
+				const sourceNode = nodeById.get(input.from);
+				const sourceWildcard = isWildcardProvider(sourceNode?.data.provider);
+				const targetWildcard = isWildcardProvider(node.data.provider);
+
+				const sourceLaneToken = sourceWildcard ? 'any' : input.lane;
+				const sourceHandle = input.branch ? `source-${sourceLaneToken}-${input.branch}` : `source-${sourceLaneToken}`;
+				const targetHandle = targetWildcard ? 'target-any' : `target-${input.lane}`;
+
 				edges.push({
 					...DEFAULT_EDGE,
 					id: uuid(),
 					source: input.from,
 					target: node.id,
 					sourceHandle,
-					targetHandle: `target-${input.lane}`,
+					targetHandle,
 				});
 			});
 		}

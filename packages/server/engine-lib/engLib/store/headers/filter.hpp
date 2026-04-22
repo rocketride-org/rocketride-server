@@ -320,6 +320,10 @@ public:
         std::string &classType) noexcept(false);
     virtual void cb_control(std::string &filter, py::object &control,
                             std::string nodeId = "") noexcept(false);
+    /// Set a per-call dispatch filter on the underlying Binder. Used by
+    /// conditional routers (e.g. `flow_if_else`) to steer a chunk to a
+    /// single downstream node id. Pass "" to restore broadcast mode.
+    /// See Binder::m_targetFilter for lifecycle/thread-safety notes.
     virtual void cb_setTargetFilter(std::string nodeId) noexcept(false);
     virtual void cb_open(py::object entry) noexcept(false);
     virtual void cb_writeTagBeginObject() noexcept(false);

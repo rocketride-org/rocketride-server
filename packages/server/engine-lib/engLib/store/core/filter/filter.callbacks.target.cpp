@@ -445,6 +445,18 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
     if (auto ccode = binder.writeTag(tag)) throw ccode;
 }
 
+// -----------------------------------------------------------------------
+// Python-facing callback: steer the next outbound writeXxx(s) to a single
+// downstream instance instead of broadcasting. Conditional routers such
+// as `flow_if_else` call this before emitting a chunk, then reset with
+// `setTargetFilter("")` to restore broadcast mode for the next chunk.
+//
+// The call is a thin delegate to `Binder::setTargetFilter` — all
+// filtering logic lives in the binder dispatch loop. Thread-safety
+// constraints inherited from Binder (see binder.hpp / binder.cpp):
+// single-threaded dispatch per pipeline; introduce a mutex if that
+// invariant changes.
+// -----------------------------------------------------------------------
 void IServiceFilterInstance::cb_setTargetFilter(std::string nodeId) noexcept(false) {
     this->binder.setTargetFilter(nodeId);
 }
