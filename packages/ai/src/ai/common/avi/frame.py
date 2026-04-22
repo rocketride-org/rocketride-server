@@ -44,13 +44,8 @@ class VideoFrameExtractor(AVIReader):
         self._start_time = config.get('start_time', 0.0)
         self._duration = config.get('duration', 0.0)
 
-        # Determine fps setting — prefer computing from interval if present so this
-        # class is robust against callers that store interval but not fps.
-        interval = config.get('interval')
-        if interval is not None and interval > 0:
-            self._fps = 1.0 / interval
-        else:
-            self._fps = config.get('fps', 1.0)
+        # Determine fps setting
+        self._fps = config.get('fps', 1.0)
 
         if self._fps >= 1:
             fps_string = f'fps={int(self._fps)}'
