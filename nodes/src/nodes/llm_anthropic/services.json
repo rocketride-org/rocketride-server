@@ -93,7 +93,6 @@
 		"profiles": {
 			"custom": {
 				"model": "",
-				"modelSource": "manual",
 				"modelTotalTokens": 200000,
 				"apikey": ""
 			},
@@ -135,6 +134,22 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 64000, // openrouter
+				"apikey": ""
+			},
+			"claude-opus-latest": {
+				"title": "Anthropic: Claude Opus Latest",
+				"model": "claude-opus-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"apikey": ""
+			},
+			"claude-opus-4-7": {
+				"title": "Anthropic: Claude Opus 4.7",
+				"model": "claude-opus-4-7",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": ""
 			},
 			"claude-opus-4-6-fast": {
@@ -269,34 +284,70 @@
 					"properties": ["anthropic.claude-opus-4-5"]
 				},
 				{
-					"value": "claude-3-haiku",
-					"properties": ["anthropic.claude-3-haiku"]
+					"value": "claude-opus-4-6-fast",
+					"properties": ["anthropic.claude-opus-4-6-fast"]
 				},
 				{
-					"value": "claude-sonnet-4",
-					"properties": ["anthropic.claude-sonnet-4"]
+					"value": "claude-opus-4",
+					"properties": ["anthropic.claude-opus-4"]
 				},
 				{
 					"value": "claude-opus-4-1",
 					"properties": ["anthropic.claude-opus-4-1"]
 				},
 				{
+					"value": "claude-opus-latest",
+					"properties": ["anthropic.claude-opus-latest"]
+				},
+				{
 					"value": "claude-3-5-haiku",
 					"properties": ["anthropic.claude-3-5-haiku"]
 				},
 				{
-					"value": "claude-opus-4-6-fast",
-					"properties": ["anthropic.claude-opus-4-6-fast"]
+					"value": "claude-opus-4-7",
+					"properties": ["anthropic.claude-opus-4-7"]
 				},
 				{
 					"value": "claude-3-7-sonnet",
 					"properties": ["anthropic.claude-3-7-sonnet"]
 				},
 				{
-					"value": "claude-opus-4",
-					"properties": ["anthropic.claude-opus-4"]
+					"value": "claude-3-haiku",
+					"properties": ["anthropic.claude-3-haiku"]
+				},
+				{
+					"value": "claude-sonnet-4",
+					"properties": ["anthropic.claude-sonnet-4"]
 				}
 			]
+		},
+		"anthropic.claude-opus-4-6-fast": {
+			"object": "claude-opus-4-6-fast",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-opus-4": {
+			"object": "claude-opus-4",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-opus-4-1": {
+			"object": "claude-opus-4-1",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-opus-latest": {
+			"object": "claude-opus-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-3-5-haiku": {
+			"object": "claude-3-5-haiku",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-opus-4-7": {
+			"object": "claude-opus-4-7",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"anthropic.claude-3-7-sonnet": {
+			"object": "claude-3-7-sonnet",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-3-haiku": {
 			"object": "claude-3-haiku",
@@ -304,26 +355,6 @@
 		},
 		"anthropic.claude-sonnet-4": {
 			"object": "claude-sonnet-4",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-opus-4-1": {
-			"object": "claude-opus-4-1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-3-5-haiku": {
-			"object": "claude-3-5-haiku",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-opus-4-6-fast": {
-			"object": "claude-opus-4-6-fast",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-3-7-sonnet": {
-			"object": "claude-3-7-sonnet",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-opus-4": {
-			"object": "claude-opus-4",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},

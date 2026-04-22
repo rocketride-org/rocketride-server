@@ -192,8 +192,8 @@
 				"title": "DeepSeek: DeepSeek V3.2",
 				"model": "deepseek-v3.2",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 163840, // litellm
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
 			"deepseek-v3-2-exp": {
@@ -233,7 +233,7 @@
 				"model": "deepseek-r1-0528",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 131072, // litellm
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
 			"deepseek-chat-v3-0324": {
@@ -370,10 +370,6 @@
 					"properties": ["deepseek.deepseek-v3"]
 				},
 				{
-					"value": "deepseek-r1-0528",
-					"properties": ["deepseek.deepseek-r1-0528"]
-				},
-				{
 					"value": "deepseek-v3-1-terminus",
 					"properties": ["deepseek.deepseek-v3-1-terminus"]
 				},
@@ -382,20 +378,12 @@
 					"properties": ["deepseek.deepseek-v3-1-nex-n1"]
 				},
 				{
-					"value": "deepseek-v3-2",
-					"properties": ["deepseek.deepseek-v3-2"]
-				},
-				{
 					"value": "deepseek-chat-v3-0324",
 					"properties": ["deepseek.deepseek-chat-v3-0324"]
 				},
 				{
-					"value": "deepseek-r1-distill-qwen-32b",
-					"properties": ["deepseek.deepseek-r1-distill-qwen-32b"]
-				},
-				{
-					"value": "deepseek-r1",
-					"properties": ["deepseek.deepseek-r1"]
+					"value": "deepseek-v3-2",
+					"properties": ["deepseek.deepseek-v3-2"]
 				},
 				{
 					"value": "deepseek-v3-2-speciale",
@@ -406,22 +394,30 @@
 					"properties": ["deepseek.deepseek-chat-v3-1"]
 				},
 				{
+					"value": "deepseek-v3-2-exp",
+					"properties": ["deepseek.deepseek-v3-2-exp"]
+				},
+				{
 					"value": "deepseek-r1t2-chimera",
 					"properties": ["deepseek.deepseek-r1t2-chimera"]
 				},
 				{
-					"value": "deepseek-r1-distill-llama-70b",
-					"properties": ["deepseek.deepseek-r1-distill-llama-70b"]
+					"value": "deepseek-r1-distill-qwen-32b",
+					"properties": ["deepseek.deepseek-r1-distill-qwen-32b"]
 				},
 				{
-					"value": "deepseek-v3-2-exp",
-					"properties": ["deepseek.deepseek-v3-2-exp"]
+					"value": "deepseek-r1",
+					"properties": ["deepseek.deepseek-r1"]
+				},
+				{
+					"value": "deepseek-r1-0528",
+					"properties": ["deepseek.deepseek-r1-0528"]
+				},
+				{
+					"value": "deepseek-r1-distill-llama-70b",
+					"properties": ["deepseek.deepseek-r1-distill-llama-70b"]
 				}
 			]
-		},
-		"deepseek.deepseek-r1-0528": {
-			"object": "deepseek-r1-0528",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"deepseek.deepseek-v3-1-terminus": {
 			"object": "deepseek-v3-1-terminus",
@@ -431,20 +427,12 @@
 			"object": "deepseek-v3-1-nex-n1",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"deepseek.deepseek-v3-2": {
-			"object": "deepseek-v3-2",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
 		"deepseek.deepseek-chat-v3-0324": {
 			"object": "deepseek-chat-v3-0324",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"deepseek.deepseek-r1-distill-qwen-32b": {
-			"object": "deepseek-r1-distill-qwen-32b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1": {
-			"object": "deepseek-r1",
+		"deepseek.deepseek-v3-2": {
+			"object": "deepseek-v3-2",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"deepseek.deepseek-v3-2-speciale": {
@@ -455,16 +443,28 @@
 			"object": "deepseek-chat-v3-1",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
+		"deepseek.deepseek-v3-2-exp": {
+			"object": "deepseek-v3-2-exp",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
 		"deepseek.deepseek-r1t2-chimera": {
 			"object": "deepseek-r1t2-chimera",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"deepseek.deepseek-r1-distill-llama-70b": {
-			"object": "deepseek-r1-distill-llama-70b",
+		"deepseek.deepseek-r1-distill-qwen-32b": {
+			"object": "deepseek-r1-distill-qwen-32b",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"deepseek.deepseek-v3-2-exp": {
-			"object": "deepseek-v3-2-exp",
+		"deepseek.deepseek-r1": {
+			"object": "deepseek-r1",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"deepseek.deepseek-r1-0528": {
+			"object": "deepseek-r1-0528",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"deepseek.deepseek-r1-distill-llama-70b": {
+			"object": "deepseek-r1-distill-llama-70b",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},

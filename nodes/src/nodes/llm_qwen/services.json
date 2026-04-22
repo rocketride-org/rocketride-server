@@ -60,7 +60,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Model: ${parameters.llm_qwen.profile}"],
+	"tile": ["Model: ${parameters.llm_qwen.model}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -173,6 +173,13 @@
 	//		in the shape
 	//
 	"fields": {
+		"qwen.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "LLM model",
+			"default": "qwen-plus",
+			"enum": ["*>preconfig.profiles.*.title"]
+		},
 		"qwen.region": {
 			"type": "string",
 			"title": "Region",
@@ -182,87 +189,6 @@
 				["us", "US (Virginia)"],
 				["intl", "Singapore"],
 				["cn", "China (Beijing)"]
-			]
-		},
-		"qwen.qwen-plus": {
-			"object": "qwen-plus",
-			"properties": ["qwen.region", "llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-flash": {
-			"object": "qwen-flash",
-			"properties": ["qwen.region", "llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-plus-2025-07-28-thinking": {
-			"object": "qwen-plus-2025-07-28-thinking",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-plus-2025-07-28": {
-			"object": "qwen-plus-2025-07-28",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-turbo": {
-			"object": "qwen-turbo",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-max": {
-			"object": "qwen-max",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-2-5-coder-32b-instruct": {
-			"object": "qwen-2-5-coder-32b-instruct",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-2-5-7b-instruct": {
-			"object": "qwen-2-5-7b-instruct",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.qwen-2-5-72b-instruct": {
-			"object": "qwen-2-5-72b-instruct",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"qwen.profile": {
-			"title": "Model",
-			"description": "Qwen LLM model",
-			"type": "string",
-			"default": "qwen-flash",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "qwen-plus",
-					"properties": ["qwen.qwen-plus"]
-				},
-				{
-					"value": "qwen-flash",
-					"properties": ["qwen.qwen-flash"]
-				},
-				{
-					"value": "qwen-plus-2025-07-28-thinking",
-					"properties": ["qwen.qwen-plus-2025-07-28-thinking"]
-				},
-				{
-					"value": "qwen-plus-2025-07-28",
-					"properties": ["qwen.qwen-plus-2025-07-28"]
-				},
-				{
-					"value": "qwen-turbo",
-					"properties": ["qwen.qwen-turbo"]
-				},
-				{
-					"value": "qwen-max",
-					"properties": ["qwen.qwen-max"]
-				},
-				{
-					"value": "qwen-2-5-coder-32b-instruct",
-					"properties": ["qwen.qwen-2-5-coder-32b-instruct"]
-				},
-				{
-					"value": "qwen-2-5-7b-instruct",
-					"properties": ["qwen.qwen-2-5-7b-instruct"]
-				},
-				{
-					"value": "qwen-2-5-72b-instruct",
-					"properties": ["qwen.qwen-2-5-72b-instruct"]
-				}
 			]
 		}
 	},
@@ -275,7 +201,7 @@
 		{
 			"section": "Pipe",
 			"title": "Qwen",
-			"properties": ["qwen.profile"]
+			"properties": ["qwen.model", "qwen.region", "llm.cloud.apikey"]
 		}
 	],
 	"test": {
