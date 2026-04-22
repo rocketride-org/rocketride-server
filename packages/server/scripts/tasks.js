@@ -826,7 +826,7 @@ function makeInstallPipAction() {
             // Pre-install additional dependencies when --pytest-preinstall is provided
             const preinstall = ctx.options && ctx.options.pytestPreinstall;
             if (preinstall) {
-                const deps = preinstall.split(',').filter(Boolean);
+                const deps = preinstall.split(',').map((d) => d.trim()).filter(Boolean);
                 task.output = `Pre-installing: ${deps.join(', ')}...`;
                 await execCommand(enginePath, ['-m', 'pip', 'install', ...deps], { task, cwd: DIST_DIR });
             }

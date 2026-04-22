@@ -58,14 +58,7 @@ class TestConfig:
     """Test configuration loaded from environment variables."""
 
     def __init__(self):
-        """
-        Initialize the test configuration.
-
-        Args:
-            provider: The provider name.
-            connConfig: The connection configuration.
-            bag: The bag to store the node instance.
-        """
+        """Initialize test configuration from ROCKETRIDE_* environment variables."""
         self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
         self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
         self.timeout = float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0'))

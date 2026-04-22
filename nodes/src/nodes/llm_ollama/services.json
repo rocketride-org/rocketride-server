@@ -470,7 +470,7 @@
 			]
 		},
 		{
-			"requires": ["ROCKETRIDE_OLLAMA_HOST", "ROCKETRIDE_OLLAMA_MODEL_QWEN2_5_0_5B"],
+			"requires": ["ROCKETRIDE_OLLAMA_SERVERBASE", "ROCKETRIDE_OLLAMA_MODEL_QWEN2_5_0_5B"],
 			"avoidMocks": true,
 			"profiles": ["qwen2_5-0_5b"],
 			"outputs": ["answers"],
