@@ -23,6 +23,7 @@ This eliminates the studio→broadcast domain gap that hurt image-mode accuracy.
 """
 
 import datetime
+
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
@@ -76,7 +77,7 @@ class IInstance(IInstanceBase):
         pass
 
     # ------------------------------------------------------------------
-    # Image lane (dropper → node, reference image upload)
+    # Image lane (reference image upload via dropper)
     # ------------------------------------------------------------------
 
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes = None):
@@ -91,7 +92,7 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             img_bytes = bytes(self._image_buf)
             self._image_buf = bytearray()
-            if self._is_reference_entry:
+            if self._is_reference_entry and self._mode != 'vlm-text':
                 self._store_reference(img_bytes, mimeType)
             self.preventDefault()
 
@@ -99,7 +100,12 @@ class IInstance(IInstanceBase):
     # Control-plane invoke — called by clip_buffer per scan interval
     # ------------------------------------------------------------------
 
-    def invoke(self, frame_bytes: bytes) -> bool:
+    def invoke(self, param) -> bool:
+        frame_bytes = getattr(param, 'frame_bytes', None)
+        if frame_bytes is None:
+            _plog('invoke: param missing frame_bytes → False')
+            return False
+
         cfg = self.IGlobal.config
 
         # ── Text-only mode: no reference image needed ──────────────────
@@ -171,7 +177,6 @@ class IInstance(IInstanceBase):
 
     def _score_frame(self, frame_bytes: bytes) -> bool:
         """Stage 1 — YOLO cheap pre-filter, Stage 2 — full frame + text → VLM."""
-        # Stage 1: YOLO pre-filter — skip VLM if no vehicles in frame
         try:
             crops = detect_car_crops(frame_bytes)
             if not crops:
@@ -181,7 +186,6 @@ class IInstance(IInstanceBase):
         except Exception as e:
             _plog(f'_score_frame: YOLO failed ({e}) → proceeding to VLM without pre-filter')
 
-        # Stage 2: full frame + text description → VLM
         cfg = self.IGlobal.config
         ref_desc = self.IGlobal.ref_description or DEFAULT_TEXT_PROMPT
         model = cfg.get('model', 'qwen2.5vl:7b')
