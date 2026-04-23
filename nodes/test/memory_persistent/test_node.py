@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # Ensure the node source and engine libs are importable
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 NODES_SRC = PROJECT_ROOT / 'nodes' / 'src' / 'nodes'
 ROCKETLIB = PROJECT_ROOT / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib'
 AI_SRC = PROJECT_ROOT / 'packages' / 'ai' / 'src'
