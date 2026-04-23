@@ -179,7 +179,7 @@ if not _TIKTOKEN_AVAILABLE:
 _patcher = patch.dict(sys.modules, _STUB_MODULES)
 _patcher.start()
 
-from nodes.src.nodes.context_optimizer.optimizer import ContextOptimizer
+from nodes.context_optimizer.optimizer import ContextOptimizer
 
 
 def teardown_module() -> None:
