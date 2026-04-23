@@ -46,7 +46,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Path setup and mock engine runtime modules via session-scoped fixture
 # ---------------------------------------------------------------------------
-NODES_SRC = Path(__file__).parent.parent / 'src' / 'nodes'
+NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 
 _MOCK_MODULE_NAMES = [
     'rocketlib',
