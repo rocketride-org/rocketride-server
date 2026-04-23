@@ -30,6 +30,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
+const os = require('os');
 const {
     exists,
     syncDir,
@@ -189,6 +190,16 @@ function makeRunPytestAction(options = {}) {
             }
             if (pattern) {
                 pytestArgs.push('-k', pattern);
+            }
+
+            // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
+            // flag is not set: empirically, cloud-LLM rate limits + node-subprocess
+            // fan-out make >8 workers counterproductive on this test shape. Explicit
+            // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
+            const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
+            const parallel = String(parallelRaw).trim().toLowerCase();
+            if (parallel && parallel !== 'off' && parallel !== '0') {
+                pytestArgs.push('-n', String(parallelRaw).trim());
             }
 
             await execCommand(ENGINE, pytestArgs, {

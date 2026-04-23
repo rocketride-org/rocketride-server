@@ -81,6 +81,8 @@ function parseArgs(args) {
 			options.pytestPattern = arg.substring('--pytest-pattern='.length);
 		} else if (arg.startsWith('--pytest-preinstall=')) {
 			options.pytestPreinstall = arg.substring('--pytest-preinstall='.length);
+        } else if (arg.startsWith('--pytest-parallel=')) {
+            options.pytestParallel = arg.substring('--pytest-parallel='.length);
 		} else if (arg.startsWith('--jest=')) {
 			options.jest = options.jest || [];
 			options.jest.push(arg.substring('--jest='.length));
@@ -204,6 +206,7 @@ Options:
   --pytest="args"           Pass arguments to pytest (can be repeated)
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated, e.g. "dep1>=10,dep2")
+  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
   --jest="args"             Pass arguments to Jest (can be repeated)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
