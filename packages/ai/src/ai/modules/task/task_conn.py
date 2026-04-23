@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -247,7 +248,11 @@ class TaskConn(
         if not self._authenticated:
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
-            await self._transport.disconnect()
+            # Schedule disconnect as a separate task rather than awaiting it here.
+            # Awaiting disconnect() from inside a _receive_data task creates a
+            # _GatheringFuture cycle: _cleanup_and_disconnect gathers _message_tasks,
+            # which includes this task (still running), and cancel() recurses infinitely.
+            asyncio.create_task(self._transport.disconnect())
             return
 
         await super().on_receive(message)
@@ -279,7 +284,7 @@ class TaskConn(
                     },
                 },
             )
-            await self._transport.disconnect()
+            asyncio.create_task(self._transport.disconnect())
             return self.build_error(request, result[1])
 
         self._account_info = result
