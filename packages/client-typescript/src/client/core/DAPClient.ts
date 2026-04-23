@@ -368,7 +368,7 @@ export class DAPClient extends DAPBase {
 		const success = (resp as { success?: boolean }).success;
 		if (!success) {
 			// Close the transport immediately — no further messages are meaningful
-			await this._transport.disconnect(resp.message ?? 'Authentication failed', true);
+			await this._transport.disconnect();
 			// Throw a typed exception so callers can catch auth failures separately
 			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
 		}

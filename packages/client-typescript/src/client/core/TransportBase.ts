@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,16 +26,16 @@ import { DAPMessage, TransportCallbacks } from '../types';
 
 /**
  * Abstract base class for DAP transport implementations.
- * 
+ *
  * This class defines the standard interface that all transport implementations
  * must follow for DAP communication. It provides common functionality for
  * callback management, connection state tracking, and debug message routing.
- * 
+ *
  * Concrete implementations must provide:
  * - connect(): Establish the transport connection
  * - disconnect(): Close the transport connection
  * - send(): Transmit a DAP message
- * 
+ *
  * @abstract This class must be extended by concrete transport implementations
  */
 export abstract class TransportBase {
@@ -103,7 +103,7 @@ export abstract class TransportBase {
 
 	/**
 	 * Bind callback functions to the transport.
-	 * 
+	 *
 	 * This must be called before using the transport for communication.
 	 * The callbacks handle debugging, connection events, and message processing.
 	 */
@@ -135,12 +135,12 @@ export abstract class TransportBase {
 	/**
 	 * Update auth credential. Takes effect on the next connect().
 	 */
-	setAuth(_auth: string): void { }
+	setAuth(_auth: string): void {}
 
 	/**
 	 * Update connection URI. Takes effect on the next connect().
 	 */
-	setUri(_uri: string): void { }
+	setUri(_uri: string): void {}
 
 	/**
 	 * Check if the transport is currently connected.
@@ -166,10 +166,8 @@ export abstract class TransportBase {
 
 	/**
 	 * Close connection and cleanup resources.
-	 * @param reason - Optional reason for disconnection (reported to onDisconnected; e.g. auth failure message).
-	 * @param hasError - Optional; when true, report this as an error to onDisconnected.
 	 */
-	abstract disconnect(reason?: string, hasError?: boolean): Promise<void>;
+	abstract disconnect(): Promise<void>;
 
 	/**
 	 * Send a message over the transport.

@@ -369,6 +369,45 @@ class ExecutionMixin(DAPClient):
             self.debug_message(f'Pipeline termination failed: {error_msg}')
             raise RuntimeError(error_msg)
 
+    async def restart(
+        self,
+        *,
+        project_id: str,
+        source: str,
+        pipeline: PipelineConfig,
+        token: Optional[str] = None,
+    ) -> None:
+        """
+        Restart a running pipeline with a new configuration.
+
+        Looks up the existing task by project/source, terminates it, and starts
+        a new execution in one server round-trip.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+            pipeline: The pipeline configuration to restart with.
+            token: Existing task token (optional; resolved server-side if omitted).
+
+        Raises:
+            RuntimeError: If the restart fails.
+        """
+        response = await self.dap_request(
+            'restart',
+            {
+                'token': token,
+                'projectId': project_id,
+                'source': source,
+                'pipeline': pipeline,
+            },
+            token='*',
+        )
+
+        if self.did_fail(response):
+            error_msg = response.get('message', 'Unknown restart error')
+            self.debug_message(f'Pipeline restart failed: {error_msg}')
+            raise RuntimeError(error_msg)
+
     async def get_task_status(self, token: str) -> TASK_STATUS:
         """
         Get the current status of a running pipeline.

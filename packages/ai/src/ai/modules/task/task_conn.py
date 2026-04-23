@@ -69,7 +69,7 @@ from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_account import AccountCommands
-from .commands.cmd_billing import BillingCommands
+from .commands.cmd_app import AppCommands
 from ai.account.models import AccountInfo, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -95,7 +95,7 @@ class TaskConn(
     DebugCommands,
     MiscCommands,
     AccountCommands,
-    BillingCommands,
+    AppCommands,
     DAPConn,
 ):
     """
@@ -128,8 +128,7 @@ class TaskConn(
     - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
-    - BillingCommands: Account billing (stub in OSS; SaaS overlays the
-                       real wallet + subscription implementation)
+    - AppCommands: App marketplace (developer, submission, catalog, admin, pricing)
     - DAPConn: Base DAP protocol implementation and transport handling
 
     Attributes:
@@ -182,7 +181,7 @@ class TaskConn(
         DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
-        BillingCommands.__init__(self, connection_id, server, transport, **kwargs)
+        AppCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id
@@ -245,9 +244,12 @@ class TaskConn(
             return
 
         if not self._authenticated:
+            # Send an error message
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
-            await self._transport.disconnect()
+
+            # Schedules the disconnect after we return
+            self._transport.disconnect()
             return
 
         await super().on_receive(message)
@@ -263,10 +265,11 @@ class TaskConn(
         if not credential:
             self._authenticated = False
             self._account_info = None
-            return self.build_response(request, body={})
+            raise ValueError('Not authenticated')
 
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
+            error_code, error_message = result
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
                 {
@@ -275,12 +278,19 @@ class TaskConn(
                         'action': 'auth_failed',
                         'timestamp': time.time(),
                         'connectionId': self.get_connection_id(),
-                        'reason': result[1],
+                        'reason': error_message,
+                        'code': error_code,
                     },
                 },
             )
-            await self._transport.disconnect()
-            return self.build_error(request, result[1])
+
+            # Send an error message
+            err = self.build_error(request, error_message)
+            await self.send(err)
+
+            # Schedules the disconnect after we return
+            self._transport.disconnect()
+            return
 
         self._account_info = result
         self._authenticated = True

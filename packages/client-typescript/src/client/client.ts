@@ -281,7 +281,7 @@ export class RocketRideClient extends DAPClient {
 	private _manualDisconnect: boolean = false;
 	private _maxRetryTime?: number;
 	private _retryStartTime?: number;
-	private _currentReconnectDelay: number = 250;
+	private _currentReconnectDelay: number = 500;
 
 	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
 	private _didNotifyConnected: boolean = false;
@@ -478,9 +478,9 @@ export class RocketRideClient extends DAPClient {
 	 * Single place for physical disconnect. Closes the transport directly,
 	 * which triggers onDisconnected via the transport callback.
 	 */
-	private async _internalDisconnect(reason?: string, hasError?: boolean): Promise<void> {
+	private async _internalDisconnect(): Promise<void> {
 		if (!this._transport) return;
-		await this._transport.disconnect(reason, hasError);
+		await this._transport.disconnect();
 	}
 
 	/**
@@ -519,7 +519,7 @@ export class RocketRideClient extends DAPClient {
 				}
 			}
 
-			this._currentReconnectDelay = Math.min(this._currentReconnectDelay * 2, 2500);
+			this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 500, 5000);
 			this._scheduleReconnect();
 			return undefined;
 		}
@@ -584,7 +584,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		this._manualDisconnect = false;
-		this._currentReconnectDelay = 250;
+		this._currentReconnectDelay = 500;
 		this._retryStartTime = undefined;
 
 		// If already connected, disconnect first
@@ -1417,7 +1417,7 @@ export class RocketRideClient extends DAPClient {
 		this._manualDisconnect = false;
 		this._didNotifyConnected = true;
 		this._clearReconnectTimeout();
-		this._currentReconnectDelay = 250;
+		this._currentReconnectDelay = 500;
 		this._retryStartTime = undefined;
 
 		// Resubscribe all monitor subscriptions after reconnect

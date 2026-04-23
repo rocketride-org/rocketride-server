@@ -51,8 +51,10 @@ _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ..base import AccountBase
 
-class Account:
+
+class Account(AccountBase):
     """
     Open-source authentication and account management.
 
@@ -210,40 +212,4 @@ class Account:
     async def remove_team_member(self, **kw):
         self._saas_only()
 
-    # =========================================================================
-    # TOKEN GENERATION  — used by task_server for pk_/tk_ task tokens
-    # =========================================================================
-
-    def generate_token(self, content: dict, prefix: str = '') -> str:
-        """
-        Generate a deterministic token from a content dict and optional prefix.
-
-        The token is a 32-character hex digest of the SHA-256 hash of the
-        JSON-serialised ``content`` dict (keys sorted for determinism),
-        optionally prepended with ``prefix``.
-
-        Args:
-            content (dict): Arbitrary key/value data to hash.  Keys are sorted
-                before serialisation so that the same logical content always
-                produces the same token regardless of insertion order.
-            prefix (str): Short string prepended to the hex digest (e.g. ``'pk_'``
-                or ``'tk_'``).  Defaults to an empty string.
-
-        Returns:
-            str: ``f'{prefix}{hex_digest[:32]}'`` — a URL-safe opaque token.
-        """
-        import hashlib
-        import json
-
-        # Serialise the content dict with sorted keys to ensure that two dicts
-        # with identical key/value pairs but different insertion orders produce
-        # the same token.
-        raw = json.dumps(content, sort_keys=True).encode('utf-8')
-
-        # Compute the SHA-256 digest and truncate to 32 hex characters (128 bits),
-        # which is sufficient entropy for a non-cryptographic task token.
-        token = hashlib.sha256(raw).hexdigest()[:32]
-
-        # Prepend the caller-supplied prefix (e.g. 'pk_' / 'tk_') so that
-        # tokens can be identified by type at a glance.
-        return f'{prefix}{token}'
+    # generate_token is inherited from AccountBase.

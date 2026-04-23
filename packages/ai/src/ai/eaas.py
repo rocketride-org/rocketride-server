@@ -104,6 +104,13 @@ Examples:
         help='Enable verbose/debug logging',
     )
 
+    # SaaS mode — load the SaaS account implementation instead of OSS
+    parser.add_argument(
+        '--saas',
+        action='store_true',
+        help='Enable SaaS account implementation (requires extension overlay)',
+    )
+
     return parser
 
 
@@ -148,15 +155,12 @@ async def run(config: Dict[str, Any] = None) -> None:
     server.use('task_http')
     server.use('profiler')
 
-    # Register the Stripe webhook endpoint if the SaaS billing overlay is present.
-    # The route is public — Stripe authenticates via payload signature, not bearer token.
-    try:
-        from ai.account.auth.stripe_webhook_endpoint import stripe_webhook
+    # Uniform entry point — OSS is a no-op; SaaS registers all HTTP routes
+    # (Zitadel callback, Stripe webhook, Stripe Connect, Marketplace) and
+    # initialises the database schema before the server starts accepting connections.
+    from ai.account import account
 
-        server.add_route('/webhooks/stripe', stripe_webhook, ['POST'], public=True)
-        print('  Stripe webhook: POST /webhooks/stripe', flush=True)
-    except ImportError:
-        pass  # SaaS billing overlay not present (OSS build)
+    await account.init_account(server)
 
     # Start the FastAPI server loop
     await server.serve()

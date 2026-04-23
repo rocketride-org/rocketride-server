@@ -239,11 +239,11 @@ class WebServer:
             self.add_route('/ping', ping, ['GET'], public=True)
             self.add_route('/use', use, ['POST'])
             self.add_route('/shutdown', shutdown, ['POST'])
+            self.add_route('/auth/callback', auth_callback, ['GET'], public=True)
 
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
         self.add_route('/version', version, ['GET'], public=True)
-        self.add_route('/auth/callback', auth_callback, ['GET'], public=True)
 
         # Configure the Uvicorn server immediately upon initialization
         self.server = self._configure_server()

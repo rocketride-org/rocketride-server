@@ -342,11 +342,11 @@ class DAPClient(DAPBase):
             try:
                 response = await self.request(request, timeout=auth_timeout)
             except Exception:
-                await self._transport.disconnect('Auth request failed', True)
+                await self._transport.disconnect()
                 raise
             if not response.get('success', False):
                 message = response.get('message', 'Authentication failed')
-                await self._transport.disconnect(message, True)
+                await self._transport.disconnect()
                 raise AuthenticationException({'message': message})
             auth_body = response.get('body') or {}
 

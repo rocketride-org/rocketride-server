@@ -44,18 +44,18 @@ depends(requirements)
 
 # =============================================================================
 # ACCOUNT IMPLEMENTATION
-# Try to load the SaaS implementation (account/auth/) first.
-# Fall back to the OSS implementation (account/oss/) if it is not present.
-# The SaaS build overlays account/auth/ at build time.
+# If --saas is present on the command line, load the SaaS implementation
+# (extension/saas/).  Otherwise use the OSS implementation (account/oss/).
 # =============================================================================
 
-try:
-    # Attempt to import the SaaS Account class which requires the auth/
-    # subpackage overlaid at build time (not present in the open-source repo).
-    from .auth import Account
-except ImportError:
-    # SaaS subpackage not available; use the OSS implementation that
-    # authenticates via ROCKETRIDE_APIKEY environment variable instead.
+import sys as _sys
+
+if '--saas' in _sys.argv:
+    # SaaS mode explicitly requested — import the SaaS Account class.
+    # Raises ImportError loudly if the extension overlay was not deployed.
+    from extension.saas import Account  # type: ignore[import]
+else:
+    # OSS mode — authenticate via ROCKETRIDE_APIKEY environment variable.
     from .oss import Account  # type: ignore[assignment]
 
 # Instantiate the single shared Account object used by the entire process.
