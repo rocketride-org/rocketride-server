@@ -1,0 +1,29 @@
+{
+  "id": "sentiment",
+  "name": "Text Sentiment Analyzer",
+  "description": "Analyzes sentiment of input text",
+  "nodes": [
+    {
+      "id": "input",
+      "type": "webhook",
+      "label": "Input Text"
+    },
+    {
+      "id": "llm",
+      "type": "llm",
+      "config": {
+        "provider": "mock",
+        "prompt": "Analyze the sentiment of the following text and classify it as Positive, Negative, or Neutral:\n\n{{input}}"
+      }
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "label": "Sentiment Output"
+    }
+  ],
+  "edges": [
+    { "from": "input", "to": "llm" },
+    { "from": "llm", "to": "output" }
+  ]
+}
