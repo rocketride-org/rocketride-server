@@ -13,13 +13,14 @@
 	// Required:
 	//      Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//      Capabilities are flags that change the behavior of the underlying
-	//      engine
+	//      engine. "invoke" lets agents call the vector DB tools exposed via
+	//      VectorStoreToolMixin (search, upsert, delete).
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -168,7 +169,8 @@
 				"title": "Your own ChromaDB server",
 				"host": "localhost",
 				"port": "8000",
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"serverName": "chroma"
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -176,7 +178,8 @@
 				"host": "",
 				"port": "443",
 				"apikey": "",
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"serverName": "chroma"
 			}
 		}
 	},
@@ -202,13 +205,20 @@
 		//
 		// Cloud configuration for ChromaDB
 		//
+		"chroma.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide.",
+			"default": "chroma",
+			"minLength": 1
+		},
 		"chroma.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.collection"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.collection", "chroma.serverName"]
 		},
 		"chroma.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.collection"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "chroma.serverName"]
 		},
 		//
 		// Profile selection for ChromaDB service

@@ -1,8 +1,9 @@
 import importlib
+import json
 import threading
 from abc import abstractmethod, ABC
-from typing import List, Callable, Dict, Any, Tuple
-from rocketlib import IInstanceBase
+from typing import List, Callable, Dict, Any, Optional, Tuple
+from rocketlib import IInstanceBase, tool_function, warning
 from .schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 
 
@@ -549,3 +550,487 @@ def getStore(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> 
 
     # Create an instance of the class
     return cls(provider, connConfig, bag)
+
+
+# ---------------------------------------------------------------------------
+# Vector DB tool mixin
+# ---------------------------------------------------------------------------
+#
+# Rod's review feedback on PR #524 suggested co-locating the tool definitions
+# with the underlying store so every vectordb node can "morph into a tool"
+# without a separate generic wrapper node. Because the engine dispatches
+# ``invoke`` against the node's ``IInstance`` (not the ``DocumentStoreBase``
+# subclass, which is composed via ``self.IGlobal.store``), the tool methods
+# must live on a class that the ``IInstance`` subclasses. This mixin is that
+# class: it lives next to ``DocumentStoreBase`` so the store interface stays
+# together in a single file, and it delegates every call to
+# ``self.IGlobal.store`` (which is a ``DocumentStoreBase`` instance).
+#
+# Any vectordb ``IInstance`` that subclasses ``VectorStoreToolMixin`` picks up
+# the ``search``, ``upsert`` and ``delete`` tools automatically via
+# ``IInstanceBase._collect_tool_methods`` (which walks the full MRO).
+
+
+_VECTORDB_TOOL_MAX_TOP_K = 100
+_VECTORDB_TOOL_DEFAULT_TOP_K = 10
+_VECTORDB_DEFAULT_SERVER_NAME = 'vectordb'
+
+
+def _normalize_vectordb_tool_input(input_obj: Any) -> Dict[str, Any]:
+    """Normalize a tool-call payload into a plain ``dict``.
+
+    Handles ``None``, plain dicts, pydantic models (``model_dump`` / ``dict``),
+    JSON strings, and nested ``input`` wrappers the host may produce. A
+    nested ``input`` value of any supported shape (dict, JSON string,
+    pydantic model) is re-normalized before merging with any sibling
+    ``extras`` in the outer payload so values like ``{'input': '{"query":
+    "x"}'}`` or ``{'input': SomeModel(...)}`` are handled correctly.
+    """
+    if input_obj is None:
+        return {}
+
+    # Pydantic (v2 prefers model_dump; fall back to v1 dict())
+    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
+        input_obj = input_obj.model_dump()
+    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
+        try:
+            input_obj = input_obj.dict()
+        except TypeError:
+            # Not a pydantic-style ``dict()`` (e.g. builtin dict) — leave as is.
+            pass
+
+    # JSON string
+    if isinstance(input_obj, str):
+        try:
+            parsed = json.loads(input_obj)
+            if isinstance(parsed, dict):
+                input_obj = parsed
+            else:
+                warning(f'vectordb tool: JSON input did not parse to a dict (got {type(parsed).__name__})')
+                return {}
+        except (json.JSONDecodeError, ValueError) as exc:
+            warning(f'vectordb tool: malformed JSON input, returning empty dict: {exc}')
+            return {}
+
+    if not isinstance(input_obj, dict):
+        warning(f'vectordb tool: unexpected input type {type(input_obj).__name__}')
+        return {}
+
+    # Unwrap nested ``input`` wrappers the host may produce. Re-run the
+    # normalizer on the inner value so string-, model- or dict-wrapped
+    # payloads all get the same treatment.
+    if 'input' in input_obj:
+        inner_raw = input_obj['input']
+        extras = {k: v for k, v in input_obj.items() if k != 'input'}
+        inner = _normalize_vectordb_tool_input(inner_raw)
+        if isinstance(inner, dict):
+            input_obj = {**inner, **extras}
+
+    input_obj.pop('security_context', None)
+    return input_obj
+
+
+class VectorStoreToolMixin:
+    """
+    Expose vector DB search/upsert/delete as agent tools.
+
+    Any vectordb ``IInstance`` that inherits from this mixin is automatically
+    discoverable through the ``tool.*`` control-plane protocol. The mixin
+    delegates all storage operations to ``self.IGlobal.store`` (a
+    :class:`DocumentStoreBase` implementation) so backend-specific code stays
+    in the backend driver.
+
+    To enable tool discovery, the node's ``services.json`` must also include
+    ``"tool"`` in its ``classType`` list and ``"invoke"`` in its
+    ``capabilities`` list.
+
+    Tool names follow the established ``<serverName>.<toolName>`` convention
+    documented in ``ai.common.tools`` and used by the MCP client: every tool
+    method on this mixin is exposed as ``<serverName>.search``,
+    ``<serverName>.upsert`` and ``<serverName>.delete`` where ``serverName``
+    comes from ``self.IGlobal.serverName`` (user-configurable via
+    ``services.json``). This prevents tool-name collisions when a pipeline
+    contains more than one vectordb node.
+    """
+
+    # --- Configuration knobs (override via IGlobal) ------------------------
+
+    def _vectordb_default_top_k(self) -> int:
+        glb = getattr(self, 'IGlobal', None)
+        value = getattr(glb, 'default_top_k', None)
+        try:
+            value = int(value) if value is not None else _VECTORDB_TOOL_DEFAULT_TOP_K
+        except (TypeError, ValueError):
+            value = _VECTORDB_TOOL_DEFAULT_TOP_K
+        return max(1, min(value, _VECTORDB_TOOL_MAX_TOP_K))
+
+    def _vectordb_score_threshold(self) -> float:
+        glb = getattr(self, 'IGlobal', None)
+        value = getattr(glb, 'score_threshold', None)
+        try:
+            value = float(value) if value is not None else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        return max(0.0, min(value, 1.0))
+
+    def _vectordb_store(self) -> 'DocumentStoreBase':
+        store = getattr(getattr(self, 'IGlobal', None), 'store', None)
+        if store is None:
+            raise RuntimeError('vectordb tool: store not initialized')
+        return store
+
+    def _vectordb_server_name(self) -> str:
+        """Return the namespace prefix for this node's tools.
+
+        Reads ``self.IGlobal.serverName`` (set from the node config). Falls
+        back to the provider name (``self.IGlobal.glb.logicalType``) and
+        finally to ``'vectordb'`` if neither is available. The returned value
+        is stripped of leading/trailing whitespace and ``'.'`` characters to
+        guarantee a clean ``<server>.<tool>`` format.
+        """
+        glb = getattr(self, 'IGlobal', None)
+        name = getattr(glb, 'serverName', None)
+        if not name:
+            # Fall back to the node's logical type (e.g. 'pinecone').
+            inner = getattr(glb, 'glb', None)
+            name = getattr(inner, 'logicalType', None)
+        if not isinstance(name, str):
+            name = _VECTORDB_DEFAULT_SERVER_NAME
+        name = name.strip().strip('.')
+        return name or _VECTORDB_DEFAULT_SERVER_NAME
+
+    def _vectordb_compute_embedding(self, query_text: str) -> Optional[List[float]]:
+        """Attempt to compute a query embedding for semantic search.
+
+        Tool invocations run in the control-plane ``invoke()`` path and do
+        not pass through the data-lane embedding filters that normally
+        populate ``QuestionText.embedding``. This hook gives nodes a chance
+        to compute an embedding for the tool path. Override in a subclass or
+        provide an ``embed_query`` callable on ``self.IGlobal`` (signature:
+        ``embed_query(text: str) -> list[float]``).
+
+        Returns ``None`` if no embedding provider is available; the caller
+        will fall back to keyword search.
+        """
+        glb = getattr(self, 'IGlobal', None)
+        embed_fn = getattr(glb, 'embed_query', None)
+        if embed_fn is None or not callable(embed_fn):
+            return None
+        try:
+            embedding = embed_fn(query_text)
+        except Exception as exc:
+            warning(f'vectordb tool: embed_query raised {type(exc).__name__}: {exc}')
+            return None
+        if not embedding:
+            return None
+        if not isinstance(embedding, (list, tuple)):
+            warning(f'vectordb tool: embed_query returned unexpected type {type(embedding).__name__}')
+            return None
+        return list(embedding)
+
+    # --- Tool descriptor / dispatch plumbing ------------------------------
+    #
+    # Override ``_collect_tool_methods`` so that our bare Python method
+    # names ``search``/``upsert``/``delete`` are exposed to the engine as
+    # namespaced tool names like ``pinecone.search``. The descriptor
+    # builder in ``IInstanceBase`` uses the dict key as the outbound
+    # ``descriptor['name']``, and the dispatcher looks up the inbound
+    # ``tool_name`` in the same dict — so namespacing both sides with one
+    # override is sufficient. We still delegate collection to ``super()``
+    # so that any further @tool_function methods added in subclasses are
+    # picked up (and namespaced) automatically.
+
+    def _collect_tool_methods(self) -> Dict[str, Callable]:
+        # Delegate to IInstanceBase (or any intermediate mixin) to discover
+        # all @tool_function methods via MRO walking. Fall back to a local
+        # walk when this mixin is instantiated outside an IInstance chain
+        # (e.g. in unit tests) so ``super()`` wouldn't resolve the method.
+        try:
+            collected = super()._collect_tool_methods()  # type: ignore[misc]
+        except AttributeError:
+            collected = {}
+            for attr_name in dir(type(self)):
+                attr = getattr(type(self), attr_name, None)
+                if attr is not None and hasattr(attr, '__tool_meta__'):
+                    collected[attr_name] = getattr(self, attr_name)
+
+        server = self._vectordb_server_name()
+
+        # Only namespace methods that actually live on VectorStoreToolMixin —
+        # other @tool_function methods a subclass defines should keep their
+        # own conventions unless the subclass explicitly opts in.
+        owned = set()
+        for attr_name in vars(VectorStoreToolMixin):
+            attr = getattr(VectorStoreToolMixin, attr_name, None)
+            if attr is not None and hasattr(attr, '__tool_meta__'):
+                owned.add(attr_name)
+
+        namespaced: Dict[str, Callable] = {}
+        for name, method in collected.items():
+            if name in owned:
+                namespaced[f'{server}.{name}'] = method
+            else:
+                namespaced[name] = method
+        return namespaced
+
+    # --- Tool methods ------------------------------------------------------
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['query'],
+            'properties': {
+                'query': {
+                    'type': 'string',
+                    'description': 'The search query text. Will be matched against stored documents using semantic similarity.',
+                },
+                'top_k': {
+                    'type': 'integer',
+                    'description': 'Maximum number of results to return (default: 10).',
+                    'default': _VECTORDB_TOOL_DEFAULT_TOP_K,
+                },
+                'filter': {
+                    'type': 'object',
+                    'description': 'Optional metadata filter. Keys are metadata field names, values are the required values. Example: {"nodeId": "my-node", "parent": "/docs"}',
+                    'additionalProperties': True,
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'results': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'content': {'type': 'string'},
+                            'score': {'type': 'number'},
+                            'metadata': {'type': 'object'},
+                        },
+                    },
+                },
+                'total': {'type': 'integer'},
+            },
+        },
+        description=(
+            'Search for documents in the vector database. If an embedding provider is bound to this '
+            'node (via IGlobal.embed_query), performs semantic similarity search. Otherwise falls back '
+            'to keyword (substring) matching — bind an upstream embedding module to enable semantic '
+            'ranking. Returns matching documents with their content, metadata, and scores.'
+        ),
+    )
+    def search(self, args):
+        """Search for documents in the vector database."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        query_text = str(args.get('query', '')).strip()
+        if not query_text:
+            raise ValueError('search requires a non-empty "query" string')
+
+        default_top_k = self._vectordb_default_top_k()
+        try:
+            top_k = int(args.get('top_k', default_top_k))
+        except (TypeError, ValueError):
+            top_k = default_top_k
+        top_k = max(1, min(top_k, _VECTORDB_TOOL_MAX_TOP_K))
+
+        raw_filter = args.get('filter') or {}
+        doc_filter = DocFilter()
+        if isinstance(raw_filter, dict):
+            object_id = raw_filter.get('objectId')
+            if object_id:
+                doc_filter.objectIds = [object_id] if isinstance(object_id, str) else list(object_id)
+            node_id = raw_filter.get('nodeId')
+            if node_id:
+                doc_filter.nodeId = node_id
+            parent = raw_filter.get('parent')
+            if parent:
+                doc_filter.parent = parent
+
+        doc_filter.limit = top_k
+        question = QuestionText(text=query_text)
+
+        # Attempt to compute an embedding for semantic search. The control-plane
+        # invoke() path does not flow through the data-lane embedding filters,
+        # so we give nodes a hook (``IGlobal.embed_query``) to plug in their
+        # own embedder. If unavailable, we do a keyword-only search — which is
+        # lossy but is always better than a hard failure on every call.
+        embedding = self._vectordb_compute_embedding(query_text)
+        if embedding is not None:
+            question.embedding = embedding
+            embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
+            if isinstance(embed_model, str) and embed_model:
+                question.embedding_model = embed_model
+            try:
+                docs: List[Doc] = store.searchSemantic(question, doc_filter)
+            except Exception as exc:
+                warning(f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.')
+                try:
+                    docs = store.searchKeyword(question, doc_filter)
+                except Exception as exc2:
+                    raise RuntimeError(f'vectordb tool: search failed: {exc2}') from exc2
+        else:
+            # No embedding available — use keyword search directly. Emit a
+            # one-shot warning (via a flag on self) so repeated tool calls
+            # don't spam the log.
+            if not getattr(self, '_vectordb_keyword_fallback_warned', False):
+                warning(f'vectordb tool: no embedding provider bound to IGlobal.embed_query; the {self._vectordb_server_name()}.search tool is running in keyword-only mode. To enable semantic similarity ranking, set IGlobal.embed_query to a callable(text) -> list[float].')
+                try:
+                    setattr(self, '_vectordb_keyword_fallback_warned', True)
+                except Exception:
+                    pass
+            try:
+                docs = store.searchKeyword(question, doc_filter)
+            except Exception as exc:
+                raise RuntimeError(f'vectordb tool: keyword search failed: {exc}') from exc
+
+        score_threshold = self._vectordb_score_threshold()
+        results: List[Dict[str, Any]] = []
+        for doc in docs:
+            score = getattr(doc, 'score', 0.0) or 0.0
+            if score_threshold > 0 and score < score_threshold:
+                continue
+            meta: Dict[str, Any] = {}
+            if doc.metadata:
+                meta = {
+                    'objectId': doc.metadata.objectId,
+                    'nodeId': doc.metadata.nodeId,
+                    'parent': doc.metadata.parent,
+                    'chunkId': doc.metadata.chunkId,
+                }
+            results.append(
+                {
+                    'content': doc.page_content or '',
+                    'score': score,
+                    'metadata': meta,
+                }
+            )
+
+        trimmed = results[:top_k]
+        return {
+            'results': trimmed,
+            'total': len(trimmed),
+        }
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['documents'],
+            'properties': {
+                'documents': {
+                    'type': 'array',
+                    'description': 'Array of documents to upsert.',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'content': {
+                                'type': 'string',
+                                'description': 'The text content of the document.',
+                            },
+                            'object_id': {
+                                'type': 'string',
+                                'description': 'Unique identifier for the document. Used for deduplication.',
+                            },
+                            'metadata': {
+                                'type': 'object',
+                                'description': 'Optional metadata key-value pairs to store with the document.',
+                                'additionalProperties': True,
+                            },
+                        },
+                        'required': ['content', 'object_id'],
+                    },
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'count': {'type': 'integer'},
+                'skipped': {'type': 'integer'},
+            },
+        },
+        description='Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.',
+    )
+    def upsert(self, args):
+        """Add or update documents in the vector database."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        raw_docs = args.get('documents', [])
+        if not isinstance(raw_docs, list) or not raw_docs:
+            raise ValueError('upsert requires a non-empty "documents" array')
+
+        docs: List[Doc] = []
+        skipped = 0
+        for raw in raw_docs:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
+            content = str(raw.get('content', '')).strip()
+            object_id = str(raw.get('object_id', '')).strip()
+            if not content or not object_id:
+                skipped += 1
+                continue
+
+            extra_meta = raw.get('metadata') or {}
+            metadata = DocMetadata(
+                objectId=object_id,
+                nodeId=extra_meta.get('nodeId', 'vectordb_tool'),
+                parent=extra_meta.get('parent', '/'),
+                chunkId=extra_meta.get('chunkId', 0),
+                isDeleted=False,
+            )
+            doc = Doc(
+                page_content=content,
+                metadata=metadata,
+            )
+            docs.append(doc)
+
+        if not docs:
+            raise ValueError('upsert: no valid documents provided')
+
+        if any(not getattr(doc, 'embedding', None) for doc in docs):
+            warning('vectordb tool: upserting documents without pre-computed embeddings. Ensure the backend is configured to generate embeddings on ingest, or results may not be searchable via semantic search.')
+
+        store.addChunks(docs)
+        return {'success': True, 'count': len(docs), 'skipped': skipped}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['object_ids'],
+            'properties': {
+                'object_ids': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'List of object IDs to delete.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'deleted_count': {'type': 'integer'},
+            },
+        },
+        description='Delete documents from the vector database by their object IDs.',
+    )
+    def delete(self, args):
+        """Delete documents from the vector database by object IDs."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        object_ids = args.get('object_ids', [])
+        if not isinstance(object_ids, list) or not object_ids:
+            raise ValueError('delete requires a non-empty "object_ids" array')
+
+        clean_ids = [str(oid).strip() for oid in object_ids if str(oid).strip()]
+        if not clean_ids:
+            raise ValueError('delete: no valid object IDs provided')
+
+        store.remove(clean_ids)
+        return {'success': True, 'deleted_count': len(clean_ids)}

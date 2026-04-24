@@ -13,13 +13,14 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
-	//     engine
+	//     engine. "invoke" lets agents call the vector DB tools exposed via
+	//     VectorStoreToolMixin (search, upsert, delete).
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -167,7 +168,8 @@
 				"title": "Your own Qdrant server",
 				"host": "localhost",
 				"port": 6333,
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -175,7 +177,8 @@
 				"host": "",
 				"port": 6333,
 				"apikey": "",
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
 			}
 		}
 	},
@@ -198,13 +201,20 @@
 		"vector.local.port": {
 			"default": 6333
 		},
+		"qdrant.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as qdrant.search / qdrant.upsert / qdrant.delete. Change this when running multiple Qdrant nodes in the same pipeline so their tool names do not collide.",
+			"default": "qdrant",
+			"minLength": 1
+		},
 		"qdrant.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.serverName"]
 		},
 		"qdrant.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.serverName"]
 		},
 		"qdrant.profile": {
 			"title": "Type of Qdrant host",

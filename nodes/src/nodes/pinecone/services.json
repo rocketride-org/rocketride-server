@@ -13,13 +13,14 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
-	//     engine
+	//     engine. "invoke" lets agents call the vector DB tools exposed via
+	//     VectorStoreToolMixin (search, upsert, delete).
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -171,13 +172,15 @@
 				"mode": "pod-based",
 				"title": "Pinecone Pod-Based Index",
 				"apikey": "",
-				"collection": "rocketride"
+				"collection": "rocketride",
+				"serverName": "pinecone"
 			},
 			"serverless-dense": {
 				"mode": "serverless-dense",
 				"title": "Pinecone Serverless Dense Index",
 				"apikey": "",
-				"collection": "rocketride"
+				"collection": "rocketride",
+				"serverName": "pinecone"
 			}
 		}
 	},
@@ -194,13 +197,20 @@
 			"description": "Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens",
 			"default": "rocketride"
 		},
+		"pinecone.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide.",
+			"default": "pinecone",
+			"minLength": 1
+		},
 		"pinecone.pod-based": {
 			"object": "pod-based",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection"]
+			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
 		},
 		"pinecone.serverless-dense": {
 			"object": "serverless-dense",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection"]
+			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
 		},
 		"pinecone.profile": {
 			"title": "Type of Pinecone Connection",
