@@ -7,7 +7,7 @@
  * Server Monitor module — Public API for the server dashboard component.
  *
  * The primary export is the `ServerMonitor` component, which is the single
- * entry point for host applications (VS Code, web app).
+ * entry point for host applications.
  *
  * ```tsx
  * import ServerMonitor from 'shared/modules/server';
@@ -16,6 +16,6 @@
  */
 
 export { default } from './ServerMonitor';
-export { MonitorPage } from './MonitorPage';
 export type { IServerMonitorProps } from './ServerMonitor';
+export { parseActivityEvent } from './utils';
 export * from './types';

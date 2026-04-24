@@ -7,16 +7,16 @@
  * ProjectView — Unified project frame composing the canvas editor and all
  * runtime views (status, tokens, flow, trace, errors) behind a shared tab bar.
  *
- * All incoming data flows via ref.handleMessage(). Outgoing messages flow
- * via the onMessage callback prop. The host bridge is stateless.
+ * All data flows in via props; all user actions flow out via callbacks.
+ * The host is responsible for managing state, fetching data, and parsing
+ * server events (use `parseServerEvent` utility).
  *
  * Supports multiple source nodes — the Status tab renders a self-contained
  * pane per source (sorted A→Z by name).
  */
 
-import React, { useState, useCallback, useRef, useMemo, useImperativeHandle, forwardRef, CSSProperties } from 'react';
+import React, { useState, useCallback, useRef, useMemo, CSSProperties } from 'react';
 
-import { applyTheme } from '../../themes';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
@@ -30,7 +30,57 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
-import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent, TraceRow } from './types';
+import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
+
+// =============================================================================
+// PROPS
+// =============================================================================
+
+/**
+ * ProjectView props — pure props-based API for direct mounting.
+ *
+ * All data flows in as props; all user actions flow out as callbacks.
+ * The host is responsible for managing state, fetching data, and
+ * parsing server events (use `parseServerEvent` utility).
+ */
+export interface IProjectViewProps {
+	/** The pipeline project object. */
+	project: any | null;
+	/** Available node service definitions (keyed by provider). */
+	servicesJson: Record<string, any>;
+	/** Whether the host is connected to the RocketRide server. */
+	isConnected: boolean;
+	/** Per-source task status map (source ID → status). */
+	statusMap: Record<string, TaskStatus>;
+	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
+	serverHost?: string;
+	/** Whether the document has unsaved changes. */
+	isDirty?: boolean;
+	/** Whether the document is a new (never-saved) file. */
+	isNew?: boolean;
+	/** Initial view state (mode, flowViewMode, viewport). Used as starting values; ProjectView manages its own local view state after mount. */
+	initialViewState?: ViewState;
+	/** Initial user preferences. Used as starting values; ProjectView manages its own local prefs after mount. */
+	initialPrefs?: Record<string, unknown>;
+	/** Accumulated trace events — host appends new events, ProjectView renders them. */
+	traceEvents?: TraceEvent[];
+	/** Called when the user edits the pipeline in the canvas. */
+	onContentChanged?: (project: any) => void;
+	/** Called to validate a pipeline. Host returns validation result as a Promise. */
+	onValidate?: (pipeline: any) => Promise<any>;
+	/** Called for pipeline run/stop/restart actions. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Called when view state changes (mode, flowViewMode, viewport). */
+	onViewStateChange?: (viewState: ViewState) => void;
+	/** Called when user preferences change (e.g. panel widths, toggles). */
+	onPrefsChange?: (prefs: Record<string, unknown>) => void;
+	/** Called when the user clicks an external link in the canvas. */
+	onOpenLink?: (url: string, displayName?: string) => void;
+	/** Called when the user requests a save (Ctrl+S or menu). */
+	onSave?: () => void;
+	/** Called when the user clears the trace log. */
+	onTraceClear?: () => void;
+}
 
 // =============================================================================
 // STYLES
@@ -111,135 +161,26 @@ interface SourceInfo {
 }
 
 // =============================================================================
-// HELPERS
-// =============================================================================
-
-// =============================================================================
 // COMPONENT
 // =============================================================================
 
-const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }, ref) => {
-	// --- Internal state (all populated via handleMessage) ---------------------
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear }) => {
+	// --- Local view state (initialized from props, managed locally) -----------
 
-	const [project, setProject] = useState<any>(null);
-	const [projectId, setProjectId] = useState<string>('');
-	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
-	const [isConnected, setIsConnected] = useState(false);
-	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
-	const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
-	const [viewState, setViewState] = useState<ViewState | null>(null);
-	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
-	const [serverHost, setServerHost] = useState<string>('');
-	const [isDirty, setIsDirty] = useState(false);
-	const [isNew, setIsNew] = useState(false);
-
-	const projectIdRef = useRef(projectId);
-	projectIdRef.current = projectId;
-
-	// Pending validate requests
-	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
-
-	// --- Imperative message handler ------------------------------------------
-
-	useImperativeHandle(ref, () => ({
-		handleMessage(msg: ProjectViewIncoming) {
-			switch (msg.type) {
-				case 'project:load':
-					// Atomic load — sets all state in one React batch
-					setProject(msg.project);
-					setProjectId(msg.project?.project_id ?? '');
-					setServicesJson(msg.services);
-					setIsConnected(msg.isConnected);
-					setStatusMap(msg.statuses ?? {});
-					setViewState({
-						mode: msg.viewState?.mode ?? 'design',
-						flowViewMode: msg.viewState?.flowViewMode ?? 'pipeline',
-						viewport: msg.viewState?.viewport,
-					});
-					setPrefs(msg.prefs ?? {});
-					setTraceEvents([]);
-					if (msg.serverHost) setServerHost(msg.serverHost);
-					break;
-				case 'shell:init':
-					if (msg.theme) applyTheme(msg.theme as any);
-					setIsConnected(msg.isConnected);
-					send({ type: 'view:initialized' });
-					break;
-				case 'shell:themeChange':
-					applyTheme(msg.tokens as any);
-					break;
-				case 'project:update':
-					setProject(msg.project);
-					break;
-				case 'project:services':
-					setServicesJson(msg.services);
-					break;
-				case 'project:validateResponse': {
-					const pending = pendingValidates.current.get(msg.requestId);
-					if (pending) {
-						pendingValidates.current.delete(msg.requestId);
-						if (msg.error) pending.reject(new Error(msg.error));
-						else pending.resolve(msg.result);
-					}
-					break;
-				}
-				case 'server:event': {
-					const event = msg.event as Record<string, any>;
-					const pid = projectIdRef.current;
-					if (event?.event === 'apaevt_status_update' && event?.body?.project_id === pid) {
-						setStatusMap((prev) => ({ ...prev, [event.body.source]: event.body }));
-					} else if (event?.event === 'apaevt_flow' && event?.body?.project_id === pid) {
-						const body = event.body;
-						const traceEvent: TraceEvent = {
-							pipelineId: body.id ?? 0,
-							op: body.op || 'enter',
-							pipes: body.pipes || [],
-							trace: body.op === 'end' ? {} : body.trace || {},
-							source: body.source,
-							...(body.op === 'end' && body.trace && Object.keys(body.trace).length > 0 ? { pipelineResult: body.trace } : {}),
-						};
-						setTraceEvents((prev) => [...prev, traceEvent]);
-					}
-					break;
-				}
-				case 'shell:connectionChange':
-					// On reconnect, clear stale data so only fresh server
-					// events repopulate the panels.
-					if (msg.isConnected) {
-						setStatusMap({});
-						setTraceEvents([]);
-					}
-					setIsConnected(msg.isConnected);
-					break;
-				case 'shell:viewActivated':
-					window.dispatchEvent(new CustomEvent('canvas:restoreViewport'));
-					break;
-				case 'project:initialState':
-					setViewState({
-						mode: msg.state?.mode ?? 'design',
-						flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
-						viewport: msg.state?.viewport,
-					});
-					break;
-				case 'project:initialPrefs':
-					setPrefs(msg.prefs ?? {});
-					break;
-				case 'project:dirtyState':
-					setIsDirty(msg.isDirty);
-					setIsNew(msg.isNew);
-					break;
-			}
-		},
+	const [viewState, setViewState] = useState<ViewState>(() => ({
+		mode: initialViewState?.mode ?? 'design',
+		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
+		viewport: initialViewState?.viewport,
 	}));
 
-	// --- Outgoing message helper ---------------------------------------------
+	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});
 
-	const send = useCallback(
-		(msg: ProjectViewOutgoing) => {
-			onMessage?.(msg);
-		},
-		[onMessage]
-	);
+	// --- Stable callback refs ------------------------------------------------
+
+	const onViewStateChangeRef = useRef(onViewStateChange);
+	onViewStateChangeRef.current = onViewStateChange;
+	const onPrefsChangeRef = useRef(onPrefsChange);
+	onPrefsChangeRef.current = onPrefsChange;
 
 	// --- Extract source components from project ------------------------------
 
@@ -266,14 +207,10 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- View state + preferences (separate concerns) -----------------------
 
-	const onMessageRef = useRef(onMessage);
-	onMessageRef.current = onMessage;
-
 	const updateViewState = useCallback((patch: Partial<ViewState>) => {
 		setViewState((prev) => {
-			if (!prev) return prev;
 			const next = { ...prev, ...patch };
-			onMessageRef.current?.({ type: 'project:viewStateChange', viewState: next });
+			onViewStateChangeRef.current?.(next);
 			return next;
 		});
 	}, []);
@@ -282,7 +219,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const setPreference = useCallback((key: string, value: unknown) => {
 		setPrefs((prev) => {
 			const next = { ...prev, [key]: value };
-			onMessageRef.current?.({ type: 'project:prefsChange', prefs: next });
+			onPrefsChangeRef.current?.(next);
 			return next;
 		});
 	}, []);
@@ -291,23 +228,17 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Validate callback for Canvas ----------------------------------------
 
-	const validateCounter = useRef(0);
-	const handleValidate = useCallback(
-		async (pipeline: any): Promise<any> => {
-			return new Promise((resolve, reject) => {
-				const requestId = ++validateCounter.current;
-				pendingValidates.current.set(requestId, { resolve, reject });
-				send({ type: 'project:validate', requestId, pipeline });
-				setTimeout(() => {
-					if (pendingValidates.current.has(requestId)) {
-						pendingValidates.current.get(requestId)!.resolve({ errors: [], warnings: [] });
-						pendingValidates.current.delete(requestId);
-					}
-				}, 15000);
-			});
-		},
-		[send]
-	);
+	const onValidateRef = useRef(onValidate);
+	onValidateRef.current = onValidate;
+
+	const handleValidate = useCallback(async (pipeline: any): Promise<any> => {
+		if (!onValidateRef.current) return { errors: [], warnings: [] };
+		try {
+			return await onValidateRef.current(pipeline);
+		} catch {
+			return { errors: [], warnings: [] };
+		}
+	}, []);
 
 	// --- Mode switch ---------------------------------------------------------
 
@@ -322,47 +253,46 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const handleContentChanged = useCallback(
 		(updatedProject: any) => {
-			setProject(updatedProject);
-			send({ type: 'project:contentChanged', project: updatedProject });
+			onContentChanged?.(updatedProject);
 		},
-		[send]
+		[onContentChanged]
 	);
 
 	const handleRunPipeline = useCallback(
 		(source: string, _project: any) => {
-			send({ type: 'status:pipelineAction', action: 'run', source });
+			onPipelineAction?.('run', source);
 		},
-		[send]
+		[onPipelineAction]
 	);
 
 	const handleStopPipeline = useCallback(
 		(source: string) => {
-			send({ type: 'status:pipelineAction', action: 'stop', source });
+			onPipelineAction?.('stop', source);
 		},
-		[send]
+		[onPipelineAction]
 	);
 
 	// --- Save ----------------------------------------------------------------
 
 	const handleSave = useCallback(() => {
-		send({ type: 'project:requestSave' });
-	}, [send]);
+		onSave?.();
+	}, [onSave]);
 
 	// --- Open link -----------------------------------------------------------
 
 	const handleOpenLink = useCallback(
 		(url: string, displayName?: string) => {
-			send({ type: 'project:openLink', url, displayName });
+			onOpenLink?.(url, displayName);
 		},
-		[send]
+		[onOpenLink]
 	);
 
 	// --- Trace clear ---------------------------------------------------------
 
 	const handleTraceClear = useCallback(() => {
 		clearTrace();
-		send({ type: 'trace:clear' });
-	}, [clearTrace, send]);
+		onTraceClear?.();
+	}, [clearTrace, onTraceClear]);
 
 	// --- Aggregated error/warning counts -------------------------------------
 
@@ -388,14 +318,12 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			send({ type: 'status:pipelineAction', action, source });
+			onPipelineAction?.(action, source);
 		},
-		[send]
+		[onPipelineAction]
 	);
 
-	// --- Wait for viewState before building any UI --------------------------
-
-	if (!viewState || !prefs) return null;
+	// --- Viewport change -----------------------------------------------------
 
 	const handleViewportChange = (viewport: { x: number; y: number; zoom: number }) => {
 		updateViewState({ viewport });
@@ -469,7 +397,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			)}
 		</div>
 	);
-});
+};
 
 ProjectView.displayName = 'ProjectView';
 

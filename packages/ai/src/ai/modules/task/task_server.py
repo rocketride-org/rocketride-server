@@ -82,6 +82,7 @@ from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
+from rocketlib import debug
 
 
 @dataclass
@@ -414,7 +415,7 @@ class TaskServer(DAPBase):
 
         # Log successful connection establishment
         self.debug_message(f'New connection established: {connection_id}')
-        print(f'[CONN] connected: id={connection_id} ip={conn._client_ip}', flush=True)
+        debug(f'[CONN] connected: id={connection_id} ip={conn._client_ip}')
 
     async def _dapbase_on_disconnected(self, conn: TaskConn) -> None:
         """
@@ -441,7 +442,7 @@ class TaskServer(DAPBase):
         """
         # Extract connection identifier for cleanup operations
         connection_id = conn.get_connection_id()
-        print(f'[CONN] disconnected: id={connection_id} authenticated={getattr(conn, "_authenticated", False)}', flush=True)
+        debug(f'[CONN] disconnected: id={connection_id} authenticated={getattr(conn, "_authenticated", False)}')
 
         # Remove connection from active connections registry
         if connection_id in self._connections:

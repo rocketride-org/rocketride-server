@@ -24,17 +24,27 @@
 /**
  * Main entry point for the shared-ui package.
  *
- * Exports the Flow component (as Canvas) and all shared types.
+ * Exports pure presentation components and shared utilities.
+ * Transport / messaging logic lives in the VS Code extension, not here.
  */
 
-export { default as Canvas } from './components/canvas';
-export type { IFlowProps } from './components/canvas';
+// --- Project module (pipeline editor) ----------------------------------------
+export { ProjectView } from './modules/project';
+export type { IProjectViewProps } from './modules/project';
+export { parseServerEvent } from './modules/project';
+export type { ParsedServerEvent } from './modules/project';
+export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './modules/project';
 
+// --- Server module (dashboard monitor) ---------------------------------------
 export { default as ServerMonitor } from './modules/server';
 export type { IServerMonitorProps } from './modules/server';
+export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
+
+// --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
+// --- Supplementary components ------------------------------------------------
 export { default as EndpointInfoModal } from './components/pipeline-actions/EndpointInfoModal';
 export type { IEndpointInfo as EndpointInfo } from './components/pipeline-actions/PipelineActions';
 export { appendAuthQueryParam, buildIntegrationExamples } from './components/pipeline-actions/endpointIntegrationExamples';
@@ -44,11 +54,3 @@ export * from './components/BoxIcon';
 
 export { TabPanel } from './components/tab-panel/TabPanel';
 export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
-
-export { useMessaging } from './hooks/useMessaging';
-export type { UseMessagingOptions, UseMessagingReturn, MessageHandler } from './hooks/useMessaging';
-
-export { ProjectView, ProjectPage } from './modules/project';
-export type { IProjectViewProps, ProjectViewRef, IViewProps, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './modules/project';
-
-export { MonitorPage } from './modules/server';

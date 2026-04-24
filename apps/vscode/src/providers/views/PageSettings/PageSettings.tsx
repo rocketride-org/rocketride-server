@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React, { useState, CSSProperties } from 'react';
-import { useMessaging } from 'shared';
+import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';

@@ -6,12 +6,12 @@
 /**
  * PageMonitor — VS Code webview entry for the server monitor.
  *
- * Imports the shared MonitorPage component and adds VS Code-specific CSS.
- * Communication is handled by MonitorPage via useMessaging (VS Code path).
+ * Imports CSS themes and mounts MonitorWebview, which bridges messages from
+ * the extension host to the pure ServerMonitor component.
  */
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
-export { MonitorPage as PageMonitor } from 'shared/modules/server';
+export { default as PageMonitor } from './MonitorWebview';

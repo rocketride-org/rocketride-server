@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React, { useState, CSSProperties } from 'react';
-import { useMessaging } from 'shared';
+import { useMessaging } from '../hooks/useMessaging';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';

@@ -64,7 +64,8 @@ class AccountInfo(BaseModel):
     # Full org/team/permissions structure — all permission checks resolve through this
     organizations: list = []
 
-    # App IDs the user's primary org is currently subscribed to (active|trialing|past_due).
+    # Subscribed apps for the user's primary org. Each entry is a dict with
+    # {appId, status} where status is one of: active, trialing, past_due, incomplete.
     # Empty list for free-tier orgs with no paid subscriptions.
     subscribedApps: list = []
 
