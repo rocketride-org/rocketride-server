@@ -29,7 +29,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { RocketRideClient } from 'rocketride';
 
-export type ConnectionMode = 'cloud' | 'onprem' | 'local';
+export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
 export interface ConfigManagerInfo {
 	/** Connection mode: cloud (RocketRide.ai), onprem (your server), or local (localhost port) */
@@ -163,10 +163,11 @@ export class ConfigManager {
 	 */
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
+		const connectionMode = config.get('connectionMode', 'local') as ConnectionMode;
+		let hostUrl = config.get('hostUrl', 'http://localhost:5565');
 
 		// Get API key from secure storage
-		const apiKey = await this.getApiKeyFromStorage();
+		let apiKey = await this.getApiKeyFromStorage();
 
 		// Ensure env is loaded (preserve existing env if already loaded)
 		const existingEnv = this.config?.env || {};
@@ -174,8 +175,21 @@ export class ConfigManager {
 			await this.loadEnvFile();
 		}
 
+		const env = this.config?.env || {};
+
+		// Docker/Service modes: fixed URL and API key from env
+		if (connectionMode === 'docker' || connectionMode === 'service') {
+			hostUrl = 'http://localhost:5565';
+			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+		}
+
+		// Cloud mode: workspace .env override, then build-time default, then hardcoded fallback
+		if (connectionMode === 'cloud') {
+			hostUrl = env.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+		}
+
 		this.config = {
-			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
+			connectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
@@ -186,7 +200,7 @@ export class ConfigManager {
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {},
+			env,
 		};
 	}
 

@@ -59,15 +59,19 @@
 					"type": "string",
 					"enum": [
 						"cloud",
+						"docker",
+						"service",
 						"onprem",
 						"local"
 					],
 					"default": "local",
 					"description": "Connection mode for RocketRide debugging",
 					"enumDescriptions": [
-						"Cloud (RocketRide.ai cloud) – needs a RocketRide account",
+						"RocketRide Cloud – sign in with your RocketRide account",
+						"Docker – connect to your local Docker instance",
+						"Service – connect to your local RocketRide service",
 						"On-prem (your own hosted server) – needs host address and API key",
-						"Local (your local machine) – just needs a port to connect to"
+						"Local (your local machine) – downloads and runs a local engine"
 					]
 				},
 				"rocketride.hostUrl": {

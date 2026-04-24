@@ -43,8 +43,9 @@ import { RemoteManager } from './remote-manager';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
 import { getIdeName } from '../shared/util/ide';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -457,7 +458,22 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 		const config = this.configManager.getConfig();
-		const hasCredentials = connectionModeRequiresApiKey(config.connectionMode) ? !!(config.apiKey && config.hostUrl) : config.connectionMode === 'onprem' ? !!config.hostUrl : true;
+		let hasCredentials: boolean;
+
+		if (connectionModeUsesOAuth(config.connectionMode)) {
+			// Cloud mode: check if we have a stored cloud token
+			hasCredentials = await CloudAuthProvider.getInstance().isSignedIn();
+		} else if (connectionModeRequiresApiKey(config.connectionMode)) {
+			// On-prem: need both API key and host URL
+			hasCredentials = !!(config.apiKey && config.hostUrl);
+		} else if (config.connectionMode === 'onprem') {
+			// On-prem without required key: just need host URL
+			hasCredentials = !!config.hostUrl;
+		} else {
+			// Docker, service, local: always have credentials
+			hasCredentials = true;
+		}
+
 		this.updateConnectionStatus({ hasCredentials });
 	}
 

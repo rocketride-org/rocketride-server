@@ -280,7 +280,7 @@ export const PageConnection: React.FC = () => {
 
 	const isConnecting = connectionData?.connectionState.state ? TRANSITIONAL_STATES.has(connectionData.connectionState.state) : false;
 	const isConnected = connectionData?.connectionState.state === 'connected';
-	const needsApiKeySetup = (connectionData?.config.connectionMode === 'cloud' || connectionData?.config.connectionMode === 'onprem') && !connectionData?.hasApiKey;
+	const needsApiKeySetup = connectionData?.config.connectionMode === 'onprem' && !connectionData?.hasApiKey;
 	const statusColor = STATUS_COLORS[connectionData?.connectionState.state ?? 'loading'];
 
 	const btnStyle = (id: string, disabled?: boolean): CSSProperties => ({
@@ -319,7 +319,7 @@ export const PageConnection: React.FC = () => {
 				<div style={styles.connectionInfo}>
 					<div style={styles.infoRow}>
 						<span style={styles.infoLabel}>Server:</span>
-						<span style={styles.infoValue}>{connectionData?.config.connectionMode === 'local' ? 'Local' : connectionData?.config.hostUrl || 'N/A'}</span>
+						<span style={styles.infoValue}>{connectionData?.config.connectionMode === 'local' ? 'Local' : connectionData?.config.connectionMode === 'cloud' ? (connectionData as any)?.cloudUserName || 'RocketRide Cloud' : connectionData?.config.connectionMode === 'docker' ? 'Docker' : connectionData?.config.connectionMode === 'service' ? 'Service' : connectionData?.config.hostUrl || 'N/A'}</span>
 					</div>
 					{connectionData?.config.connectionMode === 'local' && connectionData?.engineInfo?.version && (
 						<div style={styles.infoRow}>

@@ -758,6 +758,12 @@ class TaskServer(DAPBase):
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
         """
+        # If the task has already been removed from the registry (e.g.
+        # cleanup raced with pending broadcasts), skip silently instead of
+        # spamming "Your pipeline is not running" for every connection.
+        if token not in self._task_control:
+            return
+
         for conn in self._connections.values():
             try:
                 await conn.send_task_event(event_type, token=token, event=event)
@@ -1127,9 +1133,15 @@ class TaskServer(DAPBase):
             return _return_results(control)
 
         except Exception:
-            # Clean up failed task creation
+            # Distinguish a genuine creation failure from a user-requested
+            # stop that raced with startup / wait_for_running.  When the user
+            # terminates before the task reaches RUNNING, the exception
+            # propagates here but the task was NOT a creation failure.
+            if control.task and control.task._stop_requested:
+                self.debug_message(f'Task stopped during startup: {control.id}...')
+            else:
+                self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
             self._task_control.pop(control.token, None)
-            self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
             raise
 
     async def restart_task(

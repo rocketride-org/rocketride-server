@@ -40,6 +40,7 @@ import { getConnectionTreeProvider, getConnectionManager } from '../extension';
 import { EngineInstaller } from '../connection/engine-installer';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { AgentManager } from '../agents/agent-manager';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 export class PageSettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -158,6 +159,23 @@ export class PageSettingsProvider {
 					case 'fetchEngineVersions':
 						await this.fetchEngineVersions(panel.webview);
 						break;
+
+					case 'cloud:signIn': {
+						const cloudAuth = CloudAuthProvider.getInstance();
+						await cloudAuth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						break;
+					}
+
+					case 'cloud:signOut': {
+						const cloudAuth = CloudAuthProvider.getInstance();
+						await cloudAuth.signOut();
+						await this.sendCloudStatus(panel.webview);
+						break;
+					}
+
+					case 'cloud:getStatus':
+						await this.sendCloudStatus(panel.webview);
+						break;
 				}
 			} catch (error) {
 				console.error('[PageSettingsProvider] Message handling error:', error);
@@ -166,6 +184,14 @@ export class PageSettingsProvider {
 		});
 
 		this.disposables.push(messageDisposable);
+
+		// Listen for cloud auth changes and push updated status to the webview
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const cloudAuthHandler = () => this.sendCloudStatus(panel.webview);
+		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
+		panel.onDidDispose(() => {
+			cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler);
+		});
 
 		// Clean up when panel is disposed
 		panel.onDidDispose(() => {
@@ -444,6 +470,17 @@ export class PageSettingsProvider {
 	/**
 	 * Clears stored credentials from secure storage
 	 */
+	private async sendCloudStatus(webview: vscode.Webview): Promise<void> {
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const signedIn = await cloudAuth.isSignedIn();
+		const userName = await cloudAuth.getUserName();
+		webview.postMessage({
+			type: 'cloud:status',
+			signedIn,
+			userName,
+		});
+	}
+
 	private async clearCredentials(webview: vscode.Webview): Promise<void> {
 		try {
 			// Clear the API key from secure storage

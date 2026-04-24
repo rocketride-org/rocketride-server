@@ -47,6 +47,7 @@ import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
+import { CloudAuthProvider } from './auth/CloudAuthProvider';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
@@ -106,6 +107,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// Initialize config manager with context for secure storage
 	configManager = ConfigManager.getInstance();
 	await configManager.initialize(context);
+
+	// Initialize cloud auth provider (registers vscode:// URI handler)
+	const cloudAuth = CloudAuthProvider.getInstance();
+	cloudAuth.initialize(context);
+	context.subscriptions.push(cloudAuth);
 
 	// Run one-time migrations (idempotent — safe on every startup)
 	await runMigrations(context);

@@ -72,6 +72,12 @@ export class PageMonitorProvider {
 			try {
 				switch (message.type) {
 					case 'view:ready':
+						// Send initial connection state so the webview knows if we're connected
+						await panel.webview.postMessage({
+							type: 'shell:init',
+							theme: {},
+							isConnected: this.connectionManager.isConnected(),
+						});
 						await this.fetchAndPost();
 						this.subscribeDashboardEvents().catch((err) => {
 							this.logger.error(`[PageMonitorProvider] Event subscription error: ${err}`);

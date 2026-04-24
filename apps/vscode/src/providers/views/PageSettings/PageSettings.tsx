@@ -40,7 +40,7 @@ import '../../styles/root.css';
 
 export interface SettingsData {
 	hostUrl: string;
-	connectionMode: 'cloud' | 'onprem' | 'local';
+	connectionMode: 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 	hasApiKey: boolean;
 	apiKey: string;
 	autoConnect: boolean;
@@ -239,6 +239,10 @@ export const PageSettings: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
+	// Cloud auth state
+	const [cloudSignedIn, setCloudSignedIn] = useState(false);
+	const [cloudUserName, setCloudUserName] = useState('');
+
 	// ========================================================================
 	// WEBVIEW MESSAGING
 	// ========================================================================
@@ -253,11 +257,18 @@ export const PageSettings: React.FC = () => {
 						setEngineVersionsLoading(true);
 						sendMessage({ type: 'fetchEngineVersions' });
 					}
+					// Request cloud auth status when settings load
+					sendMessage({ type: 'cloud:getStatus' } as any);
 					break;
 
 				case 'engineVersionsLoaded':
 					setEngineVersions(message.versions);
 					setEngineVersionsLoading(false);
+					break;
+
+				case 'cloud:status' as any:
+					setCloudSignedIn((message as any).signedIn);
+					setCloudUserName((message as any).userName || '');
 					break;
 
 				case 'showMessage': {
@@ -411,7 +422,7 @@ export const PageSettings: React.FC = () => {
 			<MessageDisplay message={message} />
 
 			<div style={{ display: 'grid', gap: 24 }}>
-				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} />
+				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
 
 				<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
 

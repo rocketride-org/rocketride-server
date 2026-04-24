@@ -225,6 +225,9 @@ class Task(DAPBase):
         # Have the final events been sent yet
         self._final_events_sent = False
 
+        # Guard against _terminated() being called more than once
+        self._terminated_called = False
+
         # Server reference
         self._server = server
 
@@ -574,7 +577,17 @@ class Task(DAPBase):
 
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
+
+        Idempotent: safe to call multiple times (only the first call performs
+        cleanup; subsequent calls return immediately).
         """
+        # Guard: only run cleanup once.  Multiple callers can reach here --
+        # e.g. the stdio on_disconnected callback AND the start_task exception
+        # handler -- so we must be idempotent.
+        if self._terminated_called:
+            return
+        self._terminated_called = True
+
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
@@ -1448,6 +1461,7 @@ class Task(DAPBase):
             # Make sure some of our start is initialized in case we are restarting
             self._status.completed = False
             self._final_events_sent = False
+            self._terminated_called = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False

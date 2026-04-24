@@ -1,24 +1,6 @@
 // =============================================================================
 // MIT License
 // Copyright (c) 2026 Aparavi Software AG
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 // =============================================================================
 
 import React, { useState } from 'react';
@@ -37,13 +19,18 @@ interface ConnectionSettingsProps {
 	developmentTestMessage: MessageData | null;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
+	/** Cloud auth state — provided by PageSettingsProvider */
+	cloudSignedIn?: boolean;
+	cloudUserName?: string;
+	onCloudSignIn?: () => void;
+	onCloudSignOut?: () => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading }) => {
+export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 
@@ -52,12 +39,10 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 	// ========================================================================
 
 	const handleConnectionModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-		const mode = e.target.value as 'cloud' | 'onprem' | 'local';
+		const mode = e.target.value as 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 		const updates: Partial<SettingsData> = { connectionMode: mode };
 
-		if (mode === 'cloud') {
-			updates.hostUrl = 'https://cloud.rocketride.ai';
-		} else if (mode === 'onprem') {
+		if (mode === 'onprem') {
 			if (!settings.hostUrl || settings.hostUrl === 'https://cloud.rocketride.ai' || settings.hostUrl.startsWith('http://localhost')) {
 				updates.hostUrl = '';
 			}
@@ -76,7 +61,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 		onSettingsChange({ autoConnect: e.target.checked });
 	};
 
-	// Engine version and arguments handlers (local mode)
 	const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onSettingsChange({ localEngineVersion: e.target.value });
 	};
@@ -104,7 +88,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 
 	return (
 		<>
-			{/* Development -- where you run and debug (local or remote) */}
 			<div
 				style={{
 					...S.section,
@@ -125,51 +108,110 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 							Connection mode
 						</label>
 						<select id="connectionMode" value={settings.connectionMode} onChange={handleConnectionModeChange}>
-							<option value="cloud">Cloud (RocketRide.ai cloud)</option>
+							<option value="cloud">RocketRide Cloud</option>
+							<option value="docker">Docker</option>
+							<option value="service">Service</option>
 							<option value="onprem">On-prem (your own hosted server)</option>
-							<option value="local">Local (your local machine)</option>
+							<option value="local">Local</option>
 						</select>
 						<div style={S.helpText}>Choose where your server runs for development</div>
 					</div>
 
-					{/* Config box -- description + mode-specific fields */}
+					{/* Config box -- mode-specific fields */}
 					<div style={S.modeConfigBox}>
-						{/* Cloud -- Coming Soon */}
+						{/* ── Cloud ──────────────────────────────────────────── */}
 						{settings.connectionMode === 'cloud' && (
 							<>
-								<div style={S.modeConfigDesc}>Connect to RocketRide.ai cloud. Requires an API key from your account dashboard.</div>
-								<div style={{ textAlign: 'center', padding: '20px 16px' }}>
-									<div style={{ fontSize: 36, marginBottom: 10, opacity: 0.6 }}>&#9729;</div>
-									<div
-										style={{
-											fontSize: 15,
-											fontWeight: 600,
-											color: 'var(--rr-text-primary)',
-											marginBottom: 6,
-											letterSpacing: 0.5,
-										}}
-									>
-										Coming Soon
+								<div style={S.modeConfigDesc}>Sign in with your RocketRide account to connect to the cloud.</div>
+								{cloudSignedIn ? (
+									<div style={S.formGroup}>
+										<div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
+											<span style={{ fontSize: 20, color: 'var(--vscode-testing-iconPassed, #22c55e)' }}>&#10003;</span>
+											<div>
+												<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)' }}>{cloudUserName || 'Signed in'}</div>
+											</div>
+										</div>
+										<button
+											type="button"
+											onClick={onCloudSignOut}
+											style={{
+												width: 'auto',
+												marginTop: 8,
+												backgroundColor: 'var(--vscode-button-secondaryBackground)',
+												color: 'var(--vscode-button-secondaryForeground)',
+											}}
+										>
+											Sign Out
+										</button>
 									</div>
-									<div
-										style={{
-											fontSize: 12,
-											color: 'var(--rr-text-secondary)',
-											lineHeight: 1.6,
-										}}
-									>
-										RocketRide Cloud is under active development.
-										<br />
-										Stay tuned for managed cloud hosting with zero setup.
+								) : (
+									<div style={S.formGroup}>
+										<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
+											Sign In
+										</button>
+									</div>
+								)}
+								<div style={S.formGroup}>
+									<label htmlFor="autoConnect" style={S.label}>
+										Auto-connect on startup
+									</label>
+									<div>
+										<input type="checkbox" id="autoConnect" checked={settings.autoConnect} onChange={handleAutoConnectChange} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+										<label htmlFor="autoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+											Automatically connect when extension starts
+										</label>
 									</div>
 								</div>
 							</>
 						)}
 
-						{/* On-prem */}
+						{/* ── Docker ─────────────────────────────────────────── */}
+						{settings.connectionMode === 'docker' && (
+							<>
+								<div style={S.modeConfigDesc}>Connects to your local Docker instance.</div>
+								<div style={S.formGroup}>
+									<label htmlFor="autoConnect" style={S.label}>
+										Auto-connect on startup
+									</label>
+									<div>
+										<input type="checkbox" id="autoConnect" checked={settings.autoConnect} onChange={handleAutoConnectChange} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+										<label htmlFor="autoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+											Automatically connect when extension starts
+										</label>
+									</div>
+								</div>
+							</>
+						)}
+
+						{/* ── Service ────────────────────────────────────────── */}
+						{settings.connectionMode === 'service' && (
+							<>
+								<div style={S.modeConfigDesc}>Connects to your local RocketRide service.</div>
+								<div style={S.formGroup}>
+									<label htmlFor="autoConnect" style={S.label}>
+										Auto-connect on startup
+									</label>
+									<div>
+										<input type="checkbox" id="autoConnect" checked={settings.autoConnect} onChange={handleAutoConnectChange} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+										<label htmlFor="autoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+											Automatically connect when extension starts
+										</label>
+									</div>
+								</div>
+							</>
+						)}
+
+						{/* ── On-prem ────────────────────────────────────────── */}
 						{settings.connectionMode === 'onprem' && (
 							<>
 								<div style={S.modeConfigDesc}>Connect to your own hosted RocketRide server.</div>
+								<div style={S.formGroup}>
+									<label htmlFor="hostUrl" style={S.label}>
+										Host URL
+									</label>
+									<input type="text" id="hostUrl" placeholder="your-server:5565" value={settings.hostUrl} onChange={handleHostUrlChange} />
+									<div style={S.helpText}>Base URL of your hosted RocketRide server (e.g. myserver:5565)</div>
+								</div>
 								<div style={S.formGroup} id="apiKeyGroup">
 									<label htmlFor="apiKey" style={S.label}>
 										API Key
@@ -211,14 +253,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 											</button>
 										)}
 									</div>
-									<div style={S.helpText}>API key is saved securely when you save settings. Required for cloud development and for deployment.</div>
-								</div>
-								<div style={S.formGroup}>
-									<label htmlFor="hostUrl" style={S.label}>
-										Host URL
-									</label>
-									<input type="text" id="hostUrl" placeholder="your-server:5565" value={settings.hostUrl} onChange={handleHostUrlChange} />
-									<div style={S.helpText}>Base URL of your hosted RocketRide server (e.g. myserver:5565)</div>
+									<div style={S.helpText}>API key is saved securely when you save settings.</div>
 								</div>
 								<div style={S.formGroup}>
 									<label htmlFor="autoConnect" style={S.label}>
@@ -226,16 +261,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 									</label>
 									<div>
 										<input type="checkbox" id="autoConnect" checked={settings.autoConnect} onChange={handleAutoConnectChange} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-										<label
-											htmlFor="autoConnect"
-											style={{
-												display: 'inline',
-												fontWeight: 'normal',
-												margin: 0,
-												verticalAlign: 'middle',
-												cursor: 'pointer',
-											}}
-										>
+										<label htmlFor="autoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
 											Automatically connect when extension starts
 										</label>
 									</div>
@@ -260,7 +286,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 							</>
 						)}
 
-						{/* Local */}
+						{/* ── Local ──────────────────────────────────────────── */}
 						{settings.connectionMode === 'local' && (
 							<>
 								<div style={S.modeConfigDesc}>Run the server locally on your machine. The extension will download and manage the server for you.</div>

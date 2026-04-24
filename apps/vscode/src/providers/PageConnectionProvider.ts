@@ -36,6 +36,7 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 export class PageConnectionProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'rocketride.provider.connection';
@@ -147,6 +148,19 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 			const hasApiKey = this.configManager.hasApiKey();
 			const engineInfo = this.connectionManager.getEngineInfo();
 
+			// For cloud mode, check cloud token instead of API key
+			let hasCredentials = hasApiKey;
+			let cloudUserName = '';
+			if (config.connectionMode === 'cloud') {
+				const cloudAuth = CloudAuthProvider.getInstance();
+				hasCredentials = await cloudAuth.isSignedIn();
+				cloudUserName = await cloudAuth.getUserName();
+			}
+			// Docker/service always have credentials
+			if (config.connectionMode === 'docker' || config.connectionMode === 'service') {
+				hasCredentials = true;
+			}
+
 			this._view.webview.postMessage({
 				type: 'connectionUpdate',
 				data: {
@@ -156,7 +170,8 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						connectionMode: config.connectionMode,
 						autoConnect: config.autoConnect,
 					},
-					hasApiKey,
+					hasApiKey: hasCredentials,
+					cloudUserName,
 					engineInfo,
 				},
 			});
