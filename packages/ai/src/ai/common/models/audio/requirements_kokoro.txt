@@ -1,0 +1,5 @@
+# Kokoro-82M inference (model server + local); torch from image
+kokoro>=0.9.4
+soundfile>=0.12.0
+# en_core_web_sm is installed dynamically in KokoroLoader._ensure_dependencies()
+# via spacy_en_model.ensure_spacy_en_model() so the version matches the installed spaCy.
