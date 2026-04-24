@@ -287,16 +287,24 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
         for (auto &[id, comp] : comps) {
             // Preserve pre-wildcard behaviour: the original implementation only
             // dereferenced `comp.def` inside the input/output double loop, so
-            // components without I/O (or without a bound definition) were
-            // skipped implicitly. Hoisting the lanes lookup would deref a null
-            // `comp.def` for those components and crash.
+            // components without I/O were skipped implicitly. Keep that.
             if (comp.inputs.empty() || comp.outputs.empty()) continue;
-            if (!comp.def) continue;
+
+            // A null `comp.def` at this point means the pipeline JSON
+            // references a provider the service registry couldn't resolve
+            // (typo, missing package, catalog loader failure). Pre-PR this
+            // null-derefd inside the inner loop and crashed; a silent skip
+            // would mask the user's real config error. Fail loud at load
+            // time, matching the `input lane not found` pattern below.
+            if (!comp.def)
+                return APERR(Ec::InvalidParam, "Component", id,
+                             "has no resolvable service definition "
+                             "(unknown provider or service catalog failed to load)");
 
             // Wildcard `"*"` lanes accept any input; `{"*":["*"]}` enforces
             // input==output (passthrough router). Non-wildcard path unchanged.
             // Use `get` to avoid mutating serviceDefinition when "lanes" is absent.
-            const auto lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
+            const auto &lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
             const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {

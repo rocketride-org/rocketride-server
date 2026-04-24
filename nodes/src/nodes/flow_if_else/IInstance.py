@@ -18,6 +18,7 @@ unrelated writes through the same binder.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Callable
 
 from rocketlib import IInstanceBase
@@ -25,6 +26,8 @@ from rocketlib import IInstanceBase
 from ..flow_base import AsyncInvoker, AutoGatingMixin, Bounds, Decision, FlowResult
 from .IGlobal import IGlobal
 from .driver import IfElseDriver
+
+_logger = logging.getLogger('rocketride.flow')
 
 
 class IInstance(IInstanceBase, AutoGatingMixin):
@@ -45,11 +48,31 @@ class IInstance(IInstanceBase, AutoGatingMixin):
         branch = _branch_name(result)
         targets = self.IGlobal.targets_for(branch)
 
+        node_id = getattr(self.instance, 'nodeId', '') or '<unknown>'
+
         # Nothing connected on the chosen branch — drop the chunk silently
         # via preventDefault. Lets users leave the ELSE port unwired as a
         # "route truthy chunks, drop the rest" shortcut.
         if not targets:
+            # Stephan hit a variant where condition=False but the chunk still
+            # reached the THEN-wired downstream. A one-line trace of every
+            # decision + outcome turns that class of bug from "why did the
+            # chunk arrive?" into a one-grep diagnosis.
+            _logger.info(
+                'flow_if_else._gate node=%s lane=%s branch=%s targets=[] outcome=dropped',
+                node_id,
+                payload_name,
+                branch,
+            )
             return self.preventDefault()
+
+        _logger.info(
+            'flow_if_else._gate node=%s lane=%s branch=%s targets=%r outcome=forwarded',
+            node_id,
+            payload_name,
+            branch,
+            targets,
+        )
 
         try:
             for target_id in targets:

@@ -66,6 +66,20 @@ class FlowTrace:
     def emit_event(self, run_id: str, **fields: Any) -> None:
         self._emit('emit', run_id, fields)
 
+    def error(self, run_id: str, message: str, **fields: Any) -> None:
+        """Surface a recoverable error (fail-closed decision, bad config).
+
+        Distinct from the `span`-level `error` event which is emitted when
+        the async context manager sees an uncaught exception. This one is
+        for errors the driver *handled* (e.g. SandboxError caught and
+        routed to ELSE) but which the user still needs to see in the UI.
+
+        ``message`` is stored under ``error_message`` in the LogRecord
+        extras because ``message`` itself is reserved by Python's logging
+        machinery — using it raises `KeyError` at record-creation time.
+        """
+        self._emit('error', run_id, {'error_message': message, **fields})
+
     def _emit(self, event: str, run_id: str, fields: dict) -> None:
         self._log.info(
             'flow.%s node=%s driver=%s run_id=%s %s',

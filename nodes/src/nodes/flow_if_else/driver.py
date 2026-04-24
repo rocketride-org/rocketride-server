@@ -57,8 +57,21 @@ class IfElseDriver(FlowDriverBase):
         }
         try:
             value = evaluate_expression(self.expression, bindings)
-        except SandboxError:
+        except SandboxError as exc:
             # Fail-closed: any evaluation error routes the chunk to ELSE.
+            # Surface through the trace so the Errors panel shows *why*
+            # chunks are all going to ELSE instead of the user having to
+            # guess from downstream behaviour — pairs with the load-time
+            # validation in IGlobal so the only runtime failures that
+            # reach here are payload-shape mismatches, not typos.
+            run_id = ctx.state.get('_run_id', '') if ctx.state else ''
+            ctx.trace.error(
+                run_id,
+                f'condition evaluation failed: {exc}',
+                expression=self.expression,
+                payload_name=self.payload_name,
+                action='fail_closed_to_else',
+            )
             return False
         return bool(value)
 

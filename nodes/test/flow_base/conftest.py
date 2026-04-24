@@ -33,3 +33,47 @@ def _install_depends_stub() -> None:
 
 
 _install_depends_stub()
+
+
+# `flow_if_else.IGlobal` and `.IInstance` pull in engine-only modules
+# (`ai.common.config`, `rocketlib`). Stub the minimum surface these files
+# touch at import time so the driver (which is pure-Python) can be tested
+# without a full engine install.
+def _install_engine_stubs() -> None:
+    if 'ai' not in sys.modules:
+        ai = types.ModuleType('ai')
+        ai_common = types.ModuleType('ai.common')
+        ai_common_config = types.ModuleType('ai.common.config')
+
+        class _Config:  # minimal shape — tests override as needed
+            @staticmethod
+            def getNodeConfig(*_args, **_kwargs) -> dict:
+                return {}
+
+        ai_common_config.Config = _Config
+        ai.common = ai_common
+        ai_common.config = ai_common_config
+        sys.modules['ai'] = ai
+        sys.modules['ai.common'] = ai_common
+        sys.modules['ai.common.config'] = ai_common_config
+
+    if 'rocketlib' not in sys.modules:
+        rocketlib = types.ModuleType('rocketlib')
+
+        class _IInstanceBase:
+            pass
+
+        class _IGlobalBase:
+            pass
+
+        class _OpenMode:
+            CONFIG = 'CONFIG'
+            RUN = 'RUN'
+
+        rocketlib.IInstanceBase = _IInstanceBase
+        rocketlib.IGlobalBase = _IGlobalBase
+        rocketlib.OPEN_MODE = _OpenMode
+        sys.modules['rocketlib'] = rocketlib
+
+
+_install_engine_stubs()
