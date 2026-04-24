@@ -100,13 +100,9 @@ export class PageSettingsProvider {
 				if (result === 'Yes') {
 					await this.configManager.deleteApiKey();
 
-					// Import providers at runtime to avoid circular dependency
-					const connectionTreeProvider = getConnectionTreeProvider();
 					const connectionManager = getConnectionManager();
 
-					connectionTreeProvider?.refresh();
-
-					// Optionally disconnect since credentials are now invalid
+					// Disconnect since credentials are now invalid
 					connectionManager?.disconnect();
 				}
 			}),

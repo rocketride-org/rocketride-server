@@ -36,6 +36,7 @@ export default defineConfig({
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
+			'sidebar-main': './src/providers/views/SidebarMain/index.tsx',
 			'page-connection': './src/providers/views/PageConnection/index.tsx',
 			'page-settings': './src/providers/views/PageSettings/index.tsx',
 			'page-project': './src/providers/views/PageProject/index.tsx',

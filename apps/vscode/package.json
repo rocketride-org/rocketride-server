@@ -365,27 +365,15 @@
 			"rocketride": [
 				{
 					"type": "webview",
-					"id": "rocketride.provider.connection",
-					"name": "Connection Manager"
-				}
-			],
-			"explorer": [
-				{
-					"type": "tree",
-					"id": "rocketride.provider.files",
-					"name": "Pipelines",
-					"when": "rocketride.loaded"
+					"id": "rocketride.sidebar.main",
+					"name": "RocketRide"
 				}
 			]
 		},
 		"viewsWelcome": [
 			{
-				"view": "rocketride.provider.connection",
+				"view": "rocketride.sidebar.main",
 				"contents": "Loading..."
-			},
-			{
-				"view": "rocketride.provider.files",
-				"contents": "No pipeline files found"
 			}
 		]
 	},
