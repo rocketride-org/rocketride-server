@@ -271,12 +271,14 @@ def _detect_namespace(fields: Dict[str, Any]) -> str:
 def _repair_field_objects(fields: Dict[str, Any]) -> bool:
     """
     Ensure every profile field object that exposes ``llm.cloud.apikey`` also
-    exposes ``llm.cloud.modelSource``.
+    exposes ``llm.cloud.modelSource``, and that ``llm.cloud.modelSource`` is
+    always the last entry in its ``properties`` list.
 
     This is a forward-compatibility repair: field objects created before
-    ``llm.cloud.modelSource`` was introduced omit it from their properties list.
-    Running this repair on every patch pass ensures those objects are healed
-    even when no new profiles are being added in the current sync run.
+    ``llm.cloud.modelSource`` was introduced omit it from their properties list,
+    and occasionally a provider-specific field gets inserted after it by hand.
+    Running this repair on every patch pass heals both cases even when no new
+    profiles are being added in the current sync run.
 
     Args:
         fields: The ``"fields"`` dict to mutate in-place
@@ -291,7 +293,13 @@ def _repair_field_objects(fields: Dict[str, Any]) -> bool:
         props = value.get('properties')
         if not isinstance(props, list):
             continue
-        if 'llm.cloud.apikey' in props and 'llm.cloud.modelSource' not in props:
+        has_apikey = 'llm.cloud.apikey' in props
+        has_model_source = 'llm.cloud.modelSource' in props
+        if has_apikey and not has_model_source:
+            props.append('llm.cloud.modelSource')
+            repaired = True
+        elif has_model_source and props[-1] != 'llm.cloud.modelSource':
+            props.remove('llm.cloud.modelSource')
             props.append('llm.cloud.modelSource')
             repaired = True
     return repaired
