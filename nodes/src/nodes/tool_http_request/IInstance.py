@@ -128,16 +128,25 @@ class IInstance(IInstanceBase):
         # Validate guardrails from config
         self._validate_guardrails(args)
 
-        return execute_request(
-            url=args.get('url', ''),
-            method=args.get('method', 'GET'),
-            query_params=args.get('query_params'),
-            path_params=args.get('path_params'),
-            headers=args.get('headers'),
-            auth=args.get('auth'),
-            body=args.get('body'),
-            timeout=args.get('timeout'),
-        )
+        # Enforce rate limits before executing the request
+        rate_limiter = self.IGlobal.rate_limiter
+        if rate_limiter is not None:
+            rate_limiter.acquire()
+
+        try:
+            return execute_request(
+                url=args.get('url', ''),
+                method=args.get('method', 'GET'),
+                query_params=args.get('query_params'),
+                path_params=args.get('path_params'),
+                headers=args.get('headers'),
+                auth=args.get('auth'),
+                body=args.get('body'),
+                timeout=args.get('timeout'),
+            )
+        finally:
+            if rate_limiter is not None:
+                rate_limiter.release()
 
     def _validate_guardrails(self, args):
         """Enforce allowed methods + URL whitelist from config."""

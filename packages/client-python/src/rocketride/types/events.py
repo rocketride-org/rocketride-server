@@ -82,6 +82,7 @@ Usage:
 from enum import Flag
 from typing import Literal, TypedDict, List, Union
 from .task import TASK_STATUS
+from .data import PIPELINE_RESULT
 
 
 class EVENT_TYPE(Flag):
@@ -175,7 +176,7 @@ class EVENT_TYPE(Flag):
     ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD
 
 
-class EVENT_STATUS_UPDATE(TypedDict, total=False):
+class EVENT_STATUS(TypedDict, total=False):
     """
     DAP event for task status updates with comprehensive processing statistics.
 
@@ -260,3 +261,29 @@ class EVENT_TASK(TypedDict, total=False):
     type: Literal['event']
     event: Literal['apaevt_task']
     body: TASK_EVENT
+
+
+class TASK_EVENT_FLOW(TypedDict, total=False):
+    """
+    Pipeline flow event body — component execution and data flow visualization.
+
+    Sent during pipeline execution to track data flowing through components.
+    Each event represents a pipeline operation (begin, enter, leave, end) on
+    a specific pipe within the pipeline.
+    """
+
+    id: int  # REQUIRED - Pipe index within the pipeline
+    op: str  # REQUIRED - Operation type: 'begin', 'enter', 'leave', 'end'
+    pipes: List[str]  # REQUIRED - Component names in the current pipe's execution path
+    trace: dict  # REQUIRED - Trace data: lane, input/output data, result, error
+    result: PIPELINE_RESULT  # Present when op == 'end' and trace level >= summary
+    project_id: str  # REQUIRED - Project identifier
+    source: str  # REQUIRED - Source component identifier (e.g. "chat_1")
+
+
+class EVENT_FLOW(TypedDict, total=False):
+    """Full DAP event for pipeline flow tracking."""
+
+    type: Literal['event']
+    event: Literal['apaevt_flow']
+    body: TASK_EVENT_FLOW

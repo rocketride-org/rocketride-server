@@ -280,8 +280,8 @@ export interface IProjectComponent extends Omit<PipelineComponent, 'ui'> {
  * Extends the SDK's PipelineConfig.
  */
 export interface IProject extends PipelineConfig {
-	/** Editor document revision counter for change tracking (undo/redo, echo detection). Not a schema version. */
-	docRevision?: number;
+	// All persisted fields (docRevision, isLocked, snapToGrid, snapGridSize, editorMode, viewport)
+	// are now defined in PipelineConfig. This interface exists for semantic clarity.
 }
 
 // ============================================================================

@@ -45,6 +45,7 @@ class IInstance(IInstanceBase):
     """
 
     def __init__(self, *args, **kwargs):
+        """Initialize instance state."""
         super().__init__(*args, **kwargs)
         self._image_chunk_id = 0
 
@@ -87,6 +88,9 @@ class IInstance(IInstanceBase):
             # Write the enriched document back via the instance's writeDocuments method.
             # Wrapping the single document in a list to comply with the expected input type.
             self.instance.writeDocuments([doc])
+
+        # Prevent the engine from also routing the original image to writeImage
+        return self.preventDefault()
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action

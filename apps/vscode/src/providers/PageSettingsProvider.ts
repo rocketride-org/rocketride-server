@@ -418,39 +418,17 @@ export class PageSettingsProvider {
 				return;
 			}
 
-			const testArgs: Record<string, unknown> = {
-				clientID: 'vscode-settings-test',
-				clientName: 'VS Code Settings Test',
-				adapterID: 'rocketride',
-				pathFormat: 'path',
-				linesStartAt1: true,
-				columnsStartAt1: true,
-				supportsVariableType: true,
-				supportsVariablePaging: true,
-				supportsRunInTerminalRequest: true,
-			};
-
-			let response;
 			try {
-				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
-			} catch (requestError) {
+				await testClient.ping();
+			} catch (pingError) {
 				await testClient.disconnect();
-				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
+				const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
 				this.showMessage(webview, 'error', `Server connected but failed to respond: ${errorMessage}`, 'development');
 				return;
 			}
 
 			await testClient.disconnect();
-
-			if (!response) {
-				this.showMessage(webview, 'error', 'Server connected but returned no response.', 'development');
-			} else if (response.success === false) {
-				this.showMessage(webview, 'error', `Server rejected the request: ${response.message || 'Unknown error'}`, 'development');
-			} else if (response.type === 'response' && response.command === 'initialize') {
-				this.showMessage(webview, 'success', `Connection test successful! ${parsedUrl.host} is responding correctly.`, 'development');
-			} else {
-				this.showMessage(webview, 'warning', 'Server responded with an unexpected format. Connection may still work.', 'development');
-			}
+			this.showMessage(webview, 'success', `Connection test successful! ${parsedUrl.host} is responding correctly.`, 'development');
 		} catch (error) {
 			if (testClient) {
 				testClient.disconnect().catch(() => {

@@ -377,7 +377,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         if previous_sql and error:
             question.addContext(f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.')
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         if not result or not result.answer:
             raise ValueError('LLM failed to return a SQL query.')

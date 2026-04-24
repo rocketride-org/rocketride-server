@@ -95,7 +95,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						break;
 
 					case 'openDashboard':
-						vscode.commands.executeCommand('rocketride.page.dashboard.open');
+						vscode.commands.executeCommand('rocketride.page.monitor.open');
 						break;
 				}
 			} catch (error) {

@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, CSSProperties } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
@@ -30,10 +30,9 @@ import { EnvVariablesSettings } from './EnvVariablesSettings';
 import { IntegrationSettings } from './IntegrationSettings';
 import { MessageDisplay } from './MessageDisplay';
 
-// Import the styles
-import '../../styles/vscode.css';
-import '../../styles/app.css';
-import './styles.css';
+import 'shared/themes/rocketride-default.css';
+import 'shared/themes/rocketride-vscode.css';
+import '../../styles/root.css';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -104,6 +103,95 @@ export type PageSettingsOutgoingMessage =
 	| {
 			type: 'fetchEngineVersions';
 	  };
+
+// ============================================================================
+// SHARED STYLES
+// ============================================================================
+
+export const settingsStyles = {
+	section: {
+		border: '1px solid var(--rr-border)',
+		borderRadius: 8,
+		padding: 20,
+		backgroundColor: 'var(--rr-bg-default)',
+	} as CSSProperties,
+	sectionTitle: {
+		fontSize: 18,
+		fontWeight: 600,
+		margin: '0 0 16px 0',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	sectionDescription: {
+		color: 'var(--rr-text-secondary)',
+		fontSize: 13,
+		marginBottom: 16,
+	} as CSSProperties,
+	formGrid: {
+		display: 'grid',
+		gap: 16,
+		gridTemplateColumns: '1fr',
+		paddingLeft: 50,
+	} as CSSProperties,
+	formGroup: {
+		display: 'flex',
+		flexDirection: 'column',
+	} as CSSProperties,
+	label: {
+		fontWeight: 600,
+		marginBottom: 6,
+		fontSize: 13,
+	} as CSSProperties,
+	helpText: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		marginTop: 4,
+		lineHeight: 1.4,
+	} as CSSProperties,
+	modeConfigBox: {
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: 16,
+		gridColumn: '1 / -1',
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
+	modeConfigDesc: {
+		fontSize: 11.5,
+		color: 'var(--rr-text-secondary)',
+		lineHeight: 1.5,
+		margin: 0,
+	} as CSSProperties,
+	checkboxGroup: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 4,
+	} as CSSProperties,
+	checkboxLabel: {
+		display: 'flex',
+		alignItems: 'center',
+		cursor: 'pointer',
+		fontWeight: 'normal',
+		margin: 0,
+	} as CSSProperties,
+	checkboxInput: {
+		margin: '0 8px 0 0',
+		flexShrink: 0,
+		cursor: 'pointer',
+	} as CSSProperties,
+	checkboxSpan: {
+		fontWeight: 600,
+		fontSize: 13,
+	} as CSSProperties,
+	checkboxHelpText: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		marginLeft: 24,
+		marginTop: 2,
+		marginBottom: 8,
+		lineHeight: 1.4,
+	} as CSSProperties,
+};
 
 // ============================================================================
 // MAIN SETTINGS VIEW COMPONENT
@@ -274,19 +362,55 @@ export const PageSettings: React.FC = () => {
 	// ========================================================================
 
 	return (
-		<div className="settings-app">
-			<div className="header">
-				<h1>RocketRide Extension Settings</h1>
-				<p>Configure your RocketRide extension preferences and connection settings</p>
+		<div
+			style={{
+				maxWidth: 800,
+				margin: '0 auto',
+				padding: 24,
+				backgroundColor: 'var(--rr-bg-default)',
+			}}
+		>
+			<div
+				style={{
+					borderBottom: '1px solid var(--rr-border)',
+					paddingBottom: 16,
+					marginBottom: 24,
+				}}
+			>
+				<h1
+					style={{
+						margin: '0 0 8px 0',
+						fontSize: 24,
+						fontWeight: 600,
+						color: 'var(--rr-text-primary)',
+					}}
+				>
+					RocketRide Extension Settings
+				</h1>
+				<p
+					style={{
+						margin: 0,
+						color: 'var(--rr-text-secondary)',
+						fontSize: 14,
+					}}
+				>
+					Configure your RocketRide extension preferences and connection settings
+				</p>
 			</div>
 
-			<div className="action-buttons">
+			<div
+				style={{
+					display: 'flex',
+					gap: 12,
+					marginBottom: 24,
+				}}
+			>
 				<button onClick={handleSaveSettings}>Save All Settings</button>
 			</div>
 
 			<MessageDisplay message={message} />
 
-			<div className="settings-container">
+			<div style={{ display: 'grid', gap: 24 }}>
 				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} />
 
 				<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />

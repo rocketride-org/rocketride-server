@@ -298,19 +298,45 @@
 			"properties": ["openai.profile"]
 		}
 	],
-	"test": {
-		"profiles": ["openai-5-2", "openai-5-4", "openai-5-4-pro", "openai-5-4-mini", "openai-5-4-nano"],
-		"outputs": ["answers"],
-		"cases": [
-			{
-				"name": "LLM returns mock response",
-				"text": "What is 2+2?",
-				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
+	//
+	// Optional:
+	//		Test configuration for automated node testing.
+	//		Group 1 (mock): runs with mocked langchain_openai — no real API key required.
+	//		ROCKETRIDE_MOCK must point to nodes/test/mocks.
+	//		Group 2 (real): skipped unless ROCKETRIDE_OPENAI_KEY is set; calls the live API.
+	//
+	"test": [
+		{
+			"profiles": ["openai-5-2", "openai-5-4", "openai-5-4-pro", "openai-5-4-mini", "openai-5-4-nano"],
+			"outputs": ["answers"],
+			"cases": [
+				{
+					"name": "LLM returns mock response",
+					"text": "What is 2+2?",
+					"expect": {
+						"answers": {
+							"contains": "Mock LLM response"
+						}
 					}
 				}
-			}
-		]
-	}
+			]
+		},
+		{
+			"requires": ["ROCKETRIDE_OPENAI_KEY"],
+			"avoidMocks": true,
+			"profiles": ["openai-4o-mini"],
+			"outputs": ["answers"],
+			"cases": [
+				{
+					"name": "LLM returns real response",
+					"text": "What is 5*5? Answer with just the number.",
+					"expect": {
+						"answers": {
+							"contains": "25"
+						}
+					}
+				}
+			]
+		}
+	]
 }

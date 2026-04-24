@@ -3,6 +3,11 @@ name: Release
 on:
   workflow_call:
     inputs:
+      ref:
+        description: Git ref to check out (branch, tag, or sha). Empty uses the default.
+        required: false
+        type: string
+        default: ''
       prerelease:
         description: Create a prerelease (skips registry publishing, force-pushes tags)
         required: false
@@ -70,6 +75,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: ${{ inputs.prerelease && 1 || 0 }}
 
       - name: Check if tag exists

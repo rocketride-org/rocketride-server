@@ -31,6 +31,7 @@ open/close internally.
 import json
 from typing import Dict, Any, Optional
 from ..core import DAPClient
+from ..types.pipeline import PipelineConfig
 
 
 class StoreMixin(DAPClient):
@@ -227,25 +228,25 @@ class StoreMixin(DAPClient):
     # Domain Convenience - Projects
     # =========================================================================
 
-    async def save_project(self, project_id: str, pipeline: Dict[str, Any]) -> None:
-        """Save a project pipeline to .projects/<project_id>.json."""
-        self._validate_id(project_id, 'project_id')
+    async def save_project(self, name: str, pipeline: PipelineConfig) -> None:
+        """Save a project pipeline to .projects/<name>.json."""
+        self._validate_id(name, 'name')
         if not pipeline or not isinstance(pipeline, dict):
             raise ValueError('pipeline must be a non-empty dictionary')
 
-        await self.fs_write_json(f'.projects/{project_id}.json', pipeline)
+        await self.fs_write_json(f'.projects/{name}.json', pipeline)
 
-    async def get_project(self, project_id: str) -> Dict[str, Any]:
-        """Get a project by ID from .projects/<project_id>.json."""
-        self._validate_id(project_id, 'project_id')
+    async def get_project(self, name: str) -> PipelineConfig:
+        """Get a project by file name from .projects/<name>.json."""
+        self._validate_id(name, 'name')
 
-        return await self.fs_read_json(f'.projects/{project_id}.json')
+        return await self.fs_read_json(f'.projects/{name}.json')
 
-    async def delete_project(self, project_id: str) -> None:
-        """Delete a project by ID."""
-        self._validate_id(project_id, 'project_id')
+    async def delete_project(self, name: str) -> None:
+        """Delete a project by file name."""
+        self._validate_id(name, 'name')
 
-        await self.fs_delete(f'.projects/{project_id}.json')
+        await self.fs_delete(f'.projects/{name}.json')
 
     async def get_all_projects(self) -> Dict[str, Any]:
         """List all projects with summaries."""

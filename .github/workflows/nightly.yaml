@@ -19,11 +19,14 @@ jobs:
   init:
     name: Initialize
     uses: ./.github/workflows/_init.yaml
+    with:
+      ref: stage
   build:
     name: Build
     needs: init
     uses: ./.github/workflows/_build.yaml
     with:
+      ref: stage
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
@@ -40,6 +43,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: stage
           fetch-depth: 0
 
       - name: Delete existing prerelease tags and releases
@@ -69,6 +73,7 @@ jobs:
     needs: [init, build, cleanup-prereleases]
     uses: ./.github/workflows/_release.yaml
     with:
+      ref: stage
       prerelease: true
       server_version: ${{ needs.init.outputs.server_version }}
       vscode_version: ${{ needs.init.outputs.vscode_version }}
@@ -82,6 +87,7 @@ jobs:
     needs: [init, build]
     uses: ./.github/workflows/_docker.yaml
     with:
+      ref: stage
       server_version: ${{ needs.init.outputs.server_version }}
       prerelease: true
     secrets: inherit

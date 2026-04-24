@@ -25,13 +25,12 @@
 from enum import Enum
 from typing import Any, Dict, List
 import uuid
-from typing import Optional
 
 from depends import depends
 
 depends()
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from engLib import PROTOCOL_CAPS as _PROTOCOL_CAPS
 from engLib import TAG_ID as _TAG_ID, TAG as _TAG
@@ -188,101 +187,175 @@ class IControl(BaseModel):
 
 class IInvoke(IControl):
     """
-    Data model for the generic invoke command.
+    Envelope for invoke control-plane messages.
+
+    Used as the transport wrapper around an IInvokeOp operation object.
+    The ``param`` field carries the typed operation (e.g. IInvokeLLM.Ask).
     """
 
     control: str = 'invoke'
 
-    model_config = ConfigDict(extra='allow')  # Pydantic v2 way to allow extra fields
+    model_config = ConfigDict(extra='allow')
+
+
+class IInvokeOp(BaseModel):
+    """
+    Base class for invoke operation inner classes.
+
+    Provides:
+    - ``type``: computed from ``__qualname__`` (e.g. ``"IInvokeLLM.Ask"``)
+    - ``lane``: routing target (e.g. ``"llm"``, ``"tool"``, ``"memory"``)
+    - ``extra='allow'``: accepts additional fields
+    """
+
+    lane: str = ''
+
+    model_config = ConfigDict(extra='allow')
+
+    @computed_field
+    @property
+    def type(self) -> str:
+        """Returns the qualified class name (e.g. 'IInvokeLLM.Ask') for trace rendering."""
+        return type(self).__qualname__
 
 
 class IInvokeLLM(IInvoke):
     """
-    Data model for invoking a language model operation via control channels.
+    LLM invoke operations. Pure namespace — construct via inner classes.
 
-    Supported operations:
-    - "ask": Requires the `question` field to be set.
-    - "getContextLength": No additional parameters required. Returns the maximum context length for the model.
-    - "getOutputLength": No additional parameters required. Returns the maximum output length for the model.
-    - "getTokenCounter": No additional parameters required. Returns a function to be used as the token counter
+    Usage::
 
-    Attributes:
-        op (str): The operation to perform. Defaults to "ask".
-        question (Any): The question to ask the language model. Used with "ask".
-        text (str): The input text to tokenize. Used with "getTokens".
-
-    Additional fields are allowed via extra configuration.
+        param = IInvokeLLM.Ask(question=q)
+        result = instance.invoke(param, component_id=llm_node)
     """
 
-    op: str = 'ask'
-    question: Any = None
-    model_config = ConfigDict(extra='allow')  # Pydantic v2 way to allow extra fields
+    class Ask(IInvokeOp):
+        """Ask the LLM a question. Requires a Question object."""
+
+        lane: str = 'llm'
+        op: str = Field(default='ask', frozen=True)
+        question: Any  # Required — client SDK's Question object
+
+    class GetContextLength(IInvokeOp):
+        """Get the maximum context length for the model."""
+
+        lane: str = 'llm'
+        op: str = Field(default='getContextLength', frozen=True)
+
+    class GetOutputLength(IInvokeOp):
+        """Get the maximum output length for the model."""
+
+        lane: str = 'llm'
+        op: str = Field(default='getOutputLength', frozen=True)
+
+    class GetTokenCounter(IInvokeOp):
+        """Get a token counter function for the model."""
+
+        lane: str = 'llm'
+        op: str = Field(default='getTokenCounter', frozen=True)
 
 
 class IInvokeTool(IInvoke):
     """
-    Base class for tool operations via control channels.
+    Tool invoke operations. Pure namespace — construct via inner classes.
 
-    This is an abstract base class - use specific operation subclasses:
-    - IInvokeTool.Query: Add tool info to the "tools" array
-    - IInvokeTool.Invoke: Execute the tool with input parameters
-    - IInvokeTool.Validate: Validate tool input parameters
+    Usage::
+
+        param = IInvokeTool.Query()
+        param = IInvokeTool.Invoke(tool_name='search', input={...})
+        param = IInvokeTool.Validate(tool_name='search', input={...})
     """
 
-    op: str
-    tool_name: Optional[str] = None
+    class Query(IInvokeOp):
+        """Discover available tools. Each tool node appends its descriptors to ``tools``."""
 
-    model_config = ConfigDict(extra='allow')
-
-    class Query(BaseModel):
-        """Add tool info to the tools array for discovery."""
-
+        lane: str = 'tool'
         op: str = Field(default='tool.query', frozen=True)
-        tools: List[Any] = Field(default_factory=list)  # Output: populated by each connected tool
+        tools: List[Any] = Field(default_factory=list)
 
-        model_config = ConfigDict(extra='allow')
-
-    class Invoke(BaseModel):
+    class Invoke(IInvokeOp):
         """Invoke a tool with the provided input parameters."""
 
+        lane: str = 'tool'
         op: str = Field(default='tool.invoke', frozen=True)
-        tool_name: str  # Required for invocation
-        input: Any  # Tool parameters
-        output: Any = Field(default=None, description='Set by tool after invocation')
-        model_config = ConfigDict(extra='allow')
+        tool_name: str
+        input: Any
+        output: Any = Field(default=None)
 
-    class Validate(BaseModel):
+    class Validate(IInvokeOp):
         """Validate tool input parameters without executing."""
 
+        lane: str = 'tool'
         op: str = Field(default='tool.validate', frozen=True)
-        tool_name: str  # Required for validation
-        input: Any  # Parameters to validate
+        tool_name: str
+        input: Any
 
-        model_config = ConfigDict(extra='allow')
+
+class IInvokeMemory(IInvokeTool):
+    """
+    Memory invoke operations. Derives from IInvokeTool so memory ops
+    route through the tool dispatch protocol.
+
+    Usage::
+
+        param = IInvokeMemory.Put(input={'key': 'user_pref', 'value': {...}})
+        param = IInvokeMemory.Get(input={'key': 'user_pref'})
+    """
+
+    class Put(IInvokeTool.Invoke):
+        """Store a value in memory."""
+
+        lane: str = 'memory'
+        tool_name: str = Field(default='put', frozen=True)
+
+    class Get(IInvokeTool.Invoke):
+        """Retrieve a value from memory."""
+
+        lane: str = 'memory'
+        tool_name: str = Field(default='get', frozen=True)
+
+    class List(IInvokeTool.Invoke):
+        """List all keys in memory."""
+
+        lane: str = 'memory'
+        tool_name: str = Field(default='list', frozen=True)
+
+    class Clear(IInvokeTool.Invoke):
+        """Clear entries from memory. If key is provided, clears only that entry."""
+
+        lane: str = 'memory'
+        tool_name: str = Field(default='clear', frozen=True)
 
 
 class IInvokeCrew(IInvoke):
     """
-    Control-plane type for CrewAI sub-agent discovery (crewai.describe fan-out).
+    Crew invoke operations.  Pure namespace — construct via inner classes.
 
-    Each sub-agent connected on the 'crewai' channel appends a DescribeResponse
-    to Describe.agents when the orchestrator fans out a Describe request.
+    Usage::
+
+        param = IInvokeCrew.Describe()
+        instance.invoke(param, component_id=subagent_node_id)
+
+    Each sub-agent connected on the 'crewai' lane appends a DescribeResponse
+    to ``Describe.agents`` when the orchestrator fans out a Describe request.
+    The op name is the bare 'describe' so it routes to an @invoke_function
+    decorated method named ``describe`` on the receiving IInstance.
     """
 
-    op: str = 'crewai.describe'
-    model_config = ConfigDict(extra='allow')
-
-    class Describe(BaseModel):
+    class Describe(IInvokeOp):
         """Fan-out request: each connected sub-agent appends its descriptor."""
 
-        op: str = Field(default='crewai.describe', frozen=True)
+        lane: str = 'crewai'
+        op: str = Field(default='describe', frozen=True)
         agents: List[Any] = Field(default_factory=list)
-        model_config = ConfigDict(extra='allow')
 
     class DescribeResponse(BaseModel):
-        """Sub-agent descriptor returned in response to crewai.describe."""
+        """Sub-agent descriptor value object — appended to ``Describe.agents``.
 
-        op: str = Field(default='crewai.describe', frozen=True)
+        Not an `IInvokeOp` because this is a value object that travels inside
+        a Describe response, not an invoke operation that gets dispatched.
+        """
+
         role: str
         task_description: str
         goal: str = ''
@@ -290,6 +363,44 @@ class IInvokeCrew(IInvoke):
         expected_output: str = ''
         instructions: List[str] = Field(default_factory=list)
         node_id: str = ''  # pSelf.instance.pipeType['id'] — used to filter sub-agents from tool list
+        invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
+        model_config = ConfigDict(extra='allow')
+
+
+class IInvokeDeepagent(IInvoke):
+    """
+    DeepAgent invoke operations.  Pure namespace — construct via inner classes.
+
+    Usage::
+
+        param = IInvokeDeepagent.Describe()
+        instance.invoke(param, component_id=subagent_node_id)
+
+    Each sub-agent connected on the 'deepagent' lane appends a DescribeResponse
+    to ``Describe.agents`` when the orchestrator fans out a Describe request.
+    The op name is the bare 'describe' so it routes to an @invoke_function
+    decorated method named ``describe`` on the receiving IInstance.
+    """
+
+    class Describe(IInvokeOp):
+        """Fan-out request: each connected sub-agent appends its descriptor."""
+
+        lane: str = 'deepagent'
+        op: str = Field(default='describe', frozen=True)
+        agents: List[Any] = Field(default_factory=list)
+
+    class DescribeResponse(BaseModel):
+        """Sub-agent descriptor value object — appended to ``Describe.agents``.
+
+        Not an `IInvokeOp` because this is a value object that travels inside
+        a Describe response, not an invoke operation that gets dispatched.
+        """
+
+        name: str  # unique identifier — typically the node_id
+        description: str = ''  # how the orchestrator recognises this sub-agent's purpose
+        system_prompt: str = ''
+        instructions: List[str] = Field(default_factory=list)
+        node_id: str = ''  # pSelf.instance.pipeType['id']
         invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
         model_config = ConfigDict(extra='allow')
 

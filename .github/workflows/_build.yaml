@@ -3,6 +3,11 @@ name: Build
 on:
   workflow_call:
     inputs:
+      ref:
+        description: Git ref to check out (branch, tag, or sha). Empty uses the default.
+        required: false
+        type: string
+        default: ''
       full_version:
         description: Full build version (e.g. 1.2.3.456)
         required: true
@@ -72,6 +77,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ inputs.ref }}
           submodules: recursive
       - name: Set up pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4

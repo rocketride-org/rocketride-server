@@ -34,7 +34,7 @@
 	"contributes": {
 		"customEditors": [
 			{
-				"viewType": "rocketride.PageEditor",
+				"viewType": "rocketride.PageProject",
 				"displayName": "Pipeline Grid Editor",
 				"selector": [
 					{
@@ -185,7 +185,7 @@
 				"category": "RocketRide"
 			},
 			{
-				"command": "rocketride.page.dashboard.open",
+				"command": "rocketride.page.monitor.open",
 				"title": "Server Monitor",
 				"category": "RocketRide",
 				"icon": "$(dashboard)"
@@ -269,12 +269,6 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
-				"command": "rocketride.page.status.open",
-				"title": "Open Status Page",
-				"category": "RocketRide",
-				"icon": "$(dashboard)"
-			},
-			{
 				"command": "rocketride.sidebar.files.runPipeline",
 				"title": "Run",
 				"icon": "$(play)",
@@ -331,10 +325,6 @@
 				},
 				{
 					"command": "rocketride.openPipelineAsText",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.page.status.open",
 					"when": "false"
 				},
 				{

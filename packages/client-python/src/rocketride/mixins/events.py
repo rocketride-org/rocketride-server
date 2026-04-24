@@ -101,6 +101,8 @@ class EventMixin(DAPClient):
         self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
         # Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch
         self._sse_pipe_callbacks: Dict[int, Callable] = {}
+        # Reference-counted monitor subscriptions: key_string → {event_type: ref_count}
+        self._monitor_keys: Dict[str, Dict[str, int]] = {}
 
     def debug_message(self, msg: str) -> None:
         """Forward debug messages to the user callback (if set) after internal logging."""
@@ -161,8 +163,8 @@ class EventMixin(DAPClient):
         Handle connection established events.
 
         Called automatically when the client successfully connects to the
-        RocketRide server. If you provided an on_connected callback when creating
-        the client, it will be called with connection details.
+        RocketRide server. Resubscribes all active monitors and calls the
+        user-provided on_connected callback.
 
         Args:
             connection_info: Optional connection details (server info, etc.)
@@ -173,6 +175,9 @@ class EventMixin(DAPClient):
 
             client = RocketRideClient(uri, auth, on_connected=my_connect_handler)
         """
+        # Resubscribe all monitor subscriptions after reconnect
+        await self._resubscribe_all_monitors()
+
         if self._caller_on_connected is not None:
             try:
                 await self._caller_on_connected(connection_info)
@@ -320,6 +325,9 @@ class EventMixin(DAPClient):
         """
         Subscribe to specific types of events from the server.
 
+        .. deprecated::
+            Use :meth:`add_monitor` / :meth:`remove_monitor` instead.
+
         Tell the server which events you want to receive. This filters the
         event stream to only include events you're interested in, reducing
         network traffic and processing overhead.
@@ -373,3 +381,133 @@ class EventMixin(DAPClient):
         if self.did_fail(response):
             error_msg = response.get('message', 'Event subscription failed')
             raise RuntimeError(error_msg)
+
+    # =========================================================================
+    # MONITOR SUBSCRIPTION MANAGEMENT
+    # =========================================================================
+
+    async def add_monitor(self, key: Dict[str, Any], types: List[str]) -> None:
+        """
+        Add a monitor subscription. If the key already exists, the new types
+        are merged via reference counting and the merged set is sent to the server.
+
+        Args:
+            key: Monitor key — ``{"token": "..."}`` for a running task,
+                 or ``{"project_id": "...", "source": "..."}`` (optionally with ``"pipe_id"``).
+            types: Event types to subscribe to (e.g. ``['summary', 'flow']``).
+        """
+        key_str = self._monitor_key_to_string(key)
+        ref_counts = self._monitor_keys.get(key_str)
+        if ref_counts is None:
+            ref_counts = {}
+            self._monitor_keys[key_str] = ref_counts
+
+        # Increment reference counts
+        for t in types:
+            ref_counts[t] = ref_counts.get(t, 0) + 1
+
+        # Send merged types to server — rollback on failure
+        try:
+            await self._sync_monitor(key, ref_counts)
+        except Exception:
+            for t in types:
+                current = ref_counts.get(t, 0)
+                if current <= 1:
+                    ref_counts.pop(t, None)
+                else:
+                    ref_counts[t] = current - 1
+            if not ref_counts:
+                self._monitor_keys.pop(key_str, None)
+            raise
+
+    async def remove_monitor(self, key: Dict[str, Any], types: List[str]) -> None:
+        """
+        Remove a monitor subscription. Decrements reference counts for the
+        given types. Only unsubscribes a type from the server when its count
+        reaches 0.
+
+        Args:
+            key: Monitor key (must match the key used in add_monitor).
+            types: Event types to unsubscribe from.
+        """
+        key_str = self._monitor_key_to_string(key)
+        ref_counts = self._monitor_keys.get(key_str)
+        if ref_counts is None:
+            return
+
+        # Decrement reference counts
+        for t in types:
+            current = ref_counts.get(t, 0)
+            if current <= 1:
+                ref_counts.pop(t, None)
+            else:
+                ref_counts[t] = current - 1
+
+        # Send merged types (or unsubscribe if empty)
+        await self._sync_monitor(key, ref_counts)
+
+        # Clean up empty keys
+        if not ref_counts:
+            self._monitor_keys.pop(key_str, None)
+
+    async def _sync_monitor(self, key: Dict[str, Any], ref_counts: Dict[str, int]) -> None:
+        """Send the merged type list for a monitor key to the server."""
+        if not self.is_connected():
+            return
+
+        merged_types = list(ref_counts.keys())
+
+        if 'token' in key:
+            await self.dap_request('rrext_monitor', {'types': merged_types}, token=key['token'])
+        else:
+            args: Dict[str, Any] = {
+                'projectId': key['project_id'],
+                'source': key['source'],
+                'types': merged_types,
+            }
+            if 'pipe_id' in key and key['pipe_id'] is not None:
+                args['pipeId'] = key['pipe_id']
+            await self.dap_request('rrext_monitor', args)
+
+    async def _resubscribe_all_monitors(self) -> None:
+        """
+        Replay all active monitor subscriptions to the server.
+        Called automatically after reconnection.
+        """
+        for key_str, ref_counts in self._monitor_keys.items():
+            if not ref_counts:
+                continue
+            key = self._monitor_string_to_key(key_str)
+            if key is not None:
+                try:
+                    await self._sync_monitor(key, ref_counts)
+                except Exception as e:
+                    self.debug_message(f'Failed to resubscribe monitor {key_str}: {e}')
+
+    @staticmethod
+    def _monitor_key_to_string(key: Dict[str, Any]) -> str:
+        """Convert a monitor key dict to a stable string for map lookup."""
+        if 'token' in key:
+            return f't:{key["token"]}'
+        s = f'p:{key["project_id"]}.{key["source"]}'
+        if 'pipe_id' in key and key['pipe_id'] is not None:
+            s += f'.{key["pipe_id"]}'
+        return s
+
+    @staticmethod
+    def _monitor_string_to_key(key_str: str) -> Optional[Dict[str, Any]]:
+        """Reverse a key-string back to a monitor key dict."""
+        if key_str.startswith('t:'):
+            return {'token': key_str[2:]}
+        if key_str.startswith('p:'):
+            rest = key_str[2:]
+            dot_idx = rest.index('.') if '.' in rest else -1
+            if dot_idx == -1:
+                return None
+            project_id = rest[:dot_idx]
+            remaining = rest[dot_idx + 1 :]
+            parts = remaining.split('.')
+            if len(parts) == 2 and parts[1].isdigit():
+                return {'project_id': project_id, 'source': parts[0], 'pipe_id': int(parts[1])}
+            return {'project_id': project_id, 'source': remaining}
+        return None

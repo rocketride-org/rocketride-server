@@ -3,6 +3,11 @@ name: Initialize
 on:
   workflow_call:
     inputs:
+      ref:
+        description: Git ref to check out (branch, tag, or sha). Empty uses the default.
+        required: false
+        type: string
+        default: ''
       check_server_tag:
         description: Check whether the server release tag already exists
         required: false
@@ -49,6 +54,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: ${{ inputs.check_server_tag && '0' || '1' }}
       - name: Extract versions
         id: vars

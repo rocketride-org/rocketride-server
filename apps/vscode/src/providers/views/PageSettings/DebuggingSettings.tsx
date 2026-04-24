@@ -22,41 +22,42 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData } from './PageSettings';
+import { SettingsData, settingsStyles as S } from './PageSettings';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface DebuggingSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 }
 
-export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({
-	settings,
-	onSettingsChange
-}) => {
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange }) => {
 	const handleRestartBehaviorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onSettingsChange({ pipelineRestartBehavior: e.target.value as 'auto' | 'manual' | 'prompt' });
 	};
 
 	return (
-		<div className="section">
-			<div className="section-title">Debugging Settings</div>
-			<div className="section-description">Configure debugging and pipeline restart behavior</div>
+		<div style={S.section}>
+			<div style={S.sectionTitle}>Debugging Settings</div>
+			<div style={S.sectionDescription}>Configure debugging and pipeline restart behavior</div>
 
-			<div className="form-grid">
-				<div className="form-group">
-					<label htmlFor="pipelineRestartBehavior">Pipeline Restart Behavior</label>
-					<select
-						id="pipelineRestartBehavior"
-						value={settings.pipelineRestartBehavior}
-						onChange={handleRestartBehaviorChange}
-					>
+			<div style={S.formGrid}>
+				<div style={S.formGroup}>
+					<label htmlFor="pipelineRestartBehavior" style={S.label}>
+						Pipeline Restart Behavior
+					</label>
+					<select id="pipelineRestartBehavior" value={settings.pipelineRestartBehavior} onChange={handleRestartBehaviorChange}>
 						<option value="auto">Automatically restart when .pipe changes</option>
 						<option value="manual">Do not automatically restart</option>
 						<option value="prompt">Prompt to restart when .pipe changes</option>
 					</select>
-					<div className="help-text">
-						Choose what happens when a .pipe file changes while the pipeline is running
-					</div>
+					<div style={S.helpText}>Choose what happens when a .pipe file changes while the pipeline is running</div>
 				</div>
 			</div>
 		</div>

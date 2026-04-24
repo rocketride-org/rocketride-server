@@ -38,7 +38,7 @@ Types Defined:
     DisconnectCallback: Type alias for disconnection callbacks
     TraceInfo: Stack trace information for debugging errors
 
-These types are compatible with Python 3.8+ using native typing without extensions.
+These types are compatible with Python 3.10+ using native typing without extensions.
 
 Usage:
     from rocketride.types import RocketRideClientConfig, EventCallback

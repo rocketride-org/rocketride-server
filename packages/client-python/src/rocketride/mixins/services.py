@@ -42,6 +42,7 @@ from typing import Dict, Any, Optional
 
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
+from ..types.service import SERVICES_RESPONSE, SERVICE_DEFINITION, VALIDATION_RESULT
 
 
 class ServicesMixin(DAPClient):
@@ -59,7 +60,7 @@ class ServicesMixin(DAPClient):
         """Initialize services functionality."""
         super().__init__(**kwargs)
 
-    async def get_services(self) -> Dict[str, Any]:
+    async def get_services(self) -> SERVICES_RESPONSE:
         """
         Retrieve all available service definitions from the server.
 
@@ -82,7 +83,7 @@ class ServicesMixin(DAPClient):
 
         return response.get('body') or {}
 
-    async def get_service(self, service: str) -> Optional[Dict[str, Any]]:
+    async def get_service(self, service: str) -> Optional[SERVICE_DEFINITION]:
         """
         Retrieve a specific service definition by name.
 
@@ -106,12 +107,8 @@ class ServicesMixin(DAPClient):
         response = await self.request(request)
 
         if self.did_fail(response):
-            error_msg = response.get(
-                'message', f"Service '{service}' not found"
-            )
-            raise RuntimeError(
-                f"Failed to retrieve service '{service}': {error_msg}"
-            )
+            error_msg = response.get('message', f"Service '{service}' not found")
+            raise RuntimeError(f"Failed to retrieve service '{service}': {error_msg}")
 
         return response.get('body')
 
@@ -120,7 +117,7 @@ class ServicesMixin(DAPClient):
         pipeline: PipelineConfig,
         *,
         source: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> VALIDATION_RESULT:
         """
         Validate a pipeline configuration.
 
@@ -138,8 +135,7 @@ class ServicesMixin(DAPClient):
             source: Optional override for the source component ID.
 
         Returns:
-            Validation result containing errors, warnings, resolved component,
-            and the execution chain.
+            Validation result containing errors and warnings.
 
         Raises:
             RuntimeError: If the server returns a validation error.

@@ -251,7 +251,7 @@ class ModelClient:
 
         Args:
             model_name: Model name/path
-            model_type: Model type ('sentence_transformer', 'transformers', 'whisper')
+            model_type: Model type ('sentence_transformer', 'transformers', 'whisper', 'kokoro')
             loader_options: Options passed to the loader (identity + HF params)
 
         Raises:

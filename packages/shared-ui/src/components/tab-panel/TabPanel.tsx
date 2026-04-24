@@ -4,17 +4,85 @@
 // =============================================================================
 
 /**
- * Tab bar with sliding underline indicator — same behavior as the VS Code
- * status page (`apps/vscode/.../TabPanel.tsx`), scoped with `rr-tab-*` classes
- * and themed via --rr-* tokens in `tab-panel.css`.
+ * TabPanel — pill-style tab bar overlaying content panels.
+ *
+ * Layout:  The bar is absolutely positioned at the top center, transparent,
+ *          so content (e.g. the canvas) flows underneath.
+ *
+ * Only the active panel is mounted; switching tabs unmounts the previous
+ * panel and mounts the new one.
  */
 
-import React, { useRef, useState, useEffect, useCallback } from 'react';
-
-import './tab-panel.css';
+import React, { CSSProperties } from 'react';
 
 // =============================================================================
-// Types
+// STYLES
+// =============================================================================
+
+const styles = {
+	wrapper: {
+		position: 'relative',
+		width: '100%',
+		height: '100%',
+	} as CSSProperties,
+	bar: {
+		position: 'absolute',
+		top: 0,
+		left: 0,
+		right: 0,
+		zIndex: 10,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		flexShrink: 0,
+		backgroundColor: 'transparent',
+		padding: '15px',
+		pointerEvents: 'none',
+	} as CSSProperties,
+	pill: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 2,
+		borderRadius: 6,
+		border: '1px solid var(--rr-border)',
+		padding: 2,
+		height: 38,
+		pointerEvents: 'auto',
+		backgroundColor: 'var(--rr-bg-widget)',
+	} as CSSProperties,
+	segment: (active: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		height: '100%',
+		padding: '0 14px',
+		fontSize: 'var(--rr-font-size-widget)',
+		fontWeight: 500,
+		cursor: 'pointer',
+		border: 'none',
+		outline: 'none',
+		borderRadius: 4,
+		backgroundColor: active ? 'var(--rr-brand)' : 'transparent',
+		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)',
+		transition: 'background-color 0.15s, color 0.15s',
+	}),
+	badge: (active: boolean): CSSProperties => ({
+		marginLeft: 6,
+		padding: '1px 6px',
+		fontSize: '10px',
+		fontWeight: 600,
+		borderRadius: 8,
+		backgroundColor: active ? 'color-mix(in srgb, var(--rr-fg-button) 30%, transparent)' : 'color-mix(in srgb, var(--rr-text-disabled) 20%, transparent)',
+		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-disabled)',
+	}),
+	panel: {
+		width: '100%',
+		height: '100%',
+		overflow: 'auto',
+	} as CSSProperties,
+};
+
+// =============================================================================
+// TYPES
 // =============================================================================
 
 export interface ITabPanelTab {
@@ -23,65 +91,43 @@ export interface ITabPanelTab {
 	badge?: React.ReactNode;
 }
 
+export interface ITabPanelPanel {
+	content: React.ReactNode;
+}
+
 export interface ITabPanelProps {
 	tabs: ITabPanelTab[];
 	activeTab: string;
 	onTabChange: (id: string) => void;
-	children: React.ReactNode;
-	/** Class for the panel below the tab bar (default: rr-tabpanel-content). */
-	contentClassName?: string;
+	/** Map of tab id → { content }. Only the active panel is mounted. */
+	panels: Record<string, ITabPanelPanel>;
 }
 
 // =============================================================================
-// Component
+// COMPONENT
 // =============================================================================
 
-export function TabPanel({ tabs, activeTab, onTabChange, children, contentClassName = 'rr-tabpanel-content' }: ITabPanelProps): React.ReactElement {
-	const tabBarRef = useRef<HTMLDivElement>(null);
-	const [indicator, setIndicator] = useState({ left: 0, width: 0 });
-
-	const updateIndicator = useCallback(() => {
-		const bar = tabBarRef.current;
-		if (!bar) return;
-		const activeButton = bar.querySelector('.rr-tab-item--active') as HTMLElement | null;
-		if (activeButton) {
-			// offsetLeft is in layout coords; subtract scrollLeft so the underline matches the
-			// visible tab when .rr-tab-bar has overflow-x: auto.
-			setIndicator({
-				left: activeButton.offsetLeft - bar.scrollLeft,
-				width: activeButton.offsetWidth,
-			});
-		}
-	}, []);
-
-	useEffect(() => {
-		updateIndicator();
-	}, [activeTab, updateIndicator, tabs]);
-
-	useEffect(() => {
-		const bar = tabBarRef.current;
-		window.addEventListener('resize', updateIndicator);
-		bar?.addEventListener('scroll', updateIndicator, { passive: true });
-		return () => {
-			window.removeEventListener('resize', updateIndicator);
-			bar?.removeEventListener('scroll', updateIndicator);
-		};
-	}, [updateIndicator]);
-
+export function TabPanel({ tabs, activeTab, onTabChange, panels }: ITabPanelProps): React.ReactElement {
 	return (
-		<>
-			<div className="rr-tab-bar" ref={tabBarRef}>
-				{tabs.map((tab) => (
-					<button key={tab.id} type="button" className={`rr-tab-item${activeTab === tab.id ? ' rr-tab-item--active' : ''}`} onClick={() => onTabChange(tab.id)} role="tab" aria-selected={activeTab === tab.id}>
-						{tab.label}
-						{tab.badge && <span className="rr-tab-badge">{tab.badge}</span>}
-					</button>
-				))}
-				<span className="rr-tab-indicator" style={{ left: indicator.left, width: indicator.width }} />
+		<div style={styles.wrapper}>
+			{Object.entries(panels).map(([id, panel]) => (
+				<div key={id} style={{ ...styles.panel, display: id === activeTab ? undefined : 'none' }}>
+					{panel.content}
+				</div>
+			))}
+			<div style={styles.bar}>
+				<div style={styles.pill}>
+					{tabs.map((tab) => {
+						const isActive = activeTab === tab.id;
+						return (
+							<button key={tab.id} type="button" style={styles.segment(isActive)} onClick={() => onTabChange(tab.id)}>
+								{tab.label}
+								{tab.badge && <span style={styles.badge(isActive)}>{tab.badge}</span>}
+							</button>
+						);
+					})}
+				</div>
 			</div>
-			<div className={contentClassName} role="tabpanel">
-				{children}
-			</div>
-		</>
+		</div>
 	);
 }

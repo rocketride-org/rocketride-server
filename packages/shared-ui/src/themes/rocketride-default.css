@@ -62,6 +62,9 @@
 	/** Alternate surface for visually distinct sections (e.g. lanes). */
 	--rr-bg-surface-alt: #fafafa;
 
+	/** Generic surface — used for floating UI elements (e.g. edge delete button). */
+	--rr-bg-surface: #ffffff;
+
 	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
@@ -303,6 +306,17 @@
 
 	/** Button label font weight. */
 	--rr-font-weight-button: 600;
+
+	/* ================================================================== */
+	/* Chart / Lane Colours                                                */
+	/* ================================================================== */
+
+	--rr-chart-blue: #4263eb;
+	--rr-chart-green: #2b8a3e;
+	--rr-chart-yellow: #e67700;
+	--rr-chart-purple: #7048e8;
+	--rr-chart-orange: #e67a2e;
+	--rr-chart-red: #c92a2a;
 
 	/* ================================================================== */
 	/* Annotations                                                         */

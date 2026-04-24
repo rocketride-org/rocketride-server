@@ -1,0 +1,4 @@
+# Test dependencies for nodes/test
+pytest
+pytest-asyncio
+pytest-timeout

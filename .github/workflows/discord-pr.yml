@@ -15,6 +15,8 @@ on:
       - converted_to_draft
       - closed
       - reopened
+  pull_request_review:
+    types: [submitted, dismissed]
   workflow_call:
 
 permissions:
@@ -45,7 +47,7 @@ jobs:
           fi
 
           # ── Resolve PR number ────────────────────────────────────────────
-          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ] || [ "$EVENT_NAME" = "pull_request_review" ]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
           else
             # workflow_call — inherits caller's event context
@@ -76,6 +78,19 @@ jobs:
           LABELS=$(echo    "$PR" | jq -r '[.labels[].name]           | if length==0 then "None"       else join(", ") end')
           ASSIGNEES=$(echo "$PR" | jq -r '[.assignees[].login]       | if length==0 then "Unassigned" else join(", ") end')
           REVIEWERS=$(echo "$PR" | jq -r '[.requested_reviewers[].login] | if length==0 then "None"  else join(", ") end')
+
+          # ── Fetch submitted reviews (latest per reviewer) ───────────────
+          REVIEWS_JSON=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq '[.[] | select(.state != "COMMENTED" and .state != "PENDING") | {user: .user.login, state: .state}]' 2>/dev/null || echo '[]')
+
+          REVIEWS_FIELD=$(echo "$REVIEWS_JSON" | jq -r '
+            group_by(.user) | map(last) |
+            map(
+              if .state == "APPROVED" then "✅ " + .user
+              elif .state == "CHANGES_REQUESTED" then "❌ " + .user
+              elif .state == "DISMISSED" then "🔄 " + .user
+              else empty end
+            ) | if length == 0 then "None" else join(", ") end')
 
           # ── Status + color ───────────────────────────────────────────────
           if   [ "$PR_MERGED" = "true"  ]; then COLOR=7419530;  STATUS="🟣 Merged"
@@ -141,6 +156,7 @@ jobs:
             --arg  labels    "$LABELS" \
             --arg  assignees "$ASSIGNEES" \
             --arg  reviewers "$REVIEWERS" \
+            --arg  reviews  "$REVIEWS_FIELD" \
             --arg  checks    "$CHECKS_FIELD" \
             --argjson color  "$COLOR" \
             '{embeds: [{
@@ -153,6 +169,7 @@ jobs:
                 {name: "Labels",    value: $labels,    inline: true},
                 {name: "Assignees", value: $assignees, inline: true},
                 {name: "Reviewers", value: $reviewers, inline: true},
+                {name: "Reviews",   value: $reviews,   inline: false},
                 {name: "Checks",    value: $checks,    inline: false}
               ]
             }]}')

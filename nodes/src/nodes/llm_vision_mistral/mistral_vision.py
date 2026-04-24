@@ -35,7 +35,11 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 import httpx
-from mistralai.client import Mistral
+
+try:
+    from mistralai.client import Mistral  # 2.x layout
+except ImportError:
+    from mistralai import Mistral  # 1.x layout
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
 

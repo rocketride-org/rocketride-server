@@ -357,58 +357,6 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Substitute environment variables in a string.
-	 * Replaces ${ROCKETRIDE_*} patterns with values from env dictionary.
-	 * If variable is not found, leaves it unchanged.
-	 */
-	private substituteEnvVars(value: string, env: Record<string, string>): string {
-		// Match ${ROCKETRIDE_*} patterns only
-		return value.replace(/\$\{(ROCKETRIDE_[^}]+)\}/g, (match, varName) => {
-			// Check if variable exists in env
-			if (varName in env) {
-				return String(env[varName]);
-			}
-			// If not found, leave as is
-			return match;
-		});
-	}
-
-	/**
-	 * Recursively process an object/array to substitute environment variables.
-	 * Only processes string values, leaving other types unchanged.
-	 */
-	private processEnvSubstitution(obj: unknown, env: Record<string, string>): unknown {
-		if (typeof obj === 'string') {
-			// If it's a string, perform substitution
-			return this.substituteEnvVars(obj, env);
-		} else if (Array.isArray(obj)) {
-			// If it's an array, process each element
-			return obj.map((item) => this.processEnvSubstitution(item, env));
-		} else if (obj !== null && typeof obj === 'object') {
-			// If it's an object, process each property
-			const result: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(obj)) {
-				result[key] = this.processEnvSubstitution(value, env);
-			}
-			return result;
-		}
-		// For other types (number, boolean, null), return as is
-		return obj;
-	}
-
-	/**
-	 * Substitutes environment variables in an object (e.g., pipeline configuration) (SYNC)
-	 * Returns a new object with all ${ROCKETRIDE_*} patterns replaced with their values.
-	 *
-	 * @param obj The object to process (e.g., pipeline configuration)
-	 * @returns A new object with environment variables substituted
-	 */
-	public substituteEnvVariables(obj: Record<string, unknown>): Record<string, unknown> {
-		const env = this.getEnv();
-		return this.processEnvSubstitution(obj, env) as Record<string, unknown>;
-	}
-
-	/**
 	 * Gets the current RocketRide configuration (SYNC)
 	 */
 	public getConfig(): ConfigManagerInfo {

@@ -30,19 +30,19 @@
  * consistent behavior when multiple API keys are available.
  * 
  * Priority Order:
- * 1. OpenAI (ROCKETRIDE_APIKEY_OPENAI) - Uses GPT-4 with 128K context
- * 2. Anthropic (ROCKETRIDE_APIKEY_ANTHROPIC) - Uses Claude-3 Sonnet
- * 3. Gemini (ROCKETRIDE_APIKEY_GEMINI) - Uses Gemini Pro model
- * 4. Ollama (ROCKETRIDE_HOST_OLLAMA) - Uses local Ollama server
+ * 1. OpenAI (ROCKETRIDE_OPENAI_KEY) - Uses GPT-4 with 128K context
+ * 2. Anthropic (ROCKETRIDE_ANTHROPIC_KEY) - Uses Claude-3 Sonnet
+ * 3. Gemini (ROCKETRIDE_GEMINI_KEY) - Uses Gemini Pro model
+ * 4. Ollama (ROCKETRIDE_OLLAMA_HOST) - Uses local Ollama server
  * 
  * @returns {Object} LLM component configuration object with provider-specific settings
  * @throws {Error} When no valid API keys are found in environment variables
  */
 function createLLMComponent() {
-	const openaiKey = process.env.ROCKETRIDE_APIKEY_OPENAI;
-	const anthropicKey = process.env.ROCKETRIDE_APIKEY_ANTHROPIC;
-	const geminiKey = process.env.ROCKETRIDE_APIKEY_GEMINI;
-	const ollamaHost = process.env.ROCKETRIDE_HOST_OLLAMA;
+	const openaiKey = process.env.ROCKETRIDE_OPENAI_KEY;
+	const anthropicKey = process.env.ROCKETRIDE_ANTHROPIC_KEY;
+	const geminiKey = process.env.ROCKETRIDE_GEMINI_KEY;
+	const ollamaHost = process.env.ROCKETRIDE_OLLAMA_HOST;
 
 	if (openaiKey) {
 		return {
@@ -91,10 +91,10 @@ function createLLMComponent() {
 	else {
 		throw new Error(
 			"No LLM API key found. Please set one of the following environment variables:\n" +
-			"- ROCKETRIDE_APIKEY_OPENAI (for OpenAI GPT-4)\n" +
-			"- ROCKETRIDE_APIKEY_ANTHROPIC (for Anthropic Claude)\n" +
-			"- ROCKETRIDE_APIKEY_GEMINI (for Google Gemini)\n" +
-			"- ROCKETRIDE_HOST_OLLAMA (for Ollama)"
+			"- ROCKETRIDE_OPENAI_KEY (for OpenAI GPT-4)\n" +
+			"- ROCKETRIDE_ANTHROPIC_KEY (for Anthropic Claude)\n" +
+			"- ROCKETRIDE_GEMINI_KEY (for Google Gemini)\n" +
+			"- ROCKETRIDE_OLLAMA_HOST (for Ollama)"
 		);
 	}
 }

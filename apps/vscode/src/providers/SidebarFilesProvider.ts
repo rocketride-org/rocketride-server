@@ -37,13 +37,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { getStatusPageProvider, getPageEditorProvider } from '../extension';
+import { getPageProjectProvider } from '../extension';
 import { getLogger } from '../shared/util/output';
 import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
-import { MonitorManager } from '../connection/monitor-manager';
-import { GenericEvent, GenericResponse } from '../shared/types';
+import { GenericEvent } from '../shared/types';
 
 /** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
 export interface ParsedErrWarnLine {
@@ -143,7 +142,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 				try {
 					// Open with a specific custom editor
-					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageEditor');
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to open status page: ${error}`);
 				}
@@ -160,36 +159,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				const unknownTask = item?.unknownTask as UnknownTask;
 
 				try {
-					let projectId: string;
-					let source: string;
-					let displayName: string;
-
-					// Check if this is an unknown task
-					if (unknownTask) {
-						projectId = unknownTask.projectId;
-						source = unknownTask.sourceId;
-						displayName = unknownTask.displayName || source;
-					} else {
-						if (knownContext?.parsedPipeline?.isValid && knownContext.parsedPipeline.projectId && knownContext.componentId) {
-							projectId = knownContext.parsedPipeline.projectId;
-							source = knownContext.componentId;
-							displayName = knownContext.displayName;
-						} else {
-							vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
-							return;
-						}
-					}
-
-					// Show the status page for this project with the specific component as source
-					const statusPageProvider = getStatusPageProvider();
-					if (statusPageProvider) {
-						// Pass title and tooltip to the status page provider
-						statusPageProvider.show(displayName, resourceUri, projectId, source);
-					} else {
-						vscode.window.showErrorMessage('Status page provider not available');
-					}
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 				} catch (error) {
-					vscode.window.showErrorMessage(`Failed to open status page for component: ${error}`);
+					vscode.window.showErrorMessage(`Failed to open pipeline: ${error}`);
 				}
 			}),
 
@@ -216,22 +188,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 					const pipelineJson = JSON.parse(pipelineText);
 
-					// Substitute .env settings
-					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
-
 					// Get project and source identifiers
 					const context = this.resolveKnownPipelineCommandContext(item, resourceUri);
-					const projectId = context?.parsedPipeline?.projectId;
 					const sourceId = context?.componentId ?? '';
 
-					// Use DAP command to execute pipeline without debugging
+					const client = this.connectionManager.getClient();
+					if (!client) throw new Error('Not connected to server');
 					const pipeName = resourceUri ? path.basename(resourceUri.fsPath).replace(/\.pipe(?:\.json)?$/, '') : undefined;
-					await this.connectionManager.request('execute', {
-						projectId: projectId,
+					await client.use({
+						pipeline: pipelineJson,
 						source: sourceId,
-						pipeline: pipelineTransformed,
 						args: ConfigManager.getInstance().getEffectiveEngineArgs(),
-						...(pipeName ? { name: pipeName } : {}),
+						name: pipeName,
 					});
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -262,14 +230,16 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				}
 
 				try {
-					const response = (await this.connectionManager.request('rrext_get_token', {
-						projectId: projectId,
-						source: sourceId,
-					})) as GenericResponse | undefined;
+					const client = this.connectionManager.getClient();
+					if (!client) throw new Error('Not connected to server');
 
-					const token = response?.body?.token as string | undefined;
+					const token = await client.getTaskToken({ projectId, source: sourceId });
+					if (!token) {
+						vscode.window.showErrorMessage('No running task found to stop');
+						return;
+					}
 
-					await this.connectionManager.request('terminate', {}, token);
+					await client.terminate(token);
 				} catch (error: unknown) {
 					this.logger.error(`Unable to stop pipeline: ${error}`);
 					vscode.window.showErrorMessage(`Failed to stop pipeline: ${error}`);
@@ -305,18 +275,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id`);
 					return;
 				}
-				const projectId = parsedPipeline.projectId;
-				const sourceId = sourceComponent.id;
-				const services = this.connectionManager.getCachedServices()?.services ?? {};
-				const providerDef = sourceComponent.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
-				const displayName = sourceComponent.name || providerDef?.title || sourceId;
-				const statusPageProvider = getStatusPageProvider();
-				if (!statusPageProvider) {
-					vscode.window.showErrorMessage('Status page provider not available');
-					return;
-				}
-				await statusPageProvider.show(displayName, resourceUri, projectId, sourceId);
-				statusPageProvider.revealErrorsSection(projectId, sourceId, item.folderType);
+				// Open the pipeline file in the unified project editor (errors tab is within ProjectView)
+				await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 			}),
 		];
 
@@ -387,17 +347,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.handleEvent(e);
 		});
 
-		// Subscribe to task lifecycle and output events (once — MonitorManager
-		// handles reconnection replay, so no need to re-add on each connect)
-		MonitorManager.getInstance()
-			.addMonitor({ token: '*' }, ['task', 'output'])
-			.catch((err) => {
+		// Subscribe to task lifecycle and output events (once — the SDK
+		// handles reconnection replay via _resubscribeAllMonitors)
+		const client = this.connectionManager.getClient();
+		if (client) {
+			client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
 				this.logger.error(`Failed to subscribe to task events: ${err}`);
 			});
+		}
 
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', (_e) => {
-			// Subscriptions are restored by MonitorManager.resubscribeAll() in connection.ts
+			// Subscriptions are restored by client._resubscribeAllMonitors() on reconnect
 		});
 
 		// Listen for disconnected events
@@ -663,8 +624,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		// Check if this file save is part of a Run operation
 		// If so, skip restart check (the save is from clicking Run, not a manual edit)
-		const pageEditorProvider = getPageEditorProvider();
-		if (pageEditorProvider?.isSaveForRun(uri)) {
+		const pageProjectProvider = getPageProjectProvider();
+		if (pageProjectProvider?.isSaveForRun(uri)) {
 			return;
 		}
 
@@ -733,30 +694,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Convert to json
 		const pipelineJson = JSON.parse(pipelineText);
 
-		// Substitute and .env settings
-		const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
-
-		// Use DAP command to execute pipeline without debugging
 		try {
-			// We need the token to attach...
-			const response = (await this.connectionManager.request('rrext_get_token', {
-				projectId: projectId,
-				source: sourceId,
-			})) as GenericResponse | undefined;
+			const client = this.connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
 
-			// Get the token of the task
-			const token = response?.body?.token as string | undefined;
+			const token = await client.getTaskToken({ projectId: projectId!, source: sourceId! });
 
-			await this.connectionManager.request(
-				'restart',
-				{
-					token: token,
-					projectId: projectId,
-					source: sourceId,
-					pipeline: pipelineTransformed,
-				},
-				'*'
-			);
+			await client.restart({
+				token,
+				projectId: projectId!,
+				source: sourceId!,
+				pipeline: pipelineJson,
+			});
 		} catch (error: unknown) {
 			this.logger.error(`Unable to execute pipeline: ${error}`);
 			vscode.window.showErrorMessage(String(error));
@@ -802,7 +751,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			const content = JSON.stringify(template, null, 2);
 			await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf8'));
 
-			await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageEditor');
+			await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageProject');
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
 		}
@@ -868,7 +817,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					});
 					contextValue = hasRunningComponents ? 'pipelineFile:running' : 'pipelineFile:stopped';
 					// Aggregate task errors/warnings across all sources for pipeline file description
-					const statusProvider = getStatusPageProvider();
+					const statusProvider = getPageProjectProvider();
 					let totalErrors = 0;
 					let totalWarnings = 0;
 					for (const comp of parsedFile.sourceComponents) {
@@ -1045,7 +994,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		if (element.contextValue === 'pipelineFile' && element.parsedFile?.isValid) {
 			const parsedFile = element.parsedFile;
 			const projectId = parsedFile.projectId!;
-			const statusProvider = getStatusPageProvider();
+			const statusProvider = getPageProjectProvider();
 			const sortedSources = [...parsedFile.sourceComponents].sort((a, b) => {
 				const nameA = (a.name || a.id || '').toLowerCase();
 				const nameB = (b.name || b.id || '').toLowerCase();
@@ -1227,11 +1176,12 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 */
 	dispose(): void {
 		// Balance the wildcard monitor added in setupEventListeners
-		void MonitorManager.getInstance()
-			.removeMonitor({ token: '*' }, ['task', 'output'])
-			.catch((error) => {
+		const client = this.connectionManager.getClient();
+		if (client) {
+			void client.removeMonitor({ token: '*' }, ['task', 'output']).catch((error) => {
 				this.logger.error(`Failed to unsubscribe from task events: ${error}`);
 			});
+		}
 
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];

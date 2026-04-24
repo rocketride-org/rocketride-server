@@ -42,7 +42,11 @@ from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.validation import validate_prompt
-from mistralai.client import Mistral
+
+try:
+    from mistralai.client import Mistral  # 2.x layout
+except ImportError:
+    from mistralai import Mistral  # 1.x layout
 
 
 class Chat(ChatBase):
