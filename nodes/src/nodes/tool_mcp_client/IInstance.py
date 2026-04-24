@@ -55,6 +55,13 @@ class IInstance(IInstanceBase):
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
             arguments = {k: v for k, v in input_obj.items() if k not in _FRAMEWORK_KEYS}
+            # Some agent framework paths wrap tool args as {"input": {...}}.
+            # MCP servers with strict schemas (additionalProperties: false)
+            # reject the wrapper, so unwrap it to match the tool's schema.
+            if 'input' in arguments and isinstance(arguments['input'], dict):
+                inner = arguments['input']
+                extras = {k: v for k, v in arguments.items() if k != 'input'}
+                arguments = {**inner, **extras}
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
         return self.IGlobal.call_tool(server_name=server_name, tool_name=bare_tool, arguments=arguments)

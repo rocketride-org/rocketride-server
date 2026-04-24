@@ -37,6 +37,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -194,12 +195,12 @@ class TaskConn(
         if message.get('type') == 'request' and message.get('command') == 'auth':
             await super().on_receive(message)
             if not self._authenticated:
-                await self._transport.disconnect()
+                asyncio.create_task(self._transport.disconnect())
             return
         if not self._authenticated:
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
-            await self._transport.disconnect()
+            asyncio.create_task(self._transport.disconnect())
             return
         await super().on_receive(message)
 
