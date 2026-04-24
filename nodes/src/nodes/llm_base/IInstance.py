@@ -21,13 +21,40 @@
 # SOFTWARE.
 # =============================================================================
 
+from __future__ import annotations
+
 from rocketlib import IInstanceBase, invoke_function
 from ai.common.schema import Question, Answer
 
+from .resilience import CircuitBreakerOpenError, LLMResiliencePolicy
+from .resilience_config import create_resilience_policy
+
 
 class IInstanceGenericLLM(IInstanceBase):
+    # Lazily-initialized resilience policy (one per provider, shared across instances).
+    _resilience_policy: LLMResiliencePolicy | None = None
+
+    def _get_resilience_policy(self) -> LLMResiliencePolicy:
+        """Return (and lazily create) the resilience policy for this provider."""
+        if self._resilience_policy is None:
+            # Derive the provider name from the module path, e.g.
+            # ``nodes.src.nodes.llm_openai.IInstance`` -> ``openai``.
+            provider = type(self).__module__.rsplit('.', 1)[0].rsplit('.', 1)[-1]
+            if provider.startswith('llm_vision_'):
+                provider = provider[len('llm_vision_'):]
+            elif provider.startswith('llm_'):
+                provider = provider[4:]
+            self.__class__._resilience_policy = create_resilience_policy(provider)
+        return self._resilience_policy
+
     def _question(self, question: Question) -> Answer:
-        return self.IGlobal._chat.chat(question)
+        # Execute the LLM call through the resilience policy (circuit breaker + retry).
+        policy = self._get_resilience_policy()
+        try:
+            answer = policy.execute(self.IGlobal._chat.chat, question)
+        except CircuitBreakerOpenError:
+            raise
+        return answer
 
     def writeQuestions(self, question: Question):
         answer = self._question(question)
