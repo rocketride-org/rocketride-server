@@ -155,7 +155,14 @@ class IInstance(IInstanceBase):
         if self._vsf_node_id is None:
             return True  # stub: always match when no VSF wired (dev/test)
         try:
-            result = bool(self.instance.invoke('visual_similarity', frame_bytes, nodeId=self._vsf_node_id))
+            # New invoke API (PR #670): param object with .lane + payload fields
+            class _P:
+                pass
+
+            p = _P()
+            p.lane = 'visual_similarity'
+            p.frame_bytes = frame_bytes
+            result = bool(self.instance.invoke(p, component_id=self._vsf_node_id))
             return result
         except Exception as e:
             _plog(f'invoke_vsf: EXCEPTION {e}')
