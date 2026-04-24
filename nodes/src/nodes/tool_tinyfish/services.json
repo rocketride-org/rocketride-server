@@ -1,0 +1,57 @@
+{
+	"title": "TinyFish",
+	"protocol": "tool_tinyfish://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_tinyfish",
+	"prefix": "tinyfish",
+	"icon": "tinyfish.svg",
+	"documentation": "https://docs.tinyfish.ai",
+	"description": ["Exposes TinyFish browser-automation, search, and fetch operations as agent tools.", "Provides agent_run (multi-step browser automation), search (structured web search), and fetch (URL to clean content)."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "TinyFish",
+				"apikey": "",
+				"base_url": "https://agent.tinyfish.ai",
+				"default_timeout_s": 180
+			}
+		}
+	},
+	"fields": {
+		"tool_tinyfish.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "TinyFish API key",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_tinyfish.base_url": {
+			"type": "string",
+			"title": "Base URL",
+			"description": "TinyFish API base URL (leave default unless using a custom deployment)",
+			"default": "https://agent.tinyfish.ai"
+		},
+		"tool_tinyfish.default_timeout_s": {
+			"type": "number",
+			"title": "Default Timeout (seconds)",
+			"description": "Default wall-clock timeout for agent_run when not specified per-call",
+			"default": 180
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "TinyFish",
+			"properties": ["type", "tool_tinyfish.apikey", "tool_tinyfish.base_url", "tool_tinyfish.default_timeout_s"]
+		}
+	]
+}
