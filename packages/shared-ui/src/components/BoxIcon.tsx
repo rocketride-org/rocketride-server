@@ -57,7 +57,9 @@ function createMultiPathIcon(paths: string[], viewBox = '0 0 24 24'): IconCompon
 
 export const BxPlusSquare = createIcon('M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zm2-10h4V7h2v4h4v2h-4v4h-2v-4H7v-2z');
 
-export const BxPlusSquareSolid = createIcon('M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zm2-10h4V7h2v4h4v2h-4v4h-2v-4H7v-2z');
+// Boxicons "bxs-plus-square" — filled square with the plus forming a cutout.
+// Distinct from the outline BxPlusSquare above (previously an accidental duplicate).
+export const BxPlusSquareSolid = createIcon('M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-3 10h-3v3h-2v-3H8v-2h3V8h2v3h3v2z');
 
 export const BxPlus = createIcon('M19 11h-6V5h-2v6H5v2h6v6h2v-6h6z');
 
