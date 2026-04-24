@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2026 Aparati Software AG
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,7 @@ import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
+from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
@@ -207,6 +208,11 @@ class TaskConn(
         self._last_activity: float = time.time()
         self._client_info: Dict[str, str] = {}
 
+        # Brute-force guard: per-connection lifetime count of auth requests.
+        # Enforced in on_auth against CONST_AUTH_MAX_ATTEMPTS_PER_CONN so a
+        # single WebSocket cannot submit an unbounded stream of credentials.
+        self._auth_attempts: int = 0
+
     async def send(self, message: Dict[str, Any]) -> None:
         """
         Send a DAP message over the transport layer, updating outbound message metrics.
@@ -258,7 +264,20 @@ class TaskConn(
         """
         Handle DAP auth command: validate credential and return ConnectResult on success.
         An empty credential deauthenticates the connection.
+
+        Also enforces ``CONST_AUTH_MAX_ATTEMPTS_PER_CONN`` — once the per-connection
+        auth attempt count exceeds the cap, further auth requests are rejected and
+        the connection is scheduled for disconnect. Successful auth does not reset
+        the counter: the cap is a per-connection lifetime limit.
         """
+        # Count every call (including empty/deauth and re-auth) toward the cap.
+        self._auth_attempts += 1
+        if self._auth_attempts > CONST_AUTH_MAX_ATTEMPTS_PER_CONN:
+            err = self.build_error(request, 'Too many authentication attempts')
+            await self.send(err)
+            self._transport.disconnect()
+            return
+
         args = request.get('arguments') or {}
         credential = args.get('auth') or ''
 

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2026 Aparati Software AG
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from ai.constants import CONST_CLEANUP_DELAY_TIME, CONST_CLEANUP_SLEEP_TIME, CONST_DEFAULT_TTL, CONST_TTL_CHECK, CONST_MAX_UNAUTHED_CONNS_PER_IP
+from ai.constants import CONST_CLEANUP_DELAY_TIME, CONST_CLEANUP_SLEEP_TIME, CONST_DEFAULT_TTL, CONST_TTL_CHECK, CONST_MAX_UNAUTHED_CONNS_PER_IP, CONST_MAX_UNAUTHED_IPS
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
@@ -715,8 +715,10 @@ class TaskServer(DAPBase):
         for conn in list(self._connections.values()):
             try:
                 await conn.send_server_event(type, event=event, apikey=apikey)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log individual delivery failures so dashboard-event drops leave
+                # a trace; match the pattern used by broadcast_task_event below.
+                self.debug_message(f'Failed to broadcast server event to connection: {e}')
 
     async def push_account_update(self, user_id: str) -> None:
         """
@@ -764,7 +766,10 @@ class TaskServer(DAPBase):
         if token not in self._task_control:
             return
 
-        for conn in self._connections.values():
+        # Snapshot to list() so a connection joining or dropping mid-broadcast
+        # does not raise RuntimeError on the next iteration; matches the
+        # pattern used by broadcast_server_event / push_account_update above.
+        for conn in list(self._connections.values()):
             try:
                 await conn.send_task_event(event_type, token=token, event=event)
 
@@ -1466,6 +1471,13 @@ class TaskServer(DAPBase):
         client_ip = websocket.client.host if websocket.client else ''
         current_unauthed = self._unauthed_by_ip.get(client_ip, 0)
         if client_ip and current_unauthed >= CONST_MAX_UNAUTHED_CONNS_PER_IP:
+            await websocket.close(code=1008)  # 1008 = Policy Violation
+            return
+        # Global cap on number of distinct IPs holding slots: per-IP decrement
+        # prunes entries as they drop to zero, but an attacker rotating through
+        # many IPs (each at 1 slot) can still grow _unauthed_by_ip unbounded.
+        # Reject new IPs once the table is full; existing IPs keep working.
+        if client_ip and client_ip not in self._unauthed_by_ip and len(self._unauthed_by_ip) >= CONST_MAX_UNAUTHED_IPS:
             await websocket.close(code=1008)  # 1008 = Policy Violation
             return
         if client_ip:

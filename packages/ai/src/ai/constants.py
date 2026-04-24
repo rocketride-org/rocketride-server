@@ -70,6 +70,7 @@ CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 CONST_AUTH_PENDING_TIMEOUT = 600  # seconds before an OAuth-pending connection is dropped (10 minutes)
 CONST_MAX_PENDING_OAUTH_STATES = 500  # global cap on simultaneous OAuth state nonces
 CONST_MAX_UNAUTHED_CONNS_PER_IP = 10  # max unauthenticated WebSocket connections per client IP
+CONST_MAX_UNAUTHED_IPS = 10_000  # global cap on distinct IPs holding unauthenticated slots
 CONST_AUTH_MAX_ATTEMPTS_PER_CONN = 5  # max rrext_account_authenticate calls per connection
 CONST_DEFAULT_WEB_PORT = 5565  # default web server port
 CONST_DEFAULT_WEB_HOST = '0.0.0.0'  # default bind address (all interfaces)
