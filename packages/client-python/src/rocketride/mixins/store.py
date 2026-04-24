@@ -162,18 +162,22 @@ class StoreMixin(DAPClient):
         response = await self.request(request)
         self._check_response(response)
 
-    async def fs_rmdir(self, path: str, recursive: bool = False) -> None:
+    async def fs_rmdir(self, path: str, *, recursive: bool = False) -> None:
         """
         Remove a directory.
 
         Args:
-            path: Relative directory path.
-            recursive: If True, delete all contents recursively (default: False).
+            path: Relative directory path. Must be non-empty and must not start
+                with ``/`` or ``\\`` — destructive ops reject absolute-like
+                paths so a bad input cannot act on the account root.
+            recursive: Keyword-only. If True, delete all contents recursively
+                (default: False).
 
         Raises:
+            ValueError: If ``path`` is empty or absolute-like.
             RuntimeError: If directory is not empty and recursive is False.
         """
-        self._validate_store_path(path)
+        self._validate_relative_path(path, 'path')
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rmdir', 'path': path, 'recursive': recursive})
         response = await self.request(request)
         self._check_response(response)
@@ -203,14 +207,17 @@ class StoreMixin(DAPClient):
         all contents are moved recursively.
 
         Args:
-            old_path: Current relative path within the account store.
-            new_path: New relative path within the account store.
+            old_path: Current relative path within the account store. Must be
+                non-empty and must not start with ``/`` or ``\\``.
+            new_path: New relative path within the account store. Same
+                constraints as ``old_path``.
 
         Raises:
+            ValueError: If either path is empty or absolute-like.
             RuntimeError: If old_path does not exist or rename fails.
         """
-        self._validate_store_path(old_path)
-        self._validate_store_path(new_path)
+        self._validate_relative_path(old_path, 'old_path')
+        self._validate_relative_path(new_path, 'new_path')
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rename', 'old_path': old_path, 'new_path': new_path})
         response = await self.request(request)
         self._check_response(response)
@@ -375,6 +382,22 @@ class StoreMixin(DAPClient):
                 raise ValueError(f'Path traversal not allowed: {path}')
             if segment and any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in segment):
                 raise ValueError(f'Path contains invalid characters: {path}')
+
+    @staticmethod
+    def _validate_relative_path(path: str, name: str = 'path') -> None:
+        """
+        Validate a path for destructive operations (rmdir, rename).
+
+        Stricter than ``_validate_store_path``: rejects empty strings and paths
+        with a leading ``/`` or ``\\`` so a bad input cannot slip past and act
+        on the account root. Delegates to ``_validate_store_path`` for the
+        per-segment character/traversal checks.
+        """
+        if not isinstance(path, str) or not path:
+            raise ValueError(f'{name} must be a non-empty string')
+        if path.startswith('/') or path.startswith('\\'):
+            raise ValueError(f'{name} must be a relative path (got {path!r})')
+        StoreMixin._validate_store_path(path)
 
     @staticmethod
     def _validate_id(value: str, name: str) -> None:

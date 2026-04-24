@@ -613,16 +613,31 @@ class TaskCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path``.  Optional ``recursive``
-                (bool, defaults to ``False``) — if ``True`` the directory and all
-                its contents are removed; if ``False`` the call fails if the
-                directory is non-empty.
+            args (Dict[str, Any]): Must contain ``path`` (non-empty string). Optional
+                ``recursive`` (strict bool; any non-bool value is rejected rather than
+                coerced). If ``True`` the directory and all its contents are removed;
+                if ``False`` the call fails when the directory is non-empty.
 
         Returns:
-            Dict[str, Any]: Empty success DAP response.
+            Dict[str, Any]: Empty success DAP response, or a DAP error response if
+                ``path`` is missing/empty or ``recursive`` is not a bool.
         """
+        # Validate path is a non-empty string before touching the store — the
+        # FileStore layer rejects empty paths, but an early error here produces
+        # a cleaner DAP-level message.
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'rmdir requires a non-empty "path" string')
+
+        # Accept only an explicit bool for ``recursive`` — avoid silently enabling
+        # recursive deletion when the client sends a non-bool truthy value (e.g.
+        # a string or a dict).
+        recursive = args.get('recursive', False)
+        if not isinstance(recursive, bool):
+            return self.build_error(request, 'rmdir "recursive" must be a boolean')
+
         # Remove the directory; pass the recursive flag from the client.
-        await self._get_file_store().rmdir(args.get('path'), recursive=bool(args.get('recursive', False)))
+        await self._get_file_store().rmdir(path, recursive=recursive)
         return self.build_response(request)
 
     async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -648,11 +663,21 @@ class TaskCommands(DAPConn):
         Args:
             request (Dict[str, Any]): Original DAP request.
             args (Dict[str, Any]): Must contain ``old_path`` (current path) and
-                ``new_path`` (desired path).
+                ``new_path`` (desired path). Both are required non-empty strings.
 
         Returns:
-            Dict[str, Any]: Empty success DAP response.
+            Dict[str, Any]: Empty success DAP response, or a DAP error response if
+                either argument is missing or not a non-empty string.
         """
+        # Validate both paths up front so FileStore.rename does not receive None
+        # and fail with a less actionable error further down the stack.
+        old_path = args.get('old_path')
+        new_path = args.get('new_path')
+        if not isinstance(old_path, str) or not old_path:
+            return self.build_error(request, 'rename requires a non-empty "old_path" string')
+        if not isinstance(new_path, str) or not new_path:
+            return self.build_error(request, 'rename requires a non-empty "new_path" string')
+
         # Delegate the rename operation to the user-scoped file store backend.
-        await self._get_file_store().rename(args.get('old_path'), args.get('new_path'))
+        await self._get_file_store().rename(old_path, new_path)
         return self.build_response(request)
