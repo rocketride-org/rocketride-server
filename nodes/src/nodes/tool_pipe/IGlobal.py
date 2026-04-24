@@ -26,22 +26,28 @@
 """
 tool_pipe node — global (shared) state.
 
-Reads the tool configuration at startup so IInstance can route tool
-invocations to the correct output lane on every call.
+Reads the sub-pipeline configuration at startup so IInstance can
+drive it on every tool invocation without re-parsing config.
 """
 
 from __future__ import annotations
+
+import os
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
-VALID_RETURN_TYPES = {'text', 'answers', 'documents', 'table'}
+VALID_RETURN_TYPES = {'text', 'answers', 'documents', 'table', 'image'}
 
 
 class IGlobal(IGlobalBase):
     """Global state for tool_pipe."""
 
+    uri: str = ''
+    apikey: str = ''
+    pipe_path: str = ''
+    tool_name: str = ''
     tool_description: str = ''
     return_type: str = 'text'
 
@@ -51,17 +57,30 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        self.tool_description = str(cfg.get('tool_description') or '').strip()
-        self.return_type = str(cfg.get('return_type') or '').strip() or 'text'
+        self.uri = str(cfg.get('uri') or '').strip()
+        self.apikey = str(cfg.get('apikey') or '').strip()
+        self.pipe_path = str(cfg.get('pipe') or '').strip()
+        self.tool_name = str(cfg.get('tool_name') or 'run_pipeline').strip()
+        self.tool_description = str(cfg.get('tool_description') or 'Run a pipeline and return its result.').strip()
+        self.return_type = str(cfg.get('return_type') or 'text').strip()
 
+        if not self.uri:
+            raise Exception('tool_pipe: uri is required')
+        if not self.apikey:
+            raise Exception('tool_pipe: apikey is required')
+        if not self.pipe_path:
+            raise Exception('tool_pipe: pipe path is required')
         if self.return_type not in VALID_RETURN_TYPES:
             raise Exception(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
 
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            return_type = str(cfg.get('return_type') or '').strip() or 'text'
-            if return_type not in VALID_RETURN_TYPES:
+            pipe_path = str(cfg.get('pipe') or '').strip()
+            if pipe_path and not os.path.isfile(pipe_path):
+                warning(f'tool_pipe: pipe file not found: {pipe_path}')
+            return_type = str(cfg.get('return_type') or 'text').strip()
+            if return_type and return_type not in VALID_RETURN_TYPES:
                 warning(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
         except Exception as e:
             warning(str(e))
