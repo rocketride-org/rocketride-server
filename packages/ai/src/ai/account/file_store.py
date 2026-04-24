@@ -28,6 +28,8 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
+from rocketlib import debug
+
 from .store import IStore, StorageError
 
 # Sentinel file used to represent empty directories on object stores
@@ -36,8 +38,14 @@ DIR_MARKER = '.dirmarker'
 # Maximum bytes a single read_chunk call may return
 MAX_CHUNK_SIZE = 4_194_304  # 4 MB
 
-# Characters forbidden inside any single path segment
-_INVALID_SEGMENT_CHARS = frozenset('*?<>|"\x00')
+# Maximum open handles per connection (DoS bound). Only enforced when
+# connection_id is non-zero — zero means "unowned", used by tests.
+MAX_HANDLES_PER_CONNECTION = 64
+
+# Characters forbidden inside any single path segment. ':' blocks Windows
+# drive-letter syntax (C:\...) from leaking through after the '\\' -> '/'
+# conversion in _validate_path.
+_INVALID_SEGMENT_CHARS = frozenset('*?<>|":\x00')
 
 
 class FileHandleMode(Enum):
@@ -107,12 +115,16 @@ class FileStore:
         full_path = self._full_path(path)
         if full_path in self._write_locks:
             raise StorageError(f'File already open for writing: {path}')
+        if connection_id and self._count_handles_for(connection_id) >= MAX_HANDLES_PER_CONNECTION:
+            raise StorageError(f'Too many open handles for connection {connection_id}')
 
         # Acquire lock before awaiting to prevent races at suspension points
         self._write_locks.add(full_path)
         try:
             result = await self._store.open_write(full_path)
-        except Exception:
+        except BaseException:
+            # Catch BaseException so asyncio.CancelledError (BaseException
+            # subclass since Python 3.8) still releases the lock on cancel.
             self._write_locks.discard(full_path)
             raise
 
@@ -166,6 +178,8 @@ class FileStore:
             Dict with 'handle' (str) and 'size' (int).
         """
         full_path = self._full_path(path)
+        if connection_id and self._count_handles_for(connection_id) >= MAX_HANDLES_PER_CONNECTION:
+            raise StorageError(f'Too many open handles for connection {connection_id}')
         result = await self._store.open_read(full_path)
         handle = FileHandle(
             path=full_path,
@@ -355,13 +369,29 @@ class FileStore:
         Remove a directory.
 
         Args:
-            path: Relative directory path.
+            path: Relative directory path. Must be non-empty — an empty/root
+                path is rejected to prevent accidental account wipes.
             recursive: If True, delete all contents recursively (default: False).
 
         Raises:
-            StorageError: If directory is not empty and recursive is False.
+            StorageError: If the directory is not empty and recursive is False,
+                any file under the prefix is currently open, or one or more
+                backend deletes fail (partial-failure errors are aggregated).
         """
-        full_prefix = self._full_path(path.rstrip('/') + '/')
+        # Reject empty/root paths up front: _full_path('') resolves to the
+        # account root, and list_files on that prefix would enumerate every
+        # file owned by the account — a single bad caller could wipe the store.
+        validated = self._validate_path(path)
+        if not validated:
+            raise StorageError('rmdir requires a non-empty path')
+
+        full_prefix = self._full_path(validated.rstrip('/') + '/')
+
+        # Refuse if any open handle or write-lock lives under this prefix;
+        # otherwise the writer's next write_chunk/close would reference a
+        # deleted backend path with undefined behavior.
+        self._assert_no_active_handles_under(full_prefix)
+
         all_files = await self._store.list_files(full_prefix)
 
         # Ignore the dirmarker sentinel when checking emptiness
@@ -370,13 +400,18 @@ class FileStore:
         if not recursive and non_marker:
             raise StorageError(f'Directory not empty: {path}')
 
+        # Collect per-file failures so a partial rmdir is visible to callers
+        # rather than silently reported as success.
+        errors: list[str] = []
         for f in all_files:
             try:
                 await self._store.delete_file(f)
-            except StorageError:
-                pass
+            except StorageError as e:
+                errors.append(f'{f}: {e}')
+        if errors:
+            raise StorageError(f'rmdir partial failure ({len(errors)} file(s)): {"; ".join(errors)}')
 
-    async def rename(self, old_path: str, new_path: str) -> None:
+    async def rename(self, old_path: str, new_path: str, overwrite: bool = False) -> None:
         """
         Rename a file or directory.
 
@@ -387,10 +422,13 @@ class FileStore:
         Args:
             old_path: Current relative path within the account store.
             new_path: New relative path within the account store.
+            overwrite: When False (default) the call fails if the destination
+                already exists. Pass True to replace the destination.
 
         Raises:
-            StorageError: If old_path does not exist, is open for writing, or
-                the operation fails.
+            StorageError: If old_path does not exist, is open for reading or
+                writing, the destination already exists without ``overwrite``,
+                or the operation fails.
         """
         old_full = self._full_path(old_path)
         new_full = self._full_path(new_path)
@@ -400,8 +438,15 @@ class FileStore:
         all_files = await self._store.list_files(dir_prefix)
 
         if all_files:
-            # Directory rename: copy every file to the new prefix then delete
+            # Directory rename: refuse if any source file is open, then check
+            # destination collision before starting the copy loop.
+            self._assert_no_active_handles_under(dir_prefix)
             new_dir_prefix = new_full.rstrip('/') + '/'
+            self._assert_no_active_handles_under(new_dir_prefix)
+            if not overwrite:
+                existing = await self._store.list_files(new_dir_prefix)
+                if existing:
+                    raise StorageError(f'Destination already exists: {new_path}')
             for file_path in all_files:
                 relative_to_old = file_path[len(dir_prefix) :]
                 new_file_path = new_dir_prefix + relative_to_old
@@ -409,9 +454,23 @@ class FileStore:
                 await self._store.write_bytes(new_file_path, data)
                 await self._store.delete_file(file_path)
         else:
-            # File rename: read + write new + delete old
+            # File rename: check both source and destination locks, then
+            # check destination existence unless overwrite was requested.
             if old_full in self._write_locks:
                 raise StorageError(f'Cannot rename file while it is open for writing: {old_path}')
+            if new_full in self._write_locks:
+                raise StorageError(f'Cannot rename onto file that is open for writing: {new_path}')
+            if not overwrite:
+                dest_exists = False
+                try:
+                    info = await self._store.get_file_info(new_full)
+                    dest_exists = bool(info)
+                except StorageError:
+                    # get_file_info raises when the key does not exist — good,
+                    # destination is clear and rename can proceed.
+                    pass
+                if dest_exists:
+                    raise StorageError(f'Destination already exists: {new_path}')
             data = await self._store.read_bytes(old_full)
             await self._store.write_bytes(new_full, data)
             await self._store.delete_file(old_full)
@@ -469,6 +528,26 @@ class FileStore:
         if handle.mode == FileHandleMode.WRITE:
             self._write_locks.discard(handle.path)
 
+    def _count_handles_for(self, connection_id: int) -> int:
+        """Count currently-open handles owned by ``connection_id`` (for the DoS cap)."""
+        return sum(1 for h in self._handles.values() if h.connection_id == connection_id)
+
+    def _assert_no_active_handles_under(self, prefix: str) -> None:
+        """
+        Refuse mutating operations (rmdir, rename) when any file under ``prefix``
+        is currently held by a write lock or an open handle.
+
+        Keeps the operation consistent with open writers/readers: otherwise a
+        rmdir/rename would pull the rug out from under an in-flight handle,
+        leading to undefined backend behavior.
+        """
+        for locked in self._write_locks:
+            if locked == prefix.rstrip('/') or locked.startswith(prefix):
+                raise StorageError(f'Cannot modify: file open for writing under {prefix}')
+        for handle in self._handles.values():
+            if handle.path == prefix.rstrip('/') or handle.path.startswith(prefix):
+                raise StorageError(f'Cannot modify: handle open under {prefix}')
+
     async def _force_close_handle(self, handle_id: str) -> None:
         """Force-close a handle, committing any written data. Best-effort."""
         handle = self._handles.get(handle_id)
@@ -479,8 +558,10 @@ class FileStore:
                 await self._store.close_write(handle.path, handle.context)
             else:
                 await self._store.close_read(handle.path, handle.context)
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort cleanup — log at debug level so disconnect-time
+            # commit failures are traceable rather than silently lost.
+            debug(f'FileStore._force_close_handle failed handle={handle_id} mode={handle.mode.value} path={handle.path}: {e}')
         finally:
             self._release_handle(handle)
 
@@ -519,5 +600,6 @@ __all__ = [
     'FileHandle',
     'FileHandleMode',
     'MAX_CHUNK_SIZE',
+    'MAX_HANDLES_PER_CONNECTION',
     'DIR_MARKER',
 ]
