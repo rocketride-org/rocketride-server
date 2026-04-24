@@ -65,7 +65,10 @@ private:
     std::string m_targetFilter;
 
 public:
-    void setTargetFilter(const std::string &nodeId) noexcept { m_targetFilter = nodeId; }
+    // By-value + move: Python side hands us an rvalue std::string from
+    // pybind11, and Binder stores it verbatim. Avoids the extra copy the
+    // old const-ref signature forced at the boundary.
+    void setTargetFilter(std::string nodeId) noexcept { m_targetFilter = std::move(nodeId); }
 
     static constexpr std::array<const char *, 15> MethodNames = {
         "open",

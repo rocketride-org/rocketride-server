@@ -446,8 +446,26 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
 }
 
 // Thin delegate so Python can drive Binder::m_targetFilter. Pass "" to reset.
-void IServiceFilterInstance::cb_setTargetFilter(std::string nodeId) noexcept(false) {
-    this->binder.setTargetFilter(nodeId);
+//
+// Sanity checks are log-only, never reject: we still forward whatever the
+// caller sent. Rejecting would re-introduce the silent-drop class of bug
+// the wrapper is trying to diagnose. All three surfaces below pair with
+// the "filter active, zero matches" warning in Binder::callMethods so a
+// stale canvas branch target, stray whitespace, or control chars in a
+// node id always leave a breadcrumb instead of silently dropping chunks.
+void IServiceFilterInstance::cb_setTargetFilter(std::string nodeId) noexcept {
+    // Strip leading/trailing whitespace: a trailing space from a UI
+    // copy-paste silently misses every instance otherwise.
+    while (!nodeId.empty() &&
+           std::isspace(static_cast<unsigned char>(nodeId.back())))
+        nodeId.pop_back();
+    std::size_t leading = 0;
+    while (leading < nodeId.size() &&
+           std::isspace(static_cast<unsigned char>(nodeId[leading])))
+        ++leading;
+    if (leading) nodeId.erase(0, leading);
+
+    this->binder.setTargetFilter(std::move(nodeId));
 }
 
 void IServiceFilterInstance::cb_writeText(const std::u16string &text) noexcept(

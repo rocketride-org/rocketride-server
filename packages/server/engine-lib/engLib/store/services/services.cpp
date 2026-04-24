@@ -1790,6 +1790,48 @@ Error IServices::init() noexcept {
                 // Get the lanes array
                 const auto &lanes = serviceInfo["lanes"];
 
+                // Load-time validation of the wildcard `"*"` lane syntax.
+                // This PR is the introducer of `"*"` in `lanes`; two
+                // ambiguous shapes were previously accepted silently and
+                // dropped user intent at runtime:
+                //
+                //   {"*": ["*", "answers"]}              — concrete entry
+                //                                          next to "*" is
+                //                                          never consulted.
+                //   {"*": ["*"], "answers": ["text"]}    — wildcard key next
+                //                                          to concrete key;
+                //                                          concrete branch
+                //                                          is dead code.
+                //
+                // Reject both at service-load time. This is the last cheap
+                // window — once a second "*"-using service lands it becomes
+                // a breaking change to tighten.
+                if (lanes.isMember("*")) {
+                    // Rule 1: "*" cannot coexist with specific lane keys.
+                    for (const auto &key : lanes.getMemberNames()) {
+                        if (key != "*")
+                            return APERR(Ec::InvalidParam, "Service",
+                                         def.logicalType,
+                                         "lanes with wildcard \"*\" cannot "
+                                         "also contain specific lane key:",
+                                         key);
+                    }
+                    // Rule 2: lanes["*"] cannot mix "*" with concrete names.
+                    const auto &outDef = lanes["*"];
+                    bool hasWildcardOut = false;
+                    for (const auto &dst : outDef) {
+                        if (dst.asString() == "*") {
+                            hasWildcardOut = true;
+                            break;
+                        }
+                    }
+                    if (hasWildcardOut && outDef.size() > 1)
+                        return APERR(Ec::InvalidParam, "Service",
+                                     def.logicalType,
+                                     "lanes[\"*\"] cannot mix wildcard \"*\" "
+                                     "with concrete lane names");
+                }
+
                 // Iterate through each lane
                 for (const auto &laneId : lanes.getMemberNames()) {
                     // Get the lane

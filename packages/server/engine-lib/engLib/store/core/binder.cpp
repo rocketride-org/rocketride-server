@@ -111,11 +111,33 @@ Error Binder::callMethods(
     // Get the trace level
     auto traceLevel = pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
 
+    // Track whether the filter matched at least one instance so we can
+    // emit a "filter active, zero matches" warning after the loop. Without
+    // this, a stale canvas branch target pointing at a deleted node
+    // silently drops chunks with no engine-side breadcrumb.
+    const bool filterActive = !pThis->m_targetFilter.empty();
+    bool anyMatched = false;
+
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
         // Single-target dispatch guard (see Binder::m_targetFilter).
         // Empty filter = broadcast, zero behavioural drift.
-        if (!pThis->m_targetFilter.empty() && pInstance->pipeType.id != pThis->m_targetFilter) continue;
+        if (filterActive && pInstance->pipeType.id != pThis->m_targetFilter) {
+            // Leave a trace marker so "chunk didn't arrive at X" becomes
+            // debuggable from the engine side instead of a cross-correlation
+            // exercise between Python flow.dispatch logs and engine silence.
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+                json::Value suppressTrace;
+                suppressTrace["lane"] = methodName.c_str();
+                suppressTrace["result"] = "filter_suppressed";
+                suppressTrace["target"] = pThis->m_targetFilter.c_str();
+                suppressTrace["skipped"] = pInstance->pipeType.id.c_str();
+                pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
+                                                              suppressTrace);
+            }
+            continue;
+        }
+        anyMatched = true;
 
         // Build enter trace
         json::Value enterTrace;
@@ -171,6 +193,31 @@ Error Binder::callMethods(
                                                           leaveTrace);
         }
     }
+
+    // Filter was set but no bound instance matched — almost always a
+    // canvas branch target pointing at a deleted/renamed node. The chunk
+    // has already been dropped by the time we get here; log so the user
+    // has something to grep instead of a silent vanish.
+    if (filterActive && !anyMatched) {
+        LOG(Services,
+            "Binder::callMethods: target filter active but zero matches "
+            "(lane=",
+            methodName, ", target=", pThis->m_targetFilter,
+            ", bound=", (int)it->second->size(), ")");
+
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+            json::Value warnTrace;
+            warnTrace["lane"] = methodName.c_str();
+            warnTrace["result"] = "filter_no_match";
+            warnTrace["target"] = pThis->m_targetFilter.c_str();
+            warnTrace["bound"] = (int)it->second->size();
+            // No pInstance to attach to — use the owning filter so the
+            // UI trace has a home for the warning.
+            pThis->m_pInstance->pipe->debugger.debugLeave(pThis->m_pInstance,
+                                                          warnTrace);
+        }
+    }
+
     return ccode;
 }
 

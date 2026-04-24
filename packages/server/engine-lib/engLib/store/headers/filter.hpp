@@ -321,7 +321,9 @@ public:
     virtual void cb_control(std::string &filter, py::object &control,
                             std::string nodeId = "") noexcept(false);
     // Exposes Binder::setTargetFilter to Python. See binder.hpp.
-    virtual void cb_setTargetFilter(std::string nodeId) noexcept(false);
+    // noexcept: Binder::setTargetFilter cannot throw, and the sanity checks
+    // in the impl only log — no failure path crosses the ABI boundary.
+    virtual void cb_setTargetFilter(std::string nodeId) noexcept;
     virtual void cb_open(py::object entry) noexcept(false);
     virtual void cb_writeTagBeginObject() noexcept(false);
     virtual void cb_writeTagBeginStream() noexcept(false);

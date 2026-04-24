@@ -6,10 +6,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE
+
+from ..flow_base import SandboxError, cond, evaluate_expression
+
+_logger = logging.getLogger('rocketride.flow')
 
 
 class IGlobal(IGlobalBase):
@@ -30,11 +35,35 @@ class IGlobal(IGlobalBase):
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        raw_condition = cfg.get('condition')
+        # services.json declares the fields with the dotted prefix
+        # (`flow_if_else.condition`, `flow_if_else.branches`, …) — that is
+        # the canonical form preserved through Config.getNodeConfig. The
+        # bare keys are kept as fallbacks in case a caller flattens them.
+        raw_condition = cfg.get('flow_if_else.condition', cfg.get('condition'))
         if isinstance(raw_condition, str) and raw_condition.strip():
             self.condition = raw_condition
         self.timeout_s = _parse_timeout(cfg)
-        self.branches = _parse_branches(cfg.get('branches'))
+        self.branches = _parse_branches(cfg.get('flow_if_else.branches', cfg.get('branches')))
+
+        # Dry-eval the condition at pipeline load rather than on the first
+        # chunk. Catches syntax errors, forbidden AST nodes, dunder access,
+        # and NameError on unbound identifiers — the garbage-string case
+        # (user typed "asfasdfasdfasf") would otherwise silently fail-closed
+        # to ELSE on every chunk with no UI surface.
+        _validate_condition(self.condition, _node_id(self))
+
+        # Topology lint: THEN and ELSE wired to the same targets makes the
+        # If/Else a no-op — the condition has no effect on routing. Legal,
+        # but almost always unintentional; warn so the user doesn't wonder
+        # why their condition seems to be ignored.
+        then_targets = frozenset(self.branches.get('then', []))
+        else_targets = frozenset(self.branches.get('else', []))
+        if then_targets and then_targets == else_targets:
+            _logger.warning(
+                'flow_if_else %s: THEN and ELSE have identical targets %s — condition has no effect on downstream routing',
+                _node_id(self),
+                sorted(then_targets),
+            )
 
     def endGlobal(self) -> None:
         return None
@@ -44,9 +73,48 @@ class IGlobal(IGlobalBase):
         return list(self.branches.get(branch, []))
 
 
+# Lane names the engine exposes as expression bindings. Keep in sync with
+# `driver.py` + `services.json` `description` field. Used only for dry-eval
+# at load time — the actual runtime binding is a single lane per invocation.
+_EXPECTED_LANE_BINDINGS = {
+    'text': '',
+    'image': None,
+    'audio': None,
+    'video': None,
+    'table': '',
+    'documents': [],
+    'questions': [],
+    'answers': [],
+    'classifications': [],
+}
+
+
+def _validate_condition(expression: str, node_id: str) -> None:
+    """Parse and dry-eval the condition; raise on failure at load time.
+
+    Populates dummy values for every known lane name so a condition
+    referencing any valid lane passes. Only truly invalid expressions
+    (unknown identifier, forbidden AST node, bad syntax) raise.
+    """
+    bindings = {**_EXPECTED_LANE_BINDINGS, 'state': {}, 'cond': cond}
+    try:
+        evaluate_expression(expression, bindings)
+    except SandboxError as exc:
+        raise ValueError(f'flow_if_else {node_id}: invalid condition {expression!r}: {exc}') from exc
+
+
+def _node_id(ig: 'IGlobal') -> str:
+    """Best-effort node identifier for log context."""
+    for attr in ('nodeId', 'node_id', 'id'):
+        value = getattr(ig.glb, attr, None) if hasattr(ig, 'glb') else None
+        if isinstance(value, str) and value:
+            return value
+    return '<unknown>'
+
+
 def _parse_timeout(cfg: dict) -> float:
     """Clamp the configured timeout into `[1, 60]` seconds; fall back to 5.0 on invalid input."""
-    raw = cfg.get('timeout_s')
+    raw = cfg.get('flow_if_else.timeout_s', cfg.get('timeout_s'))
     if raw is None:
         return 5.0
     try:
