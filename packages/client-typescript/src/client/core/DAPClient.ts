@@ -274,9 +274,12 @@ export class DAPClient extends DAPBase {
 			const entry: { resolve: typeof resolve; reject: typeof reject; timer?: ReturnType<typeof setTimeout> } = { resolve, reject };
 
 			// Determine the effective timeout: per-call override takes priority over
-			// the instance-level default; undefined means no timeout
+			// the instance-level default; undefined means no timeout.
+			// Compare against undefined explicitly (rather than truthiness) so that
+			// an explicit 0 — e.g. when _dapConnect's budget is already exhausted —
+			// produces an immediate timeout rejection instead of hanging forever.
 			const effectiveTimeout = timeout ?? this._requestTimeout;
-			if (effectiveTimeout) {
+			if (effectiveTimeout !== undefined) {
 				// Schedule automatic rejection after the timeout expires
 				entry.timer = setTimeout(() => {
 					if (this._pendingRequests.has(seq)) {

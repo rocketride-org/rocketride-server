@@ -571,11 +571,17 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		// Encode PKCE code exchange as cd_<base64(JSON)>
+		// Fallback chain for the credential:
+		//   1. explicit `credential` arg (string or PKCE object)
+		//   2. ROCKETRIDE_APIKEY from the client's env snapshot
+		//   3. previously-configured `this._apikey` (e.g. from the constructor)
+		// Keeping #3 in the chain is critical for `new Client({ auth }).connect()`:
+		// without it, calling connect() with no arguments wiped the auth back to ''.
 		let resolvedCredential: string;
 		if (credential && typeof credential === 'object') {
 			resolvedCredential = 'cd_' + btoa(JSON.stringify(credential));
 		} else {
-			resolvedCredential = (credential as string | undefined) ?? this._env['ROCKETRIDE_APIKEY'] ?? '';
+			resolvedCredential = (credential as string | undefined) ?? this._env['ROCKETRIDE_APIKEY'] ?? this._apikey ?? '';
 		}
 		this._setAuth(resolvedCredential);
 
@@ -1758,12 +1764,21 @@ export class RocketRideClient extends DAPClient {
 		// Ensure the contents payload is a non-null object
 		if (!options.contents || typeof options.contents !== 'object') throw new Error('contents must be a non-empty object');
 
-		// startTime is required; it forms part of the filename for chronological ordering
+		// startTime is required; it forms part of the filename for chronological ordering.
+		// Reject anything other than a non-empty number or numeric-looking string to
+		// prevent path-separator chars from slipping into the generated filename.
 		const startTime = options.contents?.body?.startTime;
-		if (startTime === undefined) throw new Error('contents must contain body.startTime');
+		if (startTime === undefined || startTime === null) throw new Error('contents must contain body.startTime');
+		if (typeof startTime !== 'number' && typeof startTime !== 'string') {
+			throw new Error('contents.body.startTime must be a number or string');
+		}
+		const startTimeStr = String(startTime);
+		if (!startTimeStr || /[\\/]/.test(startTimeStr)) {
+			throw new Error('contents.body.startTime must not be empty or contain path separators');
+		}
 
 		// Construct a deterministic filename from source and start time
-		const filename = `${options.source}-${startTime}.log`;
+		const filename = `${options.source}-${startTimeStr}.log`;
 		// Write the log JSON to the per-project logs directory
 		await this.fsWriteJson(`.logs/${options.projectId}/${filename}`, options.contents);
 		return filename;

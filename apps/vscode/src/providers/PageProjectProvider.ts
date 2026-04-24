@@ -694,7 +694,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 	window.addEventListener('message', (event) => {
 		if (event.source === iframe.contentWindow) {
-			if (event.data.type === 'ready' || event.data.type === 'view:ready') sendDataToIframe();
+			if (event.data.type === 'view:ready') sendDataToIframe();
 			if (event.data.type === 'requestPaste') vscode.postMessage({ type: 'requestPaste' });
 			if (event.data.type === 'copyText' && event.data.text) vscode.postMessage({ type: 'copyText', text: event.data.text });
 			if (event.data.type === 'requestFileDialog') vscode.postMessage({ type: 'requestFileDialog' });
