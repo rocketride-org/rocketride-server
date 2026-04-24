@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2026 Aparati Software AG
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any, Optional
 from ai.common.dap import DAPConn, TransportBase
 
 # Only import for type checking to avoid circular import errors
@@ -210,15 +210,20 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
-            # Resolve org_id from the user's default team
-            org_id = ''
+            # Resolve org_id from the user's default team. Fail loudly if the
+            # default team does not appear in any organisation the user belongs
+            # to — silently starting the task with org_id='' breaks billing
+            # attribution and permission checks downstream.
+            org_id: Optional[str] = None
             for org in self._account_info.organizations or []:
                 for team in org.get('teams', []):
                     if team.get('id') == self._account_info.defaultTeam:
                         org_id = org.get('id', '')
                         break
-                if org_id:
+                if org_id is not None:
                     break
+            if org_id is None:
+                raise PermissionError(f'Default team {self._account_info.defaultTeam!r} does not belong to any organisation for user {self._account_info.userId!r}')
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(
