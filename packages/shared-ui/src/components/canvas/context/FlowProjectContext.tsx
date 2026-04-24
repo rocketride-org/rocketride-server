@@ -204,8 +204,11 @@ export interface IFlowProjectProviderProps {
 	serverHost?: string;
 	isConnected?: boolean;
 	initialViewport?: { x: number; y: number; zoom: number };
+	/** Whether the document has unsaved changes. Controls the save button's active state. */
 	isDirty?: boolean;
+	/** Whether the document is new (has never been saved to a backing file). */
 	isNew?: boolean;
+	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
 }
 

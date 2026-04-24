@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2026 Aparati Software AG
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal

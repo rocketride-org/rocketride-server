@@ -27,7 +27,41 @@
 # =============================================================================
 
 from pydantic import BaseModel
-from typing import List
+from typing import TypedDict
+
+
+# =============================================================================
+# NESTED SHAPES
+# Lightweight TypedDicts documenting the element shape of AccountInfo's
+# ``organizations`` and ``subscribedApps`` lists. Mirrors the public
+# ``OrgInfo`` / ``TeamInfo`` defined in ``rocketride.types.client`` but kept
+# local to avoid a server→client cross-package import.
+# =============================================================================
+
+
+class TeamInfo(TypedDict):
+    """Shape of an entry inside ``OrgInfo['teams']``."""
+
+    id: str
+    name: str
+    permissions: list[str]
+
+
+class OrgInfo(TypedDict):
+    """Shape of an entry inside ``AccountInfo.organizations``."""
+
+    id: str
+    name: str
+    permissions: list[str]
+    teams: list[TeamInfo]
+
+
+class SubscribedApp(TypedDict):
+    """Shape of an entry inside ``AccountInfo.subscribedApps``."""
+
+    appId: str
+    # One of: 'active', 'trialing', 'past_due', 'incomplete'
+    status: str
 
 
 # =============================================================================
@@ -62,12 +96,11 @@ class AccountInfo(BaseModel):
     defaultTeam: str = ''
 
     # Full org/team/permissions structure — all permission checks resolve through this
-    organizations: list = []
+    organizations: list[OrgInfo] = []
 
-    # Subscribed apps for the user's primary org. Each entry is a dict with
-    # {appId, status} where status is one of: active, trialing, past_due, incomplete.
-    # Empty list for free-tier orgs with no paid subscriptions.
-    subscribedApps: list = []
+    # Subscribed apps for the user's primary org. Empty list for free-tier orgs
+    # with no paid subscriptions.
+    subscribedApps: list[SubscribedApp] = []
 
     def to_connect_result(self) -> dict:
         """
@@ -105,7 +138,7 @@ _FULL_TEAM_PERMISSIONS = [
 ]
 
 
-def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> List[str]:
+def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[str]:
     """
     Return caller's permissions for a specific team.
     Expands org.admin to the full permission set.
@@ -118,7 +151,7 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> List[st
         team_id (str): The team whose permission list should be resolved.
 
     Returns:
-        List[str]: The effective permission strings for the caller within
+        list[str]: The effective permission strings for the caller within
             the given team.  If the caller has ``org.admin`` on the
             containing organisation, all permissions in
             ``_FULL_TEAM_PERMISSIONS`` are returned regardless of the

@@ -125,8 +125,11 @@ export interface IFlowContainerProps {
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
 
+	/** Whether the document has unsaved changes. Controls the save button's active state. */
 	isDirty?: boolean;
+	/** Whether the document is new (has never been saved to a backing file). */
 	isNew?: boolean;
+	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
 
 	/** Child components (typically the Canvas grid). */
