@@ -117,7 +117,7 @@ class IInstance(IInstanceBase):
         # Add the documents text
         question.addDocuments(text)
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         self.writeAnswers(result)
 

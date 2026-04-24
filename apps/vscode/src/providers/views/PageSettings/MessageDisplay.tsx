@@ -21,14 +21,50 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, CSSProperties } from 'react';
 import { MessageData } from './PageSettings';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface MessageDisplayProps {
 	message: MessageData | null;
+	/** When true, renders as an inline message inside a section (no margin-bottom, display:block) */
+	inline?: boolean;
 }
 
-export const MessageDisplay: React.FC<MessageDisplayProps> = ({ message }) => {
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const MESSAGE_LEVEL_STYLES: Record<string, CSSProperties> = {
+	success: {
+		backgroundColor: 'var(--vscode-testing-iconPassed)',
+		color: 'var(--rr-bg-default)',
+	},
+	error: {
+		backgroundColor: 'var(--vscode-inputValidation-errorBackground)',
+		color: 'var(--vscode-inputValidation-errorForeground)',
+		border: '1px solid var(--vscode-inputValidation-errorBorder)',
+	},
+	info: {
+		backgroundColor: 'var(--vscode-inputValidation-infoBackground)',
+		color: 'var(--vscode-inputValidation-infoForeground)',
+		border: '1px solid var(--vscode-inputValidation-infoBorder)',
+	},
+	warning: {
+		backgroundColor: 'var(--vscode-inputValidation-warningBackground)',
+		color: 'var(--vscode-inputValidation-warningForeground)',
+		border: '1px solid var(--vscode-inputValidation-warningBorder)',
+	},
+};
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export const MessageDisplay: React.FC<MessageDisplayProps> = ({ message, inline }) => {
 	const messageRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -39,14 +75,23 @@ export const MessageDisplay: React.FC<MessageDisplayProps> = ({ message }) => {
 	}, [message]);
 
 	if (!message) {
-		return <div className="message" style={{ display: 'none' }} />;
+		return <div style={{ display: 'none' }} />;
 	}
+
+	const levelStyle = MESSAGE_LEVEL_STYLES[message.level] || {};
 
 	return (
 		<div
 			ref={messageRef}
-			className={`message ${message.level}`}
-			style={{ display: 'block' }}
+			style={{
+				padding: '12px 16px',
+				borderRadius: 4,
+				marginBottom: inline ? 0 : 20,
+				fontSize: 13,
+				display: 'block',
+				...(inline ? { gridColumn: '1 / -1', marginTop: 4 } : {}),
+				...levelStyle,
+			}}
 		>
 			{message.message}
 		</div>

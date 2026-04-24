@@ -139,11 +139,22 @@ class DataCommands(DAPConn):
             # This is critical as tasks may be in startup, initialization, or other states
             await task.wait_for_running()
 
-            # Forward the complete data processing request to the task instance
-            # The task's _send_data method handles the actual processing logic
-            response = await task._send_data(request)
+            # Forward the data processing request to the task instance and get
+            # the raw response from the subprocess.
+            subprocess_response = await task._send_data(request)
 
-            return response
+            # Rebuild the response envelope keyed off the INBOUND request so the
+            # inbound DAPConn can correlate it back to the originating chat client.
+            # _send_data builds its own outbound DAP packet with a fresh seq for
+            # the eaas->subprocess hop, which means subprocess_response.request_seq
+            # points at the outbound seq, not the chat client's original seq.
+            # build_response constructs a fresh envelope keyed off the inbound
+            # request so request_seq matches what the chat client sent.  Mirrors
+            # the same pattern task_conn.request uses for the debug channel.
+            return self.build_response(
+                request,
+                body=subprocess_response.get('body'),
+            )
 
         except Exception as e:
             # Log data processing failure with context for debugging

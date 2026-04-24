@@ -118,10 +118,7 @@
 			"title": "Model",
 			"description": "LLM model",
 			"default": "qwen-plus",
-			"enum": [
-				["qwen-plus", "Qwen Plus"],
-				["qwen-flash", "Qwen Flash"]
-			]
+			"enum": ["*>preconfig.profiles.*.title"]
 		},
 		"qwen.region": {
 			"type": "string",

@@ -31,12 +31,10 @@ import { IIconProps } from './types';
  *
  * @param props - Standard icon props for controlling color.
  */
-const LockIcon: FunctionComponent<IIconProps> = ({ color, size, width, height }) => {
-	const w = width ?? (size ? Number(size) * (64 / 84) : 64);
-	const h = height ?? size ?? 84;
+const LockIcon: FunctionComponent<IIconProps> = ({ color, size }) => {
 	return (
-		<svg width={w} height={h} viewBox="0 0 64 84" fill="none" xmlns="http://www.w3.org/2000/svg">
-			<path d="M56 28H52V20C52 8.96 43.04 0 32 0C20.96 0 12 8.96 12 20V28H8C3.6 28 0 31.6 0 36V76C0 80.4 3.6 84 8 84H56C60.4 84 64 80.4 64 76V36C64 31.6 60.4 28 56 28ZM20 20C20 13.36 25.36 8 32 8C38.64 8 44 13.36 44 20V28H20V20ZM56 76H8V36H56V76ZM32 64C36.4 64 40 60.4 40 56C40 51.6 36.4 48 32 48C27.6 48 24 51.6 24 56C24 60.4 27.6 64 32 64Z" fill={color} />
+		<svg xmlns="http://www.w3.org/2000/svg" width={size ?? 24} height={size ?? 24} viewBox="0 0 24 24" fill={color ?? 'currentColor'}>
+			<path d="M12 2C9.243 2 7 4.243 7 7v2H6c-1.103 0-2 .897-2 2v9c0 1.103.897 2 2 2h12c1.103 0 2-.897 2-2v-9c0-1.103-.897-2-2-2h-1V7c0-2.757-2.243-5-5-5zM9 7c0-1.654 1.346-3 3-3s3 1.346 3 3v2H9V7zm9.002 13H13v-2.278c.595-.347 1-.985 1-1.722 0-1.103-.897-2-2-2s-2 .897-2 2c0 .736.405 1.375 1 1.722V20H6v-9h12l.002 9z" />
 		</svg>
 	);
 };

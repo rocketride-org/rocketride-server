@@ -24,9 +24,10 @@
 """
 Visual Similarity Filter node.
 
-Filters video frames by CLIP-based visual similarity to the first frame received.
-The first frame establishes the reference embedding; every subsequent frame is
-scored and forwarded only if it meets the similarity threshold.
+Text-first VLM pipeline: reference image is described once via Qwen2.5-VL,
+then each broadcast frame is scored with full-frame + text query.
+YOLO pre-filter skips VLM calls on frames with no vehicles detected.
+Supports three modes: vlm-image, vlm-text, vlm-image-text.
 """
 
 import os

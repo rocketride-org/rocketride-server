@@ -105,4 +105,19 @@ export interface PipelineConfig {
 
 	/** UI viewport settings for visual editors */
 	viewport?: { x: number; y: number; zoom: number };
+
+	/** Editor document revision counter for change tracking (undo/redo, echo detection). */
+	docRevision?: number;
+
+	/** Whether the canvas is locked from editing */
+	isLocked?: boolean;
+
+	/** Whether node snapping to grid is enabled */
+	snapToGrid?: boolean;
+
+	/** Grid size for snapping [x, y] */
+	snapGridSize?: [number, number];
+
+	/** Active editor mode (e.g. 'design', 'status', 'flow') */
+	editorMode?: string;
 }

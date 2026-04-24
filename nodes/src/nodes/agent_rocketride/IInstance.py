@@ -6,72 +6,65 @@
 """
 RocketRide Wave node instance.
 
-IInstance handles per-request lifecycle.  One IInstance is created per
-concurrent incoming question.  It lazily initialises an AgentHostServices
-facade that wires the engine's tool/memory/LLM subsystems into the interface
-the Wave driver expects.
+Receives questions on the questions lane and runs the wave-planning agent
+loop.  Also exposes itself as a `run_agent` tool via `@tool_function` so
+this node can be invoked by parent agents in the pipeline.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import json
+from typing import Any
 
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, tool_function
+from ai.common.agent.types import AGENT_TOOL_INPUT_SCHEMA, AGENT_TOOL_OUTPUT_SCHEMA
 from ai.common.schema import Question
-from ai.common.agent._internal.host import AgentHostServices
 
 from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the RocketRide Wave agent node.
-
-    Receives questions on the ``questions`` lane and runs the wave-planning
-    agent loop.  Also handles ``tool.*`` invoke operations so this node can
-    be used as an agent-as-tool by other agents in the pipeline.
-    """
+    """Pipeline instance for the RocketRide Wave agent node."""
 
     IGlobal: IGlobal
 
-    # Lazily created on the first question — avoids constructing the host
-    # services facade at startup before the pipeline is fully wired.
-    _agent_host: Optional[AgentHostServices] = None
-
     def writeQuestions(self, question: Question) -> None:
-        """Entry point for the ``questions`` lane — runs the agent loop.
+        """Entry point for the questions lane — runs the wave agent loop."""
+        self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
-        Lazily creates the AgentHostServices facade on the first call.
-        The facade wraps the engine's invoke() seam and exposes it as
-        structured host.llm / host.tools / host.memory attributes that
-        the Wave driver and planner use throughout the planning loop.
+    @tool_function(
+        input_schema=AGENT_TOOL_INPUT_SCHEMA,
+        output_schema=AGENT_TOOL_OUTPUT_SCHEMA,
+        description=lambda self: (
+            f'This agent: {self.IGlobal.agent._agent_description} Invoke this agent as a tool. Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
+            if getattr(self.IGlobal.agent, '_agent_description', '')
+            else ('Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.')
+        ),
+    )
+    def run_agent(self, input_obj: Any) -> Any:  # noqa: ANN401
+        """Invoke this agent as a tool from a parent agent."""
+        if not isinstance(input_obj, dict):
+            raise ValueError('agent tool: input must be an object')
 
-        Raises ValueError if no memory node is connected — the Wave agent
-        requires memory to store and retrieve tool results across planning
-        iterations.
-        """
-        if self._agent_host is None:
-            self._agent_host = AgentHostServices(self)
-            if self._agent_host.memory is None:
-                raise ValueError('RocketRide Wave requires a memory (internal) node to be connected')
-        # run_agent() is the AgentBase entry point — it handles run ID generation,
-        # SSE emission, tracing, and calls _run() on the driver.
-        self.IGlobal.agent.run_agent(self, question, host=self._agent_host, emit_answers_lane=True)
+        query = input_obj.get('query')
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('agent tool: input.query must be a non-empty string')
 
-    def invoke(self, param: Any) -> Any:
-        """Handle control-plane invocations.
+        ctx = input_obj.get('context')
+        if ctx is not None and not isinstance(ctx, dict):
+            raise ValueError('agent tool: input.context must be an object if provided')
 
-        Routes ``tool.*`` operations to the agent's tool provider
-        (agent-as-tool pattern) and falls back to the base class for
-        everything else (e.g. pipeline lifecycle events).
+        q = Question(role='')
+        q.addQuestion(query)
+        if ctx is not None:
+            try:
+                q.addContext(
+                    json.dumps(
+                        {'type': 'RocketRide.agent.tool_context.v1', 'context': ctx},
+                        default=str,
+                    )
+                )
+            except Exception:
+                pass
 
-        The agent-as-tool pattern lets other agents in the pipeline invoke
-        this Wave agent as a named tool via the standard tool.query /
-        tool.validate / tool.invoke protocol, without needing to know that
-        the underlying implementation is a planning agent.
-        """
-        op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
-        if isinstance(op, str) and op.startswith('tool.'):
-            # Delegate to AgentBase.handle_invoke() which routes to the
-            # _AgentAsToolProvider adapter defined in agent_tool.py
-            return self.IGlobal.agent.handle_invoke(self, param)
-        return super().invoke(param)
+        return self.IGlobal.agent.run_agent(self, q, emit_answers_lane=False)

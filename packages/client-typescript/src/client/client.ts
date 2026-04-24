@@ -25,7 +25,7 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AuthenticationException, ConnectionException } from './exceptions/index.js';
@@ -248,6 +248,19 @@ export class DataPipe {
  * - Server connectivity testing (ping)
  * - Full TypeScript type safety
  */
+
+// =============================================================================
+// MONITOR TYPES
+// =============================================================================
+
+/**
+ * Identifies a monitor subscription key.
+ *
+ * - `{ token }` — monitors a specific running task by its session token.
+ * - `{ projectId, source }` — monitors a project/source regardless of task.
+ */
+export type MonitorKey = { token: string } | { projectId: string; source: string; pipeId?: number };
+
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
 	private _apikey?: string;
@@ -272,6 +285,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
 	private _didNotifyConnected: boolean = false;
+
+	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
+	private _monitorKeys = new Map<string, Map<string, number>>();
 
 	/**
 	 * Creates a new RocketRideClient instance.
@@ -623,6 +639,18 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
+	/**
+	 * Update the environment variables used for pipeline substitution.
+	 *
+	 * The env dictionary is used by {@link use} and {@link validate} to replace
+	 * `${ROCKETRIDE_*}` placeholders in pipeline configurations. Call this
+	 * whenever the user's `.env` settings change so subsequent pipeline
+	 * executions pick up the new values without reconnecting.
+	 */
+	setEnv(env: Record<string, string>): void {
+		this._env = { ...env };
+	}
+
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -761,7 +789,7 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<Record<string, unknown>> {
+	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult> {
 		const { pipeline, source } = options;
 		const arguments_: Record<string, unknown> = { pipeline };
 		if (source !== undefined) {
@@ -775,7 +803,7 @@ export class RocketRideClient extends DAPClient {
 			const errorMsg = response.message || 'Validation failed';
 			throw new Error(`Pipeline validation failed: ${errorMsg}`);
 		}
-		return response.body || {};
+		return (response.body || {}) as unknown as ValidationResult;
 	}
 
 	// ============================================================================
@@ -837,9 +865,11 @@ export class RocketRideClient extends DAPClient {
 			ttl?: number;
 			/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+			/** Optional display name for the task (e.g. shown in dashboard). */
+			name?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -900,6 +930,9 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
+		if (name !== undefined) {
+			arguments_.name = name;
+		}
 
 		// Send execution request to server
 		const request = this.buildRequest('execute', { arguments: arguments_ });
@@ -943,6 +976,36 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Restart a running pipeline with a new configuration.
+	 *
+	 * Looks up the existing task by project/source, terminates it, and
+	 * starts a new execution in one server round-trip.
+	 *
+	 * @param options.token - Existing task token (optional, resolved server-side if omitted).
+	 * @param options.projectId - The project identifier.
+	 * @param options.source - The source component identifier.
+	 * @param options.pipeline - The pipeline configuration to restart with.
+	 */
+	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
+		const response = await this.dapRequest(
+			'restart',
+			{
+				token: options.token,
+				projectId: options.projectId,
+				source: options.source,
+				pipeline: options.pipeline,
+			},
+			'*'
+		);
+
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown restart error';
+			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+	}
+
+	/**
 	 * Get the current status of a running pipeline.
 	 */
 	async getTaskStatus(token: string): Promise<TASK_STATUS> {
@@ -959,6 +1022,23 @@ export class RocketRideClient extends DAPClient {
 
 		// Return status information
 		return (response.body as unknown as TASK_STATUS) || {};
+	}
+
+	/**
+	 * Resolve a running task's token from its project ID and source component.
+	 *
+	 * The token is required for operations like terminate and restart.
+	 * Returns undefined if no task is currently running for the given project/source.
+	 *
+	 * @param options.projectId - The project identifier.
+	 * @param options.source - The source component identifier.
+	 */
+	async getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined> {
+		const response = await this.dapRequest('rrext_get_token', {
+			projectId: options.projectId,
+			source: options.source,
+		});
+		return response?.body?.token as string | undefined;
 	}
 
 	// ============================================================================
@@ -1349,6 +1429,9 @@ export class RocketRideClient extends DAPClient {
 		this._currentReconnectDelay = 250;
 		this._retryStartTime = undefined;
 
+		// Resubscribe all monitor subscriptions after reconnect
+		await this._resubscribeAllMonitors();
+
 		// Call user-provided event handler if available
 		if (this._callerOnConnected) {
 			try {
@@ -1368,6 +1451,9 @@ export class RocketRideClient extends DAPClient {
 	 * (so "disconnect without ever connecting" does not fire the user callback).
 	 */
 	async onDisconnected(reason: string, hasError: boolean): Promise<void> {
+		// Transport is gone — clear it so the next _internalConnect always creates a fresh one
+		this._transport = undefined;
+
 		if (this._didNotifyConnected) {
 			this._didNotifyConnected = false;
 
@@ -1392,6 +1478,7 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Subscribe to specific types of events from the server.
+	 * @deprecated Use {@link addMonitor} / {@link removeMonitor} instead.
 	 */
 	async setEvents(token: string, eventTypes: string[], pipeId?: number): Promise<void> {
 		// Build event subscription request
@@ -1411,6 +1498,157 @@ export class RocketRideClient extends DAPClient {
 			const errorMsg = response.message || 'Event subscription failed';
 			throw new Error(errorMsg);
 		}
+	}
+
+	// ============================================================================
+	// MONITOR SUBSCRIPTION MANAGEMENT
+	// ============================================================================
+
+	/**
+	 * Add a monitor subscription. If the key already exists, the new types are
+	 * merged via reference counting and the merged set is sent to the server.
+	 *
+	 * @param key - Monitor key: `{ token }` for a running task, or `{ projectId, source }` for a project.
+	 * @param types - Event types to subscribe to (e.g. `['summary', 'flow']`).
+	 */
+	async addMonitor(key: MonitorKey, types: string[]): Promise<void> {
+		const keyStr = this._monitorKeyToString(key);
+		let refCounts = this._monitorKeys.get(keyStr);
+		if (!refCounts) {
+			refCounts = new Map();
+			this._monitorKeys.set(keyStr, refCounts);
+		}
+
+		// Increment reference counts
+		for (const t of types) {
+			refCounts.set(t, (refCounts.get(t) ?? 0) + 1);
+		}
+
+		// Send merged types to server — rollback on failure
+		try {
+			await this._syncMonitor(key, refCounts);
+		} catch (error) {
+			for (const t of types) {
+				const current = refCounts.get(t) ?? 0;
+				if (current <= 1) {
+					refCounts.delete(t);
+				} else {
+					refCounts.set(t, current - 1);
+				}
+			}
+			if (refCounts.size === 0) {
+				this._monitorKeys.delete(keyStr);
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Remove a monitor subscription. Decrements reference counts for the given
+	 * types. Only unsubscribes a type from the server when its count reaches 0.
+	 *
+	 * @param key - Monitor key (must match the key used in addMonitor).
+	 * @param types - Event types to unsubscribe from.
+	 */
+	async removeMonitor(key: MonitorKey, types: string[]): Promise<void> {
+		const keyStr = this._monitorKeyToString(key);
+		const refCounts = this._monitorKeys.get(keyStr);
+		if (!refCounts) return;
+
+		// Decrement reference counts
+		for (const t of types) {
+			const current = refCounts.get(t) ?? 0;
+			if (current <= 1) {
+				refCounts.delete(t);
+			} else {
+				refCounts.set(t, current - 1);
+			}
+		}
+
+		// Send merged types (or unsubscribe if empty)
+		await this._syncMonitor(key, refCounts);
+
+		// Clean up empty keys
+		if (refCounts.size === 0) {
+			this._monitorKeys.delete(keyStr);
+		}
+	}
+
+	/**
+	 * Send the merged type list for a monitor key to the server.
+	 */
+	private async _syncMonitor(key: MonitorKey, refCounts: Map<string, number>): Promise<void> {
+		if (!this.isConnected()) return;
+
+		const mergedTypes = Array.from(refCounts.keys());
+
+		if ('token' in key) {
+			await this.dapRequest('rrext_monitor', { types: mergedTypes }, key.token);
+		} else {
+			const args: Record<string, unknown> = {
+				projectId: key.projectId,
+				source: key.source,
+				types: mergedTypes,
+			};
+			if (key.pipeId !== undefined) {
+				args.pipeId = key.pipeId;
+			}
+			await this.dapRequest('rrext_monitor', args);
+		}
+	}
+
+	/**
+	 * Replay all active monitor subscriptions to the server.
+	 * Called automatically after reconnection.
+	 */
+	private async _resubscribeAllMonitors(): Promise<void> {
+		for (const [keyStr, refCounts] of this._monitorKeys) {
+			if (refCounts.size === 0) continue;
+			const key = this._monitorStringToKey(keyStr);
+			if (key) {
+				try {
+					await this._syncMonitor(key, refCounts);
+				} catch (error) {
+					this.debugMessage(`Failed to resubscribe monitor ${keyStr}: ${error}`);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Convert a MonitorKey to a stable string for map lookup.
+	 */
+	private _monitorKeyToString(key: MonitorKey): string {
+		if ('token' in key) {
+			return `t:${key.token}`;
+		}
+		let s = `p:${key.projectId}.${key.source}`;
+		if (key.pipeId !== undefined) {
+			s += `.${key.pipeId}`;
+		}
+		return s;
+	}
+
+	/**
+	 * Reverse a key-string back to a MonitorKey (for resubscribeAll).
+	 */
+	private _monitorStringToKey(keyStr: string): MonitorKey | null {
+		if (keyStr.startsWith('t:')) {
+			return { token: keyStr.slice(2) };
+		}
+		if (keyStr.startsWith('p:')) {
+			const rest = keyStr.slice(2);
+			const dotIdx = rest.indexOf('.');
+			if (dotIdx === -1) return null;
+			const projectId = rest.slice(0, dotIdx);
+			const remaining = rest.slice(dotIdx + 1);
+			const parts = remaining.split('.');
+			if (parts.length === 2 && !isNaN(Number(parts[1]))) {
+				return { projectId, source: parts[0], pipeId: Number(parts[1]) };
+			}
+			return { projectId, source: remaining };
+		}
+		return null;
 	}
 
 	// ============================================================================
@@ -1780,10 +2018,15 @@ export class RocketRideClient extends DAPClient {
 	 * Returns the current state of all connections, tasks, and aggregate
 	 * metrics from the server. Requires 'task.monitor' permission.
 	 *
-	 * @returns DAPMessage with body containing overview, connections, and tasks
+	 * @returns DashboardResponse containing overview, connections, and tasks
 	 */
-	async getDashboard(): Promise<DAPMessage> {
-		return this.dapRequest('rrext_dashboard', {});
+	async getDashboard(): Promise<DashboardResponse> {
+		const response = await this.dapRequest('rrext_dashboard', {});
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Failed to retrieve dashboard';
+			throw new Error(`Failed to retrieve dashboard: ${errorMsg}`);
+		}
+		return (response.body ?? {}) as unknown as DashboardResponse;
 	}
 
 	// ============================================================================
@@ -1842,7 +2085,7 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getServices(): Promise<Record<string, unknown>> {
+	async getServices(): Promise<ServicesResponse> {
 		// Build services request (no service argument = get all)
 		const request = this.buildRequest('rrext_services', {});
 
@@ -1856,7 +2099,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Return the body containing all service definitions
-		return response.body || {};
+		return (response.body || {}) as unknown as ServicesResponse;
 	}
 
 	/**
@@ -1881,7 +2124,7 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getService(service: string): Promise<Record<string, unknown> | undefined> {
+	async getService(service: string): Promise<ServiceDefinition | undefined> {
 		if (!service) {
 			throw new Error('Service name is required');
 		}
@@ -1901,7 +2144,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Return the body containing the service definition
-		return response.body;
+		return (response.body as unknown as ServiceDefinition) ?? undefined;
 	}
 
 	// ============================================================================

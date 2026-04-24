@@ -1,0 +1,158 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Exa Search",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_exa_search://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_exa_search",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "exa",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "exa.svg",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Exa semantic web search as an agent tool.", "Performs real-time web searches via the Exa API and returns structured results with titles, URLs, text content, relevance scores, and dates."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Exa Search",
+				"apikey": "",
+				"numResults": 10,
+				"useAutoprompt": true,
+				"searchType": "auto",
+				"includeText": true
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_exa_search.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Exa API key (from https://exa.ai)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_exa_search.numResults": {
+			"type": "integer",
+			"title": "Number of Results",
+			"description": "Maximum number of search results to return (1-50)",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 50
+		},
+		"tool_exa_search.useAutoprompt": {
+			"type": "boolean",
+			"title": "Use Autoprompt",
+			"description": "Let Exa optimize the query for better results",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_exa_search.searchType": {
+			"type": "string",
+			"title": "Search Type",
+			"description": "Type of search to perform",
+			"default": "auto",
+			"enum": [
+				["auto", "Auto"],
+				["neural", "Neural"],
+				["keyword", "Keyword"]
+			]
+		},
+		"tool_exa_search.includeText": {
+			"type": "boolean",
+			"title": "Include Text Content",
+			"description": "Include full text content in results",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	"apikey" is intentionally set to a placeholder — config validation is
+	//	tested here, not live API calls.
+	//
+	"test": {
+		"profiles": {
+			"default": {
+				"title": "Exa Search Test",
+				"apikey": "test-key",
+				"numResults": 5,
+				"useAutoprompt": false,
+				"searchType": "auto",
+				"includeText": true
+			}
+		},
+		"outputs": ["results"]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Exa Search",
+			"properties": ["type", "tool_exa_search.apikey", "tool_exa_search.numResults", "tool_exa_search.useAutoprompt", "tool_exa_search.searchType", "tool_exa_search.includeText"]
+		}
+	]
+}

@@ -38,11 +38,10 @@ export default defineConfig({
 		entry: {
 			'page-connection': './src/providers/views/PageConnection/index.tsx',
 			'page-settings': './src/providers/views/PageSettings/index.tsx',
-			'page-editor': './src/providers/views/PageEditor/index.tsx',
-			'page-status': './src/providers/views/PageStatus/index.tsx',
+			'page-project': './src/providers/views/PageProject/index.tsx',
 			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
 			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
-			'page-dashboard': './src/providers/views/PageDashboard/index.tsx',
+			'page-monitor': './src/providers/views/PageMonitor/index.tsx',
 		},
 	},
 

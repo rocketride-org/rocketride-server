@@ -7,111 +7,66 @@
 	"node": "python",
 	"path": "nodes.visual_similarity_filter",
 	"prefix": "visual_similarity_filter",
-	"description": ["Filters video frames by visual similarity using CLIP embeddings. ", "The first frame received becomes the reference; every subsequent frame ", "is scored against it and forwarded only if its similarity meets the threshold. ", "Includes pre-roll/post-roll context around matching segments."],
+	"description": ["Filters video frames by visual similarity using a local VLM (Qwen2.5-VL via Ollama). ", "Text-first pipeline: reference image is described once via VLM, then each frame is scored with full-frame + text query. ", "YOLO pre-filter skips VLM calls on frames with no vehicles detected."],
 	"icon": "embedding-image.svg",
 	"lanes": {
-		"image": ["image", "table"]
+		"image": []
 	},
 	"input": [
 		{
 			"lane": "image",
-			"description": "Image frames to filter by visual similarity.",
-			"output": [
-				{
-					"lane": "image",
-					"description": "Frames visually similar to the first frame received."
-				},
-				{
-					"lane": "table",
-					"description": "Similarity scores (frame index, timestamp, similarity) for matched frames."
-				}
-			]
+			"description": "Image frames to filter. Reference image identified by filename pattern.",
+			"output": []
 		}
 	],
 	"preconfig": {
-		"default": "clip-base",
+		"default": "vlm-image",
 		"profiles": {
-			"clip-base": {
-				"title": "CLIP ViT-B/32",
-				"embedding_model": "openai/clip-vit-base-patch32",
-				"similarity_threshold": 0.25,
-				"fps": 1.0
+			"vlm-image": {
+				"title": "VLM — Image reference (describe once, match by text)",
+				"model": "qwen2.5vl:7b",
+				"ollama_url": "http://localhost:11434",
+				"reference_filename_pattern": "reference",
+				"timeout": 30,
+				"prompt": ""
 			},
-			"clip-large": {
-				"title": "CLIP ViT-L/14",
-				"embedding_model": "openai/clip-vit-large-patch14",
-				"similarity_threshold": 0.25,
-				"fps": 1.0
+			"vlm-text": {
+				"title": "VLM — Text query only (no reference image needed)",
+				"model": "qwen2.5vl:7b",
+				"ollama_url": "http://localhost:11434",
+				"reference_filename_pattern": "reference",
+				"timeout": 30,
+				"prompt": "This is a broadcast F1 race frame. Does it contain a Mercedes AMG F1 car with silver livery and Petronas teal accents? Reply YES or NO only."
 			},
-			"custom": {
-				"title": "Custom model",
-				"embedding_model": "",
-				"similarity_threshold": 0.25,
-				"fps": 1.0
+			"vlm-image-text": {
+				"title": "VLM — Image + text combined (most precise)",
+				"model": "qwen2.5vl:7b",
+				"ollama_url": "http://localhost:11434",
+				"reference_filename_pattern": "reference",
+				"timeout": 30,
+				"prompt": ""
 			}
+		},
+		"properties": {
+			"vlm-image": ["vlm-image.model", "vlm-image.ollama_url", "vlm-image.reference_filename_pattern", "vlm-image.timeout", "vlm-image.prompt"],
+			"vlm-text": ["vlm-text.model", "vlm-text.ollama_url", "vlm-text.timeout", "vlm-text.prompt"],
+			"vlm-image-text": ["vlm-image-text.model", "vlm-image-text.ollama_url", "vlm-image-text.reference_filename_pattern", "vlm-image-text.timeout", "vlm-image-text.prompt"]
 		}
 	},
 	"fields": {
-		"vsf.embedding_model": {
-			"type": "string",
-			"title": "Embedding model (HuggingFace)",
-			"description": "HuggingFace CLIP-compatible model name (e.g. openai/clip-vit-base-patch32)",
-			"minLength": 2,
-			"maxLength": 128
-		},
-		"vsf.similarity_threshold": {
-			"type": "number",
-			"title": "Similarity threshold",
-			"description": "Minimum cosine similarity (0.0–1.0) for a frame to be forwarded. Frames below this score are dropped.",
-			"default": 0.25,
-			"minimum": 0.0,
-			"maximum": 1.0
-		},
-		"vsf.fps": {
-			"type": "number",
-			"title": "Input frame rate (fps)",
-			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps in the output table.",
-			"default": 1.0
-		},
-		"vsf.clip-base": {
-			"object": "clip-base",
-			"properties": ["vsf.similarity_threshold", "vsf.fps"]
-		},
-		"vsf.clip-large": {
-			"object": "clip-large",
-			"properties": ["vsf.similarity_threshold", "vsf.fps"]
-		},
-		"vsf.custom": {
-			"object": "custom",
-			"properties": ["vsf.embedding_model", "vsf.similarity_threshold", "vsf.fps"]
-		},
-		"vsf.profile": {
-			"title": "Embedding model",
-			"description": "CLIP model and configuration",
-			"type": "string",
-			"default": "clip-base",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "clip-base",
-					"properties": ["vsf.clip-base"]
-				},
-				{
-					"value": "clip-large",
-					"properties": ["vsf.clip-large"]
-				},
-				{
-					"value": "custom",
-					"properties": ["vsf.custom"]
-				}
-			]
-		}
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Visual Similarity Filter",
-			"properties": ["vsf.profile"]
-		}
-	]
+		"vlm-image.model": { "title": "Model", "type": "string", "default": "qwen2.5vl:7b" },
+		"vlm-image.ollama_url": { "title": "Ollama URL", "type": "string", "default": "http://localhost:11434" },
+		"vlm-image.reference_filename_pattern": { "title": "Reference filename pattern", "type": "string", "default": "reference" },
+		"vlm-image.timeout": { "title": "Timeout (seconds)", "type": "number", "default": 30 },
+		"vlm-image.prompt": { "title": "Custom prompt (leave blank to auto-describe reference)", "type": "string", "default": "" },
+		"vlm-text.model": { "title": "Model", "type": "string", "default": "qwen2.5vl:7b" },
+		"vlm-text.ollama_url": { "title": "Ollama URL", "type": "string", "default": "http://localhost:11434" },
+		"vlm-text.timeout": { "title": "Timeout (seconds)", "type": "number", "default": 30 },
+		"vlm-text.prompt": { "title": "Text query", "type": "string", "default": "This is a broadcast F1 race frame. Does it contain a Mercedes AMG F1 car? Reply YES or NO only." },
+		"vlm-image-text.model": { "title": "Model", "type": "string", "default": "qwen2.5vl:7b" },
+		"vlm-image-text.ollama_url": { "title": "Ollama URL", "type": "string", "default": "http://localhost:11434" },
+		"vlm-image-text.reference_filename_pattern": { "title": "Reference filename pattern", "type": "string", "default": "reference" },
+		"vlm-image-text.timeout": { "title": "Timeout (seconds)", "type": "number", "default": 30 },
+		"vlm-image-text.prompt": { "title": "Additional text (appended to image description)", "type": "string", "default": "" }
+	}
 }

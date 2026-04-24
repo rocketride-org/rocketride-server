@@ -900,7 +900,7 @@ class IInstanceBase:
         if it is an invoke call.
         """
         if control.control == 'invoke':
-            control.result = self.invoke(*control.args, **control.kwargs)
+            control.result = self.invoke(control.param)
         else:
             raise APERR(Ec.InvalidParam, f'Unrecognized control {control.control} sent to {self.IGlobal.glb.logicalType}')
 
@@ -1019,9 +1019,9 @@ def _patch_classes():
     pattern of calling into the engine's self.instance.*.
     """
 
-    def invoke(self, classType: str, *args, nodeId: str = '', **kwargs) -> Any:
-        control = IInvoke(args=args, kwargs=kwargs, result=None)
-        self.control(classType, control, nodeId=nodeId)
+    def invoke(self, param, component_id: str = '') -> Any:
+        control = IInvoke(param=param, result=None)
+        self.control(param.lane, control, nodeId=component_id)
         return control.result
 
     def sendSSE(self, type: str, **data) -> None:

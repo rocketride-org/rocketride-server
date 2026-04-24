@@ -138,3 +138,8 @@ class PipelineConfig(TypedDict, total=False):
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
     viewport: dict[str, Any]  # UI viewport settings for visual editors
+    docRevision: int  # Editor document revision counter for change tracking
+    isLocked: bool  # Whether the canvas is locked from editing
+    snapToGrid: bool  # Whether node snapping to grid is enabled
+    snapGridSize: list[int]  # Grid size for snapping [x, y]
+    editorMode: str  # Active editor mode (e.g. 'design', 'status', 'flow')
