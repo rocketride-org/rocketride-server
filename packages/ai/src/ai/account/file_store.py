@@ -38,6 +38,10 @@ DIR_MARKER = '.dirmarker'
 # Maximum bytes a single read_chunk call may return
 MAX_CHUNK_SIZE = 4_194_304  # 4 MB
 
+# Maximum bytes the convenience read() method will materialize in memory.
+# Larger files must use the streaming handle API (open_read + read_chunk).
+MAX_READ_SIZE = 100 * 1024 * 1024  # 100 MB
+
 # Maximum open handles per connection (DoS bound). Only enforced when
 # connection_id is non-zero — zero means "unowned", used by tests.
 MAX_HANDLES_PER_CONNECTION = 64
@@ -159,6 +163,9 @@ class FileStore:
         handle = self._get_handle(handle_id, FileHandleMode.WRITE, connection_id)
         try:
             await self._store.close_write(handle.path, handle.context)
+        except StorageError as e:
+            # Enrich the error with bytes-written so callers can assess damage
+            raise StorageError(f'Close failed after {handle.bytes_written} bytes; file state indeterminate: {e}') from e
         finally:
             self._release_handle(handle)
 
@@ -237,21 +244,32 @@ class FileStore:
     # Convenience Methods (fire-and-forget, use handles internally)
     # =========================================================================
 
-    async def read(self, path: str, connection_id: int = 0) -> bytes:
+    async def read(self, path: str, connection_id: int = 0, max_size: int = MAX_READ_SIZE) -> bytes:
         """
         Read file contents as raw bytes.
+
+        This convenience method materializes the entire file in memory.
+        For files larger than ``max_size`` use the streaming handle API
+        (``open_read`` + ``read_chunk`` + ``close_read``).
 
         Args:
             path: Relative path within the account store.
             connection_id: Owning connection ID.
+            max_size: Maximum file size in bytes (default 100 MB). Files
+                exceeding this are rejected to prevent OOM.
 
         Returns:
             Raw bytes of the file.
 
         Raises:
-            StorageError: If the file does not exist or read fails.
+            StorageError: If the file does not exist, exceeds max_size, or
+                read fails.
         """
         info = await self.open_read(path, connection_id)
+        # Fail fast if the backend reports a size larger than the cap
+        if info.get('size', 0) > max_size:
+            await self.close_read(info['handle'])
+            raise StorageError(f'File exceeds max_size ({info["size"]} > {max_size}); use the streaming handle API for large files')
         try:
             chunks = []
             offset = 0
@@ -483,24 +501,32 @@ class FileStore:
             path: Relative path within the account store.
 
         Returns:
-            Dict with keys: exists, type (file|dir), size (bytes, files only),
-            modified (epoch timestamp, files only).
+            Dict with keys: exists, type (``'file'``, ``'dir'``, or ``'both'``
+            when a file and a same-named directory co-exist on an object store),
+            size (bytes, files only), modified (epoch timestamp, files only).
         """
         full_path = self._full_path(path)
 
-        # Try as directory first (check for children under path/)
+        # Check for directory children under path/
         dir_prefix = full_path.rstrip('/') + '/'
         files = await self._store.list_files(dir_prefix)
-        # Only count as directory if there are files strictly inside the prefix
-        if any(f != full_path and f.startswith(dir_prefix) for f in files):
-            return {'exists': True, 'type': 'dir'}
+        is_dir = any(f != full_path and f.startswith(dir_prefix) for f in files)
 
-        # Try as file
+        # Check for a file at the exact path
+        file_info = None
         try:
             file_info = await self._store.get_file_info(full_path)
-            return {'exists': True, 'type': 'file', 'size': file_info['size'], 'modified': file_info['modified']}
         except StorageError:
             pass
+
+        # On object stores both a key "foo" and keys "foo/*" can co-exist;
+        # surface that rather than silently shadowing the file.
+        if is_dir and file_info:
+            return {'exists': True, 'type': 'both', 'size': file_info['size'], 'modified': file_info['modified']}
+        if is_dir:
+            return {'exists': True, 'type': 'dir'}
+        if file_info:
+            return {'exists': True, 'type': 'file', 'size': file_info['size'], 'modified': file_info['modified']}
 
         return {'exists': False}
 
@@ -600,6 +626,7 @@ __all__ = [
     'FileHandle',
     'FileHandleMode',
     'MAX_CHUNK_SIZE',
+    'MAX_READ_SIZE',
     'MAX_HANDLES_PER_CONNECTION',
     'DIR_MARKER',
 ]
