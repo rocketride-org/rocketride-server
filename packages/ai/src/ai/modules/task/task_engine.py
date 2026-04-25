@@ -1587,9 +1587,14 @@ class Task(DAPBase):
             subprocess_env = os.environ.copy()
             subprocess_env.update(self._launch_env)
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+            launch_client_id = self._launch_env.get('ROCKETRIDE_CLIENT_ID')
+            if subprocess_env.get('ROCKETRIDE_CLIENT_ID') != launch_client_id:
+                self.debug_message(f'Server overrode client-supplied ROCKETRIDE_CLIENT_ID while preparing subprocess_env (launch={launch_client_id!r}, server={self.client_id!r}, effective={subprocess_env.get("ROCKETRIDE_CLIENT_ID")!r})')
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
+                if 'ROCKETRIDE_MOCK' in self._launch_env:
+                    self.debug_message(f'avoidMocks from self._pipeline stripped ROCKETRIDE_MOCK from subprocess_env (launch={self._launch_env.get("ROCKETRIDE_MOCK")!r})')
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
 
             self._engine_process = await asyncio.create_subprocess_exec(
