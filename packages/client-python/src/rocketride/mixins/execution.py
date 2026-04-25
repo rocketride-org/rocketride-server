@@ -152,6 +152,7 @@ class ExecutionMixin(DAPClient):
         args: List[str] = None,
         ttl: int = None,
         pipelineTraceLevel: str = None,
+        name: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -302,6 +303,20 @@ class ExecutionMixin(DAPClient):
             arguments['useExisting'] = use_existing
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
+
+        # Derive display name from filepath if not explicitly provided
+        effective_name = name
+        if effective_name is None and filepath:
+            import os
+
+            base = os.path.basename(filepath)
+            for ext in ('.pipe.json', '.pipe'):
+                if base.endswith(ext):
+                    base = base[: -len(ext)]
+                    break
+            effective_name = base
+        if effective_name is not None:
+            arguments['name'] = effective_name
 
         # Send execution request to server
         request = self.build_request(command='execute', arguments=arguments)

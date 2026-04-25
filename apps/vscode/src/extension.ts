@@ -324,6 +324,66 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				vscode.window.showErrorMessage(`Failed to remove agent documentation: ${err}`);
 			}
 		}),
+
+		// ── Pipeline file commands (previously in SidebarFilesProvider) ──────────
+		vscode.commands.registerCommand('rocketride.sidebar.files.createFile', async () => {
+			if (!vscode.workspace.workspaceFolders) {
+				vscode.window.showErrorMessage('No workspace folder open');
+				return;
+			}
+			const workspaceFolder = vscode.workspace.workspaceFolders[0];
+			const config = ConfigManager.getInstance().getConfig();
+			const rawPath = config?.defaultPipelinePath || 'pipelines';
+			const relativePath = rawPath.replace(/^\$\{workspaceFolder\}[/\\]?/, '');
+			const defaultDir = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+
+			const fileUri = await vscode.window.showSaveDialog({
+				defaultUri: vscode.Uri.joinPath(defaultDir, 'new-pipeline'),
+				filters: { 'RocketRide Pipeline': ['pipe'] },
+				title: 'Create New Pipeline',
+			});
+			if (!fileUri) return;
+
+			await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, '..'));
+			const template = { components: [] };
+			try {
+				await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(template, null, 2), 'utf8'));
+				await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageProject');
+			} catch (error) {
+				vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
+			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.openFileAtLine', async (filePath: string, lineNumber?: number) => {
+			if (!filePath || typeof filePath !== 'string') return;
+			const line = typeof lineNumber === 'number' && lineNumber > 0 ? lineNumber : 1;
+			let uri: vscode.Uri;
+			if (path.isAbsolute(filePath)) {
+				uri = vscode.Uri.file(filePath);
+			} else {
+				const folders = vscode.workspace.workspaceFolders;
+				uri = folders?.length ? vscode.Uri.joinPath(folders[0].uri, filePath) : vscode.Uri.file(filePath);
+			}
+			try {
+				const doc = await vscode.workspace.openTextDocument(uri);
+				const range = new vscode.Range(line - 1, 0, line - 1, 0);
+				await vscode.window.showTextDocument(doc, { selection: range, preview: false });
+			} catch (e) {
+				vscode.window.showErrorMessage(`Could not open ${path.basename(filePath)}: ${e}`);
+			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.refresh', async () => {
+			vscode.window.showInformationMessage('Pipeline views refreshed');
+		}),
+
+		// Stub commands — run/stop/open are handled via webview messages now,
+		// but package.json still declares them so they must be registered.
+		vscode.commands.registerCommand('rocketride.sidebar.files.openFile', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.openStatus', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.stopPipeline', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.revealErrorsSection', () => {}),
 	];
 
 	commands.forEach((command) => context.subscriptions.push(command));

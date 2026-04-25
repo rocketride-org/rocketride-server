@@ -929,8 +929,10 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
-		if (name !== undefined) {
-			arguments_.name = name;
+		// Derive display name from filepath if not explicitly provided
+		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
+		if (effectiveName !== undefined) {
+			arguments_.name = effectiveName;
 		}
 
 		// Send execution request to server
@@ -1728,8 +1730,8 @@ export class RocketRideClient extends DAPClient {
 				const pipeline = await this.fsReadJson(`.templates/${entry.name}`);
 				// Extract Source-mode components to populate the sources summary list
 				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				// Push the summary (name falls back to 'Untitled' when not set)
-				templates.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
+				// Push the summary (use template ID as display name)
+				templates.push({ id, name: id, sources, totalComponents: (pipeline.components || []).length });
 			} catch (err) {
 				// Log the failure but continue so one bad file doesn't block others
 				console.debug(`[RocketRideClient] Failed to read .templates/${entry.name}:`, err);
