@@ -34,7 +34,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**Important:** `client.send()` / `client.send_files()` work with pipelines whose **source** is `webhook` or `dropper`.  
+**Important:** `client.send()` / `client.send_files()` are intended for pipelines whose **source** is `webhook` or `dropper`.  
 If your pipeline source is `chat`, use `client.chat()` instead.
 
 If you need a minimal `.pipe` to test `send()` end-to-end, start with:
@@ -45,7 +45,7 @@ If you need a minimal `.pipe` to test `send()` end-to-end, start with:
     { "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
     { "id": "response_text_1", "provider": "response_text", "config": { "laneName": "text" }, "input": [{ "lane": "text", "from": "webhook_1" }] }
   ],
-  "project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+  "project_id": "<your-project-id>",
   "viewport": { "x": 0, "y": 0, "zoom": 1 },
   "version": 1
 }
