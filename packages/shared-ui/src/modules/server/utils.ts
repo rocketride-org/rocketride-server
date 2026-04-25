@@ -23,12 +23,14 @@ import type { ActivityEvent } from './types';
  * @returns ActivityEvent if the event is dashboard or task related, null otherwise.
  */
 export function parseActivityEvent(raw: unknown): ActivityEvent | null {
-	const msg = raw as Record<string, any>;
-	if (msg?.event === 'apaevt_dashboard' && msg.body) {
-		return { source: 'dashboard', body: msg.body, receivedAt: Date.now() } as ActivityEvent;
-	}
-	if (msg?.event === 'apaevt_task' && msg.body) {
-		return { source: 'task', body: msg.body, receivedAt: Date.now() } as ActivityEvent;
+	const msg = raw as Record<string, unknown> | null;
+	if (typeof msg?.event === 'string' && typeof msg.body === 'object' && msg.body !== null) {
+		if (msg.event === 'apaevt_dashboard') {
+			return { source: 'dashboard', body: msg.body, receivedAt: Date.now() } as ActivityEvent;
+		}
+		if (msg.event === 'apaevt_task') {
+			return { source: 'task', body: msg.body, receivedAt: Date.now() } as ActivityEvent;
+		}
 	}
 	return null;
 }

@@ -14,7 +14,7 @@
  *   MonitorHost (Node.js) ↔ postMessage ↔ MonitorWebview (browser) → ServerMonitor (pure UI)
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import { ServerMonitor, parseActivityEvent } from 'shared';
@@ -64,7 +64,9 @@ const MonitorWebview: React.FC = () => {
 	const { sendMessage } = useMessaging<MonitorWebviewToHost, MonitorHostToWebview>({
 		onMessage: handleMessage,
 	});
-	sendMessageRef.current = sendMessage;
+	useEffect(() => {
+		sendMessageRef.current = sendMessage;
+	}, [sendMessage]);
 
 	// --- Callbacks → outgoing messages ---------------------------------------
 

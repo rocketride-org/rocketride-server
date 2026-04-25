@@ -14,9 +14,10 @@
  *   ProjectHost (Node.js) ↔ postMessage ↔ ProjectWebview (browser) → ProjectView (pure UI)
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
+import type { ThemeTokens } from 'shared/themes/tokens';
 import { ProjectView, parseServerEvent } from 'shared';
 import type { TaskStatus, TraceEvent, ViewState } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
@@ -44,7 +45,9 @@ const ProjectWebview: React.FC = () => {
 	// --- Stable refs for message handler closures ----------------------------
 
 	const projectIdRef = useRef(projectId);
-	projectIdRef.current = projectId;
+	useEffect(() => {
+		projectIdRef.current = projectId;
+	}, [projectId]);
 
 	// Pending validate requests (request-ID → Promise resolver)
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -78,12 +81,12 @@ const ProjectWebview: React.FC = () => {
 				break;
 			}
 			case 'shell:init':
-				if (msg.theme) applyTheme(msg.theme as any);
+				if (msg.theme) applyTheme(msg.theme as ThemeTokens);
 				setIsConnected(msg.isConnected);
 				sendMessageRef.current({ type: 'view:initialized' });
 				break;
 			case 'shell:themeChange':
-				applyTheme(msg.tokens as any);
+				applyTheme(msg.tokens as ThemeTokens);
 				break;
 			case 'project:update':
 				setProject(msg.project);
@@ -141,8 +144,12 @@ const ProjectWebview: React.FC = () => {
 	const { sendMessage, getState, setState } = useMessaging<ProjectWebviewToHost, ProjectHostToWebview, ViewState>({
 		onMessage: handleMessage,
 	});
-	sendMessageRef.current = sendMessage;
-	getStateRef.current = getState;
+	useEffect(() => {
+		sendMessageRef.current = sendMessage;
+	}, [sendMessage]);
+	useEffect(() => {
+		getStateRef.current = getState;
+	}, [getState]);
 
 	// --- ProjectView callbacks → outgoing messages ---------------------------
 

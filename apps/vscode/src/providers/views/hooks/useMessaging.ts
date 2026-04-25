@@ -9,6 +9,12 @@
  * Handles all postMessage communication between the webview (browser) and the
  * VS Code extension host. Uses acquireVsCodeApi() for sending and
  * window message events for receiving.
+ *
+ * acquireVsCodeApi() is a one-shot API — VS Code allows exactly one call per
+ * webview session.  This module performs that single acquisition at load time
+ * into `vscodeApi`.  Consumers must use this hook (or read `vscodeApi`) rather
+ * than calling acquireVsCodeApi() themselves; duplicate calls or re-imports
+ * from a second bundle copy will throw.
  */
 
 import { useEffect, useCallback } from 'react';
