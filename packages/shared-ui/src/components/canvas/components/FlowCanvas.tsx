@@ -206,7 +206,9 @@ export default function Canvas(): ReactElement {
 	// Keep a ref so the restore handler always sees the latest viewport value
 	// without needing to re-register the event listener.
 	const initialViewportRef = useRef(initialViewport);
-	initialViewportRef.current = initialViewport;
+	useEffect(() => {
+		initialViewportRef.current = initialViewport;
+	}, [initialViewport]);
 
 	// Restore saved viewport on initial ReactFlow mount.
 	const handleInit = useCallback(() => {
@@ -365,7 +367,7 @@ export default function Canvas(): ReactElement {
 			{features.save && onSave && (
 				<>
 					<ToolbarDivider />
-					<ToolbarButton title={isNew ? 'Save As…' : 'Save'} onClick={onSave} disabled={!isDirty} forceColor={isDirty ? 'var(--rr-brand)' : undefined}>
+					<ToolbarButton title={isNew ? 'Save As…' : 'Save'} onClick={onSave} disabled={!isDirty && !isNew} forceColor={isDirty ? 'var(--rr-brand)' : undefined}>
 						<BxIcon d={BX_SAVE} size={16} />
 					</ToolbarButton>
 				</>

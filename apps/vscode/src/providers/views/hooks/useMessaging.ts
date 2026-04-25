@@ -50,9 +50,11 @@ export interface UseMessagingReturn<TOutgoing, TState = unknown> {
 let vscodeApi: VSCodeAPI | null = null;
 
 try {
-	const win = window as unknown as Record<string, unknown>;
-	if (typeof window !== 'undefined' && typeof win.acquireVsCodeApi === 'function') {
-		vscodeApi = (win.acquireVsCodeApi as () => VSCodeAPI)();
+	if (typeof window !== 'undefined') {
+		const win = window as unknown as Record<string, unknown>;
+		if (typeof win.acquireVsCodeApi === 'function') {
+			vscodeApi = (win.acquireVsCodeApi as () => VSCodeAPI)();
+		}
 	}
 } catch (err) {
 	console.error('[useMessaging] Failed to acquire VS Code API:', err);
@@ -67,6 +69,8 @@ export const useMessaging = <TOutgoing, TIncoming, TState = unknown>(options?: U
 
 	// --- Send ready on mount -------------------------------------------------
 
+	// One-shot handshake: readyMessage is intentionally omitted from deps because
+	// it's a fresh object literal each render — including it would cause infinite loops.
 	useEffect(() => {
 		if (vscodeApi) {
 			vscodeApi.postMessage(readyMessage);
