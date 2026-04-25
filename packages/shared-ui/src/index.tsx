@@ -41,6 +41,10 @@ export type { IServerMonitorProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
 
+// --- Sidebar module (unified sidebar) ----------------------------------------
+export { SidebarMain } from './modules/sidebar/SidebarMain';
+export type { ISidebarMainProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 

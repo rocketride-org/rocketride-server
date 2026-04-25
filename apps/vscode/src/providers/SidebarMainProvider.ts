@@ -4,78 +4,38 @@
 // =============================================================================
 
 /**
- * SidebarMainProvider — Unified RocketRide sidebar webview provider.
+ * SidebarMainProvider — Extension host provider for the unified sidebar.
  *
- * Replaces PageConnectionProvider + SidebarFilesProvider with a single
- * webview containing navigation, pipeline file tree, and connection status.
+ * Finds and parses .pipe files, watches for file changes, forwards task
+ * events to the webview, and handles action messages (open, run, stop).
  *
- * Pipeline file watching, parsing, active-task tracking, project-ID dedup,
- * unknown-task detection, and error/warning aggregation all live here in
- * the extension host.  The React webview receives a flat serialisable
- * snapshot via postMessage and renders the tree.
+ * The webview (SidebarMainWebview.tsx) receives ProjectEntry[] and raw
+ * task events, tracks active-task state locally, and renders <SidebarMain>
+ * from shared-ui.
  */
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import type { DashboardResponse, DashboardTask } from 'rocketride';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
-import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent } from '../shared/types';
 import { getPageProjectProvider } from '../extension';
 
 // =============================================================================
-// TYPES — serialisable shapes sent to the webview
+// TYPES — serialisable ProjectEntry sent to webview
 // =============================================================================
 
-/** A single source component inside a pipeline file (sent to webview). */
-export interface PipelineSourceDTO {
-	id: string;
-	name: string;
-	provider?: string;
-	warnings: string[];
-	running: boolean;
-	taskErrors: string[];
-	taskWarnings: string[];
-}
-
-/** A pipeline file entry (sent to webview). */
-export interface PipelineFileDTO {
-	/** Absolute fsPath — used as stable key. */
-	fsPath: string;
-	/** Display label (file name). */
-	label: string;
-	/** Relative directory (undefined when in workspace root). */
-	dir?: string;
-	/** Whether the pipeline JSON parsed successfully. */
-	valid: boolean;
-	/** project_id from the parsed file. */
+interface ProjectEntryDTO {
+	path: string;
 	projectId?: string;
-	/** Whether any source in this file is currently running. */
-	running: boolean;
-	/** Aggregate error count across all sources. */
-	errorCount: number;
-	/** Aggregate warning count across all sources. */
-	warningCount: number;
-	/** Source components (empty when invalid). */
-	sources: PipelineSourceDTO[];
-}
-
-/** An unknown task running on the server with no local .pipe file. */
-export interface UnknownTaskDTO {
-	projectId: string;
-	sourceId: string;
-	displayName: string;
-	projectLabel: string;
+	sources?: { id: string; name: string; provider?: string }[];
 }
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-const POLL_INTERVAL_MS = 5_000;
 
 // =============================================================================
 // PROVIDER
@@ -88,13 +48,9 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager = ConfigManager.getInstance();
 	private connectionManager = ConnectionManager.getInstance();
-	private pollTimer: ReturnType<typeof setInterval> | null = null;
-	private lastTasks: DashboardTask[] = [];
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
-	private activePipelines = new Set<string>();
-	private unknownTasks = new Map<string, { projectId: string; sourceId: string; displayName?: string }>();
 
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.setupFileWatching();
@@ -106,7 +62,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 	// WEBVIEW LIFECYCLE
 	// =========================================================================
 
-	/** Called by VS Code when the sidebar view becomes visible. */
 	public resolveWebviewView(webviewView: vscode.WebviewView, _context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken) {
 		this._view = webviewView;
 
@@ -125,9 +80,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendFullUpdate();
-						if (this.connectionManager.isConnected()) {
-							this.startPolling();
-						}
 						break;
 					case 'connect':
 						await this.connectionManager.connect();
@@ -147,8 +99,8 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 					case 'stopPipeline':
 						this.stopPipeline(message.projectId, message.sourceId);
 						break;
-					case 'stopTask':
-						this.stopPipeline(message.projectId, message.source);
+					case 'refresh':
+						await this.loadPipelineFiles();
 						break;
 				}
 			} catch (error) {
@@ -158,7 +110,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 
 		webviewView.onDidDispose(() => {
 			this._view = undefined;
-			this.stopPolling();
 		});
 	}
 
@@ -166,7 +117,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 	// FILE WATCHING
 	// =========================================================================
 
-	/** Watch .pipe and .pipe.json for create/delete/change events. */
 	private setupFileWatching(): void {
 		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
 		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
@@ -183,18 +133,12 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
-	/**
-	 * Handles newly created .pipe files.
-	 * Empty files get a valid pipeline template; non-empty files with valid
-	 * pipeline JSON get a project_id assigned if missing or duplicated.
-	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
 			const text = Buffer.from(raw).toString('utf8').trim();
 
 			if (!text) {
-				// Empty file — initialise with valid pipeline template
 				const parsed = { project_id: crypto.randomUUID(), components: [] };
 				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
 			} else {
@@ -213,25 +157,20 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 						}
 					}
 				} catch {
-					// Invalid JSON — leave as-is; sidebar will show Parse Error
+					// Invalid JSON — leave as-is
 				}
 			}
 		} catch {
-			// File can't be read yet — proceed with reload
+			// File can't be read yet
 		}
 		await this.loadPipelineFiles();
 	}
 
-	/** Removes a deleted file from the parsed cache and refreshes. */
 	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
 		this.parsedFiles.delete(uri.fsPath);
-		this.sendPipelineUpdate();
+		this.sendEntriesUpdate();
 	}
 
-	/**
-	 * Handles file modification events.  Same philosophy as handleFileCreated.
-	 * Also triggers pipeline-restart logic based on user config.
-	 */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
@@ -263,25 +202,18 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 						}
 					}
 				} catch {
-					// Invalid JSON — leave as-is
+					// Invalid JSON
 				}
 			}
 		} catch {
-			// File can't be read — skip
+			// File can't be read
 		}
 
 		// Re-parse the changed file
 		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
 		this.parsedFiles.set(uri.fsPath, parsedFile);
 
-		// Remove matching unknown tasks if this file now covers them
-		if (parsedFile.isValid && parsedFile.projectId) {
-			for (const sc of parsedFile.sourceComponents) {
-				this.unknownTasks.delete(this.activeKey(parsedFile.projectId, sc.id));
-			}
-		}
-
-		this.sendPipelineUpdate();
+		this.sendEntriesUpdate();
 
 		// Handle pipeline restart based on configuration
 		await this.handlePipelineRestart(uri, parsedFile);
@@ -297,8 +229,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		});
 		const connected = this.connectionManager.on('connected', () => {
 			this.sendFullUpdate();
-			this.startPolling();
-			// Subscribe to task lifecycle events so the server pushes apaevt_task
+			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
 				client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
@@ -307,11 +238,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 			}
 		});
 		const disconnected = this.connectionManager.on('disconnected', () => {
-			this.lastTasks = [];
-			this.activePipelines.clear();
-			this.unknownTasks.clear();
 			this.sendFullUpdate();
-			this.stopPolling();
 		});
 		const error = this.connectionManager.on('error', () => {
 			this.sendFullUpdate();
@@ -322,178 +249,75 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 			}
 		});
 
-		// Re-parse all files when service definitions arrive so that source
-		// components are correctly identified via classType
+		// Re-parse when service definitions arrive
 		const servicesUpdated = this.connectionManager.on('servicesUpdated', () => {
 			this.loadPipelineFiles();
 		});
 
 		this.disposables.push(connState, connected, disconnected, error, configChange, servicesUpdated);
 
-		// Listen for server events that update task state
+		// Forward server events to webview
 		this.connectionManager.on('event', (event: GenericEvent) => {
-			if (event?.event === 'apaevt_dashboard') {
-				this.fetchTasks();
-			} else if (event?.event === 'apaevt_task') {
-				this.handleTaskEvent(event);
+			if (event?.event === 'apaevt_task') {
+				// Forward task event to webview for state tracking
+				this._view?.webview.postMessage({
+					type: 'taskEvent',
+					event: event.body,
+				});
 			} else if (event?.event === 'apaevt_status_update') {
-				// PageProjectProvider caches the new status synchronously in its
-				// event handler which runs before ours (same EventEmitter), so by
-				// the time we rebuild DTOs the fresh errors/warnings are available.
-				this.sendPipelineUpdate();
+				// Forward status updates (errors/warnings) to webview
+				const projectId = event.body?.project_id;
+				const sourceId = event.body?.source;
+				if (projectId && sourceId) {
+					const statusProvider = getPageProjectProvider();
+					const ts = statusProvider?.getTaskStatus(projectId, sourceId);
+					this._view?.webview.postMessage({
+						type: 'statusUpdate',
+						projectId,
+						sourceId,
+						errors: ts?.errors ?? [],
+						warnings: ts?.warnings ?? [],
+					});
+				}
 			}
 		});
 	}
 
 	// =========================================================================
-	// TASK EVENT HANDLING (ported from SidebarFilesProvider)
+	// DATA
 	// =========================================================================
 
-	/** Processes apaevt_task events to track active/unknown pipelines. */
-	private handleTaskEvent(event: GenericEvent): void {
-		const projectId = event.body?.projectId || 'default';
-		const sourceId = event.body?.source || 'default';
-		const action = event.body?.action;
-		const key = this.activeKey(projectId, sourceId);
-
-		// Track which files just became active so the webview can expand them
-		const newlyStarted = new Set<string>();
-
-		switch (action) {
-			case 'begin':
-			case 'restart':
-				if (!this.activePipelines.has(key)) {
-					this.activePipelines.add(key);
-					// Find the file(s) that own this source
-					for (const [fsPath, pf] of this.parsedFiles) {
-						if (pf.isValid && pf.projectId === projectId && pf.sourceComponents.some((c) => c.id === sourceId)) {
-							newlyStarted.add(fsPath);
-						}
-					}
-				}
-				if (!this.isKnownTask(projectId, sourceId)) {
-					this.unknownTasks.set(key, { projectId, sourceId });
-				}
-				break;
-
-			case 'running':
-				// Full resync of running tasks
-				this.activePipelines.clear();
-				this.unknownTasks.clear();
-				for (const task of event.body?.tasks ?? []) {
-					const k = this.activeKey(task.projectId, task.source);
-					this.activePipelines.add(k);
-					if (!this.isKnownTask(task.projectId, task.source)) {
-						this.unknownTasks.set(k, { projectId: task.projectId, sourceId: task.source });
-					}
-				}
-				break;
-
-			case 'end':
-				this.activePipelines.delete(key);
-				this.unknownTasks.delete(key);
-				break;
-		}
-
-		this.sendPipelineUpdate(newlyStarted.size > 0 ? [...newlyStarted] : undefined);
-	}
-
-	/** Composite key for active-pipeline tracking. */
-	private activeKey(projectId: string, sourceId: string): string {
-		return `${projectId}.${sourceId}`;
-	}
-
-	/** Returns true when a task matches a known local .pipe file. */
-	private isKnownTask(projectId: string, sourceId: string): boolean {
-		for (const pf of this.parsedFiles.values()) {
-			if (pf.isValid && pf.projectId === projectId && pf.sourceComponents.some((c) => c.id === sourceId)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	// =========================================================================
-	// DATA — FULL UPDATE
-	// =========================================================================
-
-	/** Sends connection state + pipeline tree to the webview. */
+	/** Sends connection state + entries to the webview. */
 	private async sendFullUpdate(): Promise<void> {
 		if (!this._view) return;
 
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
 
-		let cloudUserName = '';
-		if (config.connectionMode === 'cloud') {
-			cloudUserName = await CloudAuthProvider.getInstance().getUserName();
-		}
-
 		this._view.webview.postMessage({
 			type: 'update',
 			data: {
 				connectionState: status.state,
 				connectionMode: config.connectionMode,
-				cloudUserName,
-				tasks: this.lastTasks,
-				pipelineFiles: this.buildPipelineFileDTOs(),
-				unknownTasks: this.buildUnknownTaskDTOs(),
+				entries: this.buildEntries(),
+				unknownTasks: [],
 			},
 		});
 	}
 
-	/** Sends only pipeline-tree data (no connection state). */
-	private sendPipelineUpdate(expandFiles?: string[]): void {
+	/** Sends only updated entries. */
+	private sendEntriesUpdate(): void {
 		if (!this._view) return;
 		this._view.webview.postMessage({
-			type: 'pipelineUpdate',
-			pipelineFiles: this.buildPipelineFileDTOs(),
-			unknownTasks: this.buildUnknownTaskDTOs(),
-			expandFiles: expandFiles ?? [],
+			type: 'entriesUpdate',
+			entries: this.buildEntries(),
 		});
-	}
-
-	// =========================================================================
-	// DATA — DASHBOARD POLLING
-	// =========================================================================
-
-	private async fetchTasks(): Promise<void> {
-		if (!this._view || !this.connectionManager.isConnected()) return;
-
-		try {
-			const client = this.connectionManager.getClient();
-			if (!client) return;
-			const dashboard: DashboardResponse = await client.getDashboard();
-			if (dashboard?.tasks) {
-				this.lastTasks = dashboard.tasks;
-				this._view.webview.postMessage({
-					type: 'tasksUpdate',
-					tasks: this.lastTasks,
-				});
-			}
-		} catch {
-			// Silently ignore — dashboard may not be available yet
-		}
-	}
-
-	private startPolling(): void {
-		this.stopPolling();
-		this.fetchTasks();
-		this.pollTimer = setInterval(() => this.fetchTasks(), POLL_INTERVAL_MS);
-	}
-
-	private stopPolling(): void {
-		if (this.pollTimer) {
-			clearInterval(this.pollTimer);
-			this.pollTimer = null;
-		}
 	}
 
 	// =========================================================================
 	// PIPELINE FILE LOADING
 	// =========================================================================
 
-	/** Discovers and parses all .pipe / .pipe.json files in the workspace. */
 	private async loadPipelineFiles(): Promise<void> {
 		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
 		const files = [...pipeFiles, ...pipeJsonFiles];
@@ -503,120 +327,74 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		for (const uri of files) {
 			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
 			this.parsedFiles.set(uri.fsPath, parsedFile);
-
-			// Remove matching unknown tasks
-			if (parsedFile.isValid && parsedFile.projectId) {
-				for (const sc of parsedFile.sourceComponents) {
-					this.unknownTasks.delete(this.activeKey(parsedFile.projectId, sc.id));
-				}
-			}
 		}
 
-		// Update "no pipeline files" context for welcome view
 		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', files.length === 0);
-
-		this.sendPipelineUpdate();
+		this.sendEntriesUpdate();
 	}
 
-	/** Returns the service catalog for source-component detection. */
 	private getServiceClassInfoMap(): Record<string, ServiceClassInfo> | undefined {
 		const cached = this.connectionManager.getCachedServices();
 		return cached?.services as Record<string, ServiceClassInfo> | undefined;
 	}
 
 	// =========================================================================
-	// DTO BUILDERS
+	// ENTRY BUILDER
 	// =========================================================================
 
-	/** Builds the serialisable pipeline-file array for the webview. */
-	private buildPipelineFileDTOs(): PipelineFileDTO[] {
-		const statusProvider = getPageProjectProvider();
+	/** Builds the flat ProjectEntry[] array for the webview. */
+	private buildEntries(): ProjectEntryDTO[] {
 		const services = this.connectionManager.getCachedServices()?.services ?? {};
-		const dtos: PipelineFileDTO[] = [];
+		const entries: ProjectEntryDTO[] = [];
 
 		for (const [fsPath, pf] of this.parsedFiles) {
-			const fileName = path.basename(fsPath);
 			const relativePath = vscode.workspace.asRelativePath(fsPath);
-			const dir = path.dirname(relativePath) !== '.' ? path.dirname(relativePath) : undefined;
 
-			let running = false;
-			let errorCount = 0;
-			let warningCount = 0;
-			const sources: PipelineSourceDTO[] = [];
-
-			if (pf.isValid && pf.projectId) {
-				// Sort sources alphabetically
-				const sorted = [...pf.sourceComponents].sort((a, b) => {
-					const na = (a.name || a.id || '').toLowerCase();
-					const nb = (b.name || b.id || '').toLowerCase();
-					return na.localeCompare(nb, undefined, { sensitivity: 'base' });
-				});
-
-				for (const sc of sorted) {
-					const key = this.activeKey(pf.projectId!, sc.id);
-					const isActive = this.activePipelines.has(key);
-					if (isActive) running = true;
-
-					// Task errors/warnings from PageProjectProvider
-					const ts = statusProvider?.getTaskStatus(pf.projectId!, sc.id);
-					const taskErrors = ts?.errors ?? [];
-					const taskWarnings = ts?.warnings ?? [];
-					errorCount += taskErrors.length;
-					warningCount += taskWarnings.length;
-
-					// Resolve display name: component name → service title → component id
-					const providerDef = sc.provider ? (services[sc.provider] as { title?: string } | undefined) : undefined;
-					const displayName = sc.name || providerDef?.title || sc.id;
-
-					sources.push({
-						id: sc.id,
-						name: displayName,
-						provider: sc.provider,
-						warnings: sc.warnings,
-						running: isActive,
-						taskErrors,
-						taskWarnings,
-					});
-				}
+			if (!pf.isValid) {
+				entries.push({ path: relativePath });
+				continue;
 			}
 
-			dtos.push({ fsPath, label: fileName, dir, valid: pf.isValid, projectId: pf.projectId, running, errorCount, warningCount, sources });
+			// Build sources with resolved display names
+			const sources = pf.sourceComponents
+				.map((sc) => {
+					const providerDef = sc.provider ? (services[sc.provider] as { title?: string } | undefined) : undefined;
+					return {
+						id: sc.id,
+						name: sc.name || providerDef?.title || sc.id,
+						provider: sc.provider,
+					};
+				})
+				.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+			entries.push({
+				path: relativePath,
+				projectId: pf.projectId,
+				sources,
+			});
 		}
 
-		// Sort by file name
-		dtos.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-		return dtos;
-	}
-
-	/** Builds the unknown-task array for the webview. */
-	private buildUnknownTaskDTOs(): UnknownTaskDTO[] {
-		return Array.from(this.unknownTasks.values()).map((t) => {
-			// Cross-reference with dashboard tasks for friendly names
-			const dashTask = this.lastTasks.find((dt) => dt.projectId === t.projectId && dt.source === t.sourceId);
-			const displayName = dashTask?.name || t.displayName || t.sourceId;
-			const projectLabel = t.projectId.substring(0, 8);
-			return { projectId: t.projectId, sourceId: t.sourceId, displayName, projectLabel };
-		});
+		entries.sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: 'base' }));
+		return entries;
 	}
 
 	// =========================================================================
 	// PIPELINE ACTIONS
 	// =========================================================================
 
-	/** Opens a .pipe file in the custom pipeline editor. */
 	private async openPipelineFile(fsPath: string): Promise<void> {
 		try {
-			const uri = vscode.Uri.file(fsPath);
+			// fsPath may be relative — resolve against workspace
+			const uri = this.resolveFileUri(fsPath);
 			await vscode.commands.executeCommand('vscode.openWith', uri, 'rocketride.PageProject');
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to open pipeline: ${error}`);
 		}
 	}
 
-	/** Runs a pipeline (optionally targeting a specific source). */
 	private async runPipeline(fsPath: string, sourceId?: string): Promise<void> {
 		try {
-			const uri = vscode.Uri.file(fsPath);
+			const uri = this.resolveFileUri(fsPath);
 			const fileContent = await vscode.workspace.fs.readFile(uri);
 			const pipelineJson = JSON.parse(Buffer.from(fileContent).toString('utf8'));
 
@@ -635,7 +413,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	/** Stops a running pipeline by project + source. */
 	private async stopPipeline(projectId: string, sourceId: string): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
@@ -647,7 +424,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	/** Restarts a pipeline component (reads fresh JSON from disk). */
 	private async restartPipeline(projectId: string, sourceId: string, uri: vscode.Uri): Promise<void> {
 		try {
 			const fileContent = await vscode.workspace.fs.readFile(uri);
@@ -663,22 +439,39 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Resolves a relative path to a workspace URI, or treats it as absolute. */
+	private resolveFileUri(filePath: string): vscode.Uri {
+		if (path.isAbsolute(filePath)) return vscode.Uri.file(filePath);
+		const folders = vscode.workspace.workspaceFolders;
+		if (folders?.length) return vscode.Uri.joinPath(folders[0].uri, filePath);
+		return vscode.Uri.file(filePath);
+	}
+
 	// =========================================================================
 	// PIPELINE RESTART ON SAVE
 	// =========================================================================
 
-	/** Auto-restart logic mirrored from SidebarFilesProvider. */
 	private async handlePipelineRestart(uri: vscode.Uri, parsedFile: ParsedPipelineFile): Promise<void> {
 		if (!parsedFile.isValid || !parsedFile.projectId) return;
 
-		// Skip if this save was triggered by a Run button click
 		const pageProjectProvider = getPageProjectProvider();
 		if (pageProjectProvider?.isSaveForRun(uri)) return;
 
-		// Find running components in this file
-		const runningComponents = parsedFile.sourceComponents.filter((c) => {
-			return this.activePipelines.has(this.activeKey(parsedFile.projectId!, c.id));
-		});
+		// Check which sources are running by asking the webview... but we don't
+		// have that state here anymore. Instead, check via the server directly.
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+
+		const runningComponents: { id: string; name?: string }[] = [];
+		for (const c of parsedFile.sourceComponents) {
+			try {
+				const token = await client.getTaskToken({ projectId: parsedFile.projectId, source: c.id });
+				if (token) runningComponents.push(c);
+			} catch {
+				// Not running
+			}
+		}
+
 		if (runningComponents.length === 0) return;
 
 		const config = this.configManager.getConfig();
@@ -688,13 +481,11 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		switch (restartBehavior) {
 			case 'manual':
 				break;
-
 			case 'auto':
 				for (const c of runningComponents) {
 					await this.restartPipeline(parsedFile.projectId!, c.id, uri);
 				}
 				break;
-
 			case 'prompt': {
 				const names = runningComponents.map((c) => c.name || c.id).join(', ');
 				const msg = runningComponents.length === 1 ? `Pipeline component "${names}" in ${fileName} is running. Restart it?` : `${runningComponents.length} components (${names}) in ${fileName} are running. Restart them?`;
@@ -746,8 +537,6 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 	// =========================================================================
 
 	public dispose(): void {
-		this.stopPolling();
-		// Unsubscribe the wildcard task monitor
 		const client = this.connectionManager.getClient();
 		if (client) {
 			client.removeMonitor({ token: '*' }, ['task', 'output']).catch(() => {});
