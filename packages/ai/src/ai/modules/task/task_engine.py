@@ -111,6 +111,11 @@ class Task(DAPBase):
         _termination_lock (asyncio.Lock): Atomic termination operations
     """
 
+    # Only environment variables with this prefix are permitted to resolve in pipelines.
+    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
+    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+    ALLOWED_ENV_NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
 
@@ -303,11 +308,6 @@ class Task(DAPBase):
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
-
-    # Only environment variables with this prefix are permitted to resolve in pipelines.
-    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
-    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
-    ALLOWED_ENV_NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
     def _sanitize_launch_env(self, env: Any) -> Dict[str, str]:
         """
