@@ -651,6 +651,22 @@ export class RocketRideClient extends DAPClient {
 		this._env = { ...env };
 	}
 
+	/**
+	 * Build the runtime environment payload forwarded to the server task process.
+	 *
+	 * To avoid exposing arbitrary host environment variables, only ROCKETRIDE_*
+	 * keys are forwarded.
+	 */
+	private getRuntimeEnv(): Record<string, string> {
+		const runtimeEnv: Record<string, string> = {};
+		for (const [key, value] of Object.entries(this._env)) {
+			if (key.startsWith('ROCKETRIDE_')) {
+				runtimeEnv[key] = String(value);
+			}
+		}
+		return runtimeEnv;
+	}
+
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -911,6 +927,10 @@ export class RocketRideClient extends DAPClient {
 			pipeline: processedConfig,
 			args: args || [],
 		};
+		const runtimeEnv = this.getRuntimeEnv();
+		// Always send an explicit env snapshot so the server can distinguish
+		// "empty env" from "env omitted".
+		arguments_.env = runtimeEnv;
 
 		// Add TTL if provided (server uses its default if not specified)
 		if (ttl !== undefined) {
@@ -987,16 +1007,16 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 */
 	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
-		const response = await this.dapRequest(
-			'restart',
-			{
-				token: options.token,
-				projectId: options.projectId,
-				source: options.source,
-				pipeline: options.pipeline,
-			},
-			'*'
-		);
+		const runtimeEnv = this.getRuntimeEnv();
+		const arguments_: Record<string, unknown> = {
+			token: options.token,
+			projectId: options.projectId,
+			source: options.source,
+			pipeline: options.pipeline,
+			// Always send explicit env so restart can clear previously-set vars.
+			env: runtimeEnv,
+		};
+		const response = await this.dapRequest('restart', arguments_, '*');
 
 		if (this.didFail(response)) {
 			const errorMsg = response.message || 'Unknown restart error';

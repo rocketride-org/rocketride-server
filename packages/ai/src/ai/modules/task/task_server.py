@@ -1030,6 +1030,7 @@ class TaskServer(DAPBase):
                 - arguments: Task configuration including:
                     - token: Task token to restart (required)
                     - pipeline: New pipeline configuration (required)
+                    - env: Optional runtime environment overrides
             conn (TaskConn, optional): Connection requesting restart (must match launch_owner)
             attach_debugger (bool): Ignored for restart (debugger must be detached)
             wait_for_running (bool): If True, wait for task to reach running state
@@ -1085,6 +1086,7 @@ class TaskServer(DAPBase):
             pipeline = args.get('pipeline', None)
             if not pipeline:
                 raise ValueError('Missing pipeline configuration in restart request')
+            env = args.get('env', None)
 
             # Validate task existence and get control structure
             control = self.get_task_control(token)
@@ -1114,6 +1116,7 @@ class TaskServer(DAPBase):
                 project_id=control.project_id,
                 source=control.source,
                 provider=control.provider,
+                env=env,
             )
 
             # Wait for running state if requested
