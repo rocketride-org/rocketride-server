@@ -57,7 +57,7 @@ import asyncio
 import mimetypes
 from pathlib import Path
 from typing import Dict, Any, List, Union, Tuple, Optional
-from ..core import DAPClient
+from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
 
@@ -174,7 +174,17 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Your pipeline is not currently running.'))
+                msg = response.get('message') or 'Failed to open a data pipe.'
+                msg = (
+                    f"{msg}\n\n"
+                    "Common causes:\n"
+                    "- Pipeline isn't running (wrong token or task terminated)\n"
+                    "- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n"
+                    "- MIME type doesn't match the source lane (try `mimetype=\"text/plain\"`)\n"
+                )
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True
@@ -224,7 +234,10 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Failed to write to pipe'))
+                msg = response.get('message') or 'Failed to write to a data pipe.'
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
         async def close(self) -> PIPELINE_RESULT:
             """
@@ -259,7 +272,10 @@ class DataMixin(DAPClient):
                 response = await self._client.request(request)
 
                 if self._client.did_fail(response):
-                    raise RuntimeError(response.get('message', 'Failed to close pipe'))
+                    msg = response.get('message') or 'Failed to close a data pipe.'
+                    response = dict(response)
+                    response['message'] = msg
+                    raise PipeException(response)
 
                 return response.get('body', {})
 
