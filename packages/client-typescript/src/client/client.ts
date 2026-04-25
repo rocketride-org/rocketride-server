@@ -1008,15 +1008,17 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
 		const runtimeEnv = this.getRuntimeEnv();
-		const arguments_: Record<string, unknown> = {
-			token: options.token,
-			projectId: options.projectId,
-			source: options.source,
-			pipeline: options.pipeline,
-			// Always send explicit env so restart can clear previously-set vars.
-			env: runtimeEnv,
-		};
-		const response = await this.dapRequest('restart', arguments_, '*');
+		const response = await this.dapRequest(
+			'restart',
+			{
+				token: options.token,
+				projectId: options.projectId,
+				source: options.source,
+				pipeline: options.pipeline,
+				env: runtimeEnv,
+			},
+			'*'
+		);
 
 		if (this.didFail(response)) {
 			const errorMsg = response.message || 'Unknown restart error';

@@ -75,6 +75,17 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		return ++this.responseSeq;
 	}
 
+	private getFilteredLaunchEnv(): Record<string, string> {
+		const env = this.configManager.getEnv();
+		const filtered: Record<string, string> = {};
+		for (const [key, value] of Object.entries(env)) {
+			if (key.startsWith('ROCKETRIDE_')) {
+				filtered[key] = String(value);
+			}
+		}
+		return filtered;
+	}
+
 	private async initializeConnection(): Promise<void> {
 		const rocketrideConfig = this.configManager.getConfig();
 		const uri = this.configManager.getHttpUrl();
@@ -257,7 +268,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
 				message.arguments.args = this.configManager.getEffectiveEngineArgs();
-				message.arguments.env = this.configManager.getEnv();
+				message.arguments.env = this.getFilteredLaunchEnv();
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;
 			}

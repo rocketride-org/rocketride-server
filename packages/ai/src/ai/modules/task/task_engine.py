@@ -1415,9 +1415,8 @@ class Task(DAPBase):
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
 
-            if env is not None:
-                self._launch_env = self._sanitize_launch_env(env)
-                self._launch_args['env'] = dict(self._launch_env)
+            self._launch_env = self._sanitize_launch_env(env)
+            self._launch_args['env'] = dict(self._launch_env)
 
             # Update internal task configuration
             self._pipeline = pipeline
