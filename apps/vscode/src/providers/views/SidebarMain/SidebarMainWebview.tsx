@@ -38,7 +38,7 @@ interface TaskEventBody {
 	name?: string;
 	projectId: string;
 	source: string;
-	tasks?: { id: string; projectId: string; source: string }[];
+	tasks?: { id: string; name: string; projectId: string; source: string }[];
 }
 
 type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' };
@@ -99,10 +99,7 @@ const SidebarMainWebview: React.FC = () => {
 						break;
 
 					case 'end':
-						if (next.has(key)) {
-							const existing = next.get(key)!;
-							next.set(key, { ...existing, running: false });
-						}
+						next.delete(key);
 						break;
 				}
 
@@ -137,7 +134,7 @@ const SidebarMainWebview: React.FC = () => {
 							.map((t) => ({
 								projectId: t.projectId,
 								sourceId: t.source,
-								displayName: t.source,
+								displayName: t.name || t.source,
 								projectLabel: t.projectId.substring(0, 8),
 							}));
 					}
@@ -206,13 +203,9 @@ const SidebarMainWebview: React.FC = () => {
 		[sendMessage]
 	);
 
-	const onFileAction = useCallback(
-		(action: string, path: string) => {
-			switch (action) {
-				case 'open':
-					sendMessage({ type: 'openFile', fsPath: path });
-					break;
-			}
+	const onOpenFile = useCallback(
+		(path: string) => {
+			sendMessage({ type: 'openFile', fsPath: path });
 		},
 		[sendMessage]
 	);
@@ -249,7 +242,7 @@ const SidebarMainWebview: React.FC = () => {
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarMain connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onFileAction={onFileAction} onSourceAction={onSourceAction} onRefresh={onRefresh} onOpenSettings={onOpenSettings} onOpenDocs={onOpenDocs} onToggleConnection={onToggleConnection} />;
+	return <SidebarMain connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} onOpenSettings={onOpenSettings} onOpenDocs={onOpenDocs} onToggleConnection={onToggleConnection} />;
 };
 
 export default SidebarMainWebview;

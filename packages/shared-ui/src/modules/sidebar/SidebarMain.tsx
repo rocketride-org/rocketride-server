@@ -14,11 +14,14 @@
  * The component stores only files in a flat array and derives directory
  * hierarchy on the fly via path parsing (S3-style).  A flat/tree toggle
  * lets the user switch views.
+ *
+ * File management features (context menu, inline rename/create) are
+ * enabled when the optional `onFileManage` callback is provided.
  */
 
-import React, { useState, useCallback, useMemo, CSSProperties } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
-import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxBookOpen, BxCog, BxPlay, BxStop, BxListUl, BxGridAlt } from '../../components/BoxIcon';
+import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxBookOpen, BxCog, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
 import type { ISidebarMainProps, ProjectEntry, DirEntry, ActiveTaskState } from './types';
 
 // =============================================================================
@@ -95,6 +98,7 @@ const S = {
 		lineHeight: '22px',
 		cursor: 'pointer',
 		userSelect: 'none' as const,
+		position: 'relative' as const,
 	} as CSSProperties,
 	rowName: {
 		...commonStyles.textEllipsis,
@@ -136,6 +140,55 @@ const S = {
 		display: 'flex',
 		alignItems: 'center',
 	}),
+	menuBtn: {
+		background: 'none',
+		border: 'none',
+		cursor: 'pointer',
+		padding: '2px 4px',
+		borderRadius: 3,
+		color: 'var(--rr-text-secondary)',
+		flexShrink: 0,
+		display: 'flex',
+		alignItems: 'center',
+		opacity: 0.6,
+	} as CSSProperties,
+	popup: {
+		position: 'absolute' as const,
+		right: 0,
+		top: '100%',
+		zIndex: 100,
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: '4px 0',
+		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+		minWidth: 120,
+	} as CSSProperties,
+	popupRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+		padding: '5px 12px',
+		fontSize: 13,
+		cursor: 'pointer',
+		color: 'var(--rr-text-primary)',
+		background: 'none',
+		border: 'none',
+		width: '100%',
+		textAlign: 'left' as const,
+	} as CSSProperties,
+	inlineInput: {
+		flex: 1,
+		minWidth: 0,
+		fontSize: 13,
+		lineHeight: '20px',
+		padding: '0 4px',
+		border: '1px solid var(--rr-brand)',
+		borderRadius: 4,
+		outline: 'none',
+		background: 'var(--rr-bg-input, var(--rr-bg-paper))',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
 	emptyState: {
 		...commonStyles.textMuted,
 		padding: 16,
@@ -191,15 +244,48 @@ function deriveChildren(entries: ProjectEntry[], parent: string | undefined): (P
 	const seenDirs = new Set<string>();
 
 	for (const entry of entries) {
-		// Skip entries that don't belong under this parent
+		// Explicit dir entries from the host (e.g. empty dirs in rocket-ui)
+		if (entry.type === 'dir') {
+			if (!prefix && entry.path.indexOf('/') === -1) {
+				// Top-level dir
+				if (!seenDirs.has(entry.path)) {
+					seenDirs.add(entry.path);
+					result.push({ name: fileName(entry.path), path: entry.path, type: 'dir' });
+				}
+			} else if (prefix && entry.path.startsWith(prefix)) {
+				const remainder = entry.path.substring(prefix.length);
+				if (remainder.indexOf('/') === -1) {
+					// Direct child dir
+					if (!seenDirs.has(remainder)) {
+						seenDirs.add(remainder);
+						result.push({ name: remainder, path: entry.path, type: 'dir' });
+					}
+				} else {
+					// Nested — synthesize intermediate dir
+					const dirName = remainder.substring(0, remainder.indexOf('/'));
+					if (!seenDirs.has(dirName)) {
+						seenDirs.add(dirName);
+						result.push({ name: dirName, path: prefix + dirName, type: 'dir' });
+					}
+				}
+			} else if (!prefix && entry.path.indexOf('/') >= 0) {
+				// Nested dir at root level — synthesize top-level parent
+				const dirName = entry.path.substring(0, entry.path.indexOf('/'));
+				if (!seenDirs.has(dirName)) {
+					seenDirs.add(dirName);
+					result.push({ name: dirName, path: dirName, type: 'dir' });
+				}
+			}
+			continue;
+		}
+
+		// File entries
 		if (prefix && !entry.path.startsWith(prefix)) continue;
 		if (!prefix && entry.path.indexOf('/') === -1) {
-			// Root-level file
 			result.push(entry);
 			continue;
 		}
 		if (!prefix && entry.path.indexOf('/') >= 0) {
-			// Root-level: synthesize top-level directory
 			const dirName = entry.path.substring(0, entry.path.indexOf('/'));
 			if (!seenDirs.has(dirName)) {
 				seenDirs.add(dirName);
@@ -208,18 +294,15 @@ function deriveChildren(entries: ProjectEntry[], parent: string | undefined): (P
 			continue;
 		}
 
-		// Under a prefix
 		const remainder = entry.path.substring(prefix.length);
 		const slashIdx = remainder.indexOf('/');
 		if (slashIdx >= 0) {
-			// Synthesize subdirectory
 			const dirName = remainder.substring(0, slashIdx);
 			if (!seenDirs.has(dirName)) {
 				seenDirs.add(dirName);
 				result.push({ name: dirName, path: prefix + dirName, type: 'dir' });
 			}
 		} else {
-			// Direct child file
 			result.push(entry);
 		}
 	}
@@ -228,9 +311,15 @@ function deriveChildren(entries: ProjectEntry[], parent: string | undefined): (P
 }
 
 /** Gets the filename from a full path. */
-function fileName(path: string): string {
-	const idx = path.lastIndexOf('/');
-	return idx >= 0 ? path.substring(idx + 1) : path;
+function fileName(p: string): string {
+	const idx = p.lastIndexOf('/');
+	return idx >= 0 ? p.substring(idx + 1) : p;
+}
+
+/** Strips the .pipe or .pipe.json extension for display. */
+function fileStem(p: string): string {
+	const name = fileName(p);
+	return name.replace(/\.pipe(?:\.json)?$/, '') || name;
 }
 
 /** Builds a tooltip for a source component. */
@@ -266,7 +355,7 @@ function fileStatus(entry: ProjectEntry, activeTasks: Map<string, ActiveTaskStat
 	return { running, errorCount, warningCount };
 }
 
-/** Returns the status dot color for a file based on aggregate state. */
+/** Returns the status dot color based on aggregate state. */
 function fileDotColor(status: { running: boolean; errorCount: number; warningCount: number }): string | null {
 	if (status.errorCount > 0) return 'var(--rr-color-error)';
 	if (status.warningCount > 0) return 'var(--rr-color-warning)';
@@ -294,7 +383,7 @@ function dirStatus(dirPath: string, entries: ProjectEntry[], activeTasks: Map<st
 // COMPONENT
 // =============================================================================
 
-export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onFileAction, onSourceAction, onRefresh, onOpenSettings, onOpenDocs, onToggleConnection, footerSlot, activeFilePath }) => {
+export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, onOpenSettings, onOpenDocs, onToggleConnection, footerSlot, activeFilePath }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -302,16 +391,43 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 	const [hoveredNav, setHoveredNav] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
+	// ── Selection state ─────────────────────────────────────────────────────
+	const [selectedPath, setSelectedPath] = useState<string>(activeFilePath ?? '');
+	const [menuPath, setMenuPath] = useState<string | null>(null);
+	const [renamePath, setRenamePath] = useState<string | null>(null);
+	const [renameValue, setRenameValue] = useState('');
+	const [createState, setCreateState] = useState<{ type: 'file' | 'folder'; parentDir: string; name: string } | null>(null);
+
+	const menuRef = useRef<HTMLDivElement>(null);
+
+	// Sync selection when host changes active file (e.g. user switched editor tabs)
+	useEffect(() => {
+		if (activeFilePath) setSelectedPath(activeFilePath);
+	}, [activeFilePath]);
+
 	const isConnected = connection.state === 'connected';
 	const isConnecting = connection.state === 'connecting';
+	const hasFileManage = !!onFileManage;
+	const hasFooter = !!(onOpenDocs || onOpenSettings || onToggleConnection || footerSlot);
+
+	// ── Click outside to close menu ────────────────────────────────────────
+
+	useEffect(() => {
+		if (!menuPath) return;
+		const handler = (e: MouseEvent) => {
+			if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+				setMenuPath(null);
+			}
+		};
+		document.addEventListener('mousedown', handler);
+		return () => document.removeEventListener('mousedown', handler);
+	}, [menuPath]);
 
 	// ── getChildren via useMemo ────────────────────────────────────────────
 
 	const getChildren = useMemo(() => {
 		return (parent?: string) => {
-			if (viewMode === 'flat') {
-				return entries.map((e) => e);
-			}
+			if (viewMode === 'flat') return entries.filter((e) => e.type !== 'dir');
 			return deriveChildren(entries, parent);
 		};
 	}, [entries, viewMode]);
@@ -336,6 +452,72 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 		});
 	}, []);
 
+	const collapseAll = useCallback(() => {
+		setExpandedDirs(new Set());
+		setExpandedFiles(new Set());
+	}, []);
+
+	// ── Inline rename ──────────────────────────────────────────────────────
+
+	const startRename = useCallback((path: string) => {
+		setMenuPath(null);
+		setRenamePath(path);
+		setRenameValue(fileStem(path));
+	}, []);
+
+	const confirmRename = useCallback(() => {
+		if (!renamePath || !onFileManage) return;
+		const trimmed = renameValue.trim().replace(/[^a-zA-Z0-9\-_. ]/g, '');
+		if (trimmed) {
+			onFileManage('rename', renamePath, trimmed);
+		}
+		setRenamePath(null);
+		setRenameValue('');
+	}, [renamePath, renameValue, onFileManage]);
+
+	const cancelRename = useCallback(() => {
+		setRenamePath(null);
+		setRenameValue('');
+	}, []);
+
+	// ── Inline create ──────────────────────────────────────────────────────
+
+	const startCreate = useCallback(
+		(type: 'file' | 'folder') => {
+			let parentDir = '';
+			if (selectedPath) {
+				// If selected is a directory, create inside it
+				const isDir = entries.some((e) => e.type === 'dir' && e.path === selectedPath);
+				if (isDir) {
+					parentDir = selectedPath;
+				} else {
+					// Selected is a file — use its parent directory
+					parentDir = selectedPath.includes('/') ? selectedPath.substring(0, selectedPath.lastIndexOf('/')) : '';
+				}
+			}
+			if (parentDir)
+				setExpandedDirs((prev) => {
+					const next = new Set(prev);
+					next.add(parentDir);
+					return next;
+				});
+			setCreateState({ type, parentDir, name: '' });
+		},
+		[selectedPath, entries]
+	);
+
+	const confirmCreate = useCallback(() => {
+		if (!createState || !onFileManage) return;
+		const trimmed = createState.name.trim().replace(/[^a-zA-Z0-9\-_.]/g, '');
+		if (trimmed) {
+			const fullPath = createState.parentDir ? `${createState.parentDir}/${trimmed}${createState.type === 'file' ? '.pipe' : ''}` : `${trimmed}${createState.type === 'file' ? '.pipe' : ''}`;
+			onFileManage(createState.type === 'file' ? 'createFile' : 'createFolder', fullPath);
+		}
+		setCreateState(null);
+	}, [createState, onFileManage]);
+
+	const cancelCreate = useCallback(() => setCreateState(null), []);
+
 	// ── Hover helpers ──────────────────────────────────────────────────────
 
 	const hoverBg = (id: string): CSSProperties => (hoveredRow === id ? { background: HOVER_BG } : {});
@@ -354,22 +536,88 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 					// ── Directory row ───────────────────────────────────────
 					const dir = child as DirEntry;
 					const isExpanded = expandedDirs.has(dir.path);
+					const isSelected = hasFileManage && selectedPath === dir.path;
 					const rowKey = `dir:${dir.path}`;
-
-					// Show aggregate status dot when collapsed and descendants have status
 					const dirDotColor = !isExpanded ? fileDotColor(dirStatus(dir.path, entries, activeTasks)) : null;
+					const isRenaming = renamePath === dir.path;
 
 					nodes.push(
-						<div key={rowKey} style={{ ...S.row, paddingLeft: indent, ...hoverBg(rowKey) }} onMouseEnter={() => setHoveredRow(rowKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => toggleDir(dir.path)}>
+						<div
+							key={rowKey}
+							style={{
+								...S.row,
+								paddingLeft: indent,
+								...hoverBg(rowKey),
+								...(isSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}),
+							}}
+							onMouseEnter={() => setHoveredRow(rowKey)}
+							onMouseLeave={() => setHoveredRow(null)}
+							onClick={() => {
+								toggleDir(dir.path);
+								if (hasFileManage) setSelectedPath(dir.path);
+							}}
+						>
 							{isExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
 							<BxFolderOpen size={16} color="var(--rr-text-secondary)" />
-							<span style={S.rowName}>{dir.name}</span>
+							{isRenaming ? (
+								<input
+									style={S.inlineInput}
+									value={renameValue}
+									onChange={(e) => setRenameValue(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter') confirmRename();
+										if (e.key === 'Escape') cancelRename();
+									}}
+									onBlur={cancelRename}
+									autoFocus
+									onClick={(e) => e.stopPropagation()}
+								/>
+							) : (
+								<span style={S.rowName}>{dir.name}</span>
+							)}
 							<span style={S.spacer} />
 							{dirDotColor && <div style={S.dot(dirDotColor)} />}
+							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+								<button
+									style={S.menuBtn}
+									onClick={(e) => {
+										e.stopPropagation();
+										setMenuPath(menuPath === dir.path ? null : dir.path);
+									}}
+								>
+									<BxDotsHorizontal size={16} />
+								</button>
+							)}
+							{menuPath === dir.path && (
+								<div ref={menuRef} style={S.popup}>
+									<button
+										style={S.popupRow}
+										onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+										onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+										onClick={(e) => {
+											e.stopPropagation();
+											startRename(dir.path);
+										}}
+									>
+										<BxEditAlt size={16} /> Rename
+									</button>
+									<button
+										style={S.popupRow}
+										onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+										onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+										onClick={(e) => {
+											e.stopPropagation();
+											setMenuPath(null);
+											onFileManage!('delete', dir.path);
+										}}
+									>
+										<BxTrash size={16} /> Delete
+									</button>
+								</div>
+							)}
 						</div>
 					);
 
-					// Render children if expanded
 					if (isExpanded) {
 						nodes.push(...renderChildren(dir.path, depth + 1));
 					}
@@ -379,10 +627,11 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 					const name = fileName(file.path);
 					const hasSources = (file.sources?.length ?? 0) > 0;
 					const isFileExpanded = expandedFiles.has(file.path);
-					const isActive = activeFilePath === file.path;
+					const isFileSelected = selectedPath === file.path;
 					const status = fileStatus(file, activeTasks);
 					const dotColor = fileDotColor(status);
 					const rowKey = `file:${file.path}`;
+					const isRenaming = renamePath === file.path;
 
 					nodes.push(
 						<div
@@ -391,21 +640,75 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 								...S.row,
 								paddingLeft: indent,
 								...hoverBg(rowKey),
-								...(isActive ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}),
+								...(isFileSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}),
 							}}
 							onMouseEnter={() => setHoveredRow(rowKey)}
 							onMouseLeave={() => setHoveredRow(null)}
 							onClick={() => {
-								onFileAction('open', file.path);
+								onOpenFile(file.path);
 								if (hasSources) toggleFile(file.path);
+								if (hasFileManage) setSelectedPath(file.path);
 							}}
 							title={file.path}
 						>
 							{hasSources ? isFileExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} /> : <span style={{ width: 14 }} />}
 							<BxFile size={16} color="var(--rr-text-secondary)" />
-							<span style={S.rowName}>{name}</span>
+							{isRenaming ? (
+								<input
+									style={S.inlineInput}
+									value={renameValue}
+									onChange={(e) => setRenameValue(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter') confirmRename();
+										if (e.key === 'Escape') cancelRename();
+									}}
+									onBlur={cancelRename}
+									autoFocus
+									onClick={(e) => e.stopPropagation()}
+								/>
+							) : (
+								<span style={S.rowName}>{name}</span>
+							)}
 							<span style={S.spacer} />
 							{dotColor && <div style={S.dot(dotColor)} />}
+							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+								<button
+									style={S.menuBtn}
+									onClick={(e) => {
+										e.stopPropagation();
+										setMenuPath(menuPath === file.path ? null : file.path);
+									}}
+								>
+									<BxDotsHorizontal size={16} />
+								</button>
+							)}
+							{menuPath === file.path && (
+								<div ref={menuRef} style={S.popup}>
+									<button
+										style={S.popupRow}
+										onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+										onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+										onClick={(e) => {
+											e.stopPropagation();
+											startRename(file.path);
+										}}
+									>
+										<BxEditAlt size={16} /> Rename
+									</button>
+									<button
+										style={S.popupRow}
+										onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+										onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+										onClick={(e) => {
+											e.stopPropagation();
+											setMenuPath(null);
+											onFileManage!('delete', file.path);
+										}}
+									>
+										<BxTrash size={16} /> Delete
+									</button>
+								</div>
+							)}
 						</div>
 					);
 
@@ -420,7 +723,7 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 							const srcRowKey = `src:${file.path}:${source.id}`;
 
 							nodes.push(
-								<div key={srcRowKey} style={{ ...S.row, paddingLeft: indent + 20, ...hoverBg(srcRowKey) }} onMouseEnter={() => setHoveredRow(srcRowKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => onFileAction('open', file.path)} title={sourceTooltip(source, taskState)}>
+								<div key={srcRowKey} style={{ ...S.row, paddingLeft: indent + 20, ...hoverBg(srcRowKey) }} onMouseEnter={() => setHoveredRow(srcRowKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => onOpenFile(file.path)} title={sourceTooltip(source, taskState)}>
 									<div style={S.dot(srcRunning ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)')} />
 									<span style={S.rowName}>{source.name}</span>
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
@@ -445,9 +748,31 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 				}
 			}
 
+			// ── Inline create input (inserted at end of parent's children) ──
+			if (createState && createState.parentDir === (parent ?? '')) {
+				const createKey = `create:${createState.parentDir}:${createState.type}`;
+				nodes.push(
+					<div key={createKey} style={{ ...S.row, paddingLeft: indent }}>
+						{createState.type === 'folder' ? <BxFolderOpen size={16} color="var(--rr-text-secondary)" /> : <BxFile size={16} color="var(--rr-text-secondary)" />}
+						<input
+							style={S.inlineInput}
+							value={createState.name}
+							onChange={(e) => setCreateState((prev) => (prev ? { ...prev, name: e.target.value } : null))}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter') confirmCreate();
+								if (e.key === 'Escape') cancelCreate();
+							}}
+							onBlur={cancelCreate}
+							autoFocus
+							placeholder={createState.type === 'folder' ? 'folder name' : 'pipeline name'}
+						/>
+					</div>
+				);
+			}
+
 			return nodes;
 		},
-		[getChildren, expandedDirs, expandedFiles, hoveredRow, activeTasks, activeFilePath, isConnected, onFileAction, onSourceAction, toggleDir, toggleFile, entries]
+		[getChildren, expandedDirs, expandedFiles, hoveredRow, activeTasks, isConnected, onOpenFile, onFileManage, onSourceAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate]
 	);
 
 	// ── Unknown tasks ──────────────────────────────────────────────────────
@@ -481,8 +806,21 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 			{/* ── Pipelines header ────────────────────────────────────── */}
 			<div style={S.sectionHeader}>
 				<span style={S.sectionLabel}>Pipelines</span>
+				{hasFileManage && (
+					<>
+						<button style={S.headerAction} title="New Pipeline" onClick={() => startCreate('file')}>
+							<BxFilePlus size={14} />
+						</button>
+						<button style={S.headerAction} title="New Folder" onClick={() => startCreate('folder')}>
+							<BxFolderPlus size={14} />
+						</button>
+					</>
+				)}
 				<button style={S.headerAction} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))}>
 					{viewMode === 'tree' ? <BxListUl size={14} /> : <BxGridAlt size={14} />}
+				</button>
+				<button style={S.headerAction} title="Collapse All" onClick={collapseAll}>
+					<BxCollapseAll size={14} />
 				</button>
 				<button style={S.headerAction} title="Refresh" onClick={onRefresh}>
 					<BxRefresh size={14} />
@@ -531,29 +869,31 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 				)}
 			</div>
 
-			{/* ── Footer (anchored to bottom) ─────────────────────────── */}
-			<div style={S.footer}>
-				{onOpenDocs && (
-					<button style={{ ...S.footerBtn, ...navHoverBg('docs') }} onMouseEnter={() => setHoveredNav('docs')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenDocs}>
-						<BxBookOpen size={16} />
-						Documentation
-					</button>
-				)}
-				<div style={{ height: 10 }} />
-				{onOpenSettings && (
-					<button style={{ ...S.footerBtn, ...navHoverBg('settings') }} onMouseEnter={() => setHoveredNav('settings')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenSettings}>
-						<BxCog size={16} />
-						Settings
-					</button>
-				)}
-				{onToggleConnection && (
-					<button style={{ ...S.footerBtn, ...navHoverBg('connection') }} onMouseEnter={() => setHoveredNav('connection')} onMouseLeave={() => setHoveredNav(null)} onClick={onToggleConnection} title={isConnected ? 'Click to disconnect' : 'Click to connect'}>
-						<div style={S.connectionDot(isConnected)} />
-						<span>{isConnecting ? 'Connecting...' : isConnected ? `Connected (${MODE_LABELS[connection.mode ?? ''] ?? connection.mode ?? ''})` : 'Disconnected'}</span>
-					</button>
-				)}
-				{footerSlot}
-			</div>
+			{/* ── Footer (conditional — only if any footer prop provided) ── */}
+			{hasFooter && (
+				<div style={S.footer}>
+					{onOpenDocs && (
+						<button style={{ ...S.footerBtn, ...navHoverBg('docs') }} onMouseEnter={() => setHoveredNav('docs')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenDocs}>
+							<BxBookOpen size={16} />
+							Documentation
+						</button>
+					)}
+					{onOpenDocs && onOpenSettings && <div style={{ height: 10 }} />}
+					{onOpenSettings && (
+						<button style={{ ...S.footerBtn, ...navHoverBg('settings') }} onMouseEnter={() => setHoveredNav('settings')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenSettings}>
+							<BxCog size={16} />
+							Settings
+						</button>
+					)}
+					{onToggleConnection && (
+						<button style={{ ...S.footerBtn, ...navHoverBg('connection') }} onMouseEnter={() => setHoveredNav('connection')} onMouseLeave={() => setHoveredNav(null)} onClick={onToggleConnection} title={isConnected ? 'Click to disconnect' : 'Click to connect'}>
+							<div style={S.connectionDot(isConnected)} />
+							<span>{isConnecting ? 'Connecting...' : isConnected ? `Connected (${MODE_LABELS[connection.mode ?? ''] ?? connection.mode ?? ''})` : 'Disconnected'}</span>
+						</button>
+					)}
+					{footerSlot}
+				</div>
+			)}
 		</div>
 	);
 };

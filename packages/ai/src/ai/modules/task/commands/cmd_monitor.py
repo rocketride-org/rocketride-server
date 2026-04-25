@@ -297,17 +297,17 @@ class MonitorCommands(DAPConn):
                     if target.userId != caller_user_id:
                         continue
 
-                    # Get the task state
-                    state = target.task.get_status().state
+                    # Get the task status once
+                    status = target.task.get_status()
 
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)
                     # Exclude: NONE(0), COMPLETED(5), CANCELLED(6)
-                    if state in [TASK_STATE.STARTING.value, TASK_STATE.INITIALIZING.value, TASK_STATE.RUNNING.value, TASK_STATE.STOPPING.value]:
-                        # Now, append it
+                    if status.state in [TASK_STATE.STARTING.value, TASK_STATE.INITIALIZING.value, TASK_STATE.RUNNING.value, TASK_STATE.STOPPING.value]:
                         tasks.append(
                             {
                                 'id': target.id,
+                                'name': status.name,
                                 'projectId': target.project_id,
                                 'source': target.source,
                             }

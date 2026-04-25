@@ -34,11 +34,14 @@ export interface ProjectSource {
  * to extract projectId and sources before passing them here.
  */
 export interface ProjectEntry {
-	/** Full relative path (e.g. 'ingest/analyze.pipe'). */
+	/** Full relative path (e.g. 'ingest/analyze.pipe' or 'ingest/dir1'). */
 	path: string;
-	/** Project UUID parsed from the .pipe JSON. */
+	/** Entry type — 'file' (default) or 'dir'. Dirs are only needed when the
+	 *  host supports file management (rocket-ui); VS Code omits them. */
+	type?: 'file' | 'dir';
+	/** Project UUID parsed from the .pipe JSON (files only). */
 	projectId?: string;
-	/** Source components parsed from the .pipe JSON. */
+	/** Source components parsed from the .pipe JSON (files only). */
 	sources?: ProjectSource[];
 }
 
@@ -94,9 +97,16 @@ export interface ISidebarMainProps {
 	/** Server tasks with no matching local .pipe file. */
 	unknownTasks?: UnknownTask[];
 
-	// ── Actions (consolidated) ──────────────────────────────────────────────
+	// ── Actions ─────────────────────────────────────────────────────────────
 	onNavigate: (target: 'new' | 'monitor' | 'deploy' | 'templates') => void;
-	onFileAction: (action: 'open' | 'rename' | 'delete' | 'createFolder', path: string) => void;
+	/** Open a file in the editor. */
+	onOpenFile: (path: string) => void;
+	/**
+	 * File management callback — optional.  When provided, enables context
+	 * menus (rename/delete), inline rename, inline create, and new file/folder
+	 * header buttons.  When absent, the sidebar is display-only.
+	 */
+	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void;
 	onSourceAction: (action: 'run' | 'stop', filePath: string, sourceId: string, projectId?: string) => void;
 	onRefresh: () => void;
 
