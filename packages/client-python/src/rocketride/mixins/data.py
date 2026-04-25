@@ -150,7 +150,8 @@ class DataMixin(DAPClient):
                 self: The opened pipe instance for method chaining
 
             Raises:
-                RuntimeError: If pipe is already opened or if opening fails
+                RuntimeError: If the pipe is already opened.
+                PipeException: If the server rejects the open request.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/plain")
@@ -207,7 +208,8 @@ class DataMixin(DAPClient):
                 buffer: Data to send (must be bytes, not string)
 
             Raises:
-                RuntimeError: If pipe not opened or write fails
+                RuntimeError: If the pipe is not opened.
+                PipeException: If the server reports a write failure.
                 ValueError: If buffer is not bytes
 
             Example:
@@ -248,6 +250,9 @@ class DataMixin(DAPClient):
 
             Returns:
                 Dict: Results from processing the data you sent
+
+            Raises:
+                PipeException: If the server reports a failure while finalizing the pipe.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/csv")
@@ -372,7 +377,7 @@ class DataMixin(DAPClient):
 
         Raises:
             ValueError: If data is not string or bytes
-            RuntimeError: If sending fails
+            PipeException: If the server rejects the underlying pipe open/write/close.
 
         Example:
             # Send text data
