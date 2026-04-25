@@ -1,0 +1,135 @@
+{
+	"title": "Persistent Memory",
+	"protocol": "memory_persistent://",
+	"classType": ["memory"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.memory_persistent",
+	"prefix": "memory",
+	"icon": "memory.svg",
+	"description": [
+		"A persistent cross-session memory node that retains data across pipeline",
+		"invocations. Supports Redis for production and in-memory backends for",
+		"testing. Provides session management, keyed storage, history tracking,",
+		"and automatic summarization of older entries."
+	],
+	"lanes": {
+		"questions": ["questions"],
+		"answers": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Questions are enriched with session memory context before forwarding",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions with memory context attached in metadata"
+				}
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answers are stored in session memory for future retrieval",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Answers passed through after persistence"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "memory",
+		"profiles": {
+			"redis": {
+				"backend": "redis",
+				"redis_host": "localhost",
+				"redis_port": 6379,
+				"redis_password": "",
+				"session_ttl_hours": 24,
+				"max_history": 100,
+				"auto_summarize": true
+			},
+			"memory": {
+				"backend": "memory",
+				"session_ttl_hours": 0,
+				"max_history": 100,
+				"auto_summarize": true
+			},
+			"custom": {
+				"backend": "redis",
+				"redis_host": "",
+				"redis_port": 6379,
+				"redis_password": "",
+				"session_ttl_hours": 0,
+				"max_history": 100,
+				"auto_summarize": true
+			}
+		}
+	},
+	"fields": {
+		"backend": {
+			"type": "string",
+			"title": "Backend",
+			"description": "Storage backend: redis (production) or memory (testing)",
+			"default": "memory",
+			"enum": [
+				["redis", "Redis"],
+				["memory", "In-Memory (testing)"]
+			]
+		},
+		"redis_host": {
+			"type": "string",
+			"title": "Redis Host",
+			"description": "Redis server hostname",
+			"default": "localhost"
+		},
+		"redis_port": {
+			"type": "number",
+			"title": "Redis Port",
+			"description": "Redis server port",
+			"default": 6379
+		},
+		"redis_password": {
+			"type": "string",
+			"title": "Redis Password",
+			"description": "Redis server password (leave empty for no auth)",
+			"ui:options:password": true
+		},
+		"session_ttl_hours": {
+			"type": "number",
+			"title": "Session TTL (hours)",
+			"description": "How long sessions persist before auto-expiry (0 = no expiry)",
+			"default": 0
+		},
+		"max_history": {
+			"type": "number",
+			"title": "Max History Entries",
+			"description": "Maximum history entries per session before auto-summarization",
+			"default": 100
+		},
+		"auto_summarize": {
+			"type": "boolean",
+			"title": "Auto-Summarize",
+			"description": "Automatically summarize older history entries when limit is reached",
+			"default": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Persistent Memory",
+			"properties": [
+				"backend",
+				"redis_host",
+				"redis_port",
+				"redis_password",
+				"session_ttl_hours",
+				"max_history",
+				"auto_summarize"
+			]
+		}
+	]
+}
