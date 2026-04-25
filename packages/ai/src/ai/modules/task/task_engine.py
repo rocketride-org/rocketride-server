@@ -1588,8 +1588,8 @@ class Task(DAPBase):
             subprocess_env.update(self._launch_env)
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
             launch_client_id = self._launch_env.get('ROCKETRIDE_CLIENT_ID')
-            if subprocess_env.get('ROCKETRIDE_CLIENT_ID') != launch_client_id:
-                self.debug_message(f'Server overrode client-supplied ROCKETRIDE_CLIENT_ID while preparing subprocess_env (launch={launch_client_id!r}, server={self.client_id!r}, effective={subprocess_env.get("ROCKETRIDE_CLIENT_ID")!r})')
+            if launch_client_id is not None and launch_client_id != self.client_id:
+                self.debug_message(f'Server overrode client-supplied ROCKETRIDE_CLIENT_ID while preparing subprocess_env (launch={launch_client_id!r}, server={self.client_id!r})')
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
