@@ -158,7 +158,7 @@ class AuthenticationException(ConnectionException):
     pass
 
 
-class PipeException(RocketRideException):
+class PipeException(RocketRideException, RuntimeError):
     """
     Exception raised for data pipe operations.
 
