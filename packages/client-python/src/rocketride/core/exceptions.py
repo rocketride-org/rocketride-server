@@ -165,6 +165,11 @@ class PipeException(RocketRideException, RuntimeError):
     Raised when there are problems with data pipes used for sending
     data to pipelines, uploading files, or streaming operations.
 
+    Note:
+        Also inherits from :class:`RuntimeError` for backward compatibility with
+        callers that previously caught ``RuntimeError`` from
+        ``client.send()`` / ``client.pipe()`` / pipe ``open()``/``write()``/``close()``.
+
     Common scenarios:
     - Failed to open data pipe
     - Error writing data to pipe
