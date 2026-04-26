@@ -78,7 +78,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 1. All pipelines are recognized with the `*.pipe` format. Each pipeline and configuration is a JSON object - but the extension in your IDE will render within our visual builder canvas.
 
-2. All pipelines begin with source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
+2. All pipelines begin with a source node.: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
 
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
