@@ -88,7 +88,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
 
-5. 5. Deploy your pipelines on your own infrastructure.
+5. Deploy your pipelines on your own infrastructure.
 
    - **Docker** - Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
