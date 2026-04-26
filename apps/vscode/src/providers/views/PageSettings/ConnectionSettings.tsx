@@ -3,6 +3,17 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
+/**
+ * ConnectionSettings — "Development Mode" section of the VS Code Settings page.
+ *
+ * Renders a mode dropdown (Local/Cloud/On-prem/Docker/Service) and mode-specific
+ * configuration fields (engine version, host URL, API key, cloud sign-in, team
+ * selector, etc.).
+ *
+ * Cloud sign-in state is shared with DeployTargetSettings — signing in here
+ * updates both sections.
+ */
+
 import React, { useState } from 'react';
 import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S } from './PageSettings';
 import { MessageDisplay } from './MessageDisplay';
@@ -24,13 +35,15 @@ interface ConnectionSettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
+	/** Available teams for cloud mode */
+	teams?: Array<{ id: string; name: string }>;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut }) => {
+export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 
@@ -100,8 +113,8 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 				}}
 				id="developmentSection"
 			>
-				<div style={S.sectionTitle}>Development connection</div>
-				<div style={S.sectionDescription}>Where the extension connects to run and debug pipelines. Cloud and On-prem modes require a RocketRide API key.</div>
+				<div style={S.sectionTitle}>Development Mode</div>
+				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and On-prem modes require authentication.</div>
 				<div style={S.formGrid}>
 					<div style={S.formGroup}>
 						<label htmlFor="connectionMode" style={S.label}>
@@ -149,6 +162,23 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 										<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
 											Sign In
 										</button>
+									</div>
+								)}
+								{/* Team selector (only when signed in and teams available) */}
+								{cloudSignedIn && teams && teams.length > 0 && (
+									<div style={S.formGroup}>
+										<label htmlFor="developmentTeam" style={S.label}>
+											Team
+										</label>
+										<select id="developmentTeam" value={settings.developmentTeamId} onChange={(e) => onSettingsChange({ developmentTeamId: e.target.value })}>
+											<option value="">Select a team...</option>
+											{teams.map((t) => (
+												<option key={t.id} value={t.id}>
+													{t.name}
+												</option>
+											))}
+										</select>
+										<div style={S.helpText}>Which team's engine to connect to for development</div>
 									</div>
 								)}
 								<div style={S.formGroup}>

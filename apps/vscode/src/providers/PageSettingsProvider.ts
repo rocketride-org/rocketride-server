@@ -241,6 +241,14 @@ export class PageSettingsProvider {
 			// Debugging settings
 			pipelineRestartBehavior: workspaceConfig.get('pipelineRestartBehavior', 'prompt'),
 
+			// Development team / Deploy target
+			developmentTeamId: workspaceConfig.get('developmentTeamId', ''),
+			deployTargetMode: workspaceConfig.get('deployTargetMode', null),
+			deployTargetTeamId: workspaceConfig.get('deployTargetTeamId', ''),
+			deployHostUrl: workspaceConfig.get('deployHostUrl', ''),
+			deployApiKey: config.deployApiKey || '',
+			deployAutoConnect: workspaceConfig.get('deployAutoConnect', false),
+
 			// Environment variables
 			envVars: envVars,
 
@@ -258,6 +266,33 @@ export class PageSettingsProvider {
 			type: 'settingsLoaded',
 			settings: allSettings,
 		});
+
+		// Fetch teams when cloud-signed-in.  The dev connection may be local
+		// (no team support), so we create a temporary cloud client to fetch
+		// the team list directly from the cloud server.
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const signedIn = await cloudAuth.isSignedIn();
+		if (signedIn) {
+			try {
+				const token = await cloudAuth.getToken();
+				if (token) {
+					// Resolve cloud URL from env or config
+					const envVars = this.configManager.getEnvVars();
+					const cloudUrl = envVars.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+
+					// Create a short-lived client to fetch teams from the cloud server
+					const tempClient = new RocketRideClient({ persist: false });
+					await tempClient.connect(token, { uri: cloudUrl });
+					const response = await tempClient.dapRequest('rrext_account_teams', { subcommand: 'list' });
+					const teams = (response as any)?.body?.teams ?? [];
+					await tempClient.disconnect();
+
+					webview.postMessage({ type: 'teamsLoaded', teams });
+				}
+			} catch (err) {
+				console.log('[PageSettingsProvider] fetchTeams from cloud error:', err);
+			}
+		}
 	}
 
 	/**
@@ -300,6 +335,28 @@ export class PageSettingsProvider {
 			// Save debugging settings
 			if (settings.pipelineRestartBehavior !== undefined) {
 				await workspaceConfig.update('pipelineRestartBehavior', settings.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+			}
+
+			// Save development team / deploy target settings
+			if (settings.developmentTeamId !== undefined) {
+				await workspaceConfig.update('developmentTeamId', settings.developmentTeamId, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.deployTargetMode !== undefined) {
+				await workspaceConfig.update('deployTargetMode', settings.deployTargetMode, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.deployTargetTeamId !== undefined) {
+				await workspaceConfig.update('deployTargetTeamId', settings.deployTargetTeamId, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.deployHostUrl !== undefined) {
+				await workspaceConfig.update('deployHostUrl', settings.deployHostUrl, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.deployAutoConnect !== undefined) {
+				await workspaceConfig.update('deployAutoConnect', settings.deployAutoConnect, vscode.ConfigurationTarget.Global);
+			}
+
+			// Save deploy API key to secure storage (separate from dev key)
+			if (typeof settings.deployApiKey === 'string') {
+				await this.configManager.setDeployApiKey(settings.deployApiKey);
 			}
 
 			// Save integration settings

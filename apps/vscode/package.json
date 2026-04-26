@@ -125,6 +125,56 @@
 						"Prompt the user to restart the pipeline"
 					]
 				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID to use for development (which team's engine to connect to)"
+				},
+				"rocketride.deployTargetMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						null,
+						"cloud",
+						"onprem",
+						"docker",
+						"service"
+					],
+					"default": null,
+					"description": "Deploy target mode (null = not configured / same as development mode)"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID for the deployment target"
+				},
+				"rocketride.deployHostUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Host URL for on-prem deploy target (separate from dev connection)"
+				},
+				"rocketride.deployAutoConnect": {
+					"type": "boolean",
+					"default": false,
+					"description": "Automatically connect to the deploy target when extension starts"
+				},
+				"rocketride.deploy.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local deploy target"
+				},
+				"rocketride.deploy.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable debug output for the local deploy engine"
+				},
+				"rocketride.deployEngineArgs": {
+					"type": "string",
+					"default": "",
+					"description": "Additional command-line arguments for the deploy engine"
+				},
 				"rocketride.oauth2RootUrl": {
 					"type": "string",
 					"default": "https://oauth2.rocketride.ai",

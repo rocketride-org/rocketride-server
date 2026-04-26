@@ -21,7 +21,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
-import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxBookOpen, BxCog, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
+import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
 import type { ISidebarViewProps, ProjectEntry, DirEntry, ActiveTaskState } from './types';
 
 // =============================================================================
@@ -121,14 +121,6 @@ const S = {
 		flexShrink: 0,
 		marginLeft: 2,
 	}),
-	connectionDot: (connected: boolean): CSSProperties => ({
-		width: 10,
-		height: 10,
-		borderRadius: '50%',
-		backgroundColor: connected ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
-		flexShrink: 0,
-		margin: '0 3px',
-	}),
 	actionBtn: (color: string): CSSProperties => ({
 		background: 'none',
 		border: 'none',
@@ -195,38 +187,11 @@ const S = {
 		fontSize: 12,
 		textAlign: 'center' as const,
 	} as CSSProperties,
-	footer: {
-		flexShrink: 0,
-		borderTop: '1px solid var(--rr-border)',
-		padding: '12px 6px',
-	} as CSSProperties,
-	footerBtn: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '3px 8px',
-		cursor: 'pointer',
-		borderRadius: 5,
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		border: 'none',
-		background: 'none',
-		width: '100%',
-		textAlign: 'left' as const,
-	} as CSSProperties,
 };
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-const MODE_LABELS: Record<string, string> = {
-	cloud: 'Cloud',
-	docker: 'Docker',
-	service: 'Service',
-	onprem: 'On-prem',
-	local: 'Local',
-};
 
 const HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
@@ -383,7 +348,7 @@ function dirStatus(dirPath: string, entries: ProjectEntry[], activeTasks: Map<st
 // COMPONENT
 // =============================================================================
 
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, onOpenSettings, onOpenDocs, onToggleConnection, footerSlot, onOpenUnknownTask, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -406,9 +371,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 	}, [activeFilePath]);
 
 	const isConnected = connection.state === 'connected';
-	const isConnecting = connection.state === 'connecting';
 	const hasFileManage = !!onFileManage;
-	const hasFooter = !!(onOpenDocs || onOpenSettings || onToggleConnection || footerSlot);
 
 	// ── Click outside to close menu ────────────────────────────────────────
 
@@ -869,31 +832,8 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 				)}
 			</div>
 
-			{/* ── Footer (conditional — only if any footer prop provided) ── */}
-			{hasFooter && (
-				<div style={S.footer}>
-					{onOpenDocs && (
-						<button style={{ ...S.footerBtn, ...navHoverBg('docs') }} onMouseEnter={() => setHoveredNav('docs')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenDocs}>
-							<BxBookOpen size={16} />
-							Documentation
-						</button>
-					)}
-					{onOpenDocs && onOpenSettings && <div style={{ height: 10 }} />}
-					{onOpenSettings && (
-						<button style={{ ...S.footerBtn, ...navHoverBg('settings') }} onMouseEnter={() => setHoveredNav('settings')} onMouseLeave={() => setHoveredNav(null)} onClick={onOpenSettings}>
-							<BxCog size={16} />
-							Settings
-						</button>
-					)}
-					{onToggleConnection && (
-						<button style={{ ...S.footerBtn, ...navHoverBg('connection') }} onMouseEnter={() => setHoveredNav('connection')} onMouseLeave={() => setHoveredNav(null)} onClick={onToggleConnection} title={isConnected ? 'Click to disconnect' : 'Click to connect'}>
-							<div style={S.connectionDot(isConnected)} />
-							<span>{isConnecting ? 'Connecting...' : isConnected ? `Connected (${MODE_LABELS[connection.mode ?? ''] ?? connection.mode ?? ''})` : 'Disconnected'}</span>
-						</button>
-					)}
-					{footerSlot}
-				</div>
-			)}
+			{/* ── Footer slot (host-provided) ── */}
+			{footerSlot}
 		</div>
 	);
 };

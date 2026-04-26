@@ -58,3 +58,12 @@ export * from './components/BoxIcon';
 
 export { TabPanel } from './components/tab-panel/TabPanel';
 export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
+
+// --- Sidebar footer ----------------------------------------------------------
+export { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
+export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
+
+// --- Shared hooks & utilities ------------------------------------------------
+export { useClickOutside } from './hooks/useClickOutside';
+export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
+export { PopupRow } from './components/PopupRow';

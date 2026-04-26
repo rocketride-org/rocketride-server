@@ -111,10 +111,7 @@ export interface ISidebarViewProps {
 	onRefresh: () => void;
 
 	// ── Footer ──────────────────────────────────────────────────────────────
-	onOpenSettings?: () => void;
-	onOpenDocs?: () => void;
-	onToggleConnection?: () => void;
-	/** Host-specific footer content (AccountButton in rocket-ui, ConnectionStatus in VS Code). */
+	/** Host-provided footer content (e.g. SidebarFooter). */
 	footerSlot?: ReactNode;
 
 	// ── Unknown task action ─────────────────────────────────────────────────

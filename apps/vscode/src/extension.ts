@@ -383,6 +383,20 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			vscode.window.showInformationMessage('Pipeline views refreshed');
 		}),
 
+		// Account/Billing — stub panels (actual views will migrate to shared-ui later)
+		vscode.commands.registerCommand('rocketride.page.account.open', () => {
+			const panel = vscode.window.createWebviewPanel('rocketride.pageAccount', 'Account', vscode.ViewColumn.One, {});
+			panel.webview.html = '<html><body style="padding:32px;font-family:system-ui"><h2>Account</h2><p>Account management is coming soon.</p></body></html>';
+		}),
+		vscode.commands.registerCommand('rocketride.page.billing.open', () => {
+			const panel = vscode.window.createWebviewPanel('rocketride.pageBilling', 'Billing', vscode.ViewColumn.One, {});
+			panel.webview.html = '<html><body style="padding:32px;font-family:system-ui"><h2>Billing</h2><p>Billing management is coming soon.</p></body></html>';
+		}),
+		vscode.commands.registerCommand('rocketride.cloud.logout', async () => {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			await cloudAuth.signOut();
+		}),
+
 		// Stub commands — run/stop/open are handled via webview messages now,
 		// but package.json still declares them so they must be registered.
 		vscode.commands.registerCommand('rocketride.sidebar.files.openFile', () => {}),

@@ -28,6 +28,7 @@ import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
 import { EnvVariablesSettings } from './EnvVariablesSettings';
 import { IntegrationSettings } from './IntegrationSettings';
+import { DeployTargetSettings } from './DeployTargetSettings';
 import { MessageDisplay } from './MessageDisplay';
 
 import 'shared/themes/rocketride-default.css';
@@ -49,6 +50,15 @@ export interface SettingsData {
 	localEngineArgs: string;
 	localDebugOutput: boolean;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	developmentTeamId: string;
+	deployTargetMode: 'cloud' | 'docker' | 'service' | 'onprem' | 'local' | null;
+	deployTargetTeamId: string;
+	/** Separate host URL for deploy target (on-prem deploy) */
+	deployHostUrl: string;
+	/** Separate API key for deploy target (on-prem deploy) */
+	deployApiKey: string;
+	/** Auto-connect to deploy target on startup */
+	deployAutoConnect: boolean;
 	envVars?: Record<string, string>;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
@@ -225,6 +235,12 @@ export const PageSettings: React.FC = () => {
 		localEngineVersion: 'latest',
 		localEngineArgs: '',
 		pipelineRestartBehavior: 'prompt',
+		developmentTeamId: '',
+		deployTargetMode: null,
+		deployTargetTeamId: '',
+		deployHostUrl: '',
+		deployApiKey: '',
+		deployAutoConnect: false,
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
@@ -242,6 +258,7 @@ export const PageSettings: React.FC = () => {
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
+	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -269,6 +286,10 @@ export const PageSettings: React.FC = () => {
 				case 'cloud:status' as any:
 					setCloudSignedIn((message as any).signedIn);
 					setCloudUserName((message as any).userName || '');
+					break;
+
+				case 'teamsLoaded' as any:
+					setTeams((message as any).teams || []);
 					break;
 
 				case 'showMessage': {
@@ -422,7 +443,9 @@ export const PageSettings: React.FC = () => {
 			<MessageDisplay message={message} />
 
 			<div style={{ display: 'grid', gap: 24 }}>
-				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
+				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
+
+				<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
 
 				<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
 

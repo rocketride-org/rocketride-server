@@ -6,12 +6,17 @@
 /**
  * PageSidebarProvider — Extension host provider for the unified sidebar.
  *
- * Finds and parses .pipe files, watches for file changes, forwards task
- * events to the webview, and handles action messages (open, run, stop).
+ * Manages two independent connections:
+ *   - ConnectionManager (dev) — where pipelines run during development
+ *   - DeployManager (deploy) — where pipelines are deployed for production
  *
- * The webview (SidebarWebview.tsx) receives ProjectEntry[] and raw
- * task events, tracks active-task state locally, and renders <SidebarView>
- * from shared-ui.
+ * Finds and parses .pipe files, watches for file changes, forwards task
+ * events from both connections to the webview, fetches team lists when
+ * cloud-signed-in, and handles action messages (open, run, stop, mode
+ * switch, team switch, deploy target switch).
+ *
+ * The webview (SidebarWebview.tsx) receives ProjectEntry[], task events,
+ * connection state for both dev and deploy, team lists, and auth state.
  */
 
 import * as vscode from 'vscode';
@@ -19,6 +24,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
+import { DeployManager } from '../connection/deploy-manager';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent } from '../shared/types';
 import { getPageProjectProvider } from '../extension';
@@ -48,9 +55,14 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager = ConfigManager.getInstance();
 	private connectionManager = ConnectionManager.getInstance();
+	private deployManager = DeployManager.getDeployInstance();
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
+
+	// ── Teams cache (fetched when cloud-signed-in + connected) ───────────────
+	private devTeams: Array<{ id: string; name: string; color?: string; memberCount?: number }> = [];
+	private deployTeams: Array<{ id: string; name: string; color?: string; memberCount?: number }> = [];
 
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.setupFileWatching();
@@ -116,6 +128,26 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 					case 'openUnknownTask':
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
 						break;
+					case 'setDevelopmentMode':
+						await this.configManager.updateConnectionMode(message.mode);
+						break;
+					case 'setDevelopmentTeam':
+						await this.configManager.updateDevelopmentTeamId(message.teamId);
+						break;
+					case 'setDeployTargetMode':
+						await this.configManager.updateDeployTargetMode(message.mode);
+						// Reconnect the DEPLOY manager (not dev) when deploy mode changes
+						await this.deployManager.disconnect();
+						await this.deployManager.initialize();
+						break;
+					case 'setDeployTargetTeam':
+						await this.configManager.updateDeployTargetTeamId(message.teamId);
+						break;
+					case 'cloudSignIn': {
+						const auth = CloudAuthProvider.getInstance();
+						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						break;
+					}
 				}
 			} catch (error) {
 				console.error('[PageSidebarProvider] Message handling error:', error);
@@ -241,8 +273,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		const connState = this.connectionManager.on('connectionStateChanged', () => {
 			this.sendFullUpdate();
 		});
-		const connected = this.connectionManager.on('connected', () => {
-			this.sendFullUpdate();
+		const connected = this.connectionManager.on('connected', async () => {
 			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
@@ -250,6 +281,9 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 					console.error('[PageSidebarProvider] Failed to subscribe to task events:', err);
 				});
 			}
+			// Fetch teams if cloud-signed-in
+			await this.fetchTeams();
+			this.sendFullUpdate();
 		});
 		const disconnected = this.connectionManager.on('disconnected', () => {
 			this.sendFullUpdate();
@@ -268,7 +302,30 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 			this.loadPipelineFiles();
 		});
 
-		this.disposables.push(connState, connected, disconnected, error, configChange, servicesUpdated);
+		// Re-fetch teams when cloud auth state changes (sign-in/sign-out)
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const cloudAuthHandler = async () => {
+			await Promise.all([this.fetchTeams(), this.fetchDeployTeams()]);
+			this.sendFullUpdate();
+		};
+		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
+
+		// ── Deploy manager events ────────────────────────────────────────────
+		const deployConnState = this.deployManager.on('connectionStateChanged', () => {
+			this.sendFullUpdate();
+		});
+		const deployConnected = this.deployManager.on('connected', async () => {
+			// Fetch teams from deploy server
+			await this.fetchDeployTeams();
+			this.sendFullUpdate();
+		});
+		const deployDisconnected = this.deployManager.on('disconnected', () => {
+			this.sendFullUpdate();
+		});
+
+		this.disposables.push(connState, connected, disconnected, error, configChange, servicesUpdated, deployConnState, deployConnected, deployDisconnected, {
+			dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler),
+		});
 
 		// Forward server events to webview
 		this.connectionManager.on('event', (event: GenericEvent) => {
@@ -301,18 +358,82 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// DATA
 	// =========================================================================
 
-	/** Sends connection state + entries to the webview. */
+	/** Fetches team list from dev server when cloud-signed-in + connected. */
+	private async fetchTeams(): Promise<void> {
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const signedIn = await cloudAuth.isSignedIn();
+		if (!signedIn || !this.connectionManager.isConnected()) {
+			this.devTeams = [];
+			return;
+		}
+		try {
+			const client = this.connectionManager.getClient();
+			if (!client) {
+				this.devTeams = [];
+				return;
+			}
+			const response = await client.dapRequest('rrext_account_teams', { subcommand: 'list' });
+			this.devTeams = (response as any)?.body?.teams ?? [];
+		} catch (err) {
+			console.log('[PageSidebarProvider] fetchTeams error:', err);
+			this.devTeams = [];
+		}
+	}
+
+	/** Fetches team list from deploy server when cloud-signed-in + connected. */
+	private async fetchDeployTeams(): Promise<void> {
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const signedIn = await cloudAuth.isSignedIn();
+		if (!signedIn || !this.deployManager.isConnected()) {
+			this.deployTeams = [];
+			return;
+		}
+		try {
+			const client = this.deployManager.getClient();
+			if (!client) {
+				this.deployTeams = [];
+				return;
+			}
+			const response = await client.dapRequest('rrext_account_teams', { subcommand: 'list' });
+			this.deployTeams = (response as any)?.body?.teams ?? [];
+		} catch (err) {
+			console.log('[PageSidebarProvider] fetchDeployTeams error:', err);
+			this.deployTeams = [];
+		}
+	}
+
+	/** Sends connection state + entries + user identity + teams to the webview. */
 	private async sendFullUpdate(): Promise<void> {
 		if (!this._view) return;
 
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
 
+		// Fetch cloud auth identity (if signed in)
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const cloudSignedIn = await cloudAuth.isSignedIn();
+		const userName = cloudSignedIn ? await cloudAuth.getUserName() : undefined;
+
+		const deployStatus = this.deployManager.getConnectionStatus();
+
 		this._view.webview.postMessage({
 			type: 'update',
 			data: {
+				// Dev connection
 				connectionState: status.state,
 				connectionMode: config.connectionMode,
+				developmentTeamId: config.developmentTeamId,
+				// Deploy connection
+				deployConnectionState: deployStatus.state,
+				deployConnectionMode: config.deployTargetMode,
+				deployTargetTeamId: config.deployTargetTeamId,
+				// Teams (from respective servers)
+				teams: this.devTeams,
+				deployTeams: this.deployTeams,
+				// Shared
+				cloudSignedIn,
+				userName: userName || undefined,
+				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
 			},

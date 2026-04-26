@@ -7,19 +7,29 @@
  * SidebarViewWebview — VS Code webview bridge for the unified sidebar.
  *
  * Receives data from the extension host via useMessaging, manages local
- * state (active tasks, unknown tasks), and renders <SidebarView> with props.
- * User actions from SidebarView flow back as messages to the extension host.
+ * state (active tasks, unknown tasks, connection state for both dev and
+ * deploy), and renders <SidebarView> with a <SidebarFooter> footerSlot.
+ *
+ * The footer menu is built dynamically based on auth and connection state:
+ *   - Anonymous (no cloud identity): Development Mode + Settings only
+ *   - Cloud signed in: Development Mode + Deploy Target + Account/Billing/Settings/Log out
+ *
+ * Team submenus under Cloud are populated from the respective connection's
+ * server (dev teams from ConnectionManager, deploy teams from DeployManager).
  *
  * Architecture:
- *   SidebarViewProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser) → SidebarView (shared-ui)
+ *   PageSidebarProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser)
+ *     → SidebarView (shared-ui) + SidebarFooter (shared-ui)
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport, BxDesktop, BxCloudUpload, BxLock } from 'shared';
+import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
+import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 
@@ -41,7 +51,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDevelopmentTeam'; teamId: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'setDeployTargetTeam'; teamId: string } | { type: 'cloudSignIn' };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -52,18 +62,68 @@ interface DashboardTaskDTO {
 	state: number;
 }
 
-type IncomingMessage = { type: 'update'; data: { connectionState: string; connectionMode: string; entries: HostProjectEntry[]; unknownTasks: UnknownTask[] } } | { type: 'entriesUpdate'; entries: HostProjectEntry[] } | { type: 'taskEvent'; event: TaskEventBody } | { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] } | { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
+interface TeamDTO {
+	id: string;
+	name: string;
+	color?: string;
+	memberCount?: number;
+}
+
+type IncomingMessage =
+	| {
+			type: 'update';
+			data: {
+				// Dev connection
+				connectionState: string;
+				connectionMode: string;
+				developmentTeamId?: string;
+				// Deploy connection
+				deployConnectionState?: string;
+				deployConnectionMode?: string | null;
+				deployTargetTeamId?: string;
+				// Teams (from respective servers)
+				teams?: TeamDTO[];
+				deployTeams?: TeamDTO[];
+				// Shared auth
+				cloudSignedIn?: boolean;
+				userName?: string;
+				userEmail?: string;
+				// Pipeline data
+				entries: HostProjectEntry[];
+				unknownTasks: UnknownTask[];
+			};
+	  }
+	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
+	| { type: 'taskEvent'; event: TaskEventBody }
+	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
+	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
 const SidebarViewWebview: React.FC = () => {
-	// ── State ────────────────────────────────────────────────────────────────
+	// ── Dev connection state ────────────────────────────────────────────────
 	const [connection, setConnection] = useState<ConnectionInfo>({ state: 'disconnected' });
+	const [developmentMode, setDevelopmentMode] = useState('local');
+	const [developmentTeamId, setDevelopmentTeamId] = useState('');
+	const [teams, setTeams] = useState<TeamDTO[]>([]);
+
+	// ── Deploy connection state ─────────────────────────────────────────────
+	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
+	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
+	const [deployTargetTeamId, setDeployTargetTeamId] = useState('');
+	const [deployTeams, setDeployTeams] = useState<TeamDTO[]>([]);
+
+	// ── Pipeline data ───────────────────────────────────────────────────────
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
+
+	// ── Shared auth + identity ──────────────────────────────────────────────
+	const [userName, setUserName] = useState<string | undefined>();
+	const [userEmail, setUserEmail] = useState<string | undefined>();
+	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 
 	// ── Stable ref for entries (used by task event handler to check known tasks)
 	const entriesRef = useRef(entries);
@@ -171,6 +231,21 @@ const SidebarViewWebview: React.FC = () => {
 					});
 					setEntries(msg.data.entries);
 					if (msg.data.unknownTasks) setUnknownTasks(msg.data.unknownTasks);
+					if (msg.data.userName !== undefined) setUserName(msg.data.userName || undefined);
+					if (msg.data.userEmail !== undefined) setUserEmail(msg.data.userEmail || undefined);
+					// Shared auth
+					if (msg.data.cloudSignedIn !== undefined) setCloudSignedIn(msg.data.cloudSignedIn);
+
+					// Dev connection state
+					if (msg.data.teams) setTeams(msg.data.teams);
+					if (msg.data.connectionMode) setDevelopmentMode(msg.data.connectionMode);
+					if (msg.data.developmentTeamId !== undefined) setDevelopmentTeamId(msg.data.developmentTeamId);
+
+					// Deploy connection state
+					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
+					if (msg.data.deployConnectionState) setDeployConnectionState(msg.data.deployConnectionState);
+					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
+					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					break;
 
 				case 'entriesUpdate':
@@ -258,10 +333,6 @@ const SidebarViewWebview: React.FC = () => {
 		sendMessage({ type: connection.state === 'connected' ? 'disconnect' : 'connect' });
 	}, [sendMessage, connection.state]);
 
-	const onOpenSettings = useCallback(() => {
-		sendMessage({ type: 'command', command: 'rocketride.page.settings.open' });
-	}, [sendMessage]);
-
 	const onOpenDocs = useCallback(() => {
 		sendMessage({ type: 'command', command: 'rocketride.sidebar.documentation.open' });
 	}, [sendMessage]);
@@ -273,9 +344,132 @@ const SidebarViewWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	// ── Footer menu items (dynamic based on auth + connection state) ────────
+	//
+	// The menu structure adapts to three states:
+	//   1. Anonymous: Development Mode (Local/Docker/Service/On-prem/Cloud sign-in) + Settings
+	//   2. Cloud signed in: Development Mode + Deploy Target + Account/Billing/Settings/Log out
+	//   3. Both submenus show Cloud → team list when teams are available
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Builds a submenu of cloud team items for either Development Mode or Deploy Target.
+	 * Each team item shows a checkmark for the currently selected team.
+	 *
+	 * @param teamList - The team list to render (dev teams or deploy teams)
+	 * @param selectedTeamId - The currently selected team ID (for checkmark display)
+	 * @param onSelect - Callback invoked when the user selects a team
+	 * @returns Array of SidebarFooterMenuItem for the team submenu
+	 */
+	const buildCloudTeamSubmenu = useCallback((teamList: TeamDTO[], selectedTeamId: string, onSelect: (teamId: string) => void): SidebarFooterMenuItem[] => {
+		return teamList.map((t) => ({
+			id: t.id,
+			label: t.name,
+			checked: selectedTeamId === t.id,
+			onClick: () => onSelect(t.id),
+		}));
+	}, []);
+
+	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
+		const items: SidebarFooterMenuItem[] = [];
+
+		// ── Development Mode submenu ────────────────────────────────────────
+		const devModeItems: SidebarFooterMenuItem[] = [{ id: 'dev-local', label: 'Local', icon: BxDesktop, checked: developmentMode === 'local', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'local' }) }];
+
+		// Cloud: submenu of teams when signed in, sign-in action when not
+		if (cloudSignedIn && teams.length > 0) {
+			devModeItems.push({
+				id: 'dev-cloud',
+				label: 'Cloud',
+				icon: BxCloudUpload,
+				submenu: buildCloudTeamSubmenu(teams, developmentTeamId, (teamId: string) => {
+					sendMessage({ type: 'setDevelopmentTeam', teamId });
+					// Only switch mode if not already cloud — avoids needless reconnect
+					if (developmentMode !== 'cloud') {
+						sendMessage({ type: 'setDevelopmentMode', mode: 'cloud' });
+					}
+				}),
+			});
+		} else {
+			devModeItems.push({
+				id: 'dev-cloud',
+				label: 'Cloud',
+				icon: BxLock,
+				onClick: () => sendMessage({ type: 'cloudSignIn' }),
+			});
+		}
+
+		devModeItems.push({ id: 'dev-docker', label: 'Docker', checked: developmentMode === 'docker', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'docker' }) }, { id: 'dev-service', label: 'Service', checked: developmentMode === 'service', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'service' }) }, { id: 'dev-onprem', label: 'On-prem', icon: BxCog, checked: developmentMode === 'onprem', onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
+
+		items.push({ id: 'dev-mode', label: 'Development Mode', submenu: devModeItems });
+
+		// ── Deploy Target submenu (always available — you can deploy to
+		//    on-prem/docker without cloud, or to cloud teams when signed in) ──
+		{
+			const deployItems: SidebarFooterMenuItem[] = [];
+
+			// Local deploy target (dev in cloud, deploy locally)
+			deployItems.push({
+				id: 'deploy-local',
+				label: 'Local',
+				icon: BxDesktop,
+				checked: deployTargetMode === 'local',
+				onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'local' }),
+			});
+
+			// Cloud teams — use dev teams or deploy teams (whichever is available,
+			// since teams are account-level and the same on any cloud server)
+			const availableDeployTeams = deployTeams.length > 0 ? deployTeams : teams;
+			if (cloudSignedIn && availableDeployTeams.length > 0) {
+				deployItems.push({
+					id: 'deploy-cloud',
+					label: 'Cloud',
+					icon: BxCloudUpload,
+					submenu: buildCloudTeamSubmenu(availableDeployTeams, deployTargetTeamId, (teamId: string) => {
+						sendMessage({ type: 'setDeployTargetTeam', teamId });
+						// Only switch mode if not already cloud — avoids needless reconnect
+						if (deployTargetMode !== 'cloud') {
+							sendMessage({ type: 'setDeployTargetMode', mode: 'cloud' });
+						}
+					}),
+				});
+			} else if (!cloudSignedIn) {
+				// Cloud requires sign-in — show sign-in action
+				deployItems.push({
+					id: 'deploy-cloud',
+					label: 'Cloud',
+					icon: BxLock,
+					onClick: () => sendMessage({ type: 'cloudSignIn' }),
+				});
+			}
+
+			deployItems.push({ id: 'deploy-onprem', label: 'On-prem', icon: BxCog, checked: deployTargetMode === 'onprem', onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) }, { id: 'deploy-docker', label: 'Docker', checked: deployTargetMode === 'docker', onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'docker' }) }, { id: 'deploy-service', label: 'Service', checked: deployTargetMode === 'service', onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'service' }) });
+
+			// Show deploy connection state in the label when connected
+			const deployLabel = deployConnectionState === 'connected' ? 'Deploy Target  ●' : 'Deploy Target';
+			items.push({ id: 'deploy-target', label: deployLabel, submenu: deployItems });
+		}
+
+		// ── Account / Billing / Settings / Log out ──────────────────────────
+		if (cloudSignedIn) {
+			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) }, { id: 'billing', label: 'Billing', icon: BxCog, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.billing.open' }) });
+		}
+
+		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudSignedIn, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
+
+		if (cloudSignedIn) {
+			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.cloud.logout' }) });
+		}
+
+		return items;
+	}, [sendMessage, cloudSignedIn, teams, deployTeams, developmentMode, developmentTeamId, deployTargetMode, deployTargetTeamId, deployConnectionState, buildCloudTeamSubmenu]);
+
+	// ── Footer slot ─────────────────────────────────────────────────────────
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} connection={{ ...connection, onToggle: onToggleConnection }} menuItems={footerMenuItems} />;
+
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} onOpenSettings={onOpenSettings} onOpenDocs={onOpenDocs} onToggleConnection={onToggleConnection} onOpenUnknownTask={onOpenUnknownTask} />;
+	return <SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;
