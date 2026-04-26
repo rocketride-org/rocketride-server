@@ -83,7 +83,7 @@ export interface ConnectionInfo {
 // COMPONENT PROPS
 // =============================================================================
 
-export interface ISidebarMainProps {
+export interface ISidebarViewProps {
 	// ── Connection ──────────────────────────────────────────────────────────
 	connection: ConnectionInfo;
 
@@ -116,6 +116,10 @@ export interface ISidebarMainProps {
 	onToggleConnection?: () => void;
 	/** Host-specific footer content (AccountButton in rocket-ui, ConnectionStatus in VS Code). */
 	footerSlot?: ReactNode;
+
+	// ── Unknown task action ─────────────────────────────────────────────────
+	/** Called when the user clicks an unknown task. Opens a status-only view. */
+	onOpenUnknownTask?: (projectId: string, sourceId: string, displayName: string) => void;
 
 	// ── Tree UI ─────────────────────────────────────────────────────────────
 	/** Currently open file path (for active highlight). */

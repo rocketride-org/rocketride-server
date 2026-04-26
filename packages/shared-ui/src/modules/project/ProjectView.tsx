@@ -80,6 +80,8 @@ export interface IProjectViewProps {
 	onSave?: () => void;
 	/** Called when the user clears the trace log. */
 	onTraceClear?: () => void;
+	/** When true, hides the Design tab, disables Run (Stop still works), defaults to Status tab. */
+	statusOnly?: boolean;
 }
 
 // =============================================================================
@@ -164,11 +166,11 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear, statusOnly = false }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
-		mode: initialViewState?.mode ?? 'design',
+		mode: initialViewState?.mode ?? (statusOnly ? 'status' : 'design'),
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
 	}));
@@ -301,8 +303,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	// --- Tab definitions -----------------------------------------------------
 
-	const tabs = [
-		{ id: 'design', label: 'Design' },
+	const allTabs = [
+		...(statusOnly ? [] : [{ id: 'design', label: 'Design' }]),
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
@@ -313,14 +315,17 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 			badge: totalErrors + totalWarnings > 0 ? String(totalErrors + totalWarnings) : undefined,
 		},
 	];
+	const tabs = allTabs;
 
 	// --- Panels (only the active panel is mounted) ----------------------------
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
+			// In statusOnly mode, only allow stop (no pipeline JSON to run)
+			if (statusOnly && action !== 'stop') return;
 			onPipelineAction?.(action, source);
 		},
-		[onPipelineAction]
+		[onPipelineAction, statusOnly]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -334,7 +339,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isDirty} isNew={isNew} onSave={handleSave} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} statusOnly={statusOnly} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
@@ -412,12 +417,13 @@ const SourceStatusPane: React.FC<{
 	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	onOpenLink?: (url: string, displayName?: string) => void;
 	serverHost?: string;
-}> = ({ source, taskStatus, isConnected, onPipelineAction, onOpenLink, serverHost }) => {
+	statusOnly?: boolean;
+}> = ({ source, taskStatus, isConnected, onPipelineAction, onOpenLink, serverHost, statusOnly }) => {
 	const currentElapsed = useElapsedTimer(taskStatus ?? null);
 
 	return (
 		<div style={styles.sourcePane}>
-			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} />
+			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} disableRun={statusOnly} />
 			<div style={styles.sourceBody}>
 				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} isConnected={isConnected} />
 			</div>

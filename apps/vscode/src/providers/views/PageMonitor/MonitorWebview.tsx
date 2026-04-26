@@ -7,17 +7,17 @@
  * MonitorWebview — VS Code webview bridge for the server monitor.
  *
  * Receives messages from the extension host via useMessaging, manages local
- * state, and renders <ServerMonitor> with props. User actions flow back as
+ * state, and renders <MonitorView> with props. User actions flow back as
  * messages to the extension host.
  *
  * Architecture:
- *   MonitorHost (Node.js) ↔ postMessage ↔ MonitorWebview (browser) → ServerMonitor (pure UI)
+ *   MonitorHost (Node.js) ↔ postMessage ↔ MonitorWebview (browser) → MonitorView (pure UI)
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
-import { ServerMonitor, parseActivityEvent } from 'shared';
+import { MonitorView, parseActivityEvent } from 'shared';
 import type { DashboardResponse, ActivityEvent } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { MonitorHostToWebview, MonitorWebviewToHost } from '../types';
@@ -76,7 +76,7 @@ const MonitorWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	return <ServerMonitor data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
+	return <MonitorView data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
 };
 
 export default MonitorWebview;

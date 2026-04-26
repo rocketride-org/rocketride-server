@@ -195,6 +195,11 @@
 				"icon": "$(dashboard)"
 			},
 			{
+				"command": "rocketride.page.status.open",
+				"title": "Task Status",
+				"category": "RocketRide"
+			},
+			{
 				"command": "rocketride.sidebar.connection.connect",
 				"title": "Connect to Server",
 				"category": "RocketRide",

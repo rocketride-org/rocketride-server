@@ -36,11 +36,12 @@ import { icons } from './shared/util/icons';
 import { ConnectionManager } from './connection/connection';
 import { ConfigManager } from './config';
 
-import { SidebarMainProvider } from './providers/SidebarMainProvider';
+import { PageSidebarProvider } from './providers/PageSidebarProvider';
 import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageMonitorProvider } from './providers/PageMonitorProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
+import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { AgentManager } from './agents/agent-manager';
@@ -52,11 +53,12 @@ let connectionManager: ConnectionManager | undefined;
 let configManager: ConfigManager | undefined;
 
 // Provider references
-let sidebarMain: SidebarMainProvider | undefined;
+let pageSidebar: PageSidebarProvider | undefined;
 let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let _pageMonitor: PageMonitorProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
+let pageStatus: PageStatusProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
 
@@ -159,8 +161,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				progress.report({ increment: 50, message: 'Creating tree providers...' });
 
 				// Register unified sidebar webview
-				sidebarMain = new SidebarMainProvider(context.extensionUri);
-				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(SidebarMainProvider.viewType, sidebarMain);
+				pageSidebar = new PageSidebarProvider(context.extensionUri);
+				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(PageSidebarProvider.viewType, pageSidebar);
 
 				context.subscriptions.push(sidebarWebviewProvider);
 
@@ -173,6 +175,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				_pageMonitor = new PageMonitorProvider(context);
 				pageDeploy = new PageDeployProvider(context);
+				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 
 				// Register unified project editor (canvas + status + trace)
@@ -294,6 +297,9 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('rocketride.sidebar.connection.reconnect', async () => {
 			await connectionManager?.reconnect();
 		}),
+		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
+			pageStatus?.show(projectId, sourceId, displayName);
+		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
 			vscode.window.showInformationMessage('RocketRide views refreshed');
@@ -393,7 +399,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
  * Sets up event handlers for cross-provider communication
  */
 function setupConnectionEventHandlers(): void {
-	// Pipeline data changes are now handled by SidebarMainProvider's event listeners
+	// Pipeline data changes are now handled by PageSidebarProvider's event listeners
 
 	// Sync service catalog + schemas to .rocketride/ when services are fetched
 	connectionManager?.on('servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
@@ -414,7 +420,7 @@ function setupConnectionEventHandlers(): void {
  * Refreshes all data providers
  */
 async function refreshAllProviders(): Promise<void> {
-	// SidebarMainProvider handles its own refresh via event listeners
+	// PageSidebarProvider handles its own refresh via event listeners
 }
 
 /**

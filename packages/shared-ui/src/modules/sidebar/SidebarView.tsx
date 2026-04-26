@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * SidebarMain — Unified sidebar component for pipeline management.
+ * SidebarView — Unified sidebar component for pipeline management.
  *
  * Shared between VS Code webview and rocket-ui.  All data flows in via
  * props; all user actions flow out via callbacks.  The host is responsible
@@ -22,7 +22,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxBookOpen, BxCog, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
-import type { ISidebarMainProps, ProjectEntry, DirEntry, ActiveTaskState } from './types';
+import type { ISidebarViewProps, ProjectEntry, DirEntry, ActiveTaskState } from './types';
 
 // =============================================================================
 // STYLES
@@ -383,7 +383,7 @@ function dirStatus(dirPath: string, entries: ProjectEntry[], activeTasks: Map<st
 // COMPONENT
 // =============================================================================
 
-export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, onOpenSettings, onOpenDocs, onToggleConnection, footerSlot, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, onOpenSettings, onOpenDocs, onToggleConnection, footerSlot, onOpenUnknownTask, activeFilePath }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -845,7 +845,7 @@ export const SidebarMain: React.FC<ISidebarMainProps> = ({ connection, entries, 
 							unknownTasks!.map((ut) => {
 								const utKey = `ut:${ut.projectId}:${ut.sourceId}`;
 								return (
-									<div key={utKey} style={{ ...S.row, paddingLeft: 28, ...hoverBg(utKey) }} onMouseEnter={() => setHoveredRow(utKey)} onMouseLeave={() => setHoveredRow(null)} title={`Project: ${ut.projectId}\nSource: ${ut.sourceId}\nRunning (no local .pipe file)`}>
+									<div key={utKey} style={{ ...S.row, paddingLeft: 28, ...hoverBg(utKey) }} onMouseEnter={() => setHoveredRow(utKey)} onMouseLeave={() => setHoveredRow(null)} onClick={() => onOpenUnknownTask?.(ut.projectId, ut.sourceId, ut.displayName)} title={`Project: ${ut.projectId}\nSource: ${ut.sourceId}\nRunning (no local .pipe file)`}>
 										<div style={S.dot('var(--rr-color-success)')} />
 										<span style={S.rowName}>{ut.displayName}</span>
 										<span style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginLeft: 4 }}>{ut.projectLabel}</span>

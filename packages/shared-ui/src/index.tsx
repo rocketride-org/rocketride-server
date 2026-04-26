@@ -36,14 +36,14 @@ export type { ParsedServerEvent } from './modules/project';
 export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './modules/project';
 
 // --- Server module (dashboard monitor) ---------------------------------------
-export { default as ServerMonitor } from './modules/server';
-export type { IServerMonitorProps } from './modules/server';
+export { default as MonitorView } from './modules/server';
+export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
-export { SidebarMain } from './modules/sidebar/SidebarMain';
-export type { ISidebarMainProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+export { SidebarView } from './modules/sidebar/SidebarView';
+export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
 
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';

@@ -3,12 +3,9 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import SidebarMainWebview from './SidebarMainWebview';
+import StatusWebview from './StatusWebview';
 import { mountComponent } from '../../../shared/util/mount';
 
-// Override VS Code's default 20px body padding for this sidebar view
-document.body.style.padding = '0';
+mountComponent(StatusWebview, 'StatusWebview');
 
-mountComponent(SidebarMainWebview, 'SidebarMainWebview');
-
-export default SidebarMainWebview;
+export default StatusWebview;

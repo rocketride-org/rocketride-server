@@ -4,15 +4,15 @@
 // =============================================================================
 
 /**
- * ServerMonitor — Top-level entry point for the server monitor dashboard.
+ * MonitorView — Top-level entry point for the server monitor dashboard.
  *
  * This is the single component that host applications render. It receives
  * dashboard data and events as props (data-in, callbacks-out) so that the
  * host controls all data fetching and DAP communication.
  *
  * Usage:
- *   import ServerMonitor from 'shared/modules/server';
- *   <ServerMonitor data={snapshot} events={activityLog} isConnected={true} />
+ *   import MonitorView from 'shared/modules/server';
+ *   <MonitorView data={snapshot} events={activityLog} isConnected={true} />
  */
 
 import React, { useState, useMemo, CSSProperties } from 'react';
@@ -82,7 +82,7 @@ const styles = {
 // TYPES
 // =============================================================================
 
-export interface IServerMonitorProps {
+export interface IMonitorViewProps {
 	/** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
 	data: DashboardResponse | null;
 	/** Activity events pushed from the server (newest first). */
@@ -99,7 +99,7 @@ type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 // COMPONENT
 // =============================================================================
 
-const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnected, onRefresh }) => {
+const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, onRefresh }) => {
 	const [activeTab, setActiveTab] = useState<TabId>('overview');
 
 	const tabs: ITabPanelTab[] = useMemo(
@@ -171,4 +171,4 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 	);
 };
 
-export default ServerMonitor;
+export default MonitorView;

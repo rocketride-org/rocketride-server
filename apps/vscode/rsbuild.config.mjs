@@ -36,13 +36,13 @@ export default defineConfig({
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'sidebar-main': './src/providers/views/SidebarMain/index.tsx',
-			'page-connection': './src/providers/views/PageConnection/index.tsx',
+			'page-sidebar': './src/providers/views/PageSidebar/index.tsx',
 			'page-settings': './src/providers/views/PageSettings/index.tsx',
 			'page-project': './src/providers/views/PageProject/index.tsx',
 			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
 			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
 			'page-monitor': './src/providers/views/PageMonitor/index.tsx',
+			'page-status': './src/providers/views/PageStatus/index.tsx',
 		},
 	},
 

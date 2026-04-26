@@ -4,14 +4,14 @@
 // =============================================================================
 
 /**
- * SidebarMainWebview — VS Code webview bridge for the unified sidebar.
+ * SidebarViewWebview — VS Code webview bridge for the unified sidebar.
  *
  * Receives data from the extension host via useMessaging, manages local
- * state (active tasks, unknown tasks), and renders <SidebarMain> with props.
- * User actions from SidebarMain flow back as messages to the extension host.
+ * state (active tasks, unknown tasks), and renders <SidebarView> with props.
+ * User actions from SidebarView flow back as messages to the extension host.
  *
  * Architecture:
- *   SidebarMainProvider (Node.js) ↔ postMessage ↔ SidebarMainWebview (browser) → SidebarMain (shared-ui)
+ *   SidebarViewProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser) → SidebarView (shared-ui)
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -19,7 +19,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarMain } from 'shared';
+import { SidebarView } from 'shared';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 
@@ -41,15 +41,24 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string };
 
-type IncomingMessage = { type: 'update'; data: { connectionState: string; connectionMode: string; entries: HostProjectEntry[]; unknownTasks: UnknownTask[] } } | { type: 'entriesUpdate'; entries: HostProjectEntry[] } | { type: 'taskEvent'; event: TaskEventBody } | { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] };
+interface DashboardTaskDTO {
+	id: string;
+	name: string;
+	projectId: string;
+	source: string;
+	completed: boolean;
+	state: number;
+}
+
+type IncomingMessage = { type: 'update'; data: { connectionState: string; connectionMode: string; entries: HostProjectEntry[]; unknownTasks: UnknownTask[] } } | { type: 'entriesUpdate'; entries: HostProjectEntry[] } | { type: 'taskEvent'; event: TaskEventBody } | { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] } | { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-const SidebarMainWebview: React.FC = () => {
+const SidebarViewWebview: React.FC = () => {
 	// ── State ────────────────────────────────────────────────────────────────
 	const [connection, setConnection] = useState<ConnectionInfo>({ state: 'disconnected' });
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
@@ -183,11 +192,28 @@ const SidebarMainWebview: React.FC = () => {
 					});
 					break;
 				}
+
+				case 'dashboardSnapshot': {
+					// Seed active tasks + unknown tasks from dashboard (initial load)
+					const taskMap = new Map<string, ActiveTaskState>();
+					const unknown: UnknownTask[] = [];
+					for (const t of msg.tasks) {
+						if (t.completed) continue;
+						const k = `${t.projectId}.${t.source}`;
+						taskMap.set(k, { running: true, errors: [], warnings: [] });
+						if (!isKnownTask(t.projectId, t.source)) {
+							unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
+						}
+					}
+					setActiveTasks(taskMap);
+					setUnknownTasks(unknown);
+					break;
+				}
 			}
 		},
 	});
 
-	// ── Callbacks for SidebarMain ────────────────────────────────────────────
+	// ── Callbacks for SidebarView ────────────────────────────────────────────
 
 	const onNavigate = useCallback(
 		(target: string) => {
@@ -240,9 +266,16 @@ const SidebarMainWebview: React.FC = () => {
 		sendMessage({ type: 'command', command: 'rocketride.sidebar.documentation.open' });
 	}, [sendMessage]);
 
+	const onOpenUnknownTask = useCallback(
+		(projectId: string, sourceId: string, displayName: string) => {
+			sendMessage({ type: 'openUnknownTask', projectId, sourceId, displayName });
+		},
+		[sendMessage]
+	);
+
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarMain connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} onOpenSettings={onOpenSettings} onOpenDocs={onOpenDocs} onToggleConnection={onToggleConnection} />;
+	return <SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} onOpenSettings={onOpenSettings} onOpenDocs={onOpenDocs} onToggleConnection={onToggleConnection} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
-export default SidebarMainWebview;
+export default SidebarViewWebview;

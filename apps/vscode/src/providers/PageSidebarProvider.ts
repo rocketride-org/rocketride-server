@@ -4,13 +4,13 @@
 // =============================================================================
 
 /**
- * SidebarMainProvider — Extension host provider for the unified sidebar.
+ * PageSidebarProvider — Extension host provider for the unified sidebar.
  *
  * Finds and parses .pipe files, watches for file changes, forwards task
  * events to the webview, and handles action messages (open, run, stop).
  *
- * The webview (SidebarMainWebview.tsx) receives ProjectEntry[] and raw
- * task events, tracks active-task state locally, and renders <SidebarMain>
+ * The webview (SidebarWebview.tsx) receives ProjectEntry[] and raw
+ * task events, tracks active-task state locally, and renders <SidebarView>
  * from shared-ui.
  */
 
@@ -41,7 +41,7 @@ interface ProjectEntryDTO {
 // PROVIDER
 // =============================================================================
 
-export class SidebarMainProvider implements vscode.WebviewViewProvider {
+export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'rocketride.sidebar.main';
 
 	private _view?: vscode.WebviewView;
@@ -71,7 +71,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 		};
 
 		const html = this.getHtmlForWebview(webviewView.webview);
-		console.log('[SidebarMainProvider] HTML length:', html.length, 'first 200 chars:', html.substring(0, 200));
+		console.log('[PageSidebarProvider] HTML length:', html.length, 'first 200 chars:', html.substring(0, 200));
 		webviewView.webview.html = html;
 
 		// Handle messages from the webview
@@ -80,6 +80,17 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendFullUpdate();
+						if (this.connectionManager.isConnected()) {
+							try {
+								const client = this.connectionManager.getClient();
+								const dashboard = client ? await client.getDashboard() : null;
+								if (dashboard?.tasks) {
+									this._view?.webview.postMessage({ type: 'dashboardSnapshot', tasks: dashboard.tasks });
+								}
+							} catch {
+								/* ignore */
+							}
+						}
 						break;
 					case 'connect':
 						await this.connectionManager.connect();
@@ -102,9 +113,12 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 					case 'refresh':
 						await this.loadPipelineFiles();
 						break;
+					case 'openUnknownTask':
+						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
+						break;
 				}
 			} catch (error) {
-				console.error('[SidebarMainProvider] Message handling error:', error);
+				console.error('[PageSidebarProvider] Message handling error:', error);
 			}
 		});
 
@@ -233,7 +247,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 			const client = this.connectionManager.getClient();
 			if (client) {
 				client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
-					console.error('[SidebarMainProvider] Failed to subscribe to task events:', err);
+					console.error('[PageSidebarProvider] Failed to subscribe to task events:', err);
 				});
 			}
 		});
@@ -420,7 +434,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 			const token = await client.getTaskToken({ projectId, source: sourceId });
 			if (token) await client.terminate(token);
 		} catch (err) {
-			console.error('[SidebarMainProvider] stopPipeline failed:', err);
+			console.error('[PageSidebarProvider] stopPipeline failed:', err);
 		}
 	}
 
@@ -434,7 +448,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 			const token = await client.getTaskToken({ projectId, source: sourceId });
 			await client.restart({ token, projectId, source: sourceId, pipeline: pipelineJson });
 		} catch (error) {
-			console.error(`[SidebarMainProvider] restartPipeline failed: ${error}`);
+			console.error(`[PageSidebarProvider] restartPipeline failed: ${error}`);
 			vscode.window.showErrorMessage(String(error));
 		}
 	}
@@ -506,7 +520,7 @@ export class SidebarMainProvider implements vscode.WebviewViewProvider {
 
 	private getHtmlForWebview(webview: vscode.Webview): string {
 		const nonce = this.generateNonce();
-		const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'webview', 'sidebar-main.html');
+		const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'webview', 'page-sidebar.html');
 
 		try {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
