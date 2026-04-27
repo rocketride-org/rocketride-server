@@ -17,3 +17,11 @@ from unittest.mock import MagicMock
 mock_rocketlib = MagicMock()
 mock_rocketlib.debug = MagicMock()
 sys.modules['rocketlib'] = mock_rocketlib
+
+# Mock depends module — bundled with the engine binary at packages/server/engine-lib,
+# not installable via pip. Without this, importing anything under ai.* fails because
+# ai/__init__.py does `from depends import depends`.
+if 'depends' not in sys.modules:
+    mock_depends = MagicMock()
+    mock_depends.depends = MagicMock(return_value=None)
+    sys.modules['depends'] = mock_depends
