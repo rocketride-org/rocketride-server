@@ -19,6 +19,24 @@ from ..flow_base import (
 )
 from .IGlobal import _dbg  # [IFELSE-DEBUG]
 
+# Default values for every standard lane name. Pre-bound on every
+# evaluation so user expressions can reference any lane without raising
+# NameError when the active lane is different. Mirrors the load-time
+# `_EXPECTED_LANE_BINDINGS` in IGlobal.py — keep them in sync.
+# Bytes lanes default to `b''` (not `None`) so subscript / slice
+# operations like `image[:4]` work on inactive lanes without raising.
+_LANE_DEFAULTS: dict[str, Any] = {
+    'text': '',
+    'image': b'',
+    'audio': b'',
+    'video': b'',
+    'table': '',
+    'documents': [],
+    'questions': [],
+    'answers': [],
+    'classifications': [],
+}
+
 
 class IfElseDriver(FlowDriverBase):
     """Two-branch driver: truthy → THEN, falsy → ELSE.
@@ -41,6 +59,7 @@ class IfElseDriver(FlowDriverBase):
         *,
         expression: str,
         payload_name: str = 'text',
+        extras: dict = None,
         **kwargs: Any,
     ) -> None:
         """Configure the condition expression and payload binding name."""
@@ -49,12 +68,28 @@ class IfElseDriver(FlowDriverBase):
             raise ValueError('IfElseDriver requires a non-empty expression')
         self.expression = expression
         self.payload_name = payload_name
+        # Extra named bindings supplied by the gating mixin (e.g. ``mimeType``,
+        # ``action`` for streaming methods). Letting the user's condition
+        # reference these is the only way to write a stable expression
+        # across the BEGIN/WRITE/END streaming sequence — the buffer
+        # changes per action but ``mimeType`` does not.
+        self.extras = extras or {}
 
     async def evaluate(self, ctx: FlowContext) -> bool:
+        # Pre-bind every standard lane name so the user's expression can
+        # reference any lane (`text`, `table`, `image`, …) without
+        # NameError when the active lane is something else. The active
+        # lane's default is overwritten with the real chunk last, so the
+        # expression sees the real payload on the active side and a
+        # neutral default on the others — `text or table` works whichever
+        # lane fires. Streaming-method extras (`mimeType`, `action`) are
+        # added on top so byte-stable conditions are possible.
         bindings = {
-            self.payload_name: ctx.chunk,
+            **_LANE_DEFAULTS,
             'state': ctx.state,
             'cond': cond,
+            self.payload_name: ctx.chunk,
+            **self.extras,
         }
         _dbg(f'[IFELSE-DEBUG] evaluate expression={self.expression!r} payload_name={self.payload_name!r} chunk_type={type(ctx.chunk).__name__}')
         try:

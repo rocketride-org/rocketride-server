@@ -42,10 +42,11 @@ class IInstance(IInstanceBase, AutoGatingMixin):
     # Core gate — evaluates the condition and routes to a single branch
     # ------------------------------------------------------------------
 
-    def _gate(self, chunk: Any, payload_name: str, forward: Callable[[Any], None]) -> None:
+    def _gate(self, chunk: Any, payload_name: str, forward: Callable[[Any], None], extras: dict = None) -> None:
         """Evaluate the condition once, then fan out only to the selected branch."""
-        _dbg(f'[IFELSE-DEBUG] _gate ENTER payload_name={payload_name!r} chunk_type={type(chunk).__name__} IGlobal.condition={self.IGlobal.condition!r} IGlobal.branches={self.IGlobal.branches}')
-        result = self._run_driver(chunk=chunk, payload_name=payload_name)
+        extras = extras or {}
+        _dbg(f'[IFELSE-DEBUG] _gate ENTER payload_name={payload_name!r} chunk_type={type(chunk).__name__} extras_keys={list(extras.keys())} IGlobal.condition={self.IGlobal.condition!r} IGlobal.branches={self.IGlobal.branches}')
+        result = self._run_driver(chunk=chunk, payload_name=payload_name, extras=extras)
         branch = _branch_name(result)
         targets = self.IGlobal.targets_for(branch)
         _dbg(f'[IFELSE-DEBUG] _gate DECISION branch={branch} targets={targets} decision={result.decision}')
@@ -79,7 +80,13 @@ class IInstance(IInstanceBase, AutoGatingMixin):
         try:
             for target_id in targets:
                 self.instance.setTargetFilter(target_id)
-                forward(result.payload)
+                _dbg(f'[IFELSE-DEBUG] _gate FORWARD target={target_id} BEGIN')
+                try:
+                    forward(result.payload)
+                    _dbg(f'[IFELSE-DEBUG] _gate FORWARD target={target_id} OK')
+                except BaseException as exc:
+                    _dbg(f'[IFELSE-DEBUG] _gate FORWARD target={target_id} RAISED type={type(exc).__name__} msg={exc!r}')
+                    raise
         finally:
             # Always reset — never let the filter leak across chunks.
             self.instance.setTargetFilter('')
@@ -92,13 +99,14 @@ class IInstance(IInstanceBase, AutoGatingMixin):
     # Internals
     # ------------------------------------------------------------------
 
-    def _run_driver(self, *, chunk: Any, payload_name: str) -> FlowResult:
+    def _run_driver(self, *, chunk: Any, payload_name: str, extras: dict = None) -> FlowResult:
         driver = IfElseDriver(
             expression=self.IGlobal.condition,
             payload_name=payload_name,
             invoker=AsyncInvoker(self.instance.invoke),
             bounds=Bounds(timeout_s=self.IGlobal.timeout_s),
             node_id=getattr(self.instance, 'nodeId', '') or '',
+            extras=extras or {},
         )
         return asyncio.run(driver.run(chunk))
 

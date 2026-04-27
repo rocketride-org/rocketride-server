@@ -104,6 +104,12 @@ def evaluate_expression(
     if not isinstance(expression, str) or not expression.strip():
         raise SandboxError('expression must be a non-empty string')
 
+    # `ast.parse(mode='eval')` is strict about leading whitespace — it
+    # treats it as indentation and raises "unexpected indent". Strip so
+    # accidental spaces from UI copy-paste don't reject otherwise valid
+    # expressions.
+    expression = expression.strip()
+
     try:
         tree = ast.parse(expression, mode='eval')
     except SyntaxError as exc:
