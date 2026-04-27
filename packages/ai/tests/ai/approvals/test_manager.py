@@ -18,7 +18,11 @@ import time
 
 import pytest
 
-from ai.approvals.manager import ApprovalManager, PendingCapacityError
+from ai.approvals.manager import (
+    ApprovalManager,
+    ApprovalReasonRequiredError,
+    PendingCapacityError,
+)
 from ai.approvals.models import ApprovalStatus, TimeoutAction
 
 
@@ -123,7 +127,11 @@ class TestApproveReject:
         time.sleep(0.05)
         manager.approve(req.approval_id, modified_payload={'text': 'final'})
         t.join(timeout=5.0)
-        assert results['decision'].payload == {'text': 'final'}
+        decision = results['decision']
+        assert decision.was_modified
+        assert decision.modified_payload == {'text': 'final'}
+        # Original payload is preserved for audit even after modification.
+        assert decision.payload == {'text': 'draft'}
 
     def test_double_approve_raises(self):
         """A late decision after a prior resolution must not silently overwrite."""
@@ -175,6 +183,40 @@ class TestTimeout:
         manager.approve(req.approval_id)
         decision = manager.wait(req.approval_id, timeout=5.0)
         assert decision.approved
+
+
+class TestRequireReasonOnReject:
+    def test_reject_without_reason_raises_when_required(self):
+        manager = ApprovalManager()
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        with pytest.raises(ApprovalReasonRequiredError, match='requires a non-empty reason'):
+            manager.reject(req.approval_id)
+
+    def test_reject_with_blank_reason_raises_when_required(self):
+        manager = ApprovalManager()
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        with pytest.raises(ApprovalReasonRequiredError):
+            manager.reject(req.approval_id, reason='   ')
+
+    def test_reject_with_reason_succeeds_when_required(self):
+        manager = ApprovalManager()
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        updated = manager.reject(req.approval_id, reason='unsafe content')
+        assert updated.status == ApprovalStatus.REJECTED
+        assert updated.decision_reason == 'unsafe content'
+
+    def test_reject_without_reason_succeeds_when_not_required(self):
+        manager = ApprovalManager()
+        req = manager.create({'k': 'v'})  # default: require_reason_on_reject=False
+        updated = manager.reject(req.approval_id)
+        assert updated.status == ApprovalStatus.REJECTED
+
+    def test_approve_does_not_require_reason_even_when_flag_set(self):
+        """The flag is reject-specific by design — approvals are not gated."""
+        manager = ApprovalManager()
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        updated = manager.approve(req.approval_id)
+        assert updated.status == ApprovalStatus.APPROVED
 
 
 class TestList:

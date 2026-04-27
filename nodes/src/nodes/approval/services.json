@@ -90,17 +90,25 @@
 				"profile": "auto",
 				"timeout_seconds": 300,
 				"timeout_action": "approve",
-				"log_channel_enabled": true
+				"log_channel_enabled": true,
+				"require_reason_on_reject": false,
+				"max_payload_chars": 0,
+				"silent_notifications": false
 			},
 			// 'manual' requires a real reviewer; webhook_url is exposed in this
 			// profile (PR #542 reviewers flagged that hiding it was a config bug).
+			// Compliance defaults: require a reason on every rejection and
+			// truncate previews so reviewers don't drown in 100KB blobs.
 			"manual": {
 				"profile": "manual",
 				"timeout_seconds": 1800,
 				"timeout_action": "reject",
 				"log_channel_enabled": true,
 				"webhook_url": "",
-				"webhook_timeout_seconds": 5
+				"webhook_timeout_seconds": 5,
+				"require_reason_on_reject": true,
+				"max_payload_chars": 50000,
+				"silent_notifications": false
 			},
 			// 'custom' lets pipeline authors tune every dial.
 			"custom": {
@@ -111,7 +119,10 @@
 				"webhook_url": "",
 				"webhook_timeout_seconds": 5,
 				"pending_cap": 1000,
-				"allow_private_webhook_hosts": false
+				"allow_private_webhook_hosts": false,
+				"require_reason_on_reject": false,
+				"max_payload_chars": 0,
+				"silent_notifications": false
 			}
 		}
 	},
@@ -185,6 +196,22 @@
 			"type": "boolean",
 			"title": "Allow private webhook hosts",
 			"description": "Self-hosted operators only: lets the webhook target private/loopback IPs."
+		},
+		"require_reason_on_reject": {
+			"type": "boolean",
+			"title": "Require reason on rejection",
+			"description": "Refuse rejections without a non-empty reason. Recommended for compliance workflows that need a documented justification for every blocked answer."
+		},
+		"max_payload_chars": {
+			"type": "integer",
+			"title": "Max preview characters",
+			"description": "Truncate the answer payload to this many characters before storing the request. 0 disables truncation. Adds _truncated_to / _original_length markers when truncated.",
+			"minimum": 0
+		},
+		"silent_notifications": {
+			"type": "boolean",
+			"title": "Silent mode",
+			"description": "When enabled, no notification channels fire — reviewers must poll the REST API for pending requests. Use this when wiring the approvals API into a custom dashboard."
 		}
 	},
 	//
@@ -195,17 +222,17 @@
 		{
 			"section": "Pipe",
 			"title": "Decision",
-			"properties": ["profile", "timeout_seconds", "timeout_action"]
+			"properties": ["profile", "timeout_seconds", "timeout_action", "require_reason_on_reject"]
 		},
 		{
 			"section": "Pipe",
 			"title": "Notifications",
-			"properties": ["log_channel_enabled", "webhook_url", "webhook_timeout_seconds", "webhook_headers", "allow_private_webhook_hosts"]
+			"properties": ["silent_notifications", "log_channel_enabled", "webhook_url", "webhook_timeout_seconds", "webhook_headers", "allow_private_webhook_hosts"]
 		},
 		{
 			"section": "Pipe",
 			"title": "Limits",
-			"properties": ["pending_cap"]
+			"properties": ["pending_cap", "max_payload_chars"]
 		}
 	]
 }

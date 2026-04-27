@@ -84,6 +84,9 @@ class ApprovalRequest:
     modified_payload: Optional[Dict[str, Any]] = None
     profile: str = 'auto'
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # When True, reject() must be called with a non-empty reason. Lets compliance
+    # workflows enforce documented justification on every rejection.
+    require_reason_on_reject: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize for REST responses."""
@@ -101,17 +104,31 @@ class ApprovalRequest:
             'modified_payload': self.modified_payload,
             'profile': self.profile,
             'metadata': self.metadata,
+            'require_reason_on_reject': self.require_reason_on_reject,
         }
 
 
 @dataclass
 class ApprovalDecision:
-    """Result of waiting for a decision on an approval request."""
+    """Result of waiting for a decision on an approval request.
+
+    ``payload`` is the request as registered (which may have been truncated
+    for the reviewer's preview). ``modified_payload`` is set *only* when the
+    reviewer explicitly supplied edits — keeping the two separate prevents
+    a truncated preview from being mistakenly applied back onto the original
+    answer downstream.
+    """
 
     status: ApprovalStatus
     payload: Dict[str, Any]
     reason: Optional[str] = None
     decided_by: Optional[str] = None
+    modified_payload: Optional[Dict[str, Any]] = None
+
+    @property
+    def was_modified(self) -> bool:
+        """True when the reviewer supplied a modified payload."""
+        return self.modified_payload is not None
 
     @property
     def approved(self) -> bool:

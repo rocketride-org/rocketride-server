@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ai.approvals.manager import ApprovalManager
+from ai.approvals.models import ApprovalStatus
 from ai.modules.approvals.endpoints import build_routes
 
 
@@ -151,3 +152,26 @@ class TestReject:
         manager.approve(req.approval_id)
         resp = client.post(f'/approvals/{req.approval_id}/reject', json={})
         assert resp.status_code == 409
+
+    def test_400_when_reason_required_but_missing(self, client: TestClient, manager: ApprovalManager):
+        """Compliance: refuse rejection without a reason, distinct status from 409."""
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        resp = client.post(f'/approvals/{req.approval_id}/reject', json={})
+        assert resp.status_code == 400
+        assert 'requires a non-empty reason' in resp.json()['detail']
+        # Request must still be PENDING — failed reject does not consume the gate.
+        assert manager.get_request(req.approval_id).status == ApprovalStatus.PENDING
+
+    def test_400_when_reason_required_but_blank(self, client: TestClient, manager: ApprovalManager):
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        resp = client.post(f'/approvals/{req.approval_id}/reject', json={'reason': '   '})
+        assert resp.status_code == 400
+
+    def test_reject_succeeds_with_reason_when_required(self, client: TestClient, manager: ApprovalManager):
+        req = manager.create({'k': 'v'}, require_reason_on_reject=True)
+        resp = client.post(
+            f'/approvals/{req.approval_id}/reject',
+            json={'reason': 'fails policy', 'decided_by': 'reviewer'},
+        )
+        assert resp.status_code == 200
+        assert resp.json()['data']['decision_reason'] == 'fails policy'

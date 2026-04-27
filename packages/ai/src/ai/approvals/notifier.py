@@ -66,6 +66,11 @@ class NotifierConfig:
     webhook_timeout_seconds: float = 5.0
     webhook_headers: Dict[str, str] = field(default_factory=dict)
     allow_private_webhook_hosts: bool = False  # opt-in for self-hosted setups
+    # When True, no notification channels fire regardless of other settings.
+    # Surfaces "silent" as a first-class option for setups that rely solely on
+    # REST polling (e.g., a custom dashboard) — prevents the easy mistake of
+    # leaving log_channel_enabled=True and hoping nobody notices.
+    silent: bool = False
 
 
 class ApprovalNotifier:
@@ -108,6 +113,12 @@ class ApprovalNotifier:
         on individual channels are logged but never raised.
         """
         delivered: List[str] = []
+
+        if self._config.silent:
+            # Explicit silent mode short-circuits everything. We don't even log
+            # at info level here because the whole point of silent mode is no
+            # operational signal — callers rely on REST polling.
+            return delivered
 
         if self._config.log_channel_enabled:
             try:

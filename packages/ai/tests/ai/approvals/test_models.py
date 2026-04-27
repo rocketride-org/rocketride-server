@@ -51,6 +51,18 @@ class TestApprovalRequest:
         assert d['status'] == 'pending'
         assert d['deadline_at'] == 2.0
         assert d['decided_by'] is None
+        # New compliance hint: defaults to False, present on every dict.
+        assert d['require_reason_on_reject'] is False
+
+    def test_to_dict_round_trips_require_reason_flag(self):
+        request = ApprovalRequest(
+            approval_id='id-2',
+            pipeline_id=None,
+            node_id=None,
+            payload={'k': 'v'},
+            require_reason_on_reject=True,
+        )
+        assert request.to_dict()['require_reason_on_reject'] is True
 
 
 class TestApprovalDecision:

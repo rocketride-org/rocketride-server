@@ -46,6 +46,7 @@ from ai.approvals import (
 _VALID_PROFILES = {'auto', 'manual', 'custom'}
 _DEFAULT_TIMEOUT_SECONDS = 300.0
 _DEFAULT_PENDING_CAP = 1000
+_DEFAULT_MAX_PAYLOAD_CHARS = 0  # 0 disables truncation
 
 
 class IGlobal(IGlobalBase):
@@ -56,6 +57,9 @@ class IGlobal(IGlobalBase):
     timeout_seconds: float
     timeout_action: TimeoutAction
     pending_cap: int
+    max_payload_chars: int
+    require_reason_on_reject: bool
+    silent_notifications: bool
     notifier: Optional[ApprovalNotifier]
     manager: Optional[ApprovalManager]
 
@@ -71,6 +75,9 @@ class IGlobal(IGlobalBase):
         self.timeout_seconds = _DEFAULT_TIMEOUT_SECONDS
         self.timeout_action = TimeoutAction.REJECT
         self.pending_cap = _DEFAULT_PENDING_CAP
+        self.max_payload_chars = _DEFAULT_MAX_PAYLOAD_CHARS
+        self.require_reason_on_reject = False
+        self.silent_notifications = False
         self.notifier = None
         self.manager = None
 
@@ -106,6 +113,18 @@ class IGlobal(IGlobalBase):
             raise ValueError(f'approval node: pending_cap must be positive; got {pending_cap}')
         self.pending_cap = pending_cap
 
+        max_payload_chars = config.get('max_payload_chars', _DEFAULT_MAX_PAYLOAD_CHARS)
+        try:
+            max_payload_chars = int(max_payload_chars)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'approval node: max_payload_chars must be an integer; got {max_payload_chars!r}') from exc
+        if max_payload_chars < 0:
+            raise ValueError(f'approval node: max_payload_chars must be >= 0 (0 disables truncation); got {max_payload_chars}')
+        self.max_payload_chars = max_payload_chars
+
+        self.require_reason_on_reject = bool(config.get('require_reason_on_reject', False))
+        self.silent_notifications = bool(config.get('silent_notifications', False))
+
         self.notifier = self._build_notifier(config)
         self.manager = get_manager()
         debug(f'approval node ready: profile={self.profile} timeout={self.timeout_seconds}s timeout_action={self.timeout_action.value} pending_cap={self.pending_cap}')
@@ -126,6 +145,7 @@ class IGlobal(IGlobalBase):
         webhook_timeout = float(config.get('webhook_timeout_seconds', 5.0))
         webhook_headers = dict(config.get('webhook_headers') or {})
         allow_private = bool(config.get('allow_private_webhook_hosts', False))
+        silent = bool(config.get('silent_notifications', False))
 
         notifier_config = NotifierConfig(
             log_channel_enabled=log_enabled,
@@ -133,5 +153,6 @@ class IGlobal(IGlobalBase):
             webhook_timeout_seconds=webhook_timeout,
             webhook_headers=webhook_headers,
             allow_private_webhook_hosts=allow_private,
+            silent=silent,
         )
         return ApprovalNotifier(notifier_config)

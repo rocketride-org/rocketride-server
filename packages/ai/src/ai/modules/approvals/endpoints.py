@@ -35,7 +35,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
-from ai.approvals.manager import ApprovalManager, ApprovalManagerError
+from ai.approvals.manager import (
+    ApprovalManager,
+    ApprovalManagerError,
+    ApprovalReasonRequiredError,
+)
 from ai.approvals.models import ApprovalStatus
 
 
@@ -111,6 +115,11 @@ def build_routes(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ApprovalReasonRequiredError as exc:
+            # Client-side validation failure (missing reason). 400 distinguishes
+            # this from 409 (already-resolved state conflict) so reviewers know
+            # to retry with a reason rather than concluding the request is gone.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ApprovalManagerError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {'status': 'OK', 'data': updated.to_dict()}

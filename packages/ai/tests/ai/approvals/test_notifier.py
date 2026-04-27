@@ -150,6 +150,25 @@ class TestApprovalNotifier:
         )
         assert notifier.notify(_make_request()) == ['webhook']
 
+    def test_silent_mode_short_circuits_all_channels(self):
+        """silent=True must suppress every channel even when others are configured.
+
+        Reviewers using a custom dashboard rely on REST polling — accidentally
+        leaving log_channel_enabled=True would leak operational signal.
+        """
+        opener = MagicMock()
+        notifier = ApprovalNotifier(
+            NotifierConfig(
+                log_channel_enabled=True,
+                webhook_url='https://8.8.8.8/hook',
+                silent=True,
+            ),
+            url_opener=opener,
+        )
+        delivered = notifier.notify(_make_request())
+        assert delivered == []
+        opener.assert_not_called()
+
     def test_custom_headers_are_attached(self):
         opener = MagicMock()
         opener.return_value.__enter__.return_value.read.return_value = b'ok'

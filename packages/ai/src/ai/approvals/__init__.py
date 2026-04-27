@@ -23,7 +23,12 @@
 
 """Human-in-the-loop approval primitives shared by the approval node and REST module."""
 
-from .manager import ApprovalManager, ApprovalManagerError, PendingCapacityError
+from .manager import (
+    ApprovalManager,
+    ApprovalManagerError,
+    ApprovalReasonRequiredError,
+    PendingCapacityError,
+)
 from .models import (
     ApprovalDecision,
     ApprovalRequest,
@@ -39,6 +44,7 @@ __all__ = [
     'ApprovalManager',
     'ApprovalManagerError',
     'ApprovalNotifier',
+    'ApprovalReasonRequiredError',
     'ApprovalRequest',
     'ApprovalStatus',
     'ApprovalStore',

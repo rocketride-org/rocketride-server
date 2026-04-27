@@ -59,6 +59,14 @@ class PendingCapacityError(ApprovalManagerError):
     """Raised when accepting another pending request would exceed the cap."""
 
 
+class ApprovalReasonRequiredError(ApprovalManagerError):
+    """Raised when reject() is called without a reason but the request requires one.
+
+    Distinguished from generic ApprovalManagerError so the REST layer can map it
+    to HTTP 400 (client validation error) rather than 409 (state conflict).
+    """
+
+
 class _PendingEntry:
     """Internal coupling of an event signal to a request id.
 
@@ -142,6 +150,7 @@ class ApprovalManager:
         timeout: Optional[float] = None,
         profile: str = 'auto',
         metadata: Optional[Dict[str, Any]] = None,
+        require_reason_on_reject: bool = False,
     ) -> ApprovalRequest:
         """Register a new pending approval request.
 
@@ -168,6 +177,7 @@ class ApprovalManager:
             deadline_at=now + timeout,
             profile=profile,
             metadata=dict(metadata) if metadata else {},
+            require_reason_on_reject=bool(require_reason_on_reject),
         )
 
         with self._lock:
@@ -232,6 +242,7 @@ class ApprovalManager:
         timeout_action: Optional[TimeoutAction] = None,
         profile: str = 'auto',
         metadata: Optional[Dict[str, Any]] = None,
+        require_reason_on_reject: bool = False,
     ) -> ApprovalDecision:
         """Create a request and block until decided. Convenience over create + wait."""
         request = self.create(
@@ -241,6 +252,7 @@ class ApprovalManager:
             timeout=timeout,
             profile=profile,
             metadata=metadata,
+            require_reason_on_reject=require_reason_on_reject,
         )
         return self.wait(
             request.approval_id,
@@ -325,6 +337,11 @@ class ApprovalManager:
                 # Don't overwrite — first decision wins.
                 raise ApprovalManagerError(f'approval {approval_id!r} is already {stored.status.value}; cannot transition to {new_status.value}')
 
+            # Compliance gate: documented justification required on rejection.
+            if new_status == ApprovalStatus.REJECTED and stored.require_reason_on_reject:
+                if reason is None or not reason.strip():
+                    raise ApprovalReasonRequiredError(f'reject for {approval_id!r} requires a non-empty reason')
+
             stored.status = new_status
             stored.decided_at = time.monotonic()
             stored.decided_by = decided_by
@@ -376,7 +393,8 @@ class ApprovalManager:
 
         return ApprovalDecision(
             status=decision_status,
-            payload=stored.modified_payload or stored.payload,
+            payload=stored.payload,
+            modified_payload=stored.modified_payload,
             reason=f'auto-{timeout_action.value} on timeout',
             decided_by='timeout-policy',
         )
@@ -397,10 +415,10 @@ class ApprovalManager:
     @staticmethod
     def _decision_from_request(request: ApprovalRequest) -> ApprovalDecision:
         """Build an ``ApprovalDecision`` from a resolved ``ApprovalRequest``."""
-        payload = request.modified_payload or request.payload
         return ApprovalDecision(
             status=request.status,
-            payload=payload,
+            payload=request.payload,
+            modified_payload=request.modified_payload,
             reason=request.decision_reason,
             decided_by=request.decided_by,
         )

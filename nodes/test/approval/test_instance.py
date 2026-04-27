@@ -80,6 +80,8 @@ def _make_instance(manager: ApprovalManager, **overrides) -> IInstance:
     iglobal.profile = overrides.get('profile', 'auto')
     iglobal.timeout_seconds = overrides.get('timeout_seconds', 5.0)
     iglobal.timeout_action = overrides.get('timeout_action', TimeoutAction.REJECT)
+    iglobal.max_payload_chars = overrides.get('max_payload_chars', 0)
+    iglobal.require_reason_on_reject = overrides.get('require_reason_on_reject', False)
     inst.IGlobal = iglobal
 
     instance_proxy = MagicMock()
@@ -207,3 +209,88 @@ class TestPassThrough:
         answer = _FakeAnswer(text='hi')
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once_with(answer)
+
+
+class TestPayloadTruncation:
+    """Verify reviewers see a bounded preview when max_payload_chars is set."""
+
+    def test_short_text_passes_through_untruncated(self):
+        manager = ApprovalManager()
+        set_manager(manager)
+        inst = _make_instance(manager, max_payload_chars=100)
+
+        thread = threading.Thread(target=inst.writeAnswers, args=(_FakeAnswer(text='hello'),), daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2.0
+        while manager.pending_count == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        stored = manager.list_requests()[0]
+        assert stored.payload == {'text': 'hello'}
+        assert '_truncated_to' not in stored.payload
+
+        manager.approve(stored.approval_id)
+        thread.join(timeout=2.0)
+
+    def test_long_text_is_truncated_with_markers(self):
+        manager = ApprovalManager()
+        set_manager(manager)
+        inst = _make_instance(manager, max_payload_chars=10)
+
+        long_text = 'x' * 100
+        thread = threading.Thread(target=inst.writeAnswers, args=(_FakeAnswer(text=long_text),), daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2.0
+        while manager.pending_count == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        stored = manager.list_requests()[0]
+        assert stored.payload['text'] == 'x' * 10
+        assert stored.payload['_truncated_to'] == 10
+        assert stored.payload['_original_length'] == 100
+
+        # Approval should still emit the *original* answer (truncation only
+        # applies to the reviewer's preview, not the downstream emission).
+        manager.approve(stored.approval_id)
+        thread.join(timeout=2.0)
+        emitted = inst.instance.writeAnswers.call_args.args[0]
+        assert emitted.getText() == long_text
+
+    def test_zero_max_chars_disables_truncation(self):
+        manager = ApprovalManager()
+        set_manager(manager)
+        inst = _make_instance(manager, max_payload_chars=0)
+
+        long_text = 'y' * 1000
+        thread = threading.Thread(target=inst.writeAnswers, args=(_FakeAnswer(text=long_text),), daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2.0
+        while manager.pending_count == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        stored = manager.list_requests()[0]
+        assert stored.payload['text'] == long_text
+        assert '_truncated_to' not in stored.payload
+        manager.approve(stored.approval_id)
+        thread.join(timeout=2.0)
+
+
+class TestRequireReasonOnReject:
+    def test_flag_propagates_to_request(self):
+        """The IInstance must pass require_reason_on_reject through to manager.create."""
+        manager = ApprovalManager()
+        set_manager(manager)
+        inst = _make_instance(manager, require_reason_on_reject=True)
+
+        thread = threading.Thread(target=inst.writeAnswers, args=(_FakeAnswer(text='hi'),), daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2.0
+        while manager.pending_count == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        stored = manager.list_requests()[0]
+        assert stored.require_reason_on_reject is True
+
+        # Cleanup so the thread doesn't outlive the test.
+        manager.approve(stored.approval_id)
+        thread.join(timeout=2.0)

@@ -58,7 +58,7 @@ class IInstance(IInstanceBase):
             self.instance.writeAnswers(answer)
             return
 
-        payload = self._answer_to_payload(answer)
+        payload = self._answer_to_payload(answer, max_chars=self.IGlobal.max_payload_chars)
         metadata = {
             'profile': self.IGlobal.profile,
             'is_json': bool(getattr(answer, 'isJson', lambda: False)()),
@@ -70,6 +70,7 @@ class IInstance(IInstanceBase):
             timeout_action=self.IGlobal.timeout_action,
             profile=self.IGlobal.profile,
             metadata=metadata,
+            require_reason_on_reject=self.IGlobal.require_reason_on_reject,
         )
 
         # Notify after creation so the registered request id reaches reviewers
@@ -81,7 +82,14 @@ class IInstance(IInstanceBase):
         debug(f'approval decision: status={decision.status.value} decided_by={decision.decided_by} reason={decision.reason}')
 
         if decision.approved:
-            outgoing = self._payload_to_answer(answer, decision.payload)
+            # Only re-apply the payload when the reviewer actually edited it.
+            # Otherwise the original Answer is forwarded untouched — important
+            # because the registered payload may be a *truncated preview* and
+            # writing that back would corrupt the downstream content.
+            if decision.was_modified:
+                outgoing = self._payload_to_answer(answer, decision.modified_payload)
+            else:
+                outgoing = answer
             self.instance.writeAnswers(outgoing)
         else:
             # Rejected or timed-out-as-rejected: drop the answer. Downstream
@@ -89,18 +97,40 @@ class IInstance(IInstanceBase):
             debug(f'approval suppressed answer: status={decision.status.value} reason={decision.reason}')
 
     @staticmethod
-    def _answer_to_payload(answer: Any) -> Dict[str, Any]:
-        """Serialize an Answer to a JSON-safe dict for storage / REST."""
+    def _answer_to_payload(answer: Any, *, max_chars: int = 0) -> Dict[str, Any]:
+        """Serialize an Answer to a JSON-safe dict for storage / REST.
+
+        When ``max_chars`` is positive and the textual representation exceeds
+        that length, the payload is truncated and a ``_truncated_to`` /
+        ``_original_length`` marker is added so reviewers (and audit logs)
+        know the preview is not the full content. JSON answers are routed
+        through their text form for measurement so truncation applies
+        uniformly regardless of payload shape.
+        """
         is_json = bool(getattr(answer, 'isJson', lambda: False)())
         if is_json:
             try:
-                return {'json': answer.getJson()}
+                json_value = answer.getJson()
+                payload: Dict[str, Any] = {'json': json_value}
+                # Estimate size by the textual rendering — protects reviewers
+                # from a 100KB JSON blob even though structure is preserved.
+                rendered = str(json_value)
+                if max_chars > 0 and len(rendered) > max_chars:
+                    payload['_truncated_to'] = max_chars
+                    payload['_original_length'] = len(rendered)
+                return payload
             except Exception:  # pragma: no cover — defensive on malformed answers
                 pass
         try:
             text = answer.getText()
         except Exception:  # pragma: no cover — defensive
             text = str(answer)
+        if max_chars > 0 and len(text) > max_chars:
+            return {
+                'text': text[:max_chars],
+                '_truncated_to': max_chars,
+                '_original_length': len(text),
+            }
         return {'text': text}
 
     @staticmethod
