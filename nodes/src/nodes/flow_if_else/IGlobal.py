@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, List
 
 from ai.common.config import Config
@@ -15,6 +16,18 @@ from rocketlib import IGlobalBase, OPEN_MODE
 from ..flow_base import SandboxError, cond, evaluate_expression
 
 _logger = logging.getLogger('rocketride.flow')
+
+# [IFELSE-DEBUG] — writes to a file so the engine subprocess output is
+# visible to the user. Remove once the routing bug is closed.
+_DEBUG_LOG_PATH = os.environ.get('IFELSE_DEBUG_LOG', '/tmp/ifelse-debug.log')
+
+
+def _dbg(msg: str) -> None:
+    try:
+        with open(_DEBUG_LOG_PATH, 'a') as f:
+            f.write(msg + '\n')
+    except Exception:
+        pass
 
 
 class IGlobal(IGlobalBase):
@@ -35,15 +48,20 @@ class IGlobal(IGlobalBase):
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        # services.json declares the fields with the dotted prefix
-        # (`flow_if_else.condition`, `flow_if_else.branches`, …) — that is
-        # the canonical form preserved through Config.getNodeConfig. The
-        # bare keys are kept as fallbacks in case a caller flattens them.
-        raw_condition = cfg.get('flow_if_else.condition', cfg.get('condition'))
+        _dbg(f'[IFELSE-DEBUG] beginGlobal cfg keys = {list(cfg.keys())}')
+        _dbg(f'[IFELSE-DEBUG] beginGlobal cfg = {cfg!r}')
+        # The UI writes the user's current value into the BARE key
+        # (`condition`) while the dotted `flow_if_else.condition` lingers
+        # from the preconfig profile and never gets overwritten. Prefer
+        # the bare key so UI edits take effect immediately; fall back to
+        # the dotted form for callers that populate only the canonical
+        # schema name.
+        raw_condition = cfg.get('condition', cfg.get('flow_if_else.condition'))
         if isinstance(raw_condition, str) and raw_condition.strip():
             self.condition = raw_condition
         self.timeout_s = _parse_timeout(cfg)
         self.branches = _parse_branches(cfg.get('flow_if_else.branches', cfg.get('branches')))
+        _dbg(f'[IFELSE-DEBUG] resolved condition={self.condition!r} timeout_s={self.timeout_s} branches={self.branches}')
 
         # Dry-eval the condition at pipeline load rather than on the first
         # chunk. Catches syntax errors, forbidden AST nodes, dunder access,
@@ -125,12 +143,22 @@ def _parse_timeout(cfg: dict) -> float:
 
 
 def _parse_branches(raw: object) -> Dict[str, List[str]]:
-    """Normalise the branches map: drop non-string/empty entries; default empty lists."""
+    """Normalise the branches map: drop non-string/empty entries; default empty lists.
+
+    The incoming ``raw`` can be either a plain Python dict/list or an
+    ``IJson``-wrapped equivalent produced by the config layer. ``IJson``
+    values look like dicts/lists but are distinct classes, so
+    ``isinstance(x, dict)`` and ``isinstance(x, list)`` both return False
+    and the strict checks silently threw the mapping away. Use duck-
+    typing (``items`` / ``__iter__``) so both shapes are accepted.
+    """
     result: Dict[str, List[str]] = {'then': [], 'else': []}
-    if not isinstance(raw, dict):
+    if raw is None or not hasattr(raw, 'items'):
         return result
     for branch, targets in raw.items():
-        if not isinstance(branch, str) or not isinstance(targets, list):
+        if not isinstance(branch, str):
+            continue
+        if isinstance(targets, (str, bytes)) or not hasattr(targets, '__iter__'):
             continue
         result[branch] = [t for t in targets if isinstance(t, str) and t]
     return result

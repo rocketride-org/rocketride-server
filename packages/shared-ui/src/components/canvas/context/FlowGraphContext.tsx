@@ -80,7 +80,12 @@ const resolveEdgeLane = (sourceHandle?: string | null, targetHandle?: string | n
 	const sourceLaneToken = sourceParts[1] ?? '';
 	const targetLaneToken = targetParts[1] ?? '';
 	const sourceBranch = sourceParts.length > 2 ? sourceParts.slice(2).join('-') : undefined;
-	const lane = sourceLaneToken === 'any' ? targetLaneToken : sourceLaneToken;
+	// Concrete side wins; if BOTH sides are wildcard (e.g. flow_if_else →
+	// flow_if_else) there is no concrete lane to pick, so we emit the
+	// `"*"` sentinel that matches the `{"*": ["*"]}` wildcard entry in
+	// services.json. The engine expands `*` into every content method
+	// at bind time.
+	const lane = sourceLaneToken === 'any' ? (targetLaneToken === 'any' ? '*' : targetLaneToken) : sourceLaneToken;
 	return { lane, branch: sourceBranch };
 };
 

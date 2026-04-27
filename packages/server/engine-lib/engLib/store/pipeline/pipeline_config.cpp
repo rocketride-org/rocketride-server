@@ -193,8 +193,13 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "input 'lane' must be a non-empty string");
 
-                // [Rule 12] Ensure 'lane' is a valid method name
-                if (std::find(Binder::MethodNames.begin(),
+                // [Rule 12] Ensure 'lane' is a valid method name.
+                // `"*"` is accepted as a wildcard sentinel emitted by
+                // the canvas when both source and target ports are
+                // wildcards (flow_if_else → flow_if_else). Bind-time
+                // logic expands it into every content method.
+                if (lane != "*" &&
+                    std::find(Binder::MethodNames.begin(),
                               Binder::MethodNames.end(),
                               lane) == Binder::MethodNames.end())
                     return APERR(Ec::InvalidParam, "Component", id,
@@ -314,9 +319,16 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                                      "not found in service definition");
 
                     const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
-                    const bool matches = wildcard && _anyOf(outDef, "*")
-                        ? (input->name == output->name)
-                        : _anyOf(outDef, output->name);
+                    // `input->name == "*"` is the wildcard sentinel used when
+                    // both source and target ports are wildcards (canvas emits
+                    // it for flow_if_else → flow_if_else edges). Match every
+                    // output so the passthrough fan-out is preserved.
+                    const bool matches =
+                        input->name == "*"
+                            ? true
+                        : wildcard && _anyOf(outDef, "*")
+                            ? (input->name == output->name)
+                            : _anyOf(outDef, output->name);
                     if (matches)
                         input->outputs.push_back(output);
                 }

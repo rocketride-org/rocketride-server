@@ -17,6 +17,7 @@ from ..flow_base import (
     cond,
     evaluate_expression,
 )
+from .IGlobal import _dbg  # [IFELSE-DEBUG]
 
 
 class IfElseDriver(FlowDriverBase):
@@ -55,6 +56,7 @@ class IfElseDriver(FlowDriverBase):
             'state': ctx.state,
             'cond': cond,
         }
+        _dbg(f'[IFELSE-DEBUG] evaluate expression={self.expression!r} payload_name={self.payload_name!r} chunk_type={type(ctx.chunk).__name__}')
         try:
             value = evaluate_expression(self.expression, bindings)
         except SandboxError as exc:
@@ -73,7 +75,9 @@ class IfElseDriver(FlowDriverBase):
                 action='fail_closed_to_else',
             )
             return False
-        return bool(value)
+        result = bool(value)
+        _dbg(f'[IFELSE-DEBUG] evaluate result value={value!r} → bool={result}')
+        return result
 
     async def dispatch(self, ctx: FlowContext, decision: bool) -> FlowResult:
         branch = Decision.THEN if decision else Decision.ELSE

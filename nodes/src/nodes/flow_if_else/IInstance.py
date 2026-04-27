@@ -24,7 +24,7 @@ from typing import Any, Callable
 from rocketlib import IInstanceBase
 
 from ..flow_base import AsyncInvoker, AutoGatingMixin, Bounds, Decision, FlowResult
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, _dbg  # [IFELSE-DEBUG]
 from .driver import IfElseDriver
 
 _logger = logging.getLogger('rocketride.flow')
@@ -44,9 +44,11 @@ class IInstance(IInstanceBase, AutoGatingMixin):
 
     def _gate(self, chunk: Any, payload_name: str, forward: Callable[[Any], None]) -> None:
         """Evaluate the condition once, then fan out only to the selected branch."""
+        _dbg(f'[IFELSE-DEBUG] _gate ENTER payload_name={payload_name!r} chunk_type={type(chunk).__name__} IGlobal.condition={self.IGlobal.condition!r} IGlobal.branches={self.IGlobal.branches}')
         result = self._run_driver(chunk=chunk, payload_name=payload_name)
         branch = _branch_name(result)
         targets = self.IGlobal.targets_for(branch)
+        _dbg(f'[IFELSE-DEBUG] _gate DECISION branch={branch} targets={targets} decision={result.decision}')
 
         node_id = getattr(self.instance, 'nodeId', '') or '<unknown>'
 
