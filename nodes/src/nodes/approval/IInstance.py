@@ -42,6 +42,8 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
+    """Per-object handler that gates the ``answers`` lane on human approval."""
+
     IGlobal: IGlobal
 
     def writeAnswers(self, answer: Any) -> None:
