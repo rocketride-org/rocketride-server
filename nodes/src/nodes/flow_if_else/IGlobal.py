@@ -92,13 +92,16 @@ class IGlobal(IGlobalBase):
 
 
 # Lane names the engine exposes as expression bindings. Keep in sync with
-# `driver.py` + `services.json` `description` field. Used only for dry-eval
-# at load time — the actual runtime binding is a single lane per invocation.
+# `driver.py::_LANE_DEFAULTS` + `services.json` `description` field. Used
+# only for dry-eval at load time — the actual runtime binding is a single
+# lane per invocation. Defaults match the runtime types so subscripting
+# (`image[:4]`) and length checks work without raising on the inactive
+# lanes: bytes lanes get `b''`, text/table get `''`, list lanes get `[]`.
 _EXPECTED_LANE_BINDINGS = {
     'text': '',
-    'image': None,
-    'audio': None,
-    'video': None,
+    'image': b'',
+    'audio': b'',
+    'video': b'',
     'table': '',
     'documents': [],
     'questions': [],
