@@ -258,7 +258,7 @@ class FilesystemStore(IStore):
         """Get file size and modification time in a single stat call."""
         try:
             full_path = self._get_full_path(filename)
-            if not full_path.exists():
+            if not full_path.is_file():
                 raise StorageError(f'File not found: {filename}')
             st = full_path.stat()
             return {'size': st.st_size, 'modified': st.st_mtime}
