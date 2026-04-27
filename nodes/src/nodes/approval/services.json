@@ -1,0 +1,211 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Human Approval",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "approval://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.approval",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths.
+	//
+	"prefix": "approval",
+	//
+	// Optional:
+	//		Description of this driver.
+	//
+	"description": [
+		"A gating component that pauses pipeline execution until a human reviewer ",
+		"approves, rejects, or modifies the answer flowing through it. Reviewers ",
+		"act on requests via the /approvals REST API. Designed for legal, medical, ",
+		"financial, and compliance workflows where raw LLM output must not reach a ",
+		"user without human sign-off."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node.
+	//
+	"icon": "approval.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces.
+	//
+	"lanes": {
+		"answers": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "Answer to gate. Blocks until a reviewer decides.",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "The approved answer (possibly modified by the reviewer). Rejected answers are not emitted."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver itself.
+	//
+	"preconfig": {
+		"default": "auto",
+		"profiles": {
+			// 'auto' approves immediately — useful for development and dry-runs.
+			"auto": {
+				"profile": "auto",
+				"timeout_seconds": 300,
+				"timeout_action": "approve",
+				"log_channel_enabled": true
+			},
+			// 'manual' requires a real reviewer; webhook_url is exposed in this
+			// profile (PR #542 reviewers flagged that hiding it was a config bug).
+			"manual": {
+				"profile": "manual",
+				"timeout_seconds": 1800,
+				"timeout_action": "reject",
+				"log_channel_enabled": true,
+				"webhook_url": "",
+				"webhook_timeout_seconds": 5
+			},
+			// 'custom' lets pipeline authors tune every dial.
+			"custom": {
+				"profile": "custom",
+				"timeout_seconds": 600,
+				"timeout_action": "reject",
+				"log_channel_enabled": true,
+				"webhook_url": "",
+				"webhook_timeout_seconds": 5,
+				"pending_cap": 1000,
+				"allow_private_webhook_hosts": false
+			}
+		}
+	},
+	//
+	//	Test configuration — exercised by ./builder nodes:test in CONFIG mode.
+	//	Full integration tests live in nodes/test/approval.
+	//
+	"test": {
+		"profiles": ["auto"],
+		"cases": []
+	},
+	//
+	// Optional:
+	//		Local fields definitions.
+	//
+	"fields": {
+		"profile": {
+			"type": "string",
+			"title": "Profile",
+			"description": "Decision strategy: 'auto' (development), 'manual' (real reviewer), or 'custom'.",
+			"enum": [
+				["auto", "Auto-approve"],
+				["manual", "Manual review"],
+				["custom", "Custom"]
+			]
+		},
+		"timeout_seconds": {
+			"type": "number",
+			"title": "Timeout (seconds)",
+			"description": "How long to wait for a decision before applying timeout_action.",
+			"minimum": 1
+		},
+		"timeout_action": {
+			"type": "string",
+			"title": "On timeout",
+			"description": "What to do if no decision arrives in time.",
+			"enum": [
+				["approve", "Auto-approve"],
+				["reject", "Auto-reject"],
+				["error", "Raise error"]
+			]
+		},
+		"log_channel_enabled": {
+			"type": "boolean",
+			"title": "Log notifications",
+			"description": "Write a log line when an approval becomes pending."
+		},
+		"webhook_url": {
+			"type": "string",
+			"title": "Webhook URL",
+			"description": "Optional URL to POST when a request becomes pending. Private/loopback hosts are blocked unless allow_private_webhook_hosts is true."
+		},
+		"webhook_timeout_seconds": {
+			"type": "number",
+			"title": "Webhook timeout (seconds)",
+			"minimum": 1,
+			"maximum": 60
+		},
+		"webhook_headers": {
+			"type": "object",
+			"title": "Webhook headers",
+			"description": "Optional headers attached to webhook deliveries.",
+			"additionalProperties": { "type": "string" }
+		},
+		"pending_cap": {
+			"type": "integer",
+			"title": "Max pending approvals",
+			"minimum": 1
+		},
+		"allow_private_webhook_hosts": {
+			"type": "boolean",
+			"title": "Allow private webhook hosts",
+			"description": "Self-hosted operators only: lets the webhook target private/loopback IPs."
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Decision",
+			"properties": ["profile", "timeout_seconds", "timeout_action"]
+		},
+		{
+			"section": "Pipe",
+			"title": "Notifications",
+			"properties": ["log_channel_enabled", "webhook_url", "webhook_timeout_seconds", "webhook_headers", "allow_private_webhook_hosts"]
+		},
+		{
+			"section": "Pipe",
+			"title": "Limits",
+			"properties": ["pending_cap"]
+		}
+	]
+}
