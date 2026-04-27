@@ -50,7 +50,7 @@ import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../c
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
 import { RemoteManager } from './remote-manager';
-import { getLogger } from '../shared/util/output';
+import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
@@ -246,6 +246,12 @@ export class ConnectionManager extends EventEmitter {
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
+			onProtocolMessage: (message: string) => {
+				this.logger.output(message);
+			},
+			onDebugMessage: (message: string) => {
+				this.logger.output(message);
+			},
 			onEvent: async (message: DAPMessage) => {
 				if (message.event === 'output') {
 					const body = message.body;

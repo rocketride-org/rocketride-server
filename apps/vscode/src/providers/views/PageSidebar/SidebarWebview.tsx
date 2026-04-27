@@ -27,7 +27,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxDesktop, BxCloudUpload, BxLock } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
@@ -77,10 +77,12 @@ type IncomingMessage =
 				connectionState: string;
 				connectionMode: string;
 				developmentTeamId?: string;
+				devProgressMessage?: string;
 				// Deploy connection
 				deployConnectionState?: string;
 				deployConnectionMode?: string | null;
 				deployTargetTeamId?: string;
+				deployProgressMessage?: string;
 				// Teams (from respective servers)
 				teams?: TeamDTO[];
 				deployTeams?: TeamDTO[];
@@ -107,12 +109,14 @@ const SidebarViewWebview: React.FC = () => {
 	const [connection, setConnection] = useState<ConnectionInfo>({ state: 'disconnected' });
 	const [developmentMode, setDevelopmentMode] = useState('local');
 	const [developmentTeamId, setDevelopmentTeamId] = useState('');
+	const [devProgressMessage, setDevProgressMessage] = useState<string | undefined>();
 	const [teams, setTeams] = useState<TeamDTO[]>([]);
 
 	// ── Deploy connection state ─────────────────────────────────────────────
 	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
 	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
 	const [deployTargetTeamId, setDeployTargetTeamId] = useState('');
+	const [deployProgressMessage, setDeployProgressMessage] = useState<string | undefined>();
 	const [deployTeams, setDeployTeams] = useState<TeamDTO[]>([]);
 
 	// ── Pipeline data ───────────────────────────────────────────────────────
@@ -240,12 +244,14 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.teams) setTeams(msg.data.teams);
 					if (msg.data.connectionMode) setDevelopmentMode(msg.data.connectionMode);
 					if (msg.data.developmentTeamId !== undefined) setDevelopmentTeamId(msg.data.developmentTeamId);
+					setDevProgressMessage(msg.data.devProgressMessage);
 
 					// Deploy connection state
-					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
 					if (msg.data.deployConnectionState) setDeployConnectionState(msg.data.deployConnectionState);
+					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
 					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
+					setDeployProgressMessage(msg.data.deployProgressMessage);
 					break;
 
 				case 'entriesUpdate':
@@ -329,10 +335,6 @@ const SidebarViewWebview: React.FC = () => {
 		sendMessage({ type: 'refresh' });
 	}, [sendMessage]);
 
-	const onToggleConnection = useCallback(() => {
-		sendMessage({ type: connection.state === 'connected' ? 'disconnect' : 'connect' });
-	}, [sendMessage, connection.state]);
-
 	const onOpenDocs = useCallback(() => {
 		sendMessage({ type: 'command', command: 'rocketride.sidebar.documentation.open' });
 	}, [sendMessage]);
@@ -344,110 +346,79 @@ const SidebarViewWebview: React.FC = () => {
 		[sendMessage]
 	);
 
-	// ── Footer menu items (dynamic based on auth + connection state) ────────
+	// ── Footer popup menu items ─────────────────────────────────────────────
 	//
-	// The menu structure adapts to three states:
-	//   1. Anonymous: Development Mode (Local/Docker/Service/On-prem/Cloud sign-in) + Settings
-	//   2. Cloud signed in: Development Mode + Deploy Target + Account/Billing/Settings/Log out
-	//   3. Both submenus show Cloud → team list when teams are available
+	// Development and Deployment appear in the popup with `>` indicators.
+	//   - Non-cloud modes: clicking opens the Settings page (dev or deploy section)
+	//   - Cloud mode: clicking opens a team selection submenu
+	// Account, Billing, Settings, Log out follow below.
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/**
-	 * Builds a submenu of cloud team items for either Development Mode or Deploy Target.
-	 * Each team item shows a checkmark for the currently selected team.
-	 *
-	 * @param teamList - The team list to render (dev teams or deploy teams)
-	 * @param selectedTeamId - The currently selected team ID (for checkmark display)
-	 * @param onSelect - Callback invoked when the user selects a team
-	 * @returns Array of SidebarFooterMenuItem for the team submenu
-	 */
-	const buildCloudTeamSubmenu = useCallback((teamList: TeamDTO[], selectedTeamId: string, onSelect: (teamId: string) => void): SidebarFooterMenuItem[] => {
-		return teamList.map((t) => ({
-			id: t.id,
-			label: t.name,
-			checked: selectedTeamId === t.id,
-			onClick: () => onSelect(t.id),
-		}));
-	}, []);
+	/** Resolve team names from their respective connection's team lists. */
+	const devTeamName = teams.find((t) => t.id === developmentTeamId)?.name;
+	const deployTeamName = deployTeams.find((t) => t.id === deployTargetTeamId)?.name;
+
+	/** Builds a mode display label like "Local" or "Cloud". */
+	const modeLabel = (mode: string | null): string => {
+		if (!mode) return 'Not configured';
+		const labels: Record<string, string> = { local: 'Local', cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'On-prem' };
+		return labels[mode] ?? mode;
+	};
+
+	/** Builds a connection status string from state, mode, and optional progress. */
+	const connectionStatusText = (state: string, mode: string | null, progressMessage?: string): string => {
+		// Progress message takes priority (e.g. "Downloading 1.2.0: 45%", "Unpacking...")
+		if (progressMessage) return progressMessage;
+		const modeStr = modeLabel(mode);
+		switch (state) {
+			case 'connected':
+				return `Connected (${modeStr})`;
+			case 'connecting':
+				return 'Connecting...';
+			case 'downloading-engine':
+				return 'Downloading engine...';
+			case 'starting-engine':
+				return 'Starting engine...';
+			case 'stopping-engine':
+				return 'Stopping engine...';
+			default:
+				return 'Disconnected';
+		}
+	};
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [];
 
-		// ── Development Mode submenu ────────────────────────────────────────
-		const devModeItems: SidebarFooterMenuItem[] = [{ id: 'dev-local', label: 'Local', icon: BxDesktop, checked: developmentMode === 'local', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'local' }) }];
+		// ── Development section ─────────────────────────────────────────────
+		// "Development" header with live status text (e.g. "Connected (Local)").
+		// Clicking the status line opens Settings focused on the dev section.
+		// If cloud mode, a "Team: {name} >" item opens a team submenu.
+		const devStatus = connectionStatusText(connection.state, developmentMode, devProgressMessage);
+		const devTeamLine = developmentMode === 'cloud' && devTeamName ? `Team: ${devTeamName}` : undefined;
+		items.push({
+			id: 'dev-header',
+			label: 'Development',
+			header: true,
+			statusText: devTeamLine ? `${devStatus}\n${devTeamLine}` : devStatus,
+			statusState: connection.state === 'connected' ? 'connected' : connection.state === 'connecting' ? 'connecting' : 'disconnected',
+			onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['development'] }),
+			submenu: developmentMode === 'cloud' && teams.length > 0 ? [...teams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `dev-${t.id}`, label: t.name, checked: developmentTeamId === t.id, onClick: () => sendMessage({ type: 'setDevelopmentTeam', teamId: t.id }) })) : undefined,
+		});
 
-		// Cloud: submenu of teams when signed in, sign-in action when not
-		if (cloudSignedIn && teams.length > 0) {
-			devModeItems.push({
-				id: 'dev-cloud',
-				label: 'Cloud',
-				icon: BxCloudUpload,
-				submenu: buildCloudTeamSubmenu(teams, developmentTeamId, (teamId: string) => {
-					sendMessage({ type: 'setDevelopmentTeam', teamId });
-					// Only switch mode if not already cloud — avoids needless reconnect
-					if (developmentMode !== 'cloud') {
-						sendMessage({ type: 'setDevelopmentMode', mode: 'cloud' });
-					}
-				}),
+		// ── Deployment section ──────────────────────────────────────────────
+		// Same pattern as Development. Only shown when deploy target is configured.
+		if (deployTargetMode) {
+			const deployStatus = connectionStatusText(deployConnectionState, deployTargetMode, deployProgressMessage);
+			const deployTeamLine = deployTargetMode === 'cloud' && deployTeamName ? `Team: ${deployTeamName}` : undefined;
+			items.push({
+				id: 'deploy-header',
+				label: 'Deployment',
+				header: true,
+				statusText: deployTeamLine ? `${deployStatus}\n${deployTeamLine}` : deployStatus,
+				statusState: deployConnectionState === 'connected' ? 'connected' : deployConnectionState === 'connecting' ? 'connecting' : 'disconnected',
+				onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['deployment'] }),
+				submenu: deployTargetMode === 'cloud' && deployTeams.length > 0 ? [...deployTeams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `deploy-${t.id}`, label: t.name, checked: deployTargetTeamId === t.id, onClick: () => sendMessage({ type: 'setDeployTargetTeam', teamId: t.id }) })) : undefined,
 			});
-		} else {
-			devModeItems.push({
-				id: 'dev-cloud',
-				label: 'Cloud',
-				icon: BxLock,
-				onClick: () => sendMessage({ type: 'cloudSignIn' }),
-			});
-		}
-
-		devModeItems.push({ id: 'dev-docker', label: 'Docker', checked: developmentMode === 'docker', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'docker' }) }, { id: 'dev-service', label: 'Service', checked: developmentMode === 'service', onClick: () => sendMessage({ type: 'setDevelopmentMode', mode: 'service' }) }, { id: 'dev-onprem', label: 'On-prem', icon: BxCog, checked: developmentMode === 'onprem', onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
-
-		items.push({ id: 'dev-mode', label: 'Development Mode', submenu: devModeItems });
-
-		// ── Deploy Target submenu (always available — you can deploy to
-		//    on-prem/docker without cloud, or to cloud teams when signed in) ──
-		{
-			const deployItems: SidebarFooterMenuItem[] = [];
-
-			// Local deploy target (dev in cloud, deploy locally)
-			deployItems.push({
-				id: 'deploy-local',
-				label: 'Local',
-				icon: BxDesktop,
-				checked: deployTargetMode === 'local',
-				onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'local' }),
-			});
-
-			// Cloud teams — use dev teams or deploy teams (whichever is available,
-			// since teams are account-level and the same on any cloud server)
-			const availableDeployTeams = deployTeams.length > 0 ? deployTeams : teams;
-			if (cloudSignedIn && availableDeployTeams.length > 0) {
-				deployItems.push({
-					id: 'deploy-cloud',
-					label: 'Cloud',
-					icon: BxCloudUpload,
-					submenu: buildCloudTeamSubmenu(availableDeployTeams, deployTargetTeamId, (teamId: string) => {
-						sendMessage({ type: 'setDeployTargetTeam', teamId });
-						// Only switch mode if not already cloud — avoids needless reconnect
-						if (deployTargetMode !== 'cloud') {
-							sendMessage({ type: 'setDeployTargetMode', mode: 'cloud' });
-						}
-					}),
-				});
-			} else if (!cloudSignedIn) {
-				// Cloud requires sign-in — show sign-in action
-				deployItems.push({
-					id: 'deploy-cloud',
-					label: 'Cloud',
-					icon: BxLock,
-					onClick: () => sendMessage({ type: 'cloudSignIn' }),
-				});
-			}
-
-			deployItems.push({ id: 'deploy-onprem', label: 'On-prem', icon: BxCog, checked: deployTargetMode === 'onprem', onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) }, { id: 'deploy-docker', label: 'Docker', checked: deployTargetMode === 'docker', onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'docker' }) }, { id: 'deploy-service', label: 'Service', checked: deployTargetMode === 'service', onClick: () => sendMessage({ type: 'setDeployTargetMode', mode: 'service' }) });
-
-			// Show deploy connection state in the label when connected
-			const deployLabel = deployConnectionState === 'connected' ? 'Deploy Target  ●' : 'Deploy Target';
-			items.push({ id: 'deploy-target', label: deployLabel, submenu: deployItems });
 		}
 
 		// ── Account / Billing / Settings / Log out ──────────────────────────
@@ -462,10 +433,10 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		return items;
-	}, [sendMessage, cloudSignedIn, teams, deployTeams, developmentMode, developmentTeamId, deployTargetMode, deployTargetTeamId, deployConnectionState, buildCloudTeamSubmenu]);
+	}, [sendMessage, cloudSignedIn, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} connection={{ ...connection, onToggle: onToggleConnection }} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 

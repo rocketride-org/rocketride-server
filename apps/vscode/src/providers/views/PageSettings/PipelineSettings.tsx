@@ -43,17 +43,18 @@ export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, on
 	};
 
 	return (
-		<div style={S.section}>
-			<div style={S.sectionTitle}>Pipeline Settings</div>
-			<div style={S.sectionDescription}>Configure default settings for pipeline creation and management</div>
-
-			<div style={S.formGrid}>
-				<div style={S.formGroup}>
-					<label htmlFor="defaultPipelinePath" style={S.label}>
-						Default Pipeline Path
-					</label>
-					<input type="text" id="defaultPipelinePath" placeholder="${workspaceFolder}/pipelines" value={settings.defaultPipelinePath} onChange={handleDefaultPipelinePathChange} />
-					<div style={S.helpText}>Default directory path for creating new pipeline files (relative to workspace root). Examples: "pipelines", "src/pipelines", "workflows"</div>
+		<div style={S.card}>
+			<div style={S.cardHeader}>Pipeline Settings</div>
+			<div style={S.cardBody}>
+				<div style={S.sectionDescription}>Configure default settings for pipeline creation and management</div>
+				<div style={S.formGrid}>
+					<div style={S.formGroup}>
+						<label htmlFor="defaultPipelinePath" style={S.label}>
+							Default Pipeline Path
+						</label>
+						<input type="text" id="defaultPipelinePath" placeholder="${workspaceFolder}/pipelines" value={settings.defaultPipelinePath} onChange={handleDefaultPipelinePathChange} />
+						<div style={S.helpText}>Default directory path for creating new pipeline files (relative to workspace root). Examples: "pipelines", "src/pipelines", "workflows"</div>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { useState, CSSProperties } from 'react';
+import React, { useState, useMemo, CSSProperties } from 'react';
 import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
@@ -30,6 +30,9 @@ import { EnvVariablesSettings } from './EnvVariablesSettings';
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeployTargetSettings } from './DeployTargetSettings';
 import { MessageDisplay } from './MessageDisplay';
+import { commonStyles } from 'shared/themes/styles';
+import { TabPanel } from 'shared/components/tab-panel/TabPanel';
+import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
@@ -112,6 +115,9 @@ export type PageSettingsOutgoingMessage =
 	  }
 	| {
 			type: 'fetchEngineVersions';
+	  }
+	| {
+			type: 'fetchTeams';
 	  };
 
 // ============================================================================
@@ -119,28 +125,24 @@ export type PageSettingsOutgoingMessage =
 // ============================================================================
 
 export const settingsStyles = {
-	section: {
-		border: '1px solid var(--rr-border)',
-		borderRadius: 8,
-		padding: 20,
-		backgroundColor: 'var(--rr-bg-default)',
-	} as CSSProperties,
-	sectionTitle: {
-		fontSize: 18,
-		fontWeight: 600,
-		margin: '0 0 16px 0',
-		color: 'var(--rr-text-primary)',
+	// Card structure (from commonStyles)
+	card: commonStyles.card as CSSProperties,
+	cardHeader: commonStyles.cardHeader as CSSProperties,
+	cardBody: {
+		...commonStyles.cardBody,
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
 	} as CSSProperties,
 	sectionDescription: {
-		color: 'var(--rr-text-secondary)',
+		...commonStyles.textMuted,
 		fontSize: 13,
-		marginBottom: 16,
+		margin: 0,
 	} as CSSProperties,
 	formGrid: {
 		display: 'grid',
 		gap: 16,
 		gridTemplateColumns: '1fr',
-		paddingLeft: 50,
 	} as CSSProperties,
 	formGroup: {
 		display: 'flex',
@@ -152,23 +154,20 @@ export const settingsStyles = {
 		fontSize: 13,
 	} as CSSProperties,
 	helpText: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
+		...commonStyles.textMuted,
 		marginTop: 4,
 		lineHeight: 1.4,
 	} as CSSProperties,
 	modeConfigBox: {
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		padding: 16,
+		...commonStyles.cardFlat,
 		gridColumn: '1 / -1',
 		display: 'flex',
 		flexDirection: 'column',
 		gap: 16,
 	} as CSSProperties,
 	modeConfigDesc: {
+		...commonStyles.textMuted,
 		fontSize: 11.5,
-		color: 'var(--rr-text-secondary)',
 		lineHeight: 1.5,
 		margin: 0,
 	} as CSSProperties,
@@ -260,6 +259,9 @@ export const PageSettings: React.FC = () => {
 	const [cloudUserName, setCloudUserName] = useState('');
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
 
+	// Active settings tab
+	const [activeTab, setActiveTab] = useState('development');
+
 	// ========================================================================
 	// WEBVIEW MESSAGING
 	// ========================================================================
@@ -290,6 +292,10 @@ export const PageSettings: React.FC = () => {
 
 				case 'teamsLoaded' as any:
 					setTeams((message as any).teams || []);
+					break;
+
+				case 'setFocus' as any:
+					if ((message as any).focus) setActiveTab((message as any).focus);
 					break;
 
 				case 'showMessage': {
@@ -345,6 +351,10 @@ export const PageSettings: React.FC = () => {
 				setEngineVersionsLoading(true);
 				sendMessage({ type: 'fetchEngineVersions' });
 			}
+			// If either mode switches to cloud, fetch teams
+			if ((newSettings.connectionMode === 'cloud' && prev.connectionMode !== 'cloud') || (newSettings.deployTargetMode === 'cloud' && prev.deployTargetMode !== 'cloud')) {
+				sendMessage({ type: 'fetchTeams' });
+			}
 			return { ...prev, ...newSettings };
 		});
 	};
@@ -393,68 +403,91 @@ export const PageSettings: React.FC = () => {
 	// RENDER
 	// ========================================================================
 
+	// ========================================================================
+	// TAB DEFINITIONS
+	// ========================================================================
+
+	const tabs: ITabPanelTab[] = useMemo(
+		() => [
+			{ id: 'development', label: 'Development' },
+			{ id: 'deployment', label: 'Deployment' },
+			{ id: 'pipeline', label: 'Pipeline' },
+			{ id: 'environment', label: 'Environment' },
+			{ id: 'debugging', label: 'Debugging' },
+			{ id: 'integrations', label: 'Integrations' },
+		],
+		[]
+	);
+
+	const panels: Record<string, ITabPanelPanel> = useMemo(
+		() => ({
+			development: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
+					</div>
+				),
+			},
+			deployment: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
+					</div>
+				),
+			},
+			pipeline: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
+					</div>
+				),
+			},
+			environment: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<EnvVariablesSettings settings={settings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
+					</div>
+				),
+			},
+			debugging: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} />
+					</div>
+				),
+			},
+			integrations: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<MessageDisplay message={message} />
+						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
+					</div>
+				),
+			},
+		}),
+		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, teams]
+	);
+
 	return (
-		<div
-			style={{
-				maxWidth: 800,
-				margin: '0 auto',
-				padding: 24,
-				backgroundColor: 'var(--rr-bg-default)',
-			}}
-		>
-			<div
-				style={{
-					borderBottom: '1px solid var(--rr-border)',
-					paddingBottom: 16,
-					marginBottom: 24,
-				}}
-			>
-				<h1
-					style={{
-						margin: '0 0 8px 0',
-						fontSize: 24,
-						fontWeight: 600,
-						color: 'var(--rr-text-primary)',
-					}}
-				>
-					RocketRide Extension Settings
-				</h1>
-				<p
-					style={{
-						margin: 0,
-						color: 'var(--rr-text-secondary)',
-						fontSize: 14,
-					}}
-				>
-					Configure your RocketRide extension preferences and connection settings
-				</p>
+		<div style={commonStyles.columnFill}>
+			{/* ── Header bar ────────────────────────────────────────── */}
+			<div style={commonStyles.headerBar}>
+				<div>
+					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>RocketRide Extension Settings</div>
+					<div style={commonStyles.textMuted}>Configure your extension preferences and connection settings</div>
+				</div>
+				<button style={commonStyles.buttonPrimary} onClick={handleSaveSettings}>
+					Save All Settings
+				</button>
 			</div>
 
-			<div
-				style={{
-					display: 'flex',
-					gap: 12,
-					marginBottom: 24,
-				}}
-			>
-				<button onClick={handleSaveSettings}>Save All Settings</button>
-			</div>
-
-			<MessageDisplay message={message} />
-
-			<div style={{ display: 'grid', gap: 24 }}>
-				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
-
-				<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
-
-				<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
-
-				<EnvVariablesSettings settings={settings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
-
-				<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} />
-
-				<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
-			</div>
+			{/* ── Tab panel ─────────────────────────────────────────── */}
+			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} panels={panels} />
 		</div>
 	);
 };

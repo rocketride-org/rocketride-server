@@ -41,10 +41,6 @@ interface ProjectEntryDTO {
 }
 
 // =============================================================================
-// CONSTANTS
-// =============================================================================
-
-// =============================================================================
 // PROVIDER
 // =============================================================================
 
@@ -60,10 +56,10 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 
-	// ── Teams cache (fetched when cloud-signed-in + connected) ───────────────
-	private devTeams: Array<{ id: string; name: string; color?: string; memberCount?: number }> = [];
-	private deployTeams: Array<{ id: string; name: string; color?: string; memberCount?: number }> = [];
-
+	/**
+	 * Creates the sidebar provider.
+	 * Sets up file watchers and event listeners, and kicks off initial file load.
+	 */
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.setupFileWatching();
 		this.setupEventListeners();
@@ -74,6 +70,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// WEBVIEW LIFECYCLE
 	// =========================================================================
 
+	/** Called by VS Code when the sidebar view becomes visible for the first time. */
 	public resolveWebviewView(webviewView: vscode.WebviewView, _context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken) {
 		this._view = webviewView;
 
@@ -83,7 +80,6 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		};
 
 		const html = this.getHtmlForWebview(webviewView.webview);
-		console.log('[PageSidebarProvider] HTML length:', html.length, 'first 200 chars:', html.substring(0, 200));
 		webviewView.webview.html = html;
 
 		// Handle messages from the webview
@@ -132,7 +128,8 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 						await this.configManager.updateConnectionMode(message.mode);
 						break;
 					case 'setDevelopmentTeam':
-						await this.configManager.updateDevelopmentTeamId(message.teamId);
+						this.configManager.setDevelopmentTeamId(message.teamId);
+						this.sendFullUpdate();
 						break;
 					case 'setDeployTargetMode':
 						await this.configManager.updateDeployTargetMode(message.mode);
@@ -141,7 +138,8 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 						await this.deployManager.initialize();
 						break;
 					case 'setDeployTargetTeam':
-						await this.configManager.updateDeployTargetTeamId(message.teamId);
+						this.configManager.setDeployTargetTeamId(message.teamId);
+						this.sendFullUpdate();
 						break;
 					case 'cloudSignIn': {
 						const auth = CloudAuthProvider.getInstance();
@@ -163,6 +161,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// FILE WATCHING
 	// =========================================================================
 
+	/** Watches for .pipe / .pipe.json create/delete/change events in the workspace. */
 	private setupFileWatching(): void {
 		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
 		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
@@ -179,6 +178,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
+	/** Handles a newly created .pipe file — assigns a project_id if missing. */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
@@ -212,11 +212,13 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		await this.loadPipelineFiles();
 	}
 
+	/** Removes the deleted file from the parsed-files cache and updates the webview. */
 	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
 		this.parsedFiles.delete(uri.fsPath);
 		this.sendEntriesUpdate();
 	}
 
+	/** Re-parses a changed .pipe file, ensures project_id, and optionally restarts. */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
@@ -269,6 +271,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// EVENT LISTENERS
 	// =========================================================================
 
+	/** Subscribes to connection, deploy, config, and cloud-auth events. */
 	private setupEventListeners(): void {
 		const connState = this.connectionManager.on('connectionStateChanged', () => {
 			this.sendFullUpdate();
@@ -281,8 +284,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 					console.error('[PageSidebarProvider] Failed to subscribe to task events:', err);
 				});
 			}
-			// Fetch teams if cloud-signed-in
-			await this.fetchTeams();
+			// Teams come from ConnectResult — no fetch needed, just update the webview
 			this.sendFullUpdate();
 		});
 		const disconnected = this.connectionManager.on('disconnected', () => {
@@ -305,7 +307,6 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		// Re-fetch teams when cloud auth state changes (sign-in/sign-out)
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudAuthHandler = async () => {
-			await Promise.all([this.fetchTeams(), this.fetchDeployTeams()]);
 			this.sendFullUpdate();
 		};
 		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
@@ -315,8 +316,6 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 			this.sendFullUpdate();
 		});
 		const deployConnected = this.deployManager.on('connected', async () => {
-			// Fetch teams from deploy server
-			await this.fetchDeployTeams();
 			this.sendFullUpdate();
 		});
 		const deployDisconnected = this.deployManager.on('disconnected', () => {
@@ -358,48 +357,14 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// DATA
 	// =========================================================================
 
-	/** Fetches team list from dev server when cloud-signed-in + connected. */
-	private async fetchTeams(): Promise<void> {
-		const cloudAuth = CloudAuthProvider.getInstance();
-		const signedIn = await cloudAuth.isSignedIn();
-		if (!signedIn || !this.connectionManager.isConnected()) {
-			this.devTeams = [];
-			return;
-		}
-		try {
-			const client = this.connectionManager.getClient();
-			if (!client) {
-				this.devTeams = [];
-				return;
-			}
-			const response = await client.dapRequest('rrext_account_teams', { subcommand: 'list' });
-			this.devTeams = (response as any)?.body?.teams ?? [];
-		} catch (err) {
-			console.log('[PageSidebarProvider] fetchTeams error:', err);
-			this.devTeams = [];
-		}
-	}
-
-	/** Fetches team list from deploy server when cloud-signed-in + connected. */
-	private async fetchDeployTeams(): Promise<void> {
-		const cloudAuth = CloudAuthProvider.getInstance();
-		const signedIn = await cloudAuth.isSignedIn();
-		if (!signedIn || !this.deployManager.isConnected()) {
-			this.deployTeams = [];
-			return;
-		}
-		try {
-			const client = this.deployManager.getClient();
-			if (!client) {
-				this.deployTeams = [];
-				return;
-			}
-			const response = await client.dapRequest('rrext_account_teams', { subcommand: 'list' });
-			this.deployTeams = (response as any)?.body?.teams ?? [];
-		} catch (err) {
-			console.log('[PageSidebarProvider] fetchDeployTeams error:', err);
-			this.deployTeams = [];
-		}
+	/**
+	 * Returns teams from a client's ConnectResult (already cached from connect()).
+	 * No DAP request needed — teams are part of the auth handshake response.
+	 */
+	private getTeamsFromClient(client: import('rocketride').RocketRideClient | undefined): Array<{ id: string; name: string }> {
+		const info = client?.getAccountInfo();
+		if (!info?.organizations?.length) return [];
+		return info.organizations[0].teams ?? [];
 	}
 
 	/** Sends connection state + entries + user identity + teams to the webview. */
@@ -409,10 +374,17 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
 
-		// Fetch cloud auth identity (if signed in)
+		// Resolve user identity: dev client → deploy client → CloudAuth fallback
+		const devAccount = this.connectionManager.getClient()?.getAccountInfo();
+		const deployAccount = this.deployManager.getClient()?.getAccountInfo();
+		const account = (devAccount?.displayName ? devAccount : null) ?? (deployAccount?.displayName ? deployAccount : null);
+
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudSignedIn = await cloudAuth.isSignedIn();
-		const userName = cloudSignedIn ? await cloudAuth.getUserName() : undefined;
+
+		// Use connected client identity, fall back to CloudAuth name (no email)
+		const userName = account?.displayName || (cloudSignedIn ? await cloudAuth.getUserName() : undefined) || undefined;
+		const userEmail = account?.email || undefined;
 
 		const deployStatus = this.deployManager.getConnectionStatus();
 
@@ -423,16 +395,19 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 				connectionState: status.state,
 				connectionMode: config.connectionMode,
 				developmentTeamId: config.developmentTeamId,
+				devProgressMessage: status.progressMessage,
 				// Deploy connection
 				deployConnectionState: deployStatus.state,
 				deployConnectionMode: config.deployTargetMode,
 				deployTargetTeamId: config.deployTargetTeamId,
+				deployProgressMessage: deployStatus.progressMessage,
 				// Teams (from respective servers)
-				teams: this.devTeams,
-				deployTeams: this.deployTeams,
+				teams: this.getTeamsFromClient(this.connectionManager.getClient()),
+				deployTeams: this.getTeamsFromClient(this.deployManager.getClient()),
 				// Shared
 				cloudSignedIn,
 				userName: userName || undefined,
+				userEmail: userEmail || undefined,
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
@@ -453,6 +428,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// PIPELINE FILE LOADING
 	// =========================================================================
 
+	/** Scans the workspace for .pipe / .pipe.json files, parses them, and updates the webview. */
 	private async loadPipelineFiles(): Promise<void> {
 		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
 		const files = [...pipeFiles, ...pipeJsonFiles];
@@ -468,6 +444,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		this.sendEntriesUpdate();
 	}
 
+	/** Returns the cached service class definitions (used to resolve source display names). */
 	private getServiceClassInfoMap(): Record<string, ServiceClassInfo> | undefined {
 		const cached = this.connectionManager.getCachedServices();
 		return cached?.services as Record<string, ServiceClassInfo> | undefined;
@@ -517,6 +494,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// PIPELINE ACTIONS
 	// =========================================================================
 
+	/** Opens a .pipe file in the custom editor (PageProject). */
 	private async openPipelineFile(fsPath: string): Promise<void> {
 		try {
 			// fsPath may be relative — resolve against workspace
@@ -527,6 +505,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Reads the pipeline JSON from disk and sends it to the engine via client.use(). */
 	private async runPipeline(fsPath: string, sourceId?: string): Promise<void> {
 		try {
 			const uri = this.resolveFileUri(fsPath);
@@ -548,6 +527,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Terminates a running pipeline task by project + source. */
 	private async stopPipeline(projectId: string, sourceId: string): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
@@ -559,6 +539,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Restarts a running pipeline task with the latest file content. */
 	private async restartPipeline(projectId: string, sourceId: string, uri: vscode.Uri): Promise<void> {
 		try {
 			const fileContent = await vscode.workspace.fs.readFile(uri);
@@ -586,6 +567,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// PIPELINE RESTART ON SAVE
 	// =========================================================================
 
+	/** After a file save, optionally prompts or auto-restarts running pipeline tasks. */
 	private async handlePipelineRestart(uri: vscode.Uri, parsedFile: ParsedPipelineFile): Promise<void> {
 		if (!parsedFile.isValid || !parsedFile.projectId) return;
 
@@ -639,6 +621,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// HTML
 	// =========================================================================
 
+	/** Reads the static HTML template and rewrites resource URIs for the webview. */
 	private getHtmlForWebview(webview: vscode.Webview): string {
 		const nonce = this.generateNonce();
 		const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'webview', 'page-sidebar.html');
@@ -658,6 +641,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Generates a 32-character random nonce for Content Security Policy. */
 	private generateNonce(): string {
 		let text = '';
 		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -671,6 +655,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 	// DISPOSAL
 	// =========================================================================
 
+	/** Unsubscribes from task events and disposes all listeners. */
 	public dispose(): void {
 		const client = this.connectionManager.getClient();
 		if (client) {

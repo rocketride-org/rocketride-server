@@ -85,10 +85,20 @@ export class DeployManager extends ConnectionManager {
 	}
 
 	/**
-	 * Returns deploy host URL for on-prem deploy targets.
+	 * Returns deploy host URL.
+	 * For cloud mode, resolves to the cloud URL (same logic as ConnectionManager).
+	 * For on-prem, returns the deploy-specific host URL.
 	 */
 	protected override getEffectiveHostUrl(): string {
-		return this.configManager.getConfig().deployHostUrl;
+		const config = this.configManager.getConfig();
+		const mode = config.deployTargetMode;
+		if (mode === 'cloud') {
+			return config.env.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+		}
+		if (mode === 'docker' || mode === 'service') {
+			return 'http://localhost:5565';
+		}
+		return config.deployHostUrl;
 	}
 
 	/**

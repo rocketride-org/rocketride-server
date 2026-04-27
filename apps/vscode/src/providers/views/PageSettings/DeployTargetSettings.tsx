@@ -112,214 +112,214 @@ export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ sett
 	// =========================================================================
 
 	return (
-		<div style={S.section}>
-			{/* ── Section header ──────────────────────────────────────────── */}
-			<div style={S.sectionTitle}>Deployment Target</div>
-			<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
-
-			<div style={S.formGrid}>
-				{/* ── Enable/disable toggle ────────────────────────────────── */}
-				<div style={S.formGroup}>
-					<div>
-						<input type="checkbox" id="deployTargetEnabled" checked={hasDeployTarget} onChange={handleToggle} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-						<label htmlFor="deployTargetEnabled" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-							Deploy to a different target
-						</label>
-					</div>
-				</div>
-
-				{/* ── Mode-specific config (only when enabled) ─────────────── */}
-				{hasDeployTarget && (
-					<>
-						{/* Mode dropdown */}
-						<div style={S.formGroup}>
-							<label htmlFor="deployTargetMode" style={S.label}>
-								Target
+		<div style={S.card}>
+			<div style={S.cardHeader}>Deployment Target</div>
+			<div style={S.cardBody}>
+				<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
+				<div style={S.formGrid}>
+					{/* ── Enable/disable toggle ────────────────────────────────── */}
+					<div style={S.formGroup}>
+						<div>
+							<input type="checkbox" id="deployTargetEnabled" checked={hasDeployTarget} onChange={handleToggle} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+							<label htmlFor="deployTargetEnabled" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+								Deploy to a different target
 							</label>
-							<select id="deployTargetMode" value={settings.deployTargetMode ?? ''} onChange={handleModeChange}>
-								<option value="local">Local</option>
-								<option value="cloud">RocketRide Cloud</option>
-								<option value="onprem">On-prem (your own hosted server)</option>
-								<option value="docker">Docker</option>
-								<option value="service">Service</option>
-							</select>
-							<div style={S.helpText}>Choose where to deploy pipelines for production</div>
 						</div>
+					</div>
 
-						{/* Config box — mode-specific fields */}
-						<div style={S.modeConfigBox}>
-							{/* ── Local deploy mode ──────────────────────────── */}
-							{settings.deployTargetMode === 'local' && <div style={S.modeConfigDesc}>Deploy to a local engine on this machine. The extension will manage a separate engine process for deployment.</div>}
+					{/* ── Mode-specific config (only when enabled) ─────────────── */}
+					{hasDeployTarget && (
+						<>
+							{/* Mode dropdown */}
+							<div style={S.formGroup}>
+								<label htmlFor="deployTargetMode" style={S.label}>
+									Target
+								</label>
+								<select id="deployTargetMode" value={settings.deployTargetMode ?? ''} onChange={handleModeChange}>
+									<option value="local">Local</option>
+									<option value="cloud">RocketRide Cloud</option>
+									<option value="onprem">On-prem (your own hosted server)</option>
+									<option value="docker">Docker</option>
+									<option value="service">Service</option>
+								</select>
+								<div style={S.helpText}>Choose where to deploy pipelines for production</div>
+							</div>
 
-							{/* ── Cloud deploy mode ──────────────────────────── */}
-							{settings.deployTargetMode === 'cloud' && (
-								<>
-									<div style={S.modeConfigDesc}>Deploy to RocketRide Cloud. Sign-in is shared with the development section.</div>
+							{/* Config box — mode-specific fields */}
+							<div style={S.modeConfigBox}>
+								{/* ── Local deploy mode ──────────────────────────── */}
+								{settings.deployTargetMode === 'local' && <div style={S.modeConfigDesc}>Deploy to a local engine on this machine. The extension will manage a separate engine process for deployment.</div>}
 
-									{/* Cloud sign-in status (shared state) */}
-									{cloudSignedIn ? (
-										<div style={S.formGroup}>
-											<div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
-												<span style={{ fontSize: 20, color: 'var(--vscode-testing-iconPassed, #22c55e)' }}>&#10003;</span>
-												<div>
-													<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)' }}>{cloudUserName || 'Signed in'}</div>
+								{/* ── Cloud deploy mode ──────────────────────────── */}
+								{settings.deployTargetMode === 'cloud' && (
+									<>
+										<div style={S.modeConfigDesc}>Deploy to RocketRide Cloud. Sign-in is shared with the development section.</div>
+
+										{/* Cloud sign-in status (shared state) */}
+										{cloudSignedIn ? (
+											<div style={S.formGroup}>
+												<div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
+													<span style={{ fontSize: 20, color: 'var(--vscode-testing-iconPassed, #22c55e)' }}>&#10003;</span>
+													<div>
+														<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)' }}>{cloudUserName || 'Signed in'}</div>
+													</div>
 												</div>
+												<button
+													type="button"
+													onClick={onCloudSignOut}
+													style={{
+														width: 'auto',
+														marginTop: 8,
+														backgroundColor: 'var(--vscode-button-secondaryBackground)',
+														color: 'var(--vscode-button-secondaryForeground)',
+													}}
+												>
+													Sign Out
+												</button>
 											</div>
-											<button
-												type="button"
-												onClick={onCloudSignOut}
-												style={{
-													width: 'auto',
-													marginTop: 8,
-													backgroundColor: 'var(--vscode-button-secondaryBackground)',
-													color: 'var(--vscode-button-secondaryForeground)',
-												}}
-											>
-												Sign Out
-											</button>
-										</div>
-									) : (
+										) : (
+											<div style={S.formGroup}>
+												<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
+													Sign In
+												</button>
+											</div>
+										)}
+
+										{/* Team selector (only when signed in) */}
+										{cloudSignedIn && teams.length > 0 && (
+											<div style={S.formGroup}>
+												<label htmlFor="deployTargetTeam" style={S.label}>
+													Team
+												</label>
+												<select id="deployTargetTeam" value={settings.deployTargetTeamId} onChange={(e) => onSettingsChange({ deployTargetTeamId: e.target.value })}>
+													<option value="">Select a team...</option>
+													{teams.map((t) => (
+														<option key={t.id} value={t.id}>
+															{t.name}
+														</option>
+													))}
+												</select>
+												<div style={S.helpText}>Which team to deploy pipelines to</div>
+											</div>
+										)}
+
+										{/* Auto-connect for deploy */}
 										<div style={S.formGroup}>
-											<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
-												Sign In
-											</button>
+											<label htmlFor="deployAutoConnect" style={S.label}>
+												Auto-connect on startup
+											</label>
+											<div>
+												<input type="checkbox" id="deployAutoConnect" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+												<label htmlFor="deployAutoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+													Automatically connect to deploy target when extension starts
+												</label>
+											</div>
 										</div>
-									)}
+									</>
+								)}
 
-									{/* Team selector (only when signed in) */}
-									{cloudSignedIn && teams.length > 0 && (
+								{/* ── On-prem deploy mode ────────────────────────── */}
+								{settings.deployTargetMode === 'onprem' && (
+									<>
+										<div style={S.modeConfigDesc}>Deploy to your own hosted RocketRide server. Uses separate credentials from the development connection.</div>
+
+										{/* Deploy host URL */}
 										<div style={S.formGroup}>
-											<label htmlFor="deployTargetTeam" style={S.label}>
-												Team
+											<label htmlFor="deployHostUrl" style={S.label}>
+												Host URL
 											</label>
-											<select id="deployTargetTeam" value={settings.deployTargetTeamId} onChange={(e) => onSettingsChange({ deployTargetTeamId: e.target.value })}>
-												<option value="">Select a team...</option>
-												{teams.map((t) => (
-													<option key={t.id} value={t.id}>
-														{t.name}
-													</option>
-												))}
-											</select>
-											<div style={S.helpText}>Which team to deploy pipelines to</div>
+											<input type="text" id="deployHostUrl" placeholder="your-server:5565" value={settings.deployHostUrl} onChange={(e) => onSettingsChange({ deployHostUrl: e.target.value })} />
+											<div style={S.helpText}>Base URL of the deploy target server</div>
 										</div>
-									)}
 
-									{/* Auto-connect for deploy */}
-									<div style={S.formGroup}>
-										<label htmlFor="deployAutoConnect" style={S.label}>
-											Auto-connect on startup
-										</label>
-										<div>
-											<input type="checkbox" id="deployAutoConnect" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-											<label htmlFor="deployAutoConnect" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-												Automatically connect to deploy target when extension starts
+										{/* Deploy API key (separate from dev) */}
+										<div style={S.formGroup}>
+											<label htmlFor="deployApiKey" style={S.label}>
+												API Key
 											</label>
+											<div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+												<input type={showDeployApiKey ? 'text' : 'password'} id="deployApiKey" placeholder="Enter API key for deploy target" value={settings.deployApiKey} onChange={(e) => onSettingsChange({ deployApiKey: e.target.value })} style={{ flex: 1 }} />
+												<button
+													type="button"
+													onClick={() => setShowDeployApiKey(!showDeployApiKey)}
+													title={showDeployApiKey ? 'Hide API key' : 'Show API key'}
+													onMouseEnter={() => setPasswordToggleHover(true)}
+													onMouseLeave={() => setPasswordToggleHover(false)}
+													style={{
+														backgroundColor: 'var(--vscode-button-secondaryBackground)',
+														color: 'var(--vscode-button-secondaryForeground)',
+														border: '1px solid var(--rr-border-input)',
+														padding: '8px 12px',
+														borderRadius: 4,
+														cursor: 'pointer',
+														fontSize: 20,
+														minWidth: 44,
+														display: 'flex',
+														alignItems: 'center',
+														justifyContent: 'center',
+														transition: 'all 0.2s',
+														...(passwordToggleHover
+															? {
+																	backgroundColor: 'var(--vscode-button-secondaryHoverBackground)',
+																	borderColor: 'var(--rr-border-focus)',
+																}
+															: {}),
+													}}
+												>
+													{showDeployApiKey ? '\u{1F648}' : '\u{1F50D}'}
+												</button>
+											</div>
+											<div style={S.helpText}>API key for the deploy target (saved securely, separate from dev key)</div>
 										</div>
-									</div>
-								</>
-							)}
 
-							{/* ── On-prem deploy mode ────────────────────────── */}
-							{settings.deployTargetMode === 'onprem' && (
-								<>
-									<div style={S.modeConfigDesc}>Deploy to your own hosted RocketRide server. Uses separate credentials from the development connection.</div>
-
-									{/* Deploy host URL */}
-									<div style={S.formGroup}>
-										<label htmlFor="deployHostUrl" style={S.label}>
-											Host URL
-										</label>
-										<input type="text" id="deployHostUrl" placeholder="your-server:5565" value={settings.deployHostUrl} onChange={(e) => onSettingsChange({ deployHostUrl: e.target.value })} />
-										<div style={S.helpText}>Base URL of the deploy target server</div>
-									</div>
-
-									{/* Deploy API key (separate from dev) */}
-									<div style={S.formGroup}>
-										<label htmlFor="deployApiKey" style={S.label}>
-											API Key
-										</label>
-										<div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
-											<input type={showDeployApiKey ? 'text' : 'password'} id="deployApiKey" placeholder="Enter API key for deploy target" value={settings.deployApiKey} onChange={(e) => onSettingsChange({ deployApiKey: e.target.value })} style={{ flex: 1 }} />
-											<button
-												type="button"
-												onClick={() => setShowDeployApiKey(!showDeployApiKey)}
-												title={showDeployApiKey ? 'Hide API key' : 'Show API key'}
-												onMouseEnter={() => setPasswordToggleHover(true)}
-												onMouseLeave={() => setPasswordToggleHover(false)}
-												style={{
-													backgroundColor: 'var(--vscode-button-secondaryBackground)',
-													color: 'var(--vscode-button-secondaryForeground)',
-													border: '1px solid var(--rr-border-input)',
-													padding: '8px 12px',
-													borderRadius: 4,
-													cursor: 'pointer',
-													fontSize: 20,
-													minWidth: 44,
-													display: 'flex',
-													alignItems: 'center',
-													justifyContent: 'center',
-													transition: 'all 0.2s',
-													...(passwordToggleHover
-														? {
-																backgroundColor: 'var(--vscode-button-secondaryHoverBackground)',
-																borderColor: 'var(--rr-border-focus)',
-															}
-														: {}),
-												}}
-											>
-												{showDeployApiKey ? '\u{1F648}' : '\u{1F50D}'}
-											</button>
-										</div>
-										<div style={S.helpText}>API key for the deploy target (saved securely, separate from dev key)</div>
-									</div>
-
-									{/* Auto-connect for deploy */}
-									<div style={S.formGroup}>
-										<label htmlFor="deployAutoConnectOnprem" style={S.label}>
-											Auto-connect on startup
-										</label>
-										<div>
-											<input type="checkbox" id="deployAutoConnectOnprem" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-											<label htmlFor="deployAutoConnectOnprem" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-												Automatically connect to deploy target when extension starts
+										{/* Auto-connect for deploy */}
+										<div style={S.formGroup}>
+											<label htmlFor="deployAutoConnectOnprem" style={S.label}>
+												Auto-connect on startup
 											</label>
+											<div>
+												<input type="checkbox" id="deployAutoConnectOnprem" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+												<label htmlFor="deployAutoConnectOnprem" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+													Automatically connect to deploy target when extension starts
+												</label>
+											</div>
 										</div>
-									</div>
-								</>
-							)}
+									</>
+								)}
 
-							{/* ── Docker deploy mode ─────────────────────────── */}
-							{settings.deployTargetMode === 'docker' && (
-								<>
-									<div style={S.modeConfigDesc}>Deploy pipelines to a Docker container.</div>
-									<div style={S.formGroup}>
-										<div>
-											<input type="checkbox" id="deployAutoConnectDocker" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-											<label htmlFor="deployAutoConnectDocker" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-												Automatically connect when extension starts
-											</label>
+								{/* ── Docker deploy mode ─────────────────────────── */}
+								{settings.deployTargetMode === 'docker' && (
+									<>
+										<div style={S.modeConfigDesc}>Deploy pipelines to a Docker container.</div>
+										<div style={S.formGroup}>
+											<div>
+												<input type="checkbox" id="deployAutoConnectDocker" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+												<label htmlFor="deployAutoConnectDocker" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+													Automatically connect when extension starts
+												</label>
+											</div>
 										</div>
-									</div>
-								</>
-							)}
+									</>
+								)}
 
-							{/* ── Service deploy mode ────────────────────────── */}
-							{settings.deployTargetMode === 'service' && (
-								<>
-									<div style={S.modeConfigDesc}>Deploy pipelines to a local system service.</div>
-									<div style={S.formGroup}>
-										<div>
-											<input type="checkbox" id="deployAutoConnectService" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-											<label htmlFor="deployAutoConnectService" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-												Automatically connect when extension starts
-											</label>
+								{/* ── Service deploy mode ────────────────────────── */}
+								{settings.deployTargetMode === 'service' && (
+									<>
+										<div style={S.modeConfigDesc}>Deploy pipelines to a local system service.</div>
+										<div style={S.formGroup}>
+											<div>
+												<input type="checkbox" id="deployAutoConnectService" checked={settings.deployAutoConnect} onChange={(e) => onSettingsChange({ deployAutoConnect: e.target.checked })} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+												<label htmlFor="deployAutoConnectService" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+													Automatically connect when extension starts
+												</label>
+											</div>
 										</div>
-									</div>
-								</>
-							)}
-						</div>
-					</>
-				)}
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</div>
 			</div>
 		</div>
 	);

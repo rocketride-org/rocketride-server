@@ -695,6 +695,22 @@ export class ConfigManager {
 	}
 
 	/**
+	 * Sets the development team ID in cache only (runtime, not persisted).
+	 * Use when the sidebar changes the team at runtime.
+	 */
+	public setDevelopmentTeamId(teamId: string): void {
+		this.config.developmentTeamId = teamId;
+	}
+
+	/**
+	 * Sets the deploy target team ID in cache only (runtime, not persisted).
+	 * Use when the sidebar changes the team at runtime.
+	 */
+	public setDeployTargetTeamId(teamId: string): void {
+		this.config.deployTargetTeamId = teamId;
+	}
+
+	/**
 	 * Updates the development team ID (ASYNC - updates both cache and storage)
 	 */
 	public async updateDevelopmentTeamId(teamId: string): Promise<void> {

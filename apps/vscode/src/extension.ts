@@ -34,6 +34,7 @@ import { icons } from './shared/util/icons';
 
 // import { registerDebugger } from './debugger/adapter'; // Disabled: debugger removed from package.json
 import { ConnectionManager } from './connection/connection';
+import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
 
 import { PageSidebarProvider } from './providers/PageSidebarProvider';
@@ -148,6 +149,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				connectionManager = ConnectionManager.getInstance();
 				connectionManager.setEnginesRoot(context.globalStorageUri.fsPath);
 
+				// Deploy connection manager — same pattern, same engines root
+				const deployManager = DeployManager.getDeployInstance();
+				deployManager.setEnginesRoot(context.globalStorageUri.fsPath);
+
 				//-------------------------------------
 				// Create status bar
 				//-------------------------------------
@@ -241,6 +246,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					barStatus.setReady();
 					connectionManager.initialize().catch((error) => {
 						console.error('[ROCKETRIDE] Connection initialization failed:', error);
+					});
+					deployManager.initialize().catch((error) => {
+						console.error('[ROCKETRIDE] Deploy connection initialization failed:', error);
 					});
 				}
 

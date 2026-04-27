@@ -36,11 +36,12 @@
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
-import { getConnectionTreeProvider, getConnectionManager } from '../extension';
+import { getConnectionManager } from '../extension';
 import { EngineInstaller } from '../connection/engine-installer';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { AgentManager } from '../agents/agent-manager';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { DeployManager } from '../connection/deploy-manager';
 
 export class PageSettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -82,8 +83,8 @@ export class PageSettingsProvider {
 	 */
 	private registerCommands(): void {
 		const commands = [
-			vscode.commands.registerCommand('rocketride.page.settings.open', async () => {
-				await this.openSettings();
+			vscode.commands.registerCommand('rocketride.page.settings.open', async (focus?: string) => {
+				await this.openSettings(focus);
 			}),
 
 			vscode.commands.registerCommand('rocketride.page.settings.setupCredentials', async () => {
@@ -114,9 +115,21 @@ export class PageSettingsProvider {
 	/**
 	 * Opens the settings page, or reveals it if already open
 	 */
-	public async openSettings(): Promise<void> {
+	/** Pending focus section — sent to webview after view:ready. */
+	private pendingFocus?: string;
+
+	/**
+	 * Opens the settings page, optionally focused on a single section.
+	 * @param focus - If set ('development' or 'deployment'), shows only that section.
+	 */
+	public async openSettings(focus?: string): Promise<void> {
+		this.pendingFocus = focus;
 		if (this.panel) {
 			this.panel.reveal(vscode.ViewColumn.One);
+			// Panel already open — send focus update directly
+			if (focus) {
+				this.panel.webview.postMessage({ type: 'setFocus', focus });
+			}
 			return;
 		}
 
@@ -138,6 +151,11 @@ export class PageSettingsProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.loadAllSettings(panel.webview);
+						// Send focus section if settings was opened with a specific focus
+						if (this.pendingFocus) {
+							panel.webview.postMessage({ type: 'setFocus', focus: this.pendingFocus });
+							this.pendingFocus = undefined;
+						}
 						break;
 
 					case 'saveSettings':
@@ -172,6 +190,10 @@ export class PageSettingsProvider {
 					case 'cloud:getStatus':
 						await this.sendCloudStatus(panel.webview);
 						break;
+
+					case 'fetchTeams':
+						await this.fetchCloudTeams(panel.webview);
+						break;
 				}
 			} catch (error) {
 				console.error('[PageSettingsProvider] Message handling error:', error);
@@ -181,9 +203,12 @@ export class PageSettingsProvider {
 
 		this.disposables.push(messageDisposable);
 
+		// Capture webview ref before dispose (accessing panel.webview after dispose throws)
+		const panelWebview = panel.webview;
+
 		// Listen for cloud auth changes and push updated status to the webview
 		const cloudAuth = CloudAuthProvider.getInstance();
-		const cloudAuthHandler = () => this.sendCloudStatus(panel.webview);
+		const cloudAuthHandler = () => this.sendCloudStatus(panelWebview);
 		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
 		panel.onDidDispose(() => {
 			cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler);
@@ -192,7 +217,7 @@ export class PageSettingsProvider {
 		// Clean up when panel is disposed
 		panel.onDidDispose(() => {
 			this.panel = undefined;
-			this.activeWebviews.delete(panel.webview);
+			this.activeWebviews.delete(panelWebview);
 
 			const index = this.disposables.indexOf(messageDisposable);
 			if (index !== -1) {
@@ -267,32 +292,8 @@ export class PageSettingsProvider {
 			settings: allSettings,
 		});
 
-		// Fetch teams when cloud-signed-in.  The dev connection may be local
-		// (no team support), so we create a temporary cloud client to fetch
-		// the team list directly from the cloud server.
-		const cloudAuth = CloudAuthProvider.getInstance();
-		const signedIn = await cloudAuth.isSignedIn();
-		if (signedIn) {
-			try {
-				const token = await cloudAuth.getToken();
-				if (token) {
-					// Resolve cloud URL from env or config
-					const envVars = this.configManager.getEnvVars();
-					const cloudUrl = envVars.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
-
-					// Create a short-lived client to fetch teams from the cloud server
-					const tempClient = new RocketRideClient({ persist: false });
-					await tempClient.connect(token, { uri: cloudUrl });
-					const response = await tempClient.dapRequest('rrext_account_teams', { subcommand: 'list' });
-					const teams = (response as any)?.body?.teams ?? [];
-					await tempClient.disconnect();
-
-					webview.postMessage({ type: 'teamsLoaded', teams });
-				}
-			} catch (err) {
-				console.log('[PageSettingsProvider] fetchTeams from cloud error:', err);
-			}
-		}
+		// Fetch teams: try the active connection first, fall back to a temp cloud connection
+		await this.fetchCloudTeams(webview);
 	}
 
 	/**
@@ -521,7 +522,8 @@ export class PageSettingsProvider {
 	}
 
 	/**
-	 * Clears stored credentials from secure storage
+	 * Sends current cloud auth status (signed-in state + user name) to the webview.
+	 * Also fetches teams when signed in so the team selector is populated.
 	 */
 	private async sendCloudStatus(webview: vscode.Webview): Promise<void> {
 		const cloudAuth = CloudAuthProvider.getInstance();
@@ -532,6 +534,84 @@ export class PageSettingsProvider {
 			signedIn,
 			userName,
 		});
+
+		// Fetch teams whenever we push cloud status (sign-in, init, etc.)
+		await this.fetchCloudTeams(webview);
+	}
+
+	/**
+	 * Fetches available teams for the cloud team selector.
+	 *
+	 * Each connection is independent:
+	 *   - Dev in cloud mode  → check dev client, fall back to temp connection
+	 *   - Deploy in cloud mode → check deploy client, fall back to temp connection
+	 *
+	 * Since both share the same cloud account the team list is identical,
+	 * so we send a single `teamsLoaded` from whichever source succeeds first.
+	 */
+	private async fetchCloudTeams(webview: vscode.Webview): Promise<void> {
+		// Check the dev client for cached account info
+		const devAccount = getConnectionManager()?.getClient()?.getAccountInfo();
+		const devTeams = this.extractTeams(devAccount);
+		if (devTeams.length) {
+			webview.postMessage({ type: 'teamsLoaded', teams: devTeams });
+			return;
+		}
+
+		// Check the deploy client for cached account info
+		const deployAccount = DeployManager.getDeployInstance().getClient()?.getAccountInfo();
+		const deployTeams = this.extractTeams(deployAccount);
+		if (deployTeams.length) {
+			webview.postMessage({ type: 'teamsLoaded', teams: deployTeams });
+			return;
+		}
+
+		// Neither existing client had teams — create a temp cloud connection
+		await this.fetchTeamsViaTempConnection(webview);
+	}
+
+	/**
+	 * Creates a temporary cloud connection to fetch teams when no existing
+	 * client is available (e.g. user just selected cloud mode but hasn't
+	 * connected yet).
+	 */
+	private async fetchTeamsViaTempConnection(webview: vscode.Webview): Promise<void> {
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const signedIn = await cloudAuth.isSignedIn();
+		if (!signedIn) return;
+
+		let client: RocketRideClient | undefined;
+		try {
+			const token = await cloudAuth.getToken();
+			if (!token) return;
+
+			const cloudUrl = process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+			client = new RocketRideClient({
+				module: 'SETTINGS',
+				requestTimeout: 8000,
+			});
+
+			await client.connect(token, { uri: cloudUrl, timeout: 10000 });
+
+			const teams = this.extractTeams(client.getAccountInfo());
+			if (teams.length) {
+				webview.postMessage({ type: 'teamsLoaded', teams });
+			}
+		} catch (error) {
+			console.log('[PageSettingsProvider] Could not fetch cloud teams:', error);
+		} finally {
+			if (client) {
+				client.disconnect().catch(() => {});
+			}
+		}
+	}
+
+	/**
+	 * Extracts a flat team list from a ConnectResult's organizations.
+	 */
+	private extractTeams(account: ReturnType<RocketRideClient['getAccountInfo']>): Array<{ id: string; name: string }> {
+		if (!account?.organizations?.length) return [];
+		return account.organizations.flatMap((org) => (org.teams ?? []).map((t) => ({ id: t.id, name: t.name })));
 	}
 
 	private async clearCredentials(webview: vscode.Webview): Promise<void> {
@@ -540,7 +620,7 @@ export class PageSettingsProvider {
 			await this.configManager.deleteApiKey();
 
 			// Verify it was actually cleared
-			const hasApiKey = await this.configManager.hasApiKey();
+			const hasApiKey = this.configManager.hasApiKey();
 			if (!hasApiKey) {
 				this.showMessage(webview, 'success', 'API Key cleared successfully and removed from secure storage');
 			} else {

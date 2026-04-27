@@ -100,20 +100,20 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 	// ========================================================================
 
 	return (
-		<>
-			<div
-				style={{
-					...S.section,
-					...(showAccountWarning
-						? {
-								borderColor: 'var(--vscode-editorWarning-foreground)',
-								backgroundColor: 'var(--vscode-editorWarning-background)',
-							}
-						: {}),
-				}}
-				id="developmentSection"
-			>
-				<div style={S.sectionTitle}>Development Mode</div>
+		<div
+			style={{
+				...S.card,
+				...(showAccountWarning
+					? {
+							borderColor: 'var(--vscode-editorWarning-foreground)',
+							backgroundColor: 'var(--vscode-editorWarning-background)',
+						}
+					: {}),
+			}}
+			id="developmentSection"
+		>
+			<div style={S.cardHeader}>Development Mode</div>
+			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and On-prem modes require authentication.</div>
 				<div style={S.formGrid}>
 					<div style={S.formGroup}>
@@ -377,6 +377,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 					)}
 				</div>
 			</div>
-		</>
+		</div>
 	);
 };

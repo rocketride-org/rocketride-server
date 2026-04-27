@@ -12,9 +12,13 @@
  *      (when no userName but menuItems exist) — both open the popup menu
  *   3. Connection status row (optional, driven by connection prop)
  *
- * The popup menu supports arbitrarily nested submenus via the `submenu`
- * field on SidebarFooterMenuItem.  A stack-based navigation model lets the
- * user drill into Cloud → team lists, Theme options, etc. and navigate back.
+ * Popup menu:
+ *   - Main popup is 2/3 of sidebar width, inset by POPUP_MARGIN on each side.
+ *   - Items with a `submenu` field show a chevron; clicking opens a flyout
+ *     shifted 1/3 right so it peeks past the main popup while staying within
+ *     the VS Code webview bounds (popups cannot escape the webview iframe).
+ *   - Selecting a flyout item closes only the flyout, keeping the main popup.
+ *   - Click-outside dismisses everything (no hover timers).
  *
  * Three distinct footer states (driven by host):
  *   - Anonymous + engine:   gear icon trigger, Settings + Development Mode
@@ -23,13 +27,12 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { commonStyles } from '../../themes/styles';
-import { useClickOutside } from '../../hooks/useClickOutside';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { PopupRow } from '../PopupRow';
-import { BxBookOpen, BxCog, BxChevronRight, BxChevronLeft, BxCheck } from '../BoxIcon';
+import { BxBookOpen, BxCog, BxChevronRight, BxCheck } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
-import type { ConnectionInfo } from '../../modules/sidebar/types';
 
 // =============================================================================
 // TYPES
@@ -49,8 +52,14 @@ export interface SidebarFooterMenuItem {
 	submenu?: SidebarFooterMenuItem[];
 	/** Show a checkmark next to this item (for radio-style selections). */
 	checked?: boolean;
+	/** Secondary status line rendered below the label (e.g. "Connected", "Downloading..."). */
+	statusText?: string;
+	/** Connection state — drives the colored dot next to statusText. */
+	statusState?: 'connected' | 'connecting' | 'disconnected';
 	/** Render a horizontal divider before this item. */
 	dividerBefore?: boolean;
+	/** If true, render as a non-clickable section header (bold label, no hover). */
+	header?: boolean;
 }
 
 export interface SidebarFooterProps {
@@ -62,10 +71,6 @@ export interface SidebarFooterProps {
 	userName?: string;
 	/** User email (shown below name). */
 	userEmail?: string;
-
-	// ── Connection (always visible in footer) ───────────────────────────────
-	/** Connection state + toggle callback. Omit to hide the connection row. */
-	connection?: ConnectionInfo & { onToggle: () => void };
 
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
@@ -80,13 +85,7 @@ export interface SidebarFooterProps {
 // CONSTANTS
 // =============================================================================
 
-const MODE_LABELS: Record<string, string> = {
-	cloud: 'Cloud',
-	docker: 'Docker',
-	service: 'Service',
-	local: 'Local',
-	remote: 'Remote',
-};
+const POPUP_MARGIN = 10;
 
 // =============================================================================
 // STYLES
@@ -178,31 +177,6 @@ const S = {
 		textAlign: 'left' as const,
 	}),
 
-	// ── Connection row ──────────────────────────────────────────────────────
-	connectionRow: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '3px 10px',
-		cursor: 'pointer',
-		borderRadius: 8,
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		border: 'none',
-		background: 'none',
-		width: '100%',
-		textAlign: 'left' as const,
-	} as CSSProperties,
-
-	connectionDot: (connected: boolean): CSSProperties => ({
-		width: 10,
-		height: 10,
-		borderRadius: '50%',
-		backgroundColor: connected ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
-		flexShrink: 0,
-		margin: '0 3px',
-	}),
-
 	// ── Popup divider ───────────────────────────────────────────────────────
 	divider: {
 		height: 1,
@@ -215,7 +189,7 @@ const S = {
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, connection, onOpenDocs, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
 		if (!userName) return 'U';
@@ -230,51 +204,81 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	// ── Popup state ─────────────────────────────────────────────────────────
 	const [menuOpen, setMenuOpen] = useState(false);
-	const [menuStack, setMenuStack] = useState<{ label: string; items: SidebarFooterMenuItem[] }[]>([]);
 	const [hovered, setHovered] = useState(false);
-	const [connHovered, setConnHovered] = useState(false);
 	const [docsHovered, setDocsHovered] = useState(false);
 	const triggerRef = useRef<HTMLDivElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState(200);
 	const menuPos = useFixedPopupPosition(triggerRef, menuOpen, 'above');
 
+	// ── Flyout submenu state ────────────────────────────────────────────────
+	// Click-to-open model: clicking a submenu row opens the flyout; clicking
+	// outside (handled by the mousedown listener below) closes everything.
+	const [flyoutId, setFlyoutId] = useState<string | null>(null);
+	const [flyoutItems, setFlyoutItems] = useState<SidebarFooterMenuItem[]>([]);
+	const [flyoutPos, setFlyoutPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+	const flyoutRef = useRef<HTMLDivElement>(null);
+
+	// ── Portal container for popups (escapes overflow:hidden ancestors) ─────
+	// The host (VS Code webview entry, cloud-ui shell) must create a
+	// <div id="rr-popup-portal"> on document.body before React mounts.
+	// Looked up on every render (not cached) because React 18 concurrent
+	// mode can re-invoke the component in contexts where a cached ref
+	// becomes stale.
+	const portalContainer = typeof document !== 'undefined' ? document.getElementById('rr-popup-portal') : null;
+
 	const handleClose = useCallback(() => {
 		setMenuOpen(false);
-		setMenuStack([]);
+		setFlyoutId(null);
 	}, []);
 
-	useClickOutside(popupRef, handleClose);
+	/**
+	 * Opens a flyout submenu shifted 1/3 right of the main popup.
+	 *
+	 * Layout (within sidebar webview bounds):
+	 *   |--margin--|--main popup (2/3)--|
+	 *              |--flyout (2/3)------|--margin--|
+	 *
+	 * The flyout overlaps the right portion of the main popup and its
+	 * right edge aligns with (triggerWidth - POPUP_MARGIN).
+	 */
+	const openFlyout = useCallback(
+		(itemId: string, items: SidebarFooterMenuItem[], rowEl: HTMLElement) => {
+			const rect = rowEl.getBoundingClientRect();
+			const available = triggerWidth - 2 * POPUP_MARGIN;
+			const sidebarLeft = (popupRef.current?.getBoundingClientRect().left ?? rect.left) - POPUP_MARGIN;
+			const flyoutLeft = sidebarLeft + POPUP_MARGIN + Math.round(available / 3);
+			setFlyoutId(itemId);
+			setFlyoutItems(items);
+			setFlyoutPos({ top: rect.top, left: flyoutLeft });
+		},
+		[triggerWidth]
+	);
 
+	// Close menu + flyout when clicking outside all three elements
+	// (trigger, main popup, flyout). This is the only dismiss mechanism —
+	// there are no hover-based close timers.
+	useEffect(() => {
+		if (!menuOpen) return;
+		const handler = (e: MouseEvent) => {
+			const target = e.target as Node;
+			if (popupRef.current?.contains(target)) return;
+			if (flyoutRef.current?.contains(target)) return;
+			if (triggerRef.current?.contains(target)) return;
+			handleClose();
+		};
+		document.addEventListener('mousedown', handler);
+		return () => document.removeEventListener('mousedown', handler);
+	}, [menuOpen, handleClose]);
+
+	// Snapshot trigger width when popup opens (used for popup/flyout sizing)
 	useEffect(() => {
 		if (menuOpen && triggerRef.current) {
 			setTriggerWidth(triggerRef.current.getBoundingClientRect().width);
 		}
 	}, [menuOpen]);
 
-	// ── Determine what items to show in the popup ───────────────────────────
-	const visibleItems = menuStack.length > 0 ? menuStack[menuStack.length - 1].items : (menuItems ?? []);
-
-	const pushSubmenu = useCallback((label: string, items: SidebarFooterMenuItem[]) => {
-		setMenuStack((prev) => [...prev, { label, items }]);
-	}, []);
-
-	const popSubmenu = useCallback(() => {
-		setMenuStack((prev) => prev.slice(0, -1));
-	}, []);
-
-	// ── Connection state helpers ────────────────────────────────────────────
-	const isConnected = connection?.state === 'connected';
-	const isConnecting = connection?.state === 'connecting';
-
-	const connectionLabel = useMemo(() => {
-		if (isConnecting) return 'Connecting...';
-		if (isConnected) {
-			const modeLabel = MODE_LABELS[connection?.mode ?? ''] ?? connection?.mode ?? '';
-			return modeLabel ? `Connected (${modeLabel})` : 'Connected';
-		}
-		return 'Disconnected';
-	}, [isConnecting, isConnected, connection?.mode]);
+	const topLevelItems = menuItems ?? [];
 
 	// ── Render ──────────────────────────────────────────────────────────────
 
@@ -309,67 +313,149 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				</button>
 			)}
 
-			{/* ── Connection status row ────────────────────────────────── */}
-			{connection && (
-				<button style={{ ...S.connectionRow, background: connHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setConnHovered(true)} onMouseLeave={() => setConnHovered(false)} onClick={connection.onToggle} title={isConnected ? 'Click to disconnect' : 'Click to connect'}>
-					<div style={S.connectionDot(isConnected)} />
-					{!collapsed && <span>{connectionLabel}</span>}
-				</button>
-			)}
+			{/* ── Popup menu (portalled to document.body to escape overflow:hidden) */}
+			{menuOpen &&
+				menuPos &&
+				portalContainer &&
+				createPortal(
+					<div
+						ref={popupRef}
+						style={{
+							...commonStyles.popupMenu,
+							position: 'fixed',
+							top: menuPos.top,
+							left: menuPos.left + POPUP_MARGIN,
+							transform: 'translateY(-100%)',
+							marginTop: -8,
+							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
+							minWidth: 160,
+							zIndex: 10000,
+						}}
+					>
+						{/* Top-level menu items */}
+						{topLevelItems.map((item) => (
+							<React.Fragment key={item.id}>
+								{item.dividerBefore && <div style={S.divider} />}
 
-			{/* ── Popup menu ───────────────────────────────────────────── */}
-			{menuOpen && menuPos && (
-				<div
-					ref={popupRef}
-					style={{
-						...commonStyles.popupMenu,
-						position: 'fixed',
-						top: menuPos.top,
-						left: menuPos.left,
-						transform: 'translateY(-100%)',
-						marginTop: -8,
-						width: triggerWidth,
-						minWidth: 200,
-					}}
-				>
-					{/* Back button when inside a submenu */}
-					{menuStack.length > 0 && (
-						<>
-							<PopupRow onClick={popSubmenu}>
-								<BxChevronLeft size={16} />
-								<span style={{ fontWeight: 600 }}>{menuStack[menuStack.length - 1].label}</span>
-							</PopupRow>
-							<div style={S.divider} />
-						</>
-					)}
+								{/* Section header — bold label with gear icon + status line */}
+								{item.header ? (
+									<div style={{ padding: '6px 10px', fontSize: 11, fontWeight: 600, color: 'var(--rr-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+										<div style={{ display: 'flex', alignItems: 'center' }}>
+											<span style={{ flex: 1 }}>{item.label}</span>
+											{item.onClick && (
+												<span onClick={item.onClick} style={{ cursor: 'pointer', display: 'inline-flex' }}>
+													<BxCog size={14} />
+												</span>
+											)}
+										</div>
+										{/* Status lines (e.g. "Connected (Local)" + "Team: Dev") */}
+										{item.statusText &&
+											item.statusText.split('\n').map((line, i) => {
+												// Last line with a submenu → clickable to open team flyout
+												const isTeamLine = i > 0 && item.submenu;
+												return (
+													<div
+														key={i}
+														onClick={isTeamLine ? (e) => openFlyout(item.id, item.submenu!, (e.currentTarget.parentElement ?? e.currentTarget) as HTMLElement) : undefined}
+														style={{
+															paddingLeft: 10,
+															fontSize: 11,
+															fontWeight: 400,
+															textTransform: 'none',
+															letterSpacing: 'normal',
+															color: 'var(--rr-text-secondary)',
+															marginTop: i === 0 ? 2 : 0,
+															cursor: isTeamLine ? 'pointer' : 'default',
+															display: 'flex',
+															alignItems: 'center',
+														}}
+													>
+														{/* Green/gray dot on the connection status line */}
+														{i === 0 && item.statusState && (
+															<span
+																style={{
+																	width: 8,
+																	height: 8,
+																	borderRadius: '50%',
+																	flexShrink: 0,
+																	marginRight: 5,
+																	backgroundColor: item.statusState === 'connected' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+																}}
+															/>
+														)}
+														<span style={{ flex: 1 }}>{line}</span>
+														{isTeamLine && <BxChevronRight size={12} />}
+													</div>
+												);
+											})}
+									</div>
+								) : (
+									<div style={{ paddingLeft: 10 }}>
+										<PopupRow
+											onClick={(e) => {
+												if (item.submenu) {
+													openFlyout(item.id, item.submenu, e.currentTarget.parentElement!);
+												} else if (item.onClick) {
+													item.onClick();
+													handleClose();
+												}
+											}}
+										>
+											{/* Checkmark slot (for radio-style items) */}
+											{item.checked !== undefined && <span style={{ width: 16, display: 'inline-flex' }}>{item.checked && <BxCheck size={16} color="var(--rr-brand)" />}</span>}
+											{/* Icon */}
+											{item.icon && <item.icon size={16} />}
+											{/* Label */}
+											<span style={{ flex: 1 }}>{item.label}</span>
+											{/* Submenu chevron */}
+											{item.submenu && <BxChevronRight size={16} />}
+										</PopupRow>
+									</div>
+								)}
+							</React.Fragment>
+						))}
+					</div>,
+					portalContainer
+				)}
 
-					{/* Menu items */}
-					{visibleItems.map((item) => (
-						<React.Fragment key={item.id}>
-							{item.dividerBefore && <div style={S.divider} />}
+			{/* ── Flyout submenu (separate portal — must NOT be inside the
+			     transformed popup div, or position:fixed becomes relative
+			     to the transform instead of the viewport) */}
+			{menuOpen &&
+				flyoutId &&
+				flyoutItems.length > 0 &&
+				portalContainer &&
+				createPortal(
+					<div
+						ref={flyoutRef}
+						style={{
+							...commonStyles.popupMenu,
+							position: 'fixed',
+							top: flyoutPos.top,
+							left: flyoutPos.left,
+							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
+							minWidth: 140,
+							zIndex: 10001,
+						}}
+					>
+						{flyoutItems.map((sub) => (
 							<PopupRow
+								key={sub.id}
 								onClick={() => {
-									if (item.submenu) {
-										pushSubmenu(item.label, item.submenu);
-									} else if (item.onClick) {
-										item.onClick();
-										handleClose();
+									if (sub.onClick) {
+										sub.onClick();
+										setFlyoutId(null);
 									}
 								}}
 							>
-								{/* Checkmark slot (for radio-style items) */}
-								{item.checked !== undefined && <span style={{ width: 16, display: 'inline-flex' }}>{item.checked && <BxCheck size={16} color="var(--rr-brand)" />}</span>}
-								{/* Icon */}
-								{item.icon && <item.icon size={16} />}
-								{/* Label */}
-								<span style={{ flex: 1 }}>{item.label}</span>
-								{/* Submenu chevron */}
-								{item.submenu && <BxChevronRight size={16} />}
+								{sub.checked !== undefined && <span style={{ width: 16, display: 'inline-flex' }}>{sub.checked && <BxCheck size={16} color="var(--rr-brand)" />}</span>}
+								{sub.icon && <sub.icon size={16} />}
+								<span style={{ flex: 1 }}>{sub.label}</span>
 							</PopupRow>
-						</React.Fragment>
-					))}
-				</div>
-			)}
+						))}
+					</div>,
+					portalContainer
+				)}
 		</div>
 	);
 };

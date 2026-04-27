@@ -185,204 +185,206 @@ export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({ sett
 	// ========================================================================
 
 	return (
-		<div style={S.section} id="envVariablesSection">
-			<div style={S.sectionTitle}>Environment Variables</div>
-			<div style={S.sectionDescription}>Manage environment variables for your .env file. Only variables prefixed with ROCKETRIDE_ can be used in pipeline configurations using the $&#123;ROCKETRIDE_VARIABLE_NAME&#125; syntax.</div>
+		<div style={S.card} id="envVariablesSection">
+			<div style={S.cardHeader}>Environment Variables</div>
+			<div style={S.cardBody}>
+				<div style={S.sectionDescription}>Manage environment variables for your .env file. Only variables prefixed with ROCKETRIDE_ can be used in pipeline configurations using the $&#123;ROCKETRIDE_VARIABLE_NAME&#125; syntax.</div>
 
-			{error && (
-				<div
-					style={{
-						marginBottom: 12,
-						padding: '8px 12px',
-						backgroundColor: 'var(--vscode-inputValidation-errorBackground)',
-						border: '1px solid var(--vscode-inputValidation-errorBorder)',
-						borderRadius: 3,
-					}}
-				>
-					{error}
-				</div>
-			)}
-
-			{/* Delete Confirmation */}
-			{deleteConfirmKey && (
-				<div
-					style={{
-						marginBottom: 16,
-						padding: 12,
-						backgroundColor: 'var(--vscode-inputValidation-warningBackground)',
-						border: '1px solid var(--vscode-inputValidation-warningBorder)',
-						borderRadius: 4,
-					}}
-				>
-					<div style={{ marginBottom: 12, fontWeight: 500 }}>
-						Are you sure you want to delete <strong>{deleteConfirmKey}</strong>?
-					</div>
-					<div style={{ display: 'flex', gap: 8 }}>
-						<button
-							onClick={confirmDelete}
-							onMouseEnter={() => setDangerHover(true)}
-							onMouseLeave={() => setDangerHover(false)}
-							style={{
-								padding: '6px 12px',
-								backgroundColor: 'var(--rr-bg-button)',
-								color: 'var(--rr-fg-button)',
-								...(dangerHover
-									? {
-											backgroundColor: 'var(--vscode-button-hoverBackground)',
-										}
-									: {}),
-							}}
-						>
-							Delete
-						</button>
-						<button
-							onClick={cancelDelete}
-							style={{
-								padding: '6px 12px',
-								backgroundColor: 'var(--vscode-button-secondaryBackground)',
-								color: 'var(--vscode-button-secondaryForeground)',
-							}}
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
-			)}
-
-			{/* Add New Variable Form */}
-			<div
-				style={{
-					marginBottom: 20,
-					backgroundColor: 'var(--rr-bg-default)',
-					borderRadius: 4,
-					border: '1px solid var(--vscode-panel-border)',
-					padding: 12,
-				}}
-			>
-				<label style={{ display: 'block', marginBottom: 12, fontWeight: 500 }}>Add New Variable</label>
-				<div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-					<div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-						<input type="text" placeholder="ROCKETRIDE_MY_VARIABLE" value={newKey} onChange={(e) => setNewKey(e.target.value.toUpperCase())} onKeyDown={(e) => handleKeyDown(e, handleAddVariable)} style={{ width: '100%', boxSizing: 'border-box' }} />
-						<div style={S.helpText}>Variable name</div>
-					</div>
-					<div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-						<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-							<input type="text" placeholder="value" value={newValue} onChange={(e) => setNewValue(e.target.value)} onKeyDown={(e) => handleKeyDown(e, handleAddVariable)} style={{ flex: 1 }} />
-							<button onClick={handleAddVariable} disabled={!newKey.trim()} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
-								Add Variable
-							</button>
-						</div>
-						<div style={S.helpText}>Variable value</div>
-					</div>
-				</div>
-			</div>
-
-			{/* Existing Variables List */}
-			{allEnvVars.length > 0 ? (
-				<div style={{ marginTop: 16 }}>
-					<label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>Current Variables ({allEnvVars.length})</label>
+				{error && (
 					<div
 						style={{
-							border: '1px solid var(--vscode-panel-border)',
-							borderRadius: 4,
-							overflow: 'hidden',
+							marginBottom: 12,
+							padding: '8px 12px',
+							backgroundColor: 'var(--vscode-inputValidation-errorBackground)',
+							border: '1px solid var(--vscode-inputValidation-errorBorder)',
+							borderRadius: 3,
 						}}
 					>
-						{allEnvVars.map(([key, value], index) => {
-							const isEditing = editingKey === key;
-							const isVisible = showValues.has(key);
-							const displayValue = isVisible ? value : '\u2022'.repeat(Math.min(value.length, 20));
-							const isEven = index % 2 === 1;
-							const isLast = index === allEnvVars.length - 1;
-
-							return (
-								<div
-									key={key}
-									style={{
-										...styles.envVariableRow,
-										...(isEven ? { backgroundColor: 'var(--rr-bg-default)' } : {}),
-										...(!isLast ? { borderBottom: '1px solid var(--vscode-panel-border)' } : {}),
-									}}
-								>
-									{/* Variable Name */}
-									<div style={styles.envVariableName}>{key}</div>
-
-									{/* Variable Value */}
-									<div style={styles.envVariableValueContainer}>
-										{isEditing ? (
-											<input type="text" value={editingValue} onChange={(e) => setEditingValue(e.target.value)} onKeyDown={(e) => handleKeyDown(e, saveEdit)} autoFocus style={{ flex: 1, fontFamily: 'var(--vscode-editor-font-family)' }} />
-										) : (
-											<>
-												<code style={styles.envVariableValueCode}>{displayValue}</code>
-												<button type="button" onClick={() => toggleValueVisibility(key)} title={isVisible ? 'Hide value' : 'Show value'} style={{ padding: '2px 6px', minWidth: 30, fontSize: 12 }}>
-													{isVisible ? '\u{1F648}' : '\u{1F50D}'}
-												</button>
-											</>
-										)}
-									</div>
-
-									{/* Actions */}
-									<div style={styles.envVariableActions}>
-										{isEditing ? (
-											<>
-												<button onClick={saveEdit} title="Save changes" style={{ padding: '2px 8px', fontSize: 12 }}>
-													Save
-												</button>
-												<button
-													onClick={cancelEdit}
-													title="Cancel editing"
-													style={{
-														padding: '2px 8px',
-														fontSize: 12,
-														backgroundColor: 'var(--vscode-button-secondaryBackground)',
-														color: 'var(--vscode-button-secondaryForeground)',
-													}}
-												>
-													Cancel
-												</button>
-											</>
-										) : (
-											<>
-												<button onClick={() => startEdit(key, value)} title="Edit variable" style={{ padding: '2px 8px', fontSize: 12 }}>
-													Edit
-												</button>
-												<button
-													onClick={() => handleDelete(key)}
-													title="Delete variable"
-													style={{
-														padding: '2px 8px',
-														fontSize: 12,
-														backgroundColor: 'var(--vscode-button-secondaryBackground)',
-														color: 'var(--vscode-button-secondaryForeground)',
-													}}
-												>
-													Delete
-												</button>
-											</>
-										)}
-									</div>
-								</div>
-							);
-						})}
+						{error}
 					</div>
-				</div>
-			) : (
+				)}
+
+				{/* Delete Confirmation */}
+				{deleteConfirmKey && (
+					<div
+						style={{
+							marginBottom: 16,
+							padding: 12,
+							backgroundColor: 'var(--vscode-inputValidation-warningBackground)',
+							border: '1px solid var(--vscode-inputValidation-warningBorder)',
+							borderRadius: 4,
+						}}
+					>
+						<div style={{ marginBottom: 12, fontWeight: 500 }}>
+							Are you sure you want to delete <strong>{deleteConfirmKey}</strong>?
+						</div>
+						<div style={{ display: 'flex', gap: 8 }}>
+							<button
+								onClick={confirmDelete}
+								onMouseEnter={() => setDangerHover(true)}
+								onMouseLeave={() => setDangerHover(false)}
+								style={{
+									padding: '6px 12px',
+									backgroundColor: 'var(--rr-bg-button)',
+									color: 'var(--rr-fg-button)',
+									...(dangerHover
+										? {
+												backgroundColor: 'var(--vscode-button-hoverBackground)',
+											}
+										: {}),
+								}}
+							>
+								Delete
+							</button>
+							<button
+								onClick={cancelDelete}
+								style={{
+									padding: '6px 12px',
+									backgroundColor: 'var(--vscode-button-secondaryBackground)',
+									color: 'var(--vscode-button-secondaryForeground)',
+								}}
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				)}
+
+				{/* Add New Variable Form */}
 				<div
 					style={{
-						padding: 24,
-						textAlign: 'center',
-						color: 'var(--rr-text-secondary)',
-						border: '1px dashed var(--vscode-panel-border)',
+						marginBottom: 20,
+						backgroundColor: 'var(--rr-bg-default)',
 						borderRadius: 4,
-						marginTop: 16,
+						border: '1px solid var(--vscode-panel-border)',
+						padding: 12,
 					}}
 				>
-					No environment variables defined. Add one above to get started.
+					<label style={{ display: 'block', marginBottom: 12, fontWeight: 500 }}>Add New Variable</label>
+					<div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+						<div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+							<input type="text" placeholder="ROCKETRIDE_MY_VARIABLE" value={newKey} onChange={(e) => setNewKey(e.target.value.toUpperCase())} onKeyDown={(e) => handleKeyDown(e, handleAddVariable)} style={{ width: '100%', boxSizing: 'border-box' }} />
+							<div style={S.helpText}>Variable name</div>
+						</div>
+						<div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+							<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+								<input type="text" placeholder="value" value={newValue} onChange={(e) => setNewValue(e.target.value)} onKeyDown={(e) => handleKeyDown(e, handleAddVariable)} style={{ flex: 1 }} />
+								<button onClick={handleAddVariable} disabled={!newKey.trim()} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+									Add Variable
+								</button>
+							</div>
+							<div style={S.helpText}>Variable value</div>
+						</div>
+					</div>
 				</div>
-			)}
 
-			<div style={{ ...S.helpText, marginTop: 16 }}>
-				<strong>Note:</strong> Variables are automatically saved to your workspace's .env file. Use them in pipeline configurations like: $&#123;ROCKETRIDE_MY_VARIABLE&#125;
+				{/* Existing Variables List */}
+				{allEnvVars.length > 0 ? (
+					<div style={{ marginTop: 16 }}>
+						<label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>Current Variables ({allEnvVars.length})</label>
+						<div
+							style={{
+								border: '1px solid var(--vscode-panel-border)',
+								borderRadius: 4,
+								overflow: 'hidden',
+							}}
+						>
+							{allEnvVars.map(([key, value], index) => {
+								const isEditing = editingKey === key;
+								const isVisible = showValues.has(key);
+								const displayValue = isVisible ? value : '\u2022'.repeat(Math.min(value.length, 20));
+								const isEven = index % 2 === 1;
+								const isLast = index === allEnvVars.length - 1;
+
+								return (
+									<div
+										key={key}
+										style={{
+											...styles.envVariableRow,
+											...(isEven ? { backgroundColor: 'var(--rr-bg-default)' } : {}),
+											...(!isLast ? { borderBottom: '1px solid var(--vscode-panel-border)' } : {}),
+										}}
+									>
+										{/* Variable Name */}
+										<div style={styles.envVariableName}>{key}</div>
+
+										{/* Variable Value */}
+										<div style={styles.envVariableValueContainer}>
+											{isEditing ? (
+												<input type="text" value={editingValue} onChange={(e) => setEditingValue(e.target.value)} onKeyDown={(e) => handleKeyDown(e, saveEdit)} autoFocus style={{ flex: 1, fontFamily: 'var(--vscode-editor-font-family)' }} />
+											) : (
+												<>
+													<code style={styles.envVariableValueCode}>{displayValue}</code>
+													<button type="button" onClick={() => toggleValueVisibility(key)} title={isVisible ? 'Hide value' : 'Show value'} style={{ padding: '2px 6px', minWidth: 30, fontSize: 12 }}>
+														{isVisible ? '\u{1F648}' : '\u{1F50D}'}
+													</button>
+												</>
+											)}
+										</div>
+
+										{/* Actions */}
+										<div style={styles.envVariableActions}>
+											{isEditing ? (
+												<>
+													<button onClick={saveEdit} title="Save changes" style={{ padding: '2px 8px', fontSize: 12 }}>
+														Save
+													</button>
+													<button
+														onClick={cancelEdit}
+														title="Cancel editing"
+														style={{
+															padding: '2px 8px',
+															fontSize: 12,
+															backgroundColor: 'var(--vscode-button-secondaryBackground)',
+															color: 'var(--vscode-button-secondaryForeground)',
+														}}
+													>
+														Cancel
+													</button>
+												</>
+											) : (
+												<>
+													<button onClick={() => startEdit(key, value)} title="Edit variable" style={{ padding: '2px 8px', fontSize: 12 }}>
+														Edit
+													</button>
+													<button
+														onClick={() => handleDelete(key)}
+														title="Delete variable"
+														style={{
+															padding: '2px 8px',
+															fontSize: 12,
+															backgroundColor: 'var(--vscode-button-secondaryBackground)',
+															color: 'var(--vscode-button-secondaryForeground)',
+														}}
+													>
+														Delete
+													</button>
+												</>
+											)}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				) : (
+					<div
+						style={{
+							padding: 24,
+							textAlign: 'center',
+							color: 'var(--rr-text-secondary)',
+							border: '1px dashed var(--vscode-panel-border)',
+							borderRadius: 4,
+							marginTop: 16,
+						}}
+					>
+						No environment variables defined. Add one above to get started.
+					</div>
+				)}
+
+				<div style={{ ...S.helpText, marginTop: 16 }}>
+					<strong>Note:</strong> Variables are automatically saved to your workspace's .env file. Use them in pipeline configurations like: $&#123;ROCKETRIDE_MY_VARIABLE&#125;
+				</div>
 			</div>
 		</div>
 	);
