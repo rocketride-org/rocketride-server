@@ -81,6 +81,32 @@ chat -> orchestrator agent -> response
 
 **Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_ANTHROPIC_KEY`
 
+---
+
+### hitl-approval.pipe
+
+**Human-in-the-loop approval gate** that pauses pipeline execution until a reviewer approves, rejects, or edits the LLM's answer.
+
+```
+chat -> agent -> approval -> response
+                    ⏸ pauses here
+                    ↓
+        Reviewer hits the REST API:
+          POST /approvals/{id}/approve  (with optional modified_payload)
+          POST /approvals/{id}/reject
+                    ↓
+        Approve  → forwards (possibly edited) answer to response
+        Reject   → drops the answer
+        Timeout  → applies the configured timeout_action
+```
+
+- The agent drafts a response. The approval node registers it and blocks.
+- A reviewer fetches `GET /approvals` to see pending requests, then resolves one via `POST /approvals/{id}/approve` or `POST /approvals/{id}/reject`.
+- On approval, the (optionally edited) answer continues downstream; on rejection, nothing is emitted.
+- Profiles: `auto` (instant approval, for development), `manual` (real reviewer required), `custom` (tune every dial).
+
+**Required env vars:** `ROCKETRIDE_OPENAI_KEY`
+
 ## Getting Started
 
 1. Copy a template to your project directory

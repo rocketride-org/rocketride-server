@@ -177,6 +177,13 @@ class IEndpoint(IEndpointBase):
         # Create our data server to accept incoming data
         self.server.use('data')
         self.server.use('profiler')
+        # Mount the approvals REST API. Inert when no approval node is wired
+        # into the pipeline; loading it unconditionally avoids a coordination
+        # problem between source endpoints and downstream gating nodes.
+        try:
+            self.server.use('approvals')
+        except Exception as e:
+            debug(f'approvals module unavailable: {e}')
 
         # Run the  server
         self.server.run()

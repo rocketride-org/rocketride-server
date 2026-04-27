@@ -32,6 +32,7 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
+import { ApprovalPanel } from '../../components/approvals/ApprovalPanel';
 import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent, TraceRow } from './types';
 
 // =============================================================================
@@ -142,6 +143,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const [viewState, setViewState] = useState<ViewState | null>(null);
 	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
 	const [serverHost, setServerHost] = useState<string>('');
+	const [pendingApprovals, setPendingApprovals] = useState(0);
 
 	// Pending validate requests
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -356,6 +358,11 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			label: 'Errors',
 			badge: totalErrors + totalWarnings > 0 ? String(totalErrors + totalWarnings) : undefined,
 		},
+		{
+			id: 'approvals',
+			label: 'Approvals',
+			badge: pendingApprovals > 0 ? String(pendingApprovals) : undefined,
+		},
 	];
 
 	// --- Panels (only the active panel is mounted) ----------------------------
@@ -390,6 +397,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 		},
 		trace: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
+		},
+		approvals: {
+			content: (
+				<div style={commonStyles.tabContent}>
+					<ApprovalPanel serverHost={serverHost} onPendingCountChange={setPendingApprovals} />
+				</div>
+			),
 		},
 		errors: {
 			content: (

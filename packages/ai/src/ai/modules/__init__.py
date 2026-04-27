@@ -1,6 +1,7 @@
 # Explicit list of supported modules
 ALL = frozenset(
     {
+        'approvals',
         'chat',
         'clients',
         'data',
