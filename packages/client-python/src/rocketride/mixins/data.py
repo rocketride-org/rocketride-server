@@ -139,6 +139,20 @@ class DataMixin(DAPClient):
             """Get the unique ID assigned to this pipe by the server."""
             return self._pipe_id
 
+        @staticmethod
+        def _is_transient_open_error(message: str) -> bool:
+            """Return True for short-lived connection errors while task ports are starting."""
+            if not message:
+                return False
+
+            lowered = message.lower()
+            transient_markers = [
+                'connect call failed',
+                '[errno 111]',
+                'connection refused',
+            ]
+            return any(marker in lowered for marker in transient_markers)
+
         async def open(self) -> 'DataMixin.DataPipe':
             """
             Open the pipe for data transmission.
@@ -171,10 +185,24 @@ class DataMixin(DAPClient):
                 token=self._token,
             )
 
-            response = await self._client.request(request)
+            # Right after use(), the task's data port may need a brief warm-up.
+            # Retry connect-refused open errors for a short period.
+            max_attempts = 20
+            retry_delay_seconds = 0.25
+            response = None
 
-            if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Your pipeline is not currently running.'))
+            for attempt in range(max_attempts):
+                response = await self._client.request(request)
+
+                if not self._client.did_fail(response):
+                    break
+
+                message = response.get('message', '')
+                is_last_attempt = attempt == (max_attempts - 1)
+                if is_last_attempt or not self._is_transient_open_error(message):
+                    raise RuntimeError(response.get('message', 'Your pipeline is not currently running.'))
+
+                await asyncio.sleep(retry_delay_seconds)
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True

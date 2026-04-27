@@ -63,6 +63,7 @@ import os
 import json
 import random
 import string
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Any
@@ -345,6 +346,47 @@ class TestDataOperations:
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_send_text_data_after_use_with_filepath(self):
+        """Regression for docs flow: use(filepath=...) followed by send(...)."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        token = f'{self.DATA_TOKEN}-filepath'
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, token)
+
+            # Mirror docs-style usage where pipeline config is loaded from disk.
+            pipeline_config = get_echo_pipeline()
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', encoding='utf-8', delete=False) as temp_file:
+                json.dump(pipeline_config, temp_file)
+                temp_path = temp_file.name
+
+            try:
+                result = await client.use(filepath=temp_path, token=token)
+                pipeline_token = result['token']
+
+                send_result = await client.send(pipeline_token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
+
+                assert send_result is not None
+                assert isinstance(send_result, dict)
+                assert 'result_types' in send_result
+                assert isinstance(send_result['result_types'], dict)
+                assert send_result['result_types'].get('text') == 'text'
+                assert 'text' in send_result
+                assert isinstance(send_result['text'], list)
+                assert any('Hello, pipeline!' in chunk for chunk in send_result['text'])
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            else:
+                await ensure_clean_pipeline(client, token)
             if client.is_connected():
                 await client.disconnect()
 
