@@ -18,17 +18,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# 1. Mock engine-bundled modules before any node import.
-mock_rocketlib = MagicMock()
-mock_rocketlib.IInstanceBase = type('IInstanceBase', (), {})
-mock_rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-mock_rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config', NORMAL='normal')
-mock_rocketlib.debug = MagicMock()
-sys.modules['rocketlib'] = mock_rocketlib
+# 1. Mock engine-bundled modules ONLY if they aren't already importable.
+#    In CI (where the engine is built and dist/server is on sys.path) the real
+#    modules are present and we leave them alone; the mocks only kick in on a
+#    fresh checkout. Unconditional assignment would clobber real rocketlib for
+#    every other node test that runs in the same pytest session.
+if 'rocketlib' not in sys.modules:
+    mock_rocketlib = MagicMock()
+    mock_rocketlib.IInstanceBase = type('IInstanceBase', (), {})
+    mock_rocketlib.IGlobalBase = type('IGlobalBase', (), {})
+    mock_rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config', NORMAL='normal')
+    mock_rocketlib.debug = MagicMock()
+    sys.modules['rocketlib'] = mock_rocketlib
 
-mock_depends = MagicMock()
-mock_depends.depends = MagicMock(return_value=None)
-sys.modules['depends'] = mock_depends
+if 'depends' not in sys.modules:
+    mock_depends = MagicMock()
+    mock_depends.depends = MagicMock(return_value=None)
+    sys.modules['depends'] = mock_depends
 
 # 2. Make ``ai.approvals`` and the node package importable.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
