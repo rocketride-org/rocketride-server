@@ -42,7 +42,10 @@ Basic Usage:
 """
 
 import os
+from functools import cached_property
 from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .account import AccountApi
+from .billing import BillingApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -52,6 +55,10 @@ from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
 from .mixins.store import StoreMixin
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .types.client import DAPMessage
 
 # Module-level counter used to generate unique client identifiers (CLIENT-0, CLIENT-1, …)
 # so multiple client instances running in the same process are distinguishable in logs.
@@ -219,5 +226,74 @@ class RocketRideClient(
         self._client_display_name = kwargs.get('client_name', None) or 'Python SDK'
         self._client_display_version = kwargs.get('client_version', None) or __version__
 
+        # Trace callback for observing all call() traffic
+        self._on_trace: 'Callable[[int, DAPMessage], None] | None' = kwargs.get('on_trace', None)
+
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
+
+    # =========================================================================
+    # CALL — PUBLIC DAP COMMAND INTERFACE
+    # =========================================================================
+
+    # Trace type constants (mirrors TypeScript TraceType enum)
+    TRACE_REQUEST = 0
+    TRACE_SUCCESS = 1
+    TRACE_ERROR = 2
+
+    async def call(self, command: str, *, token: str = None, timeout: float = None, **kwargs) -> dict:
+        """
+        Send a DAP command, unwrap the response body, and raise on failure.
+
+        This is the single public entry point for all typed DAP operations.
+        The :attr:`account` and :attr:`billing` namespaces delegate here.
+
+        If an ``on_trace`` callback was provided in the constructor kwargs,
+        it is invoked before the request (TRACE_REQUEST) and after completion
+        (TRACE_SUCCESS or TRACE_ERROR).
+
+        Args:
+            command: DAP command name (e.g. "rrext_account_me").
+            token: Optional task/session token for scoped calls.
+            timeout: Optional per-request timeout in ms.
+            **kwargs: Key/value arguments forwarded in the request.
+
+        Returns:
+            The ``body`` field of a successful DAP response.
+
+        Raises:
+            RuntimeError: If the server signals failure.
+        """
+        # Build the raw DAP request
+        message = self.build_request(command=command, token=token, arguments=kwargs)
+
+        # Trace: outbound request
+        if self._on_trace:
+            self._on_trace(self.TRACE_REQUEST, message)
+
+        response = await self.request(message, timeout=timeout)
+
+        if self.did_fail(response):
+            if self._on_trace:
+                self._on_trace(self.TRACE_ERROR, response)
+            raise RuntimeError(response.get('message', f'{command} failed'))
+
+        # Trace: success response
+        if self._on_trace:
+            self._on_trace(self.TRACE_SUCCESS, response)
+
+        return response.get('body') or {}
+
+    # =========================================================================
+    # NAMESPACED API ACCESSORS
+    # =========================================================================
+
+    @cached_property
+    def account(self) -> AccountApi:
+        """Account management operations (profile, keys, org, members, teams)."""
+        return AccountApi(self)
+
+    @cached_property
+    def billing(self) -> BillingApi:
+        """Billing and subscription operations (plans, checkout, credits)."""
+        return BillingApi(self)

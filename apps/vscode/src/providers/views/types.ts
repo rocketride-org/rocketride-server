@@ -12,6 +12,7 @@
 
 import type { ViewState, TaskStatus } from 'shared/modules/project';
 import type { DashboardResponse } from 'shared/modules/server';
+import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
 
 // =============================================================================
 // PROJECT EDITOR PROTOCOL
@@ -32,3 +33,31 @@ export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, s
 
 /** All messages the MonitorWebview can send to the extension host. */
 export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' };
+
+// =============================================================================
+// ACCOUNT PAGE PROTOCOL
+// =============================================================================
+
+/** All messages the extension host can send to the AccountWebview. */
+export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:error'; error: string };
+
+/** All messages the AccountWebview can send to the extension host. */
+export type AccountWebviewToHost =
+	| { type: 'view:ready' }
+	| { type: 'account:saveProfile'; fields: ProfileUpdate }
+	| { type: 'account:setDefaultTeam'; teamId: string }
+	| { type: 'account:logout' }
+	| { type: 'account:deleteAccount' }
+	| { type: 'account:saveOrgName'; name: string }
+	| { type: 'account:createKey'; params: { name: string; teamId: string; permissions: string[]; expiresAt?: string } }
+	| { type: 'account:revokeKey'; keyId: string }
+	| { type: 'account:inviteMember'; params: { email: string; givenName: string; familyName: string; role: string } }
+	| { type: 'account:updateRole'; userId: string; role: string }
+	| { type: 'account:removeMember'; userId: string }
+	| { type: 'account:createTeam'; name: string }
+	| { type: 'account:deleteTeam'; teamId: string }
+	| { type: 'account:loadTeamDetail'; teamId: string }
+	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
+	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
+	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
+	| { type: 'account:sectionChange'; section: string };

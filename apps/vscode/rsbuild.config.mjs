@@ -43,12 +43,14 @@ export default defineConfig({
 			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
 			'page-monitor': './src/providers/views/PageMonitor/index.tsx',
 			'page-status': './src/providers/views/PageStatus/index.tsx',
+			'page-account': './src/providers/views/PageAccount/index.tsx',
+			'page-billing': './src/providers/views/PageBilling/index.tsx',
 		},
 	},
 
 	resolve: {
 		alias: {
-			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

@@ -65,11 +65,7 @@ class StoreMixin(DAPClient):
             Dict with 'handle' (str). Read mode also includes 'size' (int).
         """
         self._validate_store_path(path)
-        args: Dict[str, Any] = {'subcommand': 'fs_open', 'path': path, 'mode': mode}
-        request = self.build_request(command='rrext_store', arguments=args)
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_open', path=path, mode=mode)
 
     async def fs_read(self, handle: str, offset: int = 0, length: int = 4_194_304) -> bytes:
         """
@@ -83,9 +79,11 @@ class StoreMixin(DAPClient):
         Returns:
             Bytes read. Empty bytes indicates EOF.
         """
+        # fs_read returns binary data in response.arguments (not body), so use raw request
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_read', 'handle': handle, 'offset': offset, 'length': length})
         response = await self.request(request)
-        self._check_response(response)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message', 'Failed to read from handle'))
         return response.get('arguments', {}).get('data', b'')
 
     async def fs_write(self, handle: str, data: bytes) -> int:
@@ -99,10 +97,8 @@ class StoreMixin(DAPClient):
         Returns:
             Number of bytes written.
         """
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_write', 'handle': handle, 'data': data})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {}).get('bytesWritten', 0)
+        body = await self.call('rrext_store', subcommand='fs_write', handle=handle, data=data)
+        return body.get('bytesWritten', 0)
 
     async def fs_close(self, handle: str, mode: str = 'r') -> None:
         """
@@ -112,9 +108,7 @@ class StoreMixin(DAPClient):
             handle: Handle ID returned by fs_open.
             mode: 'r' or 'w' (must match the mode used in fs_open).
         """
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_close', 'handle': handle, 'mode': mode})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_close', handle=handle, mode=mode)
 
     # =========================================================================
     # Other File Operations
@@ -128,9 +122,7 @@ class StoreMixin(DAPClient):
             path: Relative path within the account store.
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_delete', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_delete', path=path)
 
     async def fs_list_dir(self, path: str = '') -> Dict[str, Any]:
         """
@@ -145,10 +137,7 @@ class StoreMixin(DAPClient):
         """
         if path:
             self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_list_dir', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_list_dir', path=path)
 
     async def fs_mkdir(self, path: str) -> None:
         """
@@ -158,9 +147,7 @@ class StoreMixin(DAPClient):
             path: Relative directory path.
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_mkdir', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_mkdir', path=path)
 
     async def fs_rmdir(self, path: str, *, recursive: bool = False) -> None:
         """
@@ -178,9 +165,7 @@ class StoreMixin(DAPClient):
             RuntimeError: If directory is not empty and recursive is False.
         """
         self._validate_relative_path(path, 'path')
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rmdir', 'path': path, 'recursive': recursive})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_rmdir', path=path, recursive=recursive)
 
     async def fs_stat(self, path: str) -> Dict[str, Any]:
         """
@@ -194,10 +179,7 @@ class StoreMixin(DAPClient):
             modified (epoch timestamp, files only).
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_stat', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_stat', path=path)
 
     async def fs_rename(self, old_path: str, new_path: str) -> None:
         """
@@ -218,9 +200,7 @@ class StoreMixin(DAPClient):
         """
         self._validate_relative_path(old_path, 'old_path')
         self._validate_relative_path(new_path, 'new_path')
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rename', 'old_path': old_path, 'new_path': new_path})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_rename', old_path=old_path, new_path=new_path)
 
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)

@@ -45,6 +45,8 @@ import { PageDeployProvider } from './providers/PageDeployProvider';
 import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
+import { PageAccountProvider } from './providers/PageAccountProvider';
+import { PageBillingProvider } from './providers/PageBillingProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
@@ -182,6 +184,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				pageDeploy = new PageDeployProvider(context);
 				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
+				new PageAccountProvider(context);
+				new PageBillingProvider(context);
 
 				// Register unified project editor (canvas + status + trace)
 				pageProject = new PageProjectProvider(context);
@@ -391,15 +395,6 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			vscode.window.showInformationMessage('Pipeline views refreshed');
 		}),
 
-		// Account/Billing — stub panels (actual views will migrate to shared-ui later)
-		vscode.commands.registerCommand('rocketride.page.account.open', () => {
-			const panel = vscode.window.createWebviewPanel('rocketride.pageAccount', 'Account', vscode.ViewColumn.One, {});
-			panel.webview.html = '<html><body style="padding:32px;font-family:system-ui"><h2>Account</h2><p>Account management is coming soon.</p></body></html>';
-		}),
-		vscode.commands.registerCommand('rocketride.page.billing.open', () => {
-			const panel = vscode.window.createWebviewPanel('rocketride.pageBilling', 'Billing', vscode.ViewColumn.One, {});
-			panel.webview.html = '<html><body style="padding:32px;font-family:system-ui"><h2>Billing</h2><p>Billing management is coming soon.</p></body></html>';
-		}),
 		vscode.commands.registerCommand('rocketride.cloud.logout', async () => {
 			const cloudAuth = CloudAuthProvider.getInstance();
 			await cloudAuth.signOut();

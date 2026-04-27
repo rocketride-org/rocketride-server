@@ -218,6 +218,29 @@ export interface RocketRideClientConfig {
 
 	/** Client version sent during auth (e.g. "0.9.4") */
 	clientVersion?: string;
+
+	/**
+	 * Optional trace callback invoked at the start and end of every `call()`.
+	 * Use for logging, debugging, or telemetry.
+	 *
+	 * @param traceType - 0 = request (before send), 1 = success (response), 2 = error
+	 * @param payload   - The trace data: command, args, and (for success/error) the result or error message.
+	 */
+	onTrace?: (traceType: TraceType, message: DAPMessage) => void;
+}
+
+// =============================================================================
+// TRACE TYPES
+// =============================================================================
+
+/** Discriminator for the three trace event types. */
+export enum TraceType {
+	/** Emitted before the DAP request is sent. */
+	Request = 0,
+	/** Emitted when the DAP request succeeds. */
+	Success = 1,
+	/** Emitted when the DAP request fails. */
+	Error = 2,
 }
 
 // =============================================================================

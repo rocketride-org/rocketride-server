@@ -45,7 +45,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage } from 'rocketride';
+import { RocketRideClient, DAPMessage, TraceType } from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../config';
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
@@ -246,11 +246,14 @@ export class ConnectionManager extends EventEmitter {
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
-			onProtocolMessage: (message: string) => {
-				this.logger.output(message);
-			},
-			onDebugMessage: (message: string) => {
-				this.logger.output(message);
+			onTrace: (traceType: number, message: any) => {
+				if (traceType === TraceType.Request) {
+					this.logger.output(`${icons.send} ${message.command} ${JSON.stringify(message.arguments ?? {})}`);
+				} else if (traceType === TraceType.Success) {
+					this.logger.output(`${icons.receive} ${message.command} ${JSON.stringify(message.body ?? {})}`);
+				} else {
+					this.logger.output(`${icons.error} ${message.command} ${message.message ?? 'failed'}`);
+				}
 			},
 			onEvent: async (message: DAPMessage) => {
 				if (message.event === 'output') {

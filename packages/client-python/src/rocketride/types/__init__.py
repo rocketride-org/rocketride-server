@@ -130,6 +130,32 @@ from .data import (
     UPLOAD_RESULT,
 )
 
+# Account types: user profile, API keys, organisation, teams, and members.
+from .account import (
+    AccountProfile,
+    AccountOrganization,
+    AccountOrgTeam,
+    ApiKeyRecord,
+    OrgDetail,
+    MemberRecord,
+    TeamRecord,
+    TeamDetail,
+    TeamMemberRecord,
+    ProfileUpdate,
+    CreateKeyParams,
+    CreateKeyResult,
+    InviteMemberParams,
+    TeamMemberParams,
+)
+
+# Billing types: subscriptions, Stripe plans, compute credits.
+from .billing import (
+    BillingDetail,
+    StripePlan,
+    CreditBalance,
+    CreditPack,
+)
+
 # Service types: shapes for service discovery responses, slot/lane descriptors,
 # capability flags, and validation results.
 from .service import (
@@ -203,4 +229,24 @@ __all__ = [
     'VALIDATION_ERROR',
     'VALIDATION_RESULT',
     'PROTOCOL_CAPS',
+    # Account types
+    'AccountProfile',
+    'AccountOrganization',
+    'AccountOrgTeam',
+    'ApiKeyRecord',
+    'OrgDetail',
+    'MemberRecord',
+    'TeamRecord',
+    'TeamDetail',
+    'TeamMemberRecord',
+    'ProfileUpdate',
+    'CreateKeyParams',
+    'CreateKeyResult',
+    'InviteMemberParams',
+    'TeamMemberParams',
+    # Billing types
+    'BillingDetail',
+    'StripePlan',
+    'CreditBalance',
+    'CreditPack',
 ]

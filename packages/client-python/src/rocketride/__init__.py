@@ -113,6 +113,31 @@ from .types import (
     UPLOAD_RESULT,
 )
 
+# Import account and billing types for user profile, org, keys, teams,
+# subscriptions, and compute credit management.
+from .types.account import (
+    AccountProfile,
+    AccountOrganization,
+    AccountOrgTeam,
+    ApiKeyRecord,
+    OrgDetail,
+    MemberRecord,
+    TeamRecord,
+    TeamDetail,
+    TeamMemberRecord,
+    ProfileUpdate,
+    CreateKeyParams,
+    CreateKeyResult,
+    InviteMemberParams,
+    TeamMemberParams,
+)
+from .types.billing import (
+    BillingDetail,
+    StripePlan,
+    CreditBalance,
+    CreditPack,
+)
+
 # Import the primary client class and its exception, plus the specialised
 # authentication exception for callers that need to distinguish auth failures.
 from .client import RocketRideClient, RocketRideException
@@ -188,4 +213,24 @@ __all__ = [
     'TraceInfo',
     'TransportCallbacks',
     'UPLOAD_RESULT',
+    # Account types
+    'AccountProfile',
+    'AccountOrganization',
+    'AccountOrgTeam',
+    'ApiKeyRecord',
+    'OrgDetail',
+    'MemberRecord',
+    'TeamRecord',
+    'TeamDetail',
+    'TeamMemberRecord',
+    'ProfileUpdate',
+    'CreateKeyParams',
+    'CreateKeyResult',
+    'InviteMemberParams',
+    'TeamMemberParams',
+    # Billing types
+    'BillingDetail',
+    'StripePlan',
+    'CreditBalance',
+    'CreditPack',
 ]

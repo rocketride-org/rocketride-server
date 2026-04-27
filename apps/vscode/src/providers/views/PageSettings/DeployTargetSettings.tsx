@@ -40,7 +40,7 @@
  */
 
 import React, { useState } from 'react';
-import { SettingsData, settingsStyles as S } from './PageSettings';
+import { SettingsData, settingsStyles as S } from './SettingsWebview';
 
 // =============================================================================
 // TYPES

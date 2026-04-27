@@ -15,7 +15,7 @@
  */
 
 import React, { useState } from 'react';
-import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S } from './PageSettings';
+import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S } from './SettingsWebview';
 import { MessageDisplay } from './MessageDisplay';
 
 // ============================================================================

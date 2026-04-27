@@ -71,11 +71,4 @@ class DashboardMixin(DAPClient):
             for task in dashboard['tasks']:
                 print(f"{task['id']}: {task['status']} ({task['elapsedTime']:.0f}s)")
         """
-        request = self.build_request(command='rrext_dashboard', arguments={})
-        response = await self.request(request)
-
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Failed to retrieve dashboard')
-            raise RuntimeError(f'Failed to retrieve dashboard: {error_msg}')
-
-        return response.get('body') or {}
+        return await self.call('rrext_dashboard')

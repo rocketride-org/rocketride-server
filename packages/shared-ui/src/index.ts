@@ -63,6 +63,17 @@ export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPan
 export { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
 export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
 
+// --- Account module (account management) ------------------------------------
+// Types: import directly from 'rocketride' (ConnectResult, ApiKeyRecord, etc.)
+export { default as AccountView } from './modules/account/AccountView';
+export type { IAccountViewProps } from './modules/account/AccountView';
+
+// --- Billing module (subscription management) --------------------------------
+// Types: import directly from 'rocketride' (BillingDetail, CreditBalance, etc.)
+export { BillingView } from './modules/billing';
+export type { IBillingViewProps } from './modules/billing';
+export { CreditsPanel } from './modules/billing';
+
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';
 export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
