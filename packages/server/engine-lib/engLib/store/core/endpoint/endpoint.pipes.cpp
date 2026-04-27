@@ -111,8 +111,19 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
             boundConnections[connectionKey] = true;
         }
 
-        // Bind the connection
-        if (auto ccode = (*pFrom)->binder.bind(lane, pTo->get())) {
+        // Bind the connection. A `lane == "*"` sentinel (emitted by the
+        // canvas for wildcard-to-wildcard edges like flow_if_else → flow_if_else)
+        // expands into every content method — excluding the lifecycle
+        // names already bound above (open/closing/close).
+        if (lane == "*") {
+            for (const char *methodName : Binder::MethodNames) {
+                const std::string mn = methodName;
+                if (mn == "open" || mn == "closing" || mn == "close") continue;
+                if (auto ccode = (*pFrom)->binder.bind(mn, pTo->get())) {
+                    return ccode;
+                }
+            }
+        } else if (auto ccode = (*pFrom)->binder.bind(lane, pTo->get())) {
             return ccode;
         }
     }
