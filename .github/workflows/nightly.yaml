@@ -1,6 +1,10 @@
 name: Nightly prerelease
-run-name: Nightly ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(scheduled)' }}
+run-name: Nightly ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(auto)' }}
 
+# `cancel-in-progress` is what makes the "every green develop commit"
+# cadence safe under load: if 5 PRs land in 30 minutes, only the last
+# one's nightly run completes — the previous 4 are cancelled mid-build.
+# Without this we'd burn ~25 min × 5 = 2 hours of CI minutes per burst.
 concurrency:
   group: nightly
   cancel-in-progress: true
@@ -10,23 +14,44 @@ permissions:
   packages: write
   id-token: write
 
+# Triggered when develop's CI run completes successfully — this is the
+# gate. A red CI on develop (whether from a bad merge, a flaky test, or
+# a PR that slipped through) leaves `workflow_run.conclusion=failure`
+# and the `if:` below skips the run, so a broken develop commit never
+# becomes a published prerelease.
+#
+# `workflow_dispatch` is kept as the manual escape hatch for hot-fix
+# flows or for re-publishing a known-good ref out of cycle.
+#
+# NB: per GitHub's rules, `workflow_run` triggers always execute the
+# version of this file from the *default* branch (main), not from the
+# branch that produced the triggering CI run. So edits here only take
+# effect after they land on main — keep that in mind if iterating.
 on:
-  schedule:
-    - cron: '0 2 * * *'
+  workflow_run:
+    workflows: ["CI"]
+    branches: [develop]
+    types: [completed]
   workflow_dispatch:
 
 jobs:
   init:
     name: Initialize
+    # Skip when CI failed; manual dispatch always runs.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     uses: ./.github/workflows/_init.yaml
     with:
-      ref: stage
+      # `head_sha` pins the build to the exact commit whose CI passed,
+      # rather than `develop` HEAD which might have moved on by the time
+      # this nightly job acquires a runner. For workflow_dispatch we use
+      # the ref the user picked when dispatching.
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
   build:
     name: Build
     needs: init
     uses: ./.github/workflows/_build.yaml
     with:
-      ref: stage
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
@@ -43,7 +68,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: stage
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
       - name: Delete existing prerelease tags and releases
@@ -73,7 +98,7 @@ jobs:
     needs: [init, build, cleanup-prereleases]
     uses: ./.github/workflows/_release.yaml
     with:
-      ref: stage
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       prerelease: true
       server_version: ${{ needs.init.outputs.server_version }}
       vscode_version: ${{ needs.init.outputs.vscode_version }}
@@ -87,7 +112,7 @@ jobs:
     needs: [init, build]
     uses: ./.github/workflows/_docker.yaml
     with:
-      ref: stage
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       server_version: ${{ needs.init.outputs.server_version }}
       prerelease: true
     secrets: inherit
