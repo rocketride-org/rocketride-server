@@ -89,10 +89,10 @@ export interface CreditBalance {
 	balance: number;
 
 	/** Total credits ever purchased — useful for ledger display. */
-	lifetime_purchased: number;
+	lifetimePurchased: number;
 
 	/** Total credits ever consumed — useful for ledger display. */
-	lifetime_consumed: number;
+	lifetimeConsumed: number;
 }
 
 /**
