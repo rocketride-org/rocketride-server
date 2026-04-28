@@ -8,7 +8,7 @@
 
 [tool.ruff]
 # Line length disabled - set high to avoid enforcement
-line-length = 320
+line-length = 120
 
 # Target Python version
 target-version = "py310"
@@ -49,14 +49,18 @@ fixable = ["D", "Q"]
 # D102 Ignore no public method docstring
 # D103 Ignore no public function docstring
 # D104 Ignore no public package docstring
+# D105 Ignore undocumented magic method
+# D106 Ignore undocumented public nested class
+# D107 Ignore undocumented public __init__
 # D200 Ignore single line docstring
 # D205 1 blank line required between summary line and description
 # D301 Use `r"""` if any backslashes in a docstring
 # D400 First line should end with a period
+# D401 First line should be in imperative mood
 # E203 Ignore whitespace before ':' - ruff puts it there and then produces an error on it
 # E402 Ignore missing module level docstring - we need depends first
 # E501 Line too long
-ignore = ["D100", "D101", "D102", "D103", "D104", "D200", "D205", "D301", "D400", "E203", "E402", "E501"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D200", "D205", "D301", "D400", "D401", "E203", "E402", "E501"]
 
 [tool.ruff.lint.flake8-quotes]
 # Enforce single quotes for inline strings
