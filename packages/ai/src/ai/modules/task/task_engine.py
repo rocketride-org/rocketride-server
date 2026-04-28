@@ -190,7 +190,7 @@ class Task(DAPBase):
         token: str,
         public_auth: str,
         pipeline: Dict[str, Any],
-        launch_args: Dict[str, Any] = {},
+        launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
@@ -225,6 +225,9 @@ class Task(DAPBase):
         # Have the final events been sent yet
         self._final_events_sent = False
 
+        # Guard against _terminated() being called more than once
+        self._terminated_called = False
+
         # Server reference
         self._server = server
 
@@ -239,9 +242,10 @@ class Task(DAPBase):
         self._service_down_notes = []
 
         # Execution configuration
-        self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
-        self._task_name: Optional[str] = launch_args.get('name', None)
+        _args = launch_args or {}
+        self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
+        self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = _args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -564,7 +568,7 @@ class Task(DAPBase):
         response = await self._data_client.dap_request(
             command=data['command'],
             arguments=args,
-            token=data.get('token'),
+            token=args.get('token'),
         )
         return response
 
@@ -574,7 +578,17 @@ class Task(DAPBase):
 
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
+
+        Idempotent: safe to call multiple times (only the first call performs
+        cleanup; subsequent calls return immediately).
         """
+        # Guard: only run cleanup once.  Multiple callers can reach here --
+        # e.g. the stdio on_disconnected callback AND the start_task exception
+        # handler -- so we must be idempotent.
+        if self._terminated_called:
+            return
+        self._terminated_called = True
+
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
@@ -1448,6 +1462,7 @@ class Task(DAPBase):
             # Make sure some of our start is initialized in case we are restarting
             self._status.completed = False
             self._final_events_sent = False
+            self._terminated_called = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False

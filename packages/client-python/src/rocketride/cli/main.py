@@ -535,10 +535,9 @@ class RocketRideCLI:
             parser.print_help()
             return 1
 
-        # Validate required authentication
+        # Validate we have something for apikey
         if not self.args.apikey:
-            print('Error: API key is required. Use --apikey or set ROCKETRIDE_APIKEY environment variable')
-            return 1
+            self.args.apikey = ''
 
         # Command-specific validation and preprocessing
         if self.args.command == 'start' and not self.args.pipeline_path:

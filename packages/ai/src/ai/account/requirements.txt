@@ -1,13 +1,10 @@
 # Core dependencies for Store
 aiofiles
 
-# Retry logic for cloud operations
+# Retry logic for cloud storage providers (s3, azure)
 tenacity
 
-# Cloud storage backends
-# AWS S3 support
-boto3
-
-# Azure Blob Storage support
-azure-storage-blob
-azure-identity
+# Optional cloud storage backends — install only if needed:
+#   boto3                          (S3 support)
+#   azure-storage-blob             (Azure Blob Storage)
+#   azure-identity                 (Azure credential chain)

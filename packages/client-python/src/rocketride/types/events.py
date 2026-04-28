@@ -214,6 +214,7 @@ class TASK_RUNNING_ENTRY(TypedDict):
     """Task info entry in the 'running' action payload."""
 
     id: str  # Unique task identifier
+    name: str  # Display name of the task (e.g. 'Parser1.Chat')
     projectId: str  # Project identifier
     source: str  # Source component entry point
 

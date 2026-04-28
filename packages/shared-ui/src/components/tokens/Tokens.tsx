@@ -21,11 +21,6 @@ import { commonStyles } from '../../themes/styles';
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	empty: {
-		color: 'var(--rr-text-disabled)',
-		textAlign: 'center',
-		padding: 32,
-	},
 	summary: {
 		display: 'grid',
 		gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
@@ -174,7 +169,7 @@ export interface SourceTokensContentProps {
 export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens }) => {
 	if (!tokens) {
 		return (
-			<div style={styles.empty}>
+			<div style={commonStyles.empty}>
 				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
 				<div>No token data available</div>
 				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
@@ -236,7 +231,7 @@ export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 
 	if (!hasData) {
 		return (
-			<div style={styles.empty}>
+			<div style={commonStyles.empty}>
 				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
 				<div>No token data available</div>
 				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
