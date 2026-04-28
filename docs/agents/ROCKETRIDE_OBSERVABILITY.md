@@ -53,7 +53,7 @@ Two relevant transports run on that port:
 
 So the WebSocket URL is:
 
-```
+```text
 ws://<host>:5565/task/service
 ```
 
