@@ -150,7 +150,14 @@ export class DataPipe {
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
-			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			try {
+				await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			} catch (err) {
+				const errMsg = err instanceof Error ? err.message : String(err);
+				const msg = `Failed to subscribe to SSE events for this data pipe.\n\n${errMsg}`;
+				throw new PipeException({ message: msg });
+			}
+
 			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
 		}
 
