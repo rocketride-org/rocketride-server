@@ -1872,10 +1872,19 @@ export class RocketRideClient extends DAPClient {
 	 * @returns The bytes read
 	 */
 	async fsRead(handle: string, offset: number = 0, length: number = 4_194_304): Promise<Uint8Array> {
-		// call() returns response.body ?? response; fs_read sends binary data
-		// in response.arguments, so we access it from the full response fallback
-		const result = await this.call('rrext_store', { subcommand: 'fs_read', handle, offset, length });
-		return ((result as any)?.arguments?.data as Uint8Array) || ((result as any)?.data as Uint8Array) || new Uint8Array(0);
+		// Bypass call() which unwraps response.body, losing response.arguments
+		// where the server places the binary data payload.
+		const message = this.buildRequest('rrext_store', {
+			arguments: { subcommand: 'fs_read', handle, offset, length },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'fs_read failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+		return ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 	}
 
 	/**

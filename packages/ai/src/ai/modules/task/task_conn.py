@@ -405,11 +405,9 @@ class TaskConn(
         if self._account_info.auth.startswith('tk_'):
             return self._account_info.auth
 
-        # Extract token from top-level (injected by debug commands) or arguments
-        token = request.get('token', None)
-        if token is None:
-            args = request.get('arguments') or {}
-            token = args.get('token', None)
+        # Extract token from arguments
+        args = request.get('arguments') or {}
+        token = args.get('token', None)
 
         # Now, we are good... but we need to verify permissions
         if permissions:

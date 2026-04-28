@@ -532,9 +532,11 @@ class DAPBase:
             'command': command,  # The DAP command to execute
         }
 
-        # Include token for task correlation
+        # Include token for task correlation (inside arguments)
         if token is not None:
-            request['token'] = token
+            if arguments is None:
+                arguments = {}
+            arguments['token'] = token
 
         # Include command arguments if provided
         if arguments is not None:

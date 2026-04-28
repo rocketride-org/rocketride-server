@@ -190,7 +190,7 @@ class Task(DAPBase):
         token: str,
         public_auth: str,
         pipeline: Dict[str, Any],
-        launch_args: Dict[str, Any] = {},
+        launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
@@ -242,9 +242,10 @@ class Task(DAPBase):
         self._service_down_notes = []
 
         # Execution configuration
-        self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
-        self._task_name: Optional[str] = launch_args.get('name', None)
+        _args = launch_args or {}
+        self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
+        self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = _args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -567,7 +568,7 @@ class Task(DAPBase):
         response = await self._data_client.dap_request(
             command=data['command'],
             arguments=args,
-            token=data.get('token'),
+            token=args.get('token'),
         )
         return response
 
