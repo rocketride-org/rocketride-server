@@ -41,7 +41,7 @@ Dynamic Field Access Pattern:
     Pipeline results use a dynamic field pattern where the result_types dictionary
     defines what fields are available and their types. This allows pipelines to
     return arbitrary data structures based on configuration:
-    
+
     result_types = {"text": "text", "answers": "answers", "metadata": "json"}
     result["text"]      # Contains List[str] - text content
     result["answers"]   # Contains List[str] - AI responses
@@ -49,17 +49,17 @@ Dynamic Field Access Pattern:
 
 Usage:
     from rocketride.types import PIPELINE_RESULT, UPLOAD_RESULT
-    
+
     # Handle pipeline result with dynamic fields
     result: PIPELINE_RESULT = await client.send(token, data, mime='text/plain')
-    
+
     if result.get('result_types'):
         # Examine what fields are available
         for field_name, field_type in result['result_types'].items():
             field_data = result.get(field_name)
             if field_data:
                 print(f"{field_name} ({field_type}): {field_data}")
-    
+
     # Handle file upload results
     uploads: List[UPLOAD_RESULT] = await client.send_files(files, token)
     for upload in uploads:

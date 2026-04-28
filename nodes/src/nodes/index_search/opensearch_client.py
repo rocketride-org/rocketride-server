@@ -44,7 +44,7 @@ from .constants import (
 )
 
 # OpenSearch-specific default (config overrides at runtime)
-DEFAULT_HOST = "http://localhost:9200"
+DEFAULT_HOST = 'http://localhost:9200'
 
 
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
@@ -344,9 +344,7 @@ class OpenSearchClient:
             op = 'or'
         slop = max(int(match_operator_slop or 0), 0)
         if op == 'exact':
-            base_query: Dict[str, Any] = {
-                'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}
-            }
+            base_query: Dict[str, Any] = {'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}}
         elif op == 'and':
             base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'and'}}}
         elif op == 'or':
@@ -367,4 +365,3 @@ class OpenSearchClient:
             frag_size = max(int(highlight_fragment_size or 0), 0) or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
             body['highlight'] = _build_highlight_config(CONTENT_FIELD, frag_size)
         return body
-

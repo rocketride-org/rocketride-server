@@ -89,13 +89,25 @@ class DocMetadata(BaseModel):
     """
 
     objectId: str = Field(..., description='Unique identifier for the source document in the RocketRide system.')
-    chunkId: int = Field(..., description='Position of this chunk within the source document (0=first chunk, 1=second, etc.).')
+    chunkId: int = Field(
+        ..., description='Position of this chunk within the source document (0=first chunk, 1=second, etc.).'
+    )
     nodeId: str = Field(None, description='Identifier of the RocketRide node/server where this document is stored.')
-    parent: str = Field(None, description='File path or name of the source document. This is what you would see in a file browser.')
-    permissionId: int = Field(None, description='Permission level identifier that controls who can access this document.')
-    isDeleted: bool = Field(None, description='True if the source document has been deleted but is still in search results.')
-    isTable: bool = Field(None, description='True if this chunk contains structured table data, False for regular text content.')
-    tableId: int = Field(None, description='If isTable is True, this identifies which table within the document this data came from.')
+    parent: str = Field(
+        None, description='File path or name of the source document. This is what you would see in a file browser.'
+    )
+    permissionId: int = Field(
+        None, description='Permission level identifier that controls who can access this document.'
+    )
+    isDeleted: bool = Field(
+        None, description='True if the source document has been deleted but is still in search results.'
+    )
+    isTable: bool = Field(
+        None, description='True if this chunk contains structured table data, False for regular text content.'
+    )
+    tableId: int = Field(
+        None, description='If isTable is True, this identifies which table within the document this data came from.'
+    )
     signature: str = Field(None, description='Component ID or signature associated with the document processing.')
 
     model_config = ConfigDict(extra='allow')

@@ -12,11 +12,13 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
 
+
 # Mock heavy dependencies only for the duration of the milvus import so that
 # real modules (numpy, ai.*) remain available to other test files collected in
 # the same pytest session.
 class _FakeDocumentStoreBase:
     pass
+
 
 with patch.dict(
     sys.modules,

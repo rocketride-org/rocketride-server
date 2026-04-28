@@ -43,7 +43,14 @@ class IGlobal(IGlobalBase):
             depends(requirements)
 
             # Prefer provider-driven exceptions vs string parsing
-            from openai import OpenAI, APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                OpenAIError,
+                AuthenticationError,
+                RateLimitError,
+                APIConnectionError,
+            )
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -67,9 +74,13 @@ class IGlobal(IGlobalBase):
 
                 # Make sure model is using the correct parameters
                 if uses_max_completion_tokens:
-                    client.chat.completions.create(model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_completion_tokens=10)
+                    client.chat.completions.create(
+                        model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_completion_tokens=10
+                    )
                 else:
-                    client.chat.completions.create(model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_tokens=1)
+                    client.chat.completions.create(
+                        model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_tokens=1
+                    )
             except APIStatusError as e:
                 # HTTP error with structured body; pull status/type/message
                 status = getattr(e, 'status_code', None) or getattr(e, 'status', None)

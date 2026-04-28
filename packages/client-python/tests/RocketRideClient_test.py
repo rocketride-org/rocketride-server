@@ -75,14 +75,12 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
 # Skip chat tests when no LLM API key is available
-# fmt: off
 HAS_LLM_KEY = bool(
     os.environ.get('ROCKETRIDE_OPENAI_KEY')
     or os.environ.get('ROCKETRIDE_ANTHROPIC_KEY')
     or os.environ.get('ROCKETRIDE_GEMINI_KEY')
     or os.environ.get('ROCKETRIDE_OLLAMA_HOST')
 )
-# fmt: on
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
     reason='Skipped: no LLM API key set (need ROCKETRIDE_OPENAI_KEY, ROCKETRIDE_ANTHROPIC_KEY, ROCKETRIDE_GEMINI_KEY, or ROCKETRIDE_OLLAMA_HOST)',
@@ -585,7 +583,14 @@ class TestDataOperations:
             result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
             pipeline_token = result['token']
 
-            test_cases = [{'data': 'Plain text content', 'mime_type': 'text/plain', 'description': 'plain text'}, {'data': json.dumps({'message': 'Hello', 'value': 42}), 'mime_type': 'application/json', 'description': 'JSON data'}]
+            test_cases = [
+                {'data': 'Plain text content', 'mime_type': 'text/plain', 'description': 'plain text'},
+                {
+                    'data': json.dumps({'message': 'Hello', 'value': 42}),
+                    'mime_type': 'application/json',
+                    'description': 'JSON data',
+                },
+            ]
 
             for test_case in test_cases:
                 result = await client.send(pipeline_token, test_case['data'], {}, test_case['mime_type'])
@@ -1335,7 +1340,9 @@ class TestEventHandling:
 
             # Should have received at least one status_update event
             status_events = [e for e in received_events if e.get('event') == 'apaevt_status_update']
-            assert len(status_events) > 0, "Expected at least one apaevt_status_update event after subscribing to ['summary']"
+            assert len(status_events) > 0, (
+                "Expected at least one apaevt_status_update event after subscribing to ['summary']"
+            )
 
             # Clear events and change subscription
             received_events.clear()
@@ -1346,7 +1353,9 @@ class TestEventHandling:
 
             # Wait for task events (filter out unsolicited events from other server activity)
             start2 = time.time()
-            while not any(e.get('event') == 'apaevt_task' for e in received_events) and (time.time() - start2) < timeout:
+            while (
+                not any(e.get('event') == 'apaevt_task' for e in received_events) and (time.time() - start2) < timeout
+            ):
                 await asyncio.sleep(0.25)
 
             # Should have received at least one task event
@@ -1461,7 +1470,11 @@ class TestErrorHandling:
             await client.connect()
             await ensure_clean_pipeline(client, self.ERROR_TOKEN)
 
-            invalid_pipeline = {'components': [{'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}}], 'source': 'invalid_1', 'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42'}
+            invalid_pipeline = {
+                'components': [{'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}}],
+                'source': 'invalid_1',
+                'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42',
+            }
 
             with pytest.raises(Exception):
                 await client.use(pipeline=invalid_pipeline, token=self.ERROR_TOKEN)
@@ -1847,7 +1860,12 @@ Line 3: random data {random.random()}"""
             token = result['token']
 
             # Generate large text content (10KB)
-            large_text = '\n'.join([f'Line {i + 1}: This is a test line with some content to make it longer. Random: {random.random()}' for i in range(1000)])
+            large_text = '\n'.join(
+                [
+                    f'Line {i + 1}: This is a test line with some content to make it longer. Random: {random.random()}'
+                    for i in range(1000)
+                ]
+            )
 
             assert len(large_text) > 10000
 
@@ -2002,7 +2020,13 @@ class TestConcurrentPipelineOperations:
             SEND_COUNT = 10
 
             # Generate unique test data for concurrent sends
-            test_data = [{'index': i, 'text': f'Concurrent-send-{i} data: {"".join(random.choices(string.ascii_lowercase, k=8))} timestamp-{int(time.time())}-{i}'} for i in range(SEND_COUNT)]
+            test_data = [
+                {
+                    'index': i,
+                    'text': f'Concurrent-send-{i} data: {"".join(random.choices(string.ascii_lowercase, k=8))} timestamp-{int(time.time())}-{i}',
+                }
+                for i in range(SEND_COUNT)
+            ]
 
             # Send all data concurrently to the same pipeline
             async def send_data(data):
@@ -2098,7 +2122,12 @@ class TestConcurrentPipelineOperations:
 
                 response = await client.send(data['token'], data['text'], {}, 'text/plain')
 
-                return {'pipeline_index': data['pipeline_index'], 'send_index': data['send_index'], 'original_text': data['text'], 'response': response}
+                return {
+                    'pipeline_index': data['pipeline_index'],
+                    'send_index': data['send_index'],
+                    'original_text': data['text'],
+                    'response': response,
+                }
 
             send_results = await asyncio.gather(*[send_data(data) for data in all_send_data])
 
@@ -2163,12 +2192,7 @@ class TestConcurrentPipelineOperations:
 
             # Create 4 independent subprocesses concurrently
             sub_tokens = [f'{self.CONCURRENT_TOKEN}-s{i}' for i in range(SUBPROCESS_COUNT)]
-            # fmt: off
-            await asyncio.gather(*[
-                client.use(pipeline=get_echo_pipeline(), token=token)
-                for token in sub_tokens
-            ])
-            # fmt: on
+            await asyncio.gather(*[client.use(pipeline=get_echo_pipeline(), token=token) for token in sub_tokens])
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2181,11 +2205,7 @@ class TestConcurrentPipelineOperations:
                     results.append(result['text'][0])
                 return results
 
-            # fmt: off
-            all_results = await asyncio.gather(*[
-                run_pipeline(token, i) for i, token in enumerate(sub_tokens)
-            ])
-            # fmt: on
+            all_results = await asyncio.gather(*[run_pipeline(token, i) for i, token in enumerate(sub_tokens)])
 
             flat = [r for pipeline in all_results for r in pipeline]
             assert len(flat) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
@@ -2244,8 +2264,20 @@ class TestConcurrentPipelineOperations:
             assert res_b['token'] == res_a['token']
 
             # Generate distinct payloads per client so we can verify no cross-routing.
-            data_a = [{'index': i, 'text': f'clientA-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-A-{i}'} for i in range(SENDS_PER_CLIENT)]
-            data_b = [{'index': i, 'text': f'clientB-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-B-{i}'} for i in range(SENDS_PER_CLIENT)]
+            data_a = [
+                {
+                    'index': i,
+                    'text': f'clientA-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-A-{i}',
+                }
+                for i in range(SENDS_PER_CLIENT)
+            ]
+            data_b = [
+                {
+                    'index': i,
+                    'text': f'clientB-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-B-{i}',
+                }
+                for i in range(SENDS_PER_CLIENT)
+            ]
 
             async def send_a(d):
                 await asyncio.sleep(random.random() * 0.05)

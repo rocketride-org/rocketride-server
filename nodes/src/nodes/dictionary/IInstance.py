@@ -94,7 +94,10 @@ So you ask what we define as a red loan? A red loan, according to the Credit Por
 Division (CPMD) is a loan that the client has a credit score less than 650. The client also has 
 to be delinquent on their repayment schedule by 60 days or more.
 """,
-            [{'term': 'Red loan', 'description': 'Credit score less than 650 and delinquent by 60 days or more'}, {'term': 'CPMD', 'description': 'Credit Portfolio Marketing Division'}],
+            [
+                {'term': 'Red loan', 'description': 'Credit score less than 650 and delinquent by 60 days or more'},
+                {'term': 'CPMD', 'description': 'Credit Portfolio Marketing Division'},
+            ],
         )
 
         # Add the documents text

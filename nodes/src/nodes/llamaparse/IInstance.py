@@ -47,7 +47,9 @@ class IInstance(IInstanceBase):
         self._current_text = ''
         self._document_data = b''  # Reset document data when a new object is opened
         self._target_object_writer = None
-        debug(f'LlamaParse Instance: Object opened, size: {object.size if hasattr(object, "size") else "unknown"} bytes')
+        debug(
+            f'LlamaParse Instance: Object opened, size: {object.size if hasattr(object, "size") else "unknown"} bytes'
+        )
 
     def close(self):
         """Call from engLib, process object complete."""
@@ -59,18 +61,36 @@ class IInstance(IInstanceBase):
                 self._target_object_writer = None
                 debug('LlamaParse Instance: Closed target object writer')
 
-            if hasattr(self, '_current_object') and self._current_object and not getattr(self._current_object, 'objectFailed', False) and self._document_data:
+            if (
+                hasattr(self, '_current_object')
+                and self._current_object
+                and not getattr(self._current_object, 'objectFailed', False)
+                and self._document_data
+            ):
                 debug(f'LlamaParse Instance: Processing document data ({len(self._document_data)} bytes)')
 
                 # Parse the document using LlamaParse
                 with self.IGlobal._parserLock:
                     debug('LlamaParse Instance: Acquired parser lock')
                     if self.IGlobal._parser:
-                        result = self.IGlobal._parser.parse(pipe_id=self.instance.pipeId, file_data=self._document_data, file_name=self._current_object.fileName)
-                        debug(f'LlamaParse Instance: Parser returned result with keys: {list(result.keys()) if isinstance(result, dict) else "not a dict"}')
+                        result = self.IGlobal._parser.parse(
+                            pipe_id=self.instance.pipeId,
+                            file_data=self._document_data,
+                            file_name=self._current_object.fileName,
+                        )
+                        debug(
+                            f'LlamaParse Instance: Parser returned result with keys: {list(result.keys()) if isinstance(result, dict) else "not a dict"}'
+                        )
                     else:
                         debug('LlamaParse Instance: No parser available')
-                        result = {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {}}
+                        result = {
+                            'text': '',
+                            'structured_data': [],
+                            'page_count': 0,
+                            'project_id': None,
+                            'file_id': None,
+                            'parsing_metadata': {},
+                        }
 
                         # Extract text and metadata from result
                 if isinstance(result, dict):
@@ -80,7 +100,9 @@ class IInstance(IInstanceBase):
                     project_id = result.get('project_id')
                     file_id = result.get('file_id')
                     parsing_metadata = result.get('parsing_metadata', {})
-                    debug(f'LlamaParse Instance: Extracted {len(text)} characters, {page_count} pages, {len(structured_data)} structured items')
+                    debug(
+                        f'LlamaParse Instance: Extracted {len(text)} characters, {page_count} pages, {len(structured_data)} structured items'
+                    )
                 elif isinstance(result, list):
                     text = ' '.join(result)
                     page_count = 0
@@ -149,7 +171,9 @@ class IInstance(IInstanceBase):
                                 metadata_str = metadata_str.decode('latin-1', errors='ignore')
 
                         self._current_metadata = json.loads(metadata_str)
-                        debug(f'LlamaParse Instance: Received metadata tag with keys: {list(self._current_metadata.keys()) if self._current_metadata else []}')
+                        debug(
+                            f'LlamaParse Instance: Received metadata tag with keys: {list(self._current_metadata.keys()) if self._current_metadata else []}'
+                        )
                     else:
                         debug('LlamaParse Instance: OMET tag has no value attribute')
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -170,7 +194,9 @@ class IInstance(IInstanceBase):
                     try:
                         raw_tag_bytes = tag.asBytes
                         tag_size = tag.size
-                        debug(f'LlamaParse Instance: Got raw tag bytes: {len(raw_tag_bytes)} total, data size: {tag_size}')
+                        debug(
+                            f'LlamaParse Instance: Got raw tag bytes: {len(raw_tag_bytes)} total, data size: {tag_size}'
+                        )
 
                         # Skip the TAG header (which is sizeof(TAG)) to get just the data
                         # TAG struct is typically around 16-32 bytes depending on platform
@@ -178,9 +204,13 @@ class IInstance(IInstanceBase):
                         if header_size > 0 and len(raw_tag_bytes) >= header_size:
                             data_bytes = raw_tag_bytes[header_size:]
                             self._document_data += data_bytes
-                            debug(f'LlamaParse Instance: Successfully extracted {len(data_bytes)} bytes from asBytes (total: {len(self._document_data)})')
+                            debug(
+                                f'LlamaParse Instance: Successfully extracted {len(data_bytes)} bytes from asBytes (total: {len(self._document_data)})'
+                            )
                         else:
-                            debug(f'LlamaParse Instance: Invalid tag structure: total={len(raw_tag_bytes)}, data_size={tag_size}')
+                            debug(
+                                f'LlamaParse Instance: Invalid tag structure: total={len(raw_tag_bytes)}, data_size={tag_size}'
+                            )
 
                     except Exception as e:
                         debug(f'LlamaParse Instance: asBytes access failed: {e}')
@@ -188,7 +218,9 @@ class IInstance(IInstanceBase):
                         # Method 2: Try to get size at least for logging
                         try:
                             tag_size = tag.size
-                            debug(f'LlamaParse Instance: SDAT tag with {tag_size} bytes - data access failed but size available')
+                            debug(
+                                f'LlamaParse Instance: SDAT tag with {tag_size} bytes - data access failed but size available'
+                            )
                         except Exception as e2:
                             debug(f'LlamaParse Instance: Even size access failed: {e2}')
 
@@ -207,7 +239,9 @@ class IInstance(IInstanceBase):
                                 mime_type = self._current_metadata.get('dc:format', '')
 
                         # Process the document data received via tags
-                        debug(f'LlamaParse Instance: Processing {len(self._document_data)} bytes from tag lane with MIME type: {mime_type}')
+                        debug(
+                            f'LlamaParse Instance: Processing {len(self._document_data)} bytes from tag lane with MIME type: {mime_type}'
+                        )
                         self._process_document(document_data=self._document_data, mime_type=mime_type)
                     else:
                         debug('LlamaParse Instance: No document data to process')
@@ -231,7 +265,9 @@ class IInstance(IInstanceBase):
                 debug(f'LlamaParse Instance: Unknown tag type: {tag_id_str}')
 
         except Exception as e:
-            debug(f'LlamaParse Instance: Error processing tag {getattr(tag, "tagId", "unknown")}: {type(e).__name__}: {e}')
+            debug(
+                f'LlamaParse Instance: Error processing tag {getattr(tag, "tagId", "unknown")}: {type(e).__name__}: {e}'
+            )
 
     def _process_document(self, document_data: bytes, mime_type: str):
         """Process document data using LlamaParse."""
@@ -246,20 +282,32 @@ class IInstance(IInstanceBase):
                     if mime_type.startswith('image/'):
                         debug('LlamaParse Instance: Processing image file')
                         # Parse image - result_type is configured in the parser
-                        result = self.IGlobal._parser.parse(pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName)
+                        result = self.IGlobal._parser.parse(
+                            pipe_id=self.instance.pipeId,
+                            file_data=document_data,
+                            file_name=self._current_object.fileName,
+                        )
                     else:
                         # For documents, use the configured result_type
-                        result = self.IGlobal._parser.parse(pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName)
+                        result = self.IGlobal._parser.parse(
+                            pipe_id=self.instance.pipeId,
+                            file_data=document_data,
+                            file_name=self._current_object.fileName,
+                        )
 
                     # Handle both old string format and new dict format
                     if isinstance(result, dict):
                         text = result.get('text', '')
                         structured_data = result.get('structured_data', [])
-                        debug(f'LlamaParse Instance: Parser returned structured data with {len(text)} characters and {len(structured_data)} structured items')
+                        debug(
+                            f'LlamaParse Instance: Parser returned structured data with {len(text)} characters and {len(structured_data)} structured items'
+                        )
                     else:
                         text = result
                         structured_data = []
-                        debug(f'LlamaParse Instance: Parser returned {len(text) if text else 0} characters (legacy format)')
+                        debug(
+                            f'LlamaParse Instance: Parser returned {len(text) if text else 0} characters (legacy format)'
+                        )
 
                     debug(f'LlamaParse Instance: Parser result type: {type(result)}')
 
@@ -442,7 +490,11 @@ class IInstance(IInstanceBase):
 
     def writeText(self, text: str):
         """Call from engLib, process text."""
-        if hasattr(self, '_current_object') and self._current_object and getattr(self._current_object, 'objectFailed', False):
+        if (
+            hasattr(self, '_current_object')
+            and self._current_object
+            and getattr(self._current_object, 'objectFailed', False)
+        ):
             debug('LlamaParse Instance: Skipping text processing (object failed)')
             return
 
@@ -451,11 +503,17 @@ class IInstance(IInstanceBase):
             if self._current_text is None:
                 self._current_text = ''
             self._current_text += text
-            debug(f'LlamaParse Instance: Appended {len(text)} characters to current text (total: {len(self._current_text)})')
+            debug(
+                f'LlamaParse Instance: Appended {len(text)} characters to current text (total: {len(self._current_text)})'
+            )
 
     def writeTable(self, table: str):
         """Call from engLib, process table data."""
-        if hasattr(self, '_current_object') and self._current_object and getattr(self._current_object, 'objectFailed', False):
+        if (
+            hasattr(self, '_current_object')
+            and self._current_object
+            and getattr(self._current_object, 'objectFailed', False)
+        ):
             debug('LlamaParse Instance: Skipping table processing (object failed)')
             return
 
@@ -492,7 +550,9 @@ class IInstance(IInstanceBase):
                 debug('LlamaParse Instance: Acquired parser lock for document object')
                 if self.IGlobal._parser:
                     debug(f'LlamaParse Instance: Calling parser for document object: {self._current_object.fileName}')
-                    result = self.IGlobal._parser.parse(pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName)
+                    result = self.IGlobal._parser.parse(
+                        pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName
+                    )
                     # Handle both old string format and new dict format
                     if isinstance(result, dict):
                         text = result.get('text', '')

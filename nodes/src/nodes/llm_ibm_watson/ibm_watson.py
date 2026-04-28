@@ -68,7 +68,9 @@ def _validate_location(location):
     if not _LOCATION_RE.match(location):
         raise ValueError(f'Invalid location format: {location!r}')
     if location not in _VALID_LOCATIONS:
-        raise ValueError(f'Unknown IBM Cloud location: {location!r}. Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}')
+        raise ValueError(
+            f'Unknown IBM Cloud location: {location!r}. Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
+        )
     return f'https://{location}.ml.cloud.ibm.com'
 
 

@@ -251,7 +251,11 @@ class IGlobal(IGlobalBase):
                     # Fall back to listing relationship types without endpoints.
                     try:
                         result = session.run('CALL db.relationshipTypes()')
-                        schema['relationships'] = [{'type': r.get('relationshipType', ''), 'start': '', 'end': ''} for r in result if r.get('relationshipType')]
+                        schema['relationships'] = [
+                            {'type': r.get('relationshipType', ''), 'start': '', 'end': ''}
+                            for r in result
+                            if r.get('relationshipType')
+                        ]
                     except Neo4jError:
                         pass
 
