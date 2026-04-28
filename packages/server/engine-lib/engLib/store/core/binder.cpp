@@ -89,6 +89,7 @@ Error Binder::bind(const std::string &methodName,
  */
 Error Binder::callMethods(
     Binder *pThis, const std::string &methodName,
+    const std::string &targetNodeId,
     std::function<Error(IServiceFilterInstance *)> callback,
     std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
         serializeTrace) noexcept {
@@ -111,18 +112,15 @@ Error Binder::callMethods(
     // Get the trace level
     auto traceLevel = pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
 
-    // Track whether the filter matched at least one instance so we can
-    // emit a "filter active, zero matches" warning after the loop. Without
-    // this, a stale canvas branch target pointing at a deleted node
-    // silently drops chunks with no engine-side breadcrumb.
-    const bool filterActive = !pThis->m_targetFilter.empty();
+    // Per-call single-target dispatch guard. Empty `targetNodeId` =
+    // broadcast (default). Non-empty = deliver only to the instance
+    // whose pipeType.id matches. No state on the Binder.
+    const bool filterActive = !targetNodeId.empty();
     bool anyMatched = false;
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
-        // Single-target dispatch guard (see Binder::m_targetFilter).
-        // Empty filter = broadcast, zero behavioural drift.
-        if (filterActive && pInstance->pipeType.id != pThis->m_targetFilter) {
+        if (filterActive && pInstance->pipeType.id != targetNodeId) {
             // Leave a trace marker so "chunk didn't arrive at X" becomes
             // debuggable from the engine side instead of a cross-correlation
             // exercise between Python flow.dispatch logs and engine silence.
@@ -130,7 +128,7 @@ Error Binder::callMethods(
                 json::Value suppressTrace;
                 suppressTrace["lane"] = methodName.c_str();
                 suppressTrace["result"] = "filter_suppressed";
-                suppressTrace["target"] = pThis->m_targetFilter.c_str();
+                suppressTrace["target"] = targetNodeId.c_str();
                 suppressTrace["skipped"] = pInstance->pipeType.id.c_str();
                 pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
                                                               suppressTrace);
@@ -212,14 +210,14 @@ Error Binder::callMethods(
         LOG(Services,
             "Binder::callMethods: target filter active but zero matches "
             "(lane=",
-            methodName, ", target=", pThis->m_targetFilter,
+            methodName, ", target=", targetNodeId,
             ", bound=", (int)it->second->size(), ")");
 
         if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
             json::Value warnTrace;
             warnTrace["lane"] = methodName.c_str();
             warnTrace["result"] = "filter_no_match";
-            warnTrace["target"] = pThis->m_targetFilter.c_str();
+            warnTrace["target"] = targetNodeId.c_str();
             warnTrace["bound"] = (int)it->second->size();
             // No pInstance to attach to — use the owning filter so the
             // UI trace has a home for the warning.
@@ -295,7 +293,7 @@ Error Binder::open(Entry &entry) noexcept {
 
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
-    return callMethods(this, "open", call, serializeTrace);
+    return callMethods(this, "open", "", call, serializeTrace);
 }
 
 /**
@@ -311,7 +309,7 @@ Error Binder::writeTag(const TAG *pTag) noexcept {
 
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
-    return callMethods(this, "tags", call, serializeTrace);
+    return callMethods(this, "tags", "", call, serializeTrace);
 }
 
 /**
@@ -320,7 +318,8 @@ Error Binder::writeTag(const TAG *pTag) noexcept {
  * @param text The text to write.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeText(const Utf16View &text) noexcept {
+Error Binder::writeText(const Utf16View &text,
+                        const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeText(text);
     };
@@ -332,7 +331,7 @@ Error Binder::writeText(const Utf16View &text) noexcept {
             out["text"] = _tr<Text>(text).substr(0, 2000);
     };
 
-    return callMethods(this, "text", call, serializeTrace);
+    return callMethods(this, "text", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -341,7 +340,8 @@ Error Binder::writeText(const Utf16View &text) noexcept {
  * @param text The table data as text.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeTable(const Utf16View &text) noexcept {
+Error Binder::writeTable(const Utf16View &text,
+                         const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeTable(text);
     };
@@ -353,7 +353,7 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
             out["table"] = _tr<Text>(text).substr(0, 2000);
     };
 
-    return callMethods(this, "table", call, serializeTrace);
+    return callMethods(this, "table", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -362,14 +362,15 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
  * @param textWords A vector of words to write.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeWords(const WordVector &textWords) noexcept {
+Error Binder::writeWords(const WordVector &textWords,
+                         const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeWords(textWords);
     };
 
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
-    return callMethods(this, "words", call, serializeTrace);
+    return callMethods(this, "words", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -381,7 +382,8 @@ Error Binder::writeWords(const WordVector &textWords) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
-                         const pybind11::bytes &streamData) noexcept {
+                         const pybind11::bytes &streamData,
+                         const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAudio(action, mimeType, streamData);
     };
@@ -396,7 +398,7 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
         }
     };
 
-    return callMethods(this, "audio", call, serializeTrace);
+    return callMethods(this, "audio", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -408,7 +410,8 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
-                         const pybind11::bytes &streamData) noexcept {
+                         const pybind11::bytes &streamData,
+                         const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeVideo(action, mimeType, streamData);
     };
@@ -423,7 +426,7 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
         }
     };
 
-    return callMethods(this, "video", call, serializeTrace);
+    return callMethods(this, "video", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -435,7 +438,8 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
-                         const pybind11::bytes &streamData) noexcept {
+                         const pybind11::bytes &streamData,
+                         const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeImage(action, mimeType, streamData);
     };
@@ -450,7 +454,7 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
         }
     };
 
-    return callMethods(this, "image", call, serializeTrace);
+    return callMethods(this, "image", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -459,7 +463,8 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
  * @param questions A Python object containing the questions.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeQuestions(const pybind11::object &question) noexcept {
+Error Binder::writeQuestions(const pybind11::object &question,
+                             const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeQuestions(question);
     };
@@ -472,7 +477,7 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
         }
     };
 
-    return callMethods(this, "questions", call, serializeTrace);
+    return callMethods(this, "questions", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -481,7 +486,8 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
  * @param answers A Python object containing the answers.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
+Error Binder::writeAnswers(const pybind11::object &answers,
+                           const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAnswers(answers);
     };
@@ -494,7 +500,7 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
         }
     };
 
-    return callMethods(this, "answers", call, serializeTrace);
+    return callMethods(this, "answers", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -505,7 +511,8 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
  */
 Error Binder::writeClassifications(
     const json::Value &classifications, const json::Value &classificationPolicy,
-    const json::Value &classificationRules) noexcept {
+    const json::Value &classificationRules,
+    const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeClassifications(
             classifications, classificationPolicy, classificationRules);
@@ -516,7 +523,8 @@ Error Binder::writeClassifications(
             out["count"] = (int)classifications.size();
     };
 
-    return callMethods(this, "classifications", call, serializeTrace);
+    return callMethods(this, "classifications", targetNodeId, call,
+                       serializeTrace);
 }
 
 /**
@@ -526,7 +534,8 @@ Error Binder::writeClassifications(
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeClassificationContext(
-    const json::Value &classifications) noexcept {
+    const json::Value &classifications,
+    const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeClassificationContext(classifications);
     };
@@ -536,7 +545,8 @@ Error Binder::writeClassificationContext(
             out["count"] = (int)classifications.size();
     };
 
-    return callMethods(this, "classificationContext", call, serializeTrace);
+    return callMethods(this, "classificationContext", targetNodeId, call,
+                       serializeTrace);
 }
 
 /**
@@ -545,7 +555,8 @@ Error Binder::writeClassificationContext(
  * @param documents A Python object containing the documents.
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
-Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
+Error Binder::writeDocuments(const pybind11::object &documents,
+                             const std::string &targetNodeId) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeDocuments(documents);
     };
@@ -567,7 +578,7 @@ Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
         }
     };
 
-    return callMethods(this, "documents", call, serializeTrace);
+    return callMethods(this, "documents", targetNodeId, call, serializeTrace);
 }
 
 /**
@@ -582,7 +593,7 @@ Error Binder::closing() noexcept {
 
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
-    return callMethods(this, "closing", call, serializeTrace);
+    return callMethods(this, "closing", "", call, serializeTrace);
 }
 
 /**
@@ -597,7 +608,7 @@ Error Binder::close() noexcept {
 
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
-    return callMethods(this, "close", call, serializeTrace);
+    return callMethods(this, "close", "", call, serializeTrace);
 }
 
 }  // namespace engine::store

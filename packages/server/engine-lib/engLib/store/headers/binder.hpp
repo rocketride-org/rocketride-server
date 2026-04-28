@@ -56,20 +56,7 @@ private:
                        std::unique_ptr<std::vector<IServiceFilterInstance *>>>
         methodMap;
 
-    // Per-call dispatch filter used by conditional routers (e.g. flow_if_else).
-    // Empty → broadcast (default, identical to pre-filter behaviour).
-    // Non-empty → callMethods skips every instance whose pipeType.id differs.
-    // Not thread-safe: assumes single-threaded dispatch per pipeline.
-    // Future: promote to unordered_set<string> for parallel multi-target fan-out,
-    //         or add mutex/thread_local if multi-threaded dispatch is introduced.
-    std::string m_targetFilter;
-
 public:
-    // By-value + move: Python side hands us an rvalue std::string from
-    // pybind11, and Binder stores it verbatim. Avoids the extra copy the
-    // old const-ref signature forced at the boundary.
-    void setTargetFilter(std::string nodeId) noexcept { m_targetFilter = std::move(nodeId); }
-
     static constexpr std::array<const char *, 15> MethodNames = {
         "open",
         "tags",
@@ -103,36 +90,58 @@ public:
     virtual std::vector<std::string> getListeners() noexcept;
     virtual bool hasListener(const std::string &methodName) noexcept;
 
+    // `targetNodeId` empty → broadcast to every bound instance on the
+    // lane (default, pre-PR behaviour). Non-empty → dispatch only to
+    // the instance whose `pipeType.id == targetNodeId`. Used by
+    // conditional routers (e.g. `flow/base`) to deliver one chunk to
+    // a single chosen branch target without leaving any state on the
+    // Binder between calls.
     static Error callMethods(
         Binder *pThis, const std::string &methodName,
+        const std::string &targetNodeId,
         std::function<Error(IServiceFilterInstance *)> fcn,
         std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
             serializeTrace) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		Methods that we support
+    ///		Methods that we support. Every content-bearing writeXxx
+    ///		takes an optional `targetNodeId`; when empty the call
+    ///		broadcasts to all bound listeners (default), when non-empty
+    ///		it is delivered only to the listener whose pipeType.id
+    ///		matches.
     //-----------------------------------------------------------------
     virtual Error open(Entry &entry) noexcept;
     virtual Error writeTag(const TAG *pTag) noexcept;
-    virtual Error writeText(const Utf16View &text) noexcept;
-    virtual Error writeTable(const Utf16View &text) noexcept;
-    virtual Error writeWords(const WordVector &textWords) noexcept;
+    virtual Error writeText(const Utf16View &text,
+                            const std::string &targetNodeId = "") noexcept;
+    virtual Error writeTable(const Utf16View &text,
+                             const std::string &targetNodeId = "") noexcept;
+    virtual Error writeWords(const WordVector &textWords,
+                             const std::string &targetNodeId = "") noexcept;
     virtual Error writeAudio(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData) noexcept;
+                             const pybind11::bytes &streamData,
+                             const std::string &targetNodeId = "") noexcept;
     virtual Error writeVideo(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData) noexcept;
+                             const pybind11::bytes &streamData,
+                             const std::string &targetNodeId = "") noexcept;
     virtual Error writeImage(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData) noexcept;
-    virtual Error writeQuestions(const pybind11::object &question) noexcept;
-    virtual Error writeAnswers(const pybind11::object &answers) noexcept;
+                             const pybind11::bytes &streamData,
+                             const std::string &targetNodeId = "") noexcept;
+    virtual Error writeQuestions(const pybind11::object &question,
+                                 const std::string &targetNodeId = "") noexcept;
+    virtual Error writeAnswers(const pybind11::object &answers,
+                               const std::string &targetNodeId = "") noexcept;
     virtual Error writeClassifications(
         const json::Value &classifications,
         const json::Value &classificationPolicy,
-        const json::Value &classificationRules) noexcept;
+        const json::Value &classificationRules,
+        const std::string &targetNodeId = "") noexcept;
     virtual Error writeClassificationContext(
-        const json::Value &classifications) noexcept;
-    virtual Error writeDocuments(const pybind11::object &documents) noexcept;
+        const json::Value &classifications,
+        const std::string &targetNodeId = "") noexcept;
+    virtual Error writeDocuments(const pybind11::object &documents,
+                                 const std::string &targetNodeId = "") noexcept;
     virtual Error closing() noexcept;
     virtual Error close() noexcept;
 };

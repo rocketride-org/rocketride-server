@@ -1,0 +1,71 @@
+{
+	"title": "Flow If/Else (Python)",
+	"protocol": "flow_pyeval://",
+	"classType": ["flow_control"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.flow_pyeval",
+	"prefix": "flow_pyeval",
+	"description": ["Two-branch conditional router. The condition is a sandboxed Python ", "expression evaluated against the active lane payload and the current ", "entry. Truthy → THEN, falsy → ELSE. Streaming lanes (image / audio / ", "video) are buffered until END so the condition sees the complete payload."],
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Condition: flow_pyeval.condition"],
+	"lanes": {
+		"*": ["*"]
+	},
+	"branches": ["then", "else"],
+	"preconfig": {
+		"default": "passthrough",
+		"profiles": {
+			"passthrough": {
+				"title": "Pass-through (always THEN)",
+				"flow_pyeval.condition": "True",
+				"flow_pyeval.timeout_s": 5,
+				"flow_pyeval.branches": { "then": [], "else": [] }
+			},
+			"non_empty_text": {
+				"title": "Non-empty text → THEN, empty → ELSE",
+				"flow_pyeval.condition": "len(text) > 0",
+				"flow_pyeval.timeout_s": 5,
+				"flow_pyeval.branches": { "then": [], "else": [] }
+			}
+		}
+	},
+	"fields": {
+		"flow_pyeval.condition": {
+			"type": "string",
+			"title": "Condition",
+			"description": "Python expression. Available bindings: the active lane payload by name (text, table, image, audio, video, questions, answers, documents, classifications), and `obj` for the current entry metadata. Examples: `len(text) > 100`, `image[:4] == b'\\x89PNG'`, `'foo' in text and obj.size >= 1024 * 1024`.",
+			"default": "True"
+		},
+		"flow_pyeval.timeout_s": {
+			"type": "integer",
+			"title": "Timeout (seconds)",
+			"description": "Maximum wall-clock time for a single condition evaluation. Timeout routes to ELSE.",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 60,
+			"optional": true
+		},
+		"flow_pyeval.branches": {
+			"type": "object",
+			"title": "Branch targets",
+			"description": "Maps each branch name to the list of downstream node IDs on that branch. Populated automatically by the canvas when you wire edges from the THEN / ELSE output ports.",
+			"properties": {
+				"then": { "type": "array", "items": { "type": "string" } },
+				"else": { "type": "array", "items": { "type": "string" } }
+			},
+			"default": { "then": [], "else": [] },
+			"optional": true,
+			"hidden": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Flow If/Else (Python)",
+			"properties": ["type", "flow_pyeval.condition", "flow_pyeval.timeout_s"]
+		}
+	]
+}
