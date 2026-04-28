@@ -22,14 +22,20 @@ class _FakeTask:
 
     ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
 
+    def __init__(self):
+        """Initialize per-launch env overrides used by the fake resolver."""
+        self._launch_env = {}
+
     def _resolve_pipeline(self, pipeline):
+        """Resolve `${VAR}` placeholders using allowlisted env sources."""
         pipeline_str = json.dumps(pipeline)
 
         def replacer(match):
+            """Replace one `${VAR}` token while enforcing the allowlist."""
             env_var = match.group(1)
             if env_var.startswith(self.ALLOWED_ENV_PREFIX):
                 # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
+                value = self._launch_env.get(env_var, os.environ.get(env_var, match.group(0)))
                 if value == match.group(0):
                     return value  # placeholder not found
                 return json.dumps(value)[1:-1]  # escape but strip outer quotes
@@ -41,6 +47,7 @@ class _FakeTask:
 
 @pytest.fixture
 def task():
+    """Provide a fresh fake task instance per test."""
     return _FakeTask()
 
 
@@ -52,12 +59,16 @@ def task():
 class TestAllowedEnvVars:
     """Env vars with the ROCKETRIDE_ prefix should be resolved normally."""
 
-    @pytest.mark.parametrize('var_name,value', [
-        ('ROCKETRIDE_API_KEY', 'rr-key-123'),
-        ('ROCKETRIDE_HOST', 'localhost'),
-        ('ROCKETRIDE_DEBUG', 'true'),
-    ])
+    @pytest.mark.parametrize(
+        'var_name,value',
+        [
+            ('ROCKETRIDE_API_KEY', 'rr-key-123'),
+            ('ROCKETRIDE_HOST', 'localhost'),
+            ('ROCKETRIDE_DEBUG', 'true'),
+        ],
+    )
     def test_allowed_prefix_resolves(self, task, var_name, value):
+        """Allowlisted vars should resolve to their env value."""
         with patch.dict(os.environ, {var_name: value}):
             pipeline = {'config': f'${{{var_name}}}'}
             result = task._resolve_pipeline(pipeline)
@@ -70,6 +81,7 @@ class TestAllowedEnvVars:
         assert result['config'] == '${ROCKETRIDE_MISSING}'
 
     def test_multiple_allowed_vars(self, task):
+        """Multiple allowlisted placeholders should all resolve."""
         env = {
             'ROCKETRIDE_HOST': 'localhost',
             'ROCKETRIDE_PORT': '8080',
@@ -78,6 +90,21 @@ class TestAllowedEnvVars:
             pipeline = {'url': '${ROCKETRIDE_HOST}:${ROCKETRIDE_PORT}'}
             result = task._resolve_pipeline(pipeline)
             assert result['url'] == 'localhost:8080'
+
+    def test_launch_env_resolves_allowed_var(self, task):
+        """Launch payload env should resolve allowlisted placeholders."""
+        task._launch_env = {'ROCKETRIDE_HOST': 'from-launch-env'}
+        pipeline = {'host': '${ROCKETRIDE_HOST}'}
+        result = task._resolve_pipeline(pipeline)
+        assert result['host'] == 'from-launch-env'
+
+    def test_launch_env_takes_precedence_over_process_env(self, task):
+        """Launch payload env should override process env for allowlisted vars."""
+        task._launch_env = {'ROCKETRIDE_HOST': 'launch'}
+        with patch.dict(os.environ, {'ROCKETRIDE_HOST': 'process'}):
+            pipeline = {'host': '${ROCKETRIDE_HOST}'}
+            result = task._resolve_pipeline(pipeline)
+            assert result['host'] == 'launch'
 
 
 # ==========================================================================
@@ -88,22 +115,26 @@ class TestAllowedEnvVars:
 class TestBlockedEnvVars:
     """Env vars outside the allowlist must be redacted."""
 
-    @pytest.mark.parametrize('var_name', [
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_ACCESS_KEY_ID',
-        'DATABASE_URL',
-        'PYPI_TOKEN',
-        'GITHUB_TOKEN',
-        'HOME',
-        'PATH',
-        'SSH_PRIVATE_KEY',
-        'OPENAI_API_KEY',
-        'STRIPE_SECRET_KEY',
-        'PIPELINE_MODE',
-        'NODE_ENV',
-        'ROCKET_DEBUG',
-    ])
+    @pytest.mark.parametrize(
+        'var_name',
+        [
+            'AWS_SECRET_ACCESS_KEY',
+            'AWS_ACCESS_KEY_ID',
+            'DATABASE_URL',
+            'PYPI_TOKEN',
+            'GITHUB_TOKEN',
+            'HOME',
+            'PATH',
+            'SSH_PRIVATE_KEY',
+            'OPENAI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'PIPELINE_MODE',
+            'NODE_ENV',
+            'ROCKET_DEBUG',
+        ],
+    )
     def test_sensitive_var_redacted(self, task, var_name):
+        """Sensitive non-allowlisted vars should always be redacted."""
         with patch.dict(os.environ, {var_name: 'super-secret-value'}):
             pipeline = {'leak': f'${{{var_name}}}'}
             result = task._resolve_pipeline(pipeline)
@@ -116,7 +147,16 @@ class TestBlockedEnvVars:
         result = task._resolve_pipeline(pipeline)
         assert result['leak'] == '<REDACTED>'
 
+    def test_launch_env_cannot_bypass_allowlist(self, task):
+        """Launch env cannot bypass redaction for blocked variable names."""
+        task._launch_env = {'AWS_SECRET_ACCESS_KEY': 'super-secret-value'}
+        pipeline = {'leak': '${AWS_SECRET_ACCESS_KEY}'}
+        result = task._resolve_pipeline(pipeline)
+        assert result['leak'] == '<REDACTED>'
+        assert 'super-secret-value' not in json.dumps(result)
+
     def test_mixed_allowed_and_blocked(self, task):
+        """Mixed placeholders should resolve allowlisted and redact blocked vars."""
         env = {
             'ROCKETRIDE_HOST': 'localhost',
             'AWS_SECRET_ACCESS_KEY': 'AKIA...',
@@ -146,10 +186,13 @@ class TestBlockedEnvVars:
 
     def test_inline_mixed_text(self, task):
         """Blocked var embedded in a larger string is still redacted."""
-        with patch.dict(os.environ, {
-            'ROCKETRIDE_HOST': 'myhost',
-            'AWS_SECRET_ACCESS_KEY': 'secret123',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'ROCKETRIDE_HOST': 'myhost',
+                'AWS_SECRET_ACCESS_KEY': 'secret123',
+            },
+        ):
             pipeline = {'cmd': 'connect ${ROCKETRIDE_HOST} using ${AWS_SECRET_ACCESS_KEY}'}
             result = task._resolve_pipeline(pipeline)
             assert 'myhost' in result['cmd']
@@ -163,12 +206,16 @@ class TestBlockedEnvVars:
 
 
 class TestEdgeCases:
+    """Edge-case behavior for placeholder matching and passthrough values."""
+
     def test_no_placeholders(self, task):
+        """Pipelines without placeholders should be returned unchanged."""
         pipeline = {'key': 'plain value'}
         result = task._resolve_pipeline(pipeline)
         assert result == pipeline
 
     def test_empty_pipeline(self, task):
+        """An empty pipeline object should remain empty after resolution."""
         result = task._resolve_pipeline({})
         assert result == {}
 
@@ -237,6 +284,7 @@ class TestJsonInjection:
             assert result['msg'] == payload
 
     def test_tab_and_control_chars_are_escaped(self, task):
+        """Control characters in allowlisted values should survive safely."""
         payload = 'col1\tcol2\x08end'  # tab + backspace; null bytes are rejected by the OS
         with patch.dict(os.environ, {'ROCKETRIDE_DATA': payload}):
             pipeline = {'data': '${ROCKETRIDE_DATA}'}

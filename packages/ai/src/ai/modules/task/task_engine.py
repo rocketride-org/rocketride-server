@@ -111,6 +111,11 @@ class Task(DAPBase):
         _termination_lock (asyncio.Lock): Atomic termination operations
     """
 
+    # Only environment variables with this prefix are permitted to resolve in pipelines.
+    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
+    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+    ALLOWED_ENV_NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
 
@@ -297,15 +302,37 @@ class Task(DAPBase):
 
         # Store complete configuration
         self._launch_args = launch_args
+        self._launch_env: Dict[str, str] = self._sanitize_launch_env(launch_args.get('env'))
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    # Only environment variables with this prefix are permitted to resolve in pipelines.
-    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
-    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+    def _sanitize_launch_env(self, env: Any) -> Dict[str, str]:
+        """
+        Keep only safe runtime env overrides supplied by the client.
+
+        Accepted keys must:
+        - be strings
+        - start with ALLOWED_ENV_PREFIX
+        - match shell env naming rules
+        """
+        if not isinstance(env, dict):
+            return {}
+
+        result: Dict[str, str] = {}
+        for key, value in env.items():
+            if not isinstance(key, str):
+                continue
+            if not key.startswith(self.ALLOWED_ENV_PREFIX):
+                continue
+            if not self.ALLOWED_ENV_NAME_PATTERN.match(key):
+                continue
+            if value is None:
+                continue
+            result[key] = str(value)
+        return result
 
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -329,7 +356,7 @@ class Task(DAPBase):
             env_var = match.group(1)
             if env_var.startswith(self.ALLOWED_ENV_PREFIX):
                 # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
+                value = self._launch_env.get(env_var, os.environ.get(env_var, match.group(0)))
                 if value == match.group(0):
                     return value  # placeholder not found
                 return json.dumps(value)[1:-1]  # escape but strip outer quotes
@@ -1353,6 +1380,7 @@ class Task(DAPBase):
         project_id: str,
         source: str,
         provider: str,
+        env: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Restart the task with new pipeline configuration.
@@ -1386,6 +1414,9 @@ class Task(DAPBase):
 
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
+
+            self._launch_env = self._sanitize_launch_env(env)
+            self._launch_args['env'] = dict(self._launch_env)
 
             # Update internal task configuration
             self._pipeline = pipeline
@@ -1554,10 +1585,16 @@ class Task(DAPBase):
 
             # Launch subprocess - pass environment with account context for store access
             subprocess_env = os.environ.copy()
+            subprocess_env.update(self._launch_env)
             subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+            launch_client_id = self._launch_env.get('ROCKETRIDE_CLIENT_ID')
+            if launch_client_id is not None and launch_client_id != self.client_id:
+                self.debug_message(f'Server overrode client-supplied ROCKETRIDE_CLIENT_ID while preparing subprocess_env (launch={launch_client_id!r}, server={self.client_id!r})')
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
+                if 'ROCKETRIDE_MOCK' in self._launch_env:
+                    self.debug_message(f'avoidMocks from self._pipeline stripped ROCKETRIDE_MOCK from subprocess_env (launch={self._launch_env.get("ROCKETRIDE_MOCK")!r})')
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
 
             self._engine_process = await asyncio.create_subprocess_exec(
