@@ -95,13 +95,13 @@ class CreditBalance(TypedDict):
 
     Attributes:
         balance: Current unspent credit balance for the org.
-        lifetime_purchased: Total credits ever purchased.
-        lifetime_consumed: Total credits ever consumed.
+        lifetimePurchased: Total credits ever purchased.
+        lifetimeConsumed: Total credits ever consumed.
     """
 
     balance: int
-    lifetime_purchased: int
-    lifetime_consumed: int
+    lifetimePurchased: int
+    lifetimeConsumed: int
 
 
 class CreditPack(TypedDict):
