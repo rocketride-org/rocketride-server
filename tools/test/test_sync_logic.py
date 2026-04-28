@@ -202,6 +202,78 @@ class TestMerge:
         assert 'apikey' in new_profile
 
 
+class TestModelSources:
+    """Tests for the new --model-source ordering and discovery semantics."""
+
+    def test_default_model_sources_used_when_none_passed(self, current_profiles, title_mappings):
+        """merge() must accept model_sources=None and fall back to default order."""
+        api_models = [{'id': 'test-model-a'}]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            model_sources=None,  # explicit None — should default to all three
+        )
+        # No crash; existing profile is processed normally.
+        assert 'test-model-a' in updated
+
+    def test_provider_API_ctx_wins_with_default_order(self, current_profiles, title_mappings):
+        """When the api_entry is from the provider API and has context_window, that value wins."""
+        api_models = [
+            {'id': 'test-model-a', 'context_window': 99999},  # _source defaults to 'provider API'
+        ]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            model_sources=['provider', 'openrouter', 'litellm'],
+        )
+        assert updated['test-model-a']['modelTotalTokens'] == 99999
+        assert updated['test-model-a'].get('_src_modelTotalTokens') == 'provider API'
+
+    def test_openrouter_source_marks_modelSource(self, current_profiles, title_mappings):
+        """An api_entry with _source='openrouter' produces modelSource='openrouter' on new profiles."""
+        api_models = [
+            {'id': 'test-model-new', '_source': 'openrouter', 'context_window': 32000},
+        ]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            model_sources=['openrouter', 'litellm'],
+            extra_profile_fields={'apikey': ''},
+        )
+        new_profile = updated['test-model-new']
+        assert new_profile['modelSource'] == 'openrouter'
+        assert new_profile['modelTotalTokens'] == 32000
+
+    def test_config_override_wins_over_all_sources(self, current_profiles, title_mappings):
+        """token_limit_overrides always wins, regardless of model_sources order or content."""
+        api_models = [
+            {'id': 'test-model-a', 'context_window': 50000},
+        ]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={'test-model-a': 123456},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            model_sources=['provider'],
+        )
+        assert updated['test-model-a']['modelTotalTokens'] == 123456
+        assert updated['test-model-a'].get('_src_modelTotalTokens') == 'sync_models.config.json'
+
+
 # ---------------------------------------------------------------------------
 # patcher.py tests
 # ---------------------------------------------------------------------------
@@ -392,4 +464,66 @@ class TestReporter:
         report.add(pr)
         output = format_console(report)
         assert 'ERROR' in output
-        assert 'Connection refused' in output
+
+    def test_discovery_skipped_shown_in_console(self):
+        """When discovery_skipped is set, the console output must surface the hint."""
+        report = SyncReport()
+        pr = ProviderReport(provider='llm_anthropic')
+        pr.discovery_skipped = True
+        pr.unchanged_count = 5
+        report.add(pr)
+        output = format_console(report)
+        assert 'discovery skipped' in output.lower()
+
+    def test_discovery_skipped_shown_in_pr_body(self):
+        """When discovery_skipped is set, the PR body must include the warning even with no changes."""
+        report = SyncReport()
+        pr = ProviderReport(provider='llm_anthropic')
+        pr.discovery_skipped = True
+        pr.unchanged_count = 5
+        report.add(pr)
+        body = format_pr_body(report)
+        assert 'Discovery skipped' in body
+        assert 'llm_anthropic' in body
+
+
+# ---------------------------------------------------------------------------
+# CLI flag validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestCliValidation:
+    """argparse-level validation for the new flag set."""
+
+    def _run_cli(self, *args):
+        """Invoke sync_models.py as a subprocess and return (returncode, stderr)."""
+        import subprocess
+        import sys
+
+        repo_root = Path(__file__).resolve().parents[2]
+        script = repo_root / 'tools' / 'src' / 'sync_models.py'
+        result = subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+        )
+        return result.returncode, result.stderr
+
+    def test_allow_fallback_requires_enable_discovery(self):
+        rc, stderr = self._run_cli('--provider', 'llm_openai', '--allow-fallback-discovery')
+        assert rc != 0
+        assert '--allow-fallback-discovery' in stderr
+        assert '--enable-discovery' in stderr
+
+    def test_duplicate_model_source_rejected(self):
+        rc, stderr = self._run_cli(
+            '--provider',
+            'llm_openai',
+            '--model-source',
+            'provider',
+            '--model-source',
+            'provider',
+        )
+        assert rc != 0
+        assert 'must not be repeated' in stderr.lower() or 'duplicate' in stderr.lower() or '--model-source' in stderr

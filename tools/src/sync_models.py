@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 try:
     from dotenv import load_dotenv
@@ -144,10 +144,9 @@ def sync_provider(
     config: Dict[str, Any],
     repo_root: Path,
     apply: bool,
-    litellm_only: bool = False,
-    openrouter_only: bool = False,
-    use_litellm: bool = True,
-    use_openrouter: bool = True,
+    model_sources: List[str] | None = None,
+    enable_discovery: bool = False,
+    allow_fallback_discovery: bool = False,
     use_config_overrides: bool = True,
 ) -> 'ProviderReport':  # noqa: F821
     """
@@ -158,6 +157,11 @@ def sync_provider(
         config: Full parsed sync_models.config.json
         repo_root: Absolute path to the repository root
         apply: If True, write changes to disk; otherwise dry-run
+        model_sources: Ordered list of sources (``"provider"``, ``"openrouter"``,
+            ``"litellm"``).  Defaults to all three in that order.
+        enable_discovery: If True, allow new model profiles to be added.
+        allow_fallback_discovery: If True, OpenRouter/LiteLLM may discover models
+            for providers without API keys.  Requires ``enable_discovery``.
 
     Returns:
         ProviderReport
@@ -218,10 +222,9 @@ def sync_provider(
         extra_profile_fields=_DEFAULT_EXTRA_FIELDS,
         apply=apply,
         services_json_path=str(services_path),
-        litellm_only=litellm_only,
-        openrouter_only=openrouter_only,
-        use_litellm=use_litellm,
-        use_openrouter=use_openrouter,
+        model_sources=model_sources,
+        enable_discovery=enable_discovery,
+        allow_fallback_discovery=allow_fallback_discovery,
         use_config_overrides=use_config_overrides,
         global_protected_profiles=global_protected,
     )
@@ -264,28 +267,25 @@ def main() -> int:
         help='Output a GitHub PR body in markdown format (for CI/CD use)',
     )
     parser.add_argument(
-        '--litellm-only',
-        action='store_true',
-        default=False,
-        help=('Use LiteLLM database as the sole model source — no provider API calls, no smoke tests, no API key required. Exits with an error if litellm is not installed.'),
+        '--model-source',
+        choices=['provider', 'openrouter', 'litellm'],
+        action='append',
+        dest='model_sources',
+        default=None,
+        metavar='SOURCE',
+        help=("Source to consult for model lists and token data. Repeatable. Order matters — the first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: 'provider', 'openrouter', 'litellm' (in that order)."),
     )
     parser.add_argument(
-        '--no-litellm',
+        '--enable-discovery',
         action='store_true',
         default=False,
-        help='Disable LiteLLM entirely — token limits come only from provider APIs, OpenRouter, and config overrides.',
+        help=("Allow new model profiles to be added to services.json. Default off — without this flag, the sync only enriches existing profiles' token data and deprecation status."),
     )
     parser.add_argument(
-        '--no-openrouter',
+        '--allow-fallback-discovery',
         action='store_true',
         default=False,
-        help='Disable OpenRouter fallback — token limits come only from provider APIs, LiteLLM, and config overrides.',
-    )
-    parser.add_argument(
-        '--openrouter-only',
-        action='store_true',
-        default=False,
-        help=('Use OpenRouter as the sole model source — no provider API calls, no smoke tests, no API key required.'),
+        help=('Permit OpenRouter/LiteLLM to act as discovery sources for providers whose API key is missing. Requires --enable-discovery. Default off — strict mode skips discovery for providers without keys (existing profiles still enriched).'),
     )
     parser.add_argument(
         '--no-config-overrides',
@@ -295,34 +295,30 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.litellm_only and args.no_litellm:
+    # --- Validate / normalise --model-source ---
+    if args.model_sources is None:
+        args.model_sources = ['provider', 'openrouter', 'litellm']
+    if len(args.model_sources) != len(set(args.model_sources)):
         print(
-            'ERROR: --litellm-only and --no-litellm are mutually exclusive.',
+            'ERROR: --model-source values must not be repeated.',
             file=sys.stderr,
         )
         return 1
 
-    if args.openrouter_only and args.no_openrouter:
+    # --- Validate flag combinations ---
+    if args.allow_fallback_discovery and not args.enable_discovery:
         print(
-            'ERROR: --openrouter-only and --no-openrouter are mutually exclusive.',
+            'ERROR: --allow-fallback-discovery requires --enable-discovery.',
             file=sys.stderr,
         )
         return 1
 
-    if args.openrouter_only and args.litellm_only:
+    if 'litellm' in args.model_sources and not _LITELLM_AVAILABLE:
         print(
-            'ERROR: --openrouter-only and --litellm-only are mutually exclusive.',
+            'ERROR: --model-source litellm requires litellm to be installed.\n       Run: pip install litellm',
             file=sys.stderr,
         )
         return 1
-
-    if args.litellm_only:
-        if not _LITELLM_AVAILABLE:
-            print(
-                'ERROR: --litellm-only requires litellm to be installed.\n       Run: pip install litellm',
-                file=sys.stderr,
-            )
-            return 1
 
     try:
         config = _load_config()
@@ -339,11 +335,9 @@ def main() -> int:
     providers_config = config.get('providers', {})
     providers_to_sync = sorted(k for k in _PROVIDER_REGISTRY if providers_config.get(k, {}).get('enabled', True) is not False) if args.all else args.providers
 
-    use_openrouter = not args.no_openrouter and not args.litellm_only
-
     # Pre-load OpenRouter cache once before the provider loop so the header
     # status is accurate and all per-model lookups hit the in-memory dict.
-    if use_openrouter or args.openrouter_only:
+    if 'openrouter' in args.model_sources:
         get_openrouter_cache()
 
     report = SyncReport(
@@ -358,10 +352,9 @@ def main() -> int:
             config=config,
             repo_root=repo_root,
             apply=args.apply,
-            litellm_only=args.litellm_only,
-            openrouter_only=args.openrouter_only,
-            use_litellm=not args.no_litellm,
-            use_openrouter=use_openrouter,
+            model_sources=list(args.model_sources),
+            enable_discovery=args.enable_discovery,
+            allow_fallback_discovery=args.allow_fallback_discovery,
             use_config_overrides=not args.no_config_overrides,
         )
         report.add(pr)

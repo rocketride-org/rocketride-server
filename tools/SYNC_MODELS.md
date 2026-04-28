@@ -31,37 +31,36 @@ The `--models` flag forwards arguments directly to `sync_models.py`.
 
 ### Flags
 
-| Flag                    | Description                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--provider PROVIDER`   | Sync one or more specific providers (repeatable)                                                                                            |
-| `--all`                 | Sync all registered providers                                                                                                               |
-| `--apply`               | Write changes to disk. Without this flag runs in **dry-run mode**                                                                           |
-| `--litellm-only`        | Use LiteLLM database as sole model source — no API calls, no smoke tests, no key required. Exits with error if litellm is not installed     |
-| `--no-litellm`          | Disable LiteLLM entirely — token limits come only from provider APIs, OpenRouter, and config overrides                                      |
-| `--openrouter-only`     | Use OpenRouter as sole model source — no API calls, no smoke tests, no key required                                                         |
-| `--no-openrouter`       | Disable OpenRouter fallback — token limits come only from provider APIs, LiteLLM, and config overrides                                      |
-| `--no-config-overrides` | Ignore `token_limit_overrides` and `model_output_tokens.overrides` from the config file — token limits come entirely from live data sources |
-| `--pr-body`             | Print a GitHub PR body (markdown). Also writes to `GITHUB_ENV` for CI                                                                       |
+| Flag                         | Description                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--provider PROVIDER`        | Sync one or more specific providers (repeatable)                                                                                                                                                                                                                                                                                                |
+| `--all`                      | Sync all registered providers                                                                                                                                                                                                                                                                                                                   |
+| `--apply`                    | Write changes to disk. Without this flag runs in **dry-run mode**                                                                                                                                                                                                                                                                               |
+| `--model-source SOURCE`      | Source to consult for model lists and token data. Repeatable. Values: `provider`, `openrouter`, `litellm`. Order matters — first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: `provider openrouter litellm` (in that order).                                                        |
+| `--enable-discovery`         | Allow new model profiles to be added to `services.json`. Default off — without this flag, the sync only enriches existing profiles' token data and deprecation status. Never adds or removes profile keys.                                                                                                                                      |
+| `--allow-fallback-discovery` | Permit `openrouter`/`litellm` to act as discovery sources for providers whose API key is missing. Requires `--enable-discovery`. Default off — strict mode skips discovery for providers without keys (existing profiles still enriched). Use only when you intentionally want to introduce model IDs the native runtime SDK may not recognise. |
+| `--no-config-overrides`      | Ignore `token_limit_overrides` and `model_output_tokens.overrides` from the config file — token limits come entirely from live data sources                                                                                                                                                                                                     |
+| `--pr-body`                  | Print a GitHub PR body (markdown). Also writes to `GITHUB_ENV` for CI                                                                                                                                                                                                                                                                           |
 
-Mutually exclusive pairs: `--litellm-only` / `--no-litellm`, `--openrouter-only` / `--no-openrouter`, `--openrouter-only` / `--litellm-only`.
+Validation: `--model-source` may not list duplicate values. `--allow-fallback-discovery` requires `--enable-discovery`.
 
 ### Examples
 
 ```bash
-# Dry-run a single provider
+# Default: dry-run, enrichment-only — updates token data on existing profiles, no new profiles added
 python tools/src/sync_models.py --provider llm_openai
 
-# Dry-run multiple providers
-python tools/src/sync_models.py --provider llm_mistral --provider llm_openai
+# Production CI path: discovery on, strict mode — only providers with keys get new profiles
+python tools/src/sync_models.py --all --enable-discovery --apply
 
-# Apply changes for all providers
-python tools/src/sync_models.py --all --apply
+# Dev workflow without API keys, explicit fallback opt-in (may add OpenRouter aliases)
+python tools/src/sync_models.py --provider llm_openai --enable-discovery --allow-fallback-discovery
 
-# Use LiteLLM database only (no API key needed)
-python tools/src/sync_models.py --all --litellm-only --apply
+# Custom source ordering — LiteLLM first for token data, OpenRouter as backup, no provider API
+python tools/src/sync_models.py --provider llm_openai --model-source litellm --model-source openrouter
 
-# Skip LiteLLM, use only provider API + config overrides
-python tools/src/sync_models.py --provider llm_openai --no-litellm
+# Discovery from OpenRouter alone, suitable for an aggregator-style node
+python tools/src/sync_models.py --provider llm_openai --model-source openrouter --enable-discovery --allow-fallback-discovery
 ```
 
 ---
@@ -87,39 +86,48 @@ Set keys in a `.env` file in the repo root or export them in the shell.
 
 ## How It Works
 
-### Pipeline (normal mode)
+### Pipeline
 
 ```
-Provider API  →  filter  →  smoke test (new models only)  →  merge  →  services.json
+Pick primary source  →  fetch model list  →  discovery gate  →  smoke test (provider-discovered new models only)  →  merge  →  services.json
 ```
 
-1. **Fetch** — calls the provider's `/v1/models` (or equivalent) endpoint
-2. **Filter** — applies `model_filter` rules from `sync_models.config.json`
-3. **Smoke test** — for each _new_ model, makes a minimal chat/embed call to confirm it is usable with the given API key. Existing models are not re-tested.
-4. **Merge** — smart merge into `preconfig.profiles`:
+1. **Pick primary source** — walk `--model-source` in order, take the first source whose prerequisite is satisfied for this provider:
+
+   - `provider`: provider API key env var is set.
+   - `openrouter`: OpenRouter cache loaded (no auth required).
+   - `litellm`: `litellm` package importable.
+
+   If none qualify, the provider is skipped with a warning.
+
+2. **Fetch model list** — call the source's API or read its database.
+3. **Discovery gate** — if `--enable-discovery` is off, drop new models from the list (only existing profiles get enriched). If discovery is on but no source qualifies for discovery (because the provider key is missing and `--allow-fallback-discovery` is off), drop new models too and flag the provider as `discovery_skipped` in the report.
+4. **Smoke test** — only when (a) discovery is on, (b) the discovery source is `provider`, (c) the API key is set. New models are smoke-tested via the native API. Discovery from `openrouter` or `litellm` skips smoke testing — there is no client to invoke.
+5. **Merge** — smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
    - Existing model → update token limits if authoritative data differs; preserve title and other manual fields
-   - Model no longer in API → mark `"deprecated": true`
+   - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`)
    - Model in `protected_profiles` → never deprecated (e.g. `"custom"`)
 
 ### Token limit resolution (priority order)
 
-1. `token_limit_overrides` in `sync_models.config.json` — always wins
-2. `context_window` returned by the provider API (Gemini returns it; most others don't)
-3. **OpenRouter** — `https://openrouter.ai/api/v1/models`, no auth, fetched once per run
-4. LiteLLM model database (`litellm.get_model_info`) — wide coverage but known accuracy issues (e.g. Anthropic context window)
-5. `default_context_window` in provider config
-6. `16384` — global last resort (flagged as `?` estimated in output)
+1. `token_limit_overrides` in `sync_models.config.json` — always wins.
+2. First available source listed in `--model-source`, in the order given. Default order is `provider` → `openrouter` → `litellm`.
+3. `default_context_window` in provider config.
+4. `16384` — global last resort (flagged as `?` estimated in output).
 
-The same order applies to output tokens: `model_output_tokens.overrides` → OpenRouter `max_completion_tokens` → LiteLLM `max_output_tokens` → `model_output_tokens.defaults.chat`.
+The same priority applies to output tokens: `model_output_tokens.overrides` → first source in `--model-source` order with data → `model_output_tokens.defaults.chat` (or `defaults.embedding` for embedding providers).
 
-### `--litellm-only` mode
+### Discovery vs enrichment
 
-Skips provider API calls and smoke tests entirely. Iterates `litellm.model_cost`,
-strips provider prefixes (e.g. `"mistral/ministral-8b-latest"` → `"ministral-8b-latest"`),
-applies the same filter rules, and runs the same merge. No API key required.
-Also disables OpenRouter (litellm is the sole source).
-Useful for an initial bulk population of token limits.
+The sync has two distinct modes:
+
+- **Enrichment-only (default)** — refreshes `modelTotalTokens`, `modelOutputTokens`, `modelSource` provenance, and `deprecated`/`migration` fields on profiles already in `services.json`. Never adds or removes profile keys. Safe to run anywhere; no API key required.
+- **Discovery (with `--enable-discovery`)** — additionally adds new profiles found in the configured sources. The discovery source for each provider is the first `--model-source` entry whose prerequisite is satisfied (and which is permitted for discovery — see below).
+
+**Strict discovery (default when `--enable-discovery` is set)**: only the `provider` source can introduce new profiles. If the provider's API key is missing, that provider runs enrichment-only and the report shows `discovery skipped — set ROCKETRIDE_APIKEY_<PROVIDER>`. This is the production-safe mode: profiles in `services.json` only ever come from the native API, so they are guaranteed to be invokable through the native SDK.
+
+**Loose discovery (`--allow-fallback-discovery`)**: opt in to letting `openrouter` or `litellm` serve as discovery sources. Useful for initial bulk-populating profiles in dev or for nodes that legitimately route through OpenRouter. **Risk**: OpenRouter routing aliases (e.g. `claude-opus-4-6-fast`) may be added as profiles even though they are not valid IDs for the native provider SDK. Use only when you understand the trade-off.
 
 ---
 
@@ -284,9 +292,11 @@ pytest tools/test/test_sync_live.py
 `.github/workflows/sync-models.yml` runs every Monday at 05:00 UTC and on
 manual dispatch. It:
 
-1. Runs a dry-run first (`python tools/src/sync_models.py --all`) — fails fast if the script errors
-2. Runs with `--apply --pr-body` to write changes and capture the report
-3. Opens a PR via `peter-evans/create-pull-request` with the report as the body
+1. Runs a dry-run first (`python tools/src/sync_models.py --all --enable-discovery`) — fails fast if the script errors.
+2. Runs with `--apply --pr-body` to write changes and capture the report.
+3. Opens a PR via `peter-evans/create-pull-request` with the report as the body.
+
+The workflow uses `--enable-discovery` (so model lists grow over time) but **does NOT** use `--allow-fallback-discovery`. This is intentional: when a provider's secret is missing from the GitHub Actions environment, the resulting PR body shows `Discovery skipped — set ROCKETRIDE_APIKEY_<PROVIDER>` for that provider. A reviewer sees the gap and can decide whether to add the secret rather than silently shipping fallback-discovered profiles to production.
 
 Provider API keys are stored as GitHub Actions secrets named
 `ROCKETRIDE_APIKEY_<PROVIDER>` (see `.github/workflows/sync-models.yml` for

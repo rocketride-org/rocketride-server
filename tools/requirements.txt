@@ -11,9 +11,13 @@ json5
 # .env file loading
 python-dotenv
 
-# LiteLLM — model database (context windows, token limits) for all providers
-litellm
+# LiteLLM — model database (context windows, token limits) for all providers.
+# Pinned to a compatible-release range (>=1.50,<2.0) so the weekly CI doesn't
+# break on a major-version bump.  Bump the floor when intentionally adopting
+# new fields from a later release.
+litellm~=1.50
 
 # Test dependencies
 pytest
 pytest-asyncio
+pytest-timeout

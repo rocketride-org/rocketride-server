@@ -345,8 +345,7 @@ def merge(
     extra_profile_fields: Dict[str, Any] | None = None,
     provider_default_context_window: int | None = None,
     protected_profile_keys: set | None = None,
-    use_litellm: bool = True,
-    use_openrouter: bool = True,
+    model_sources: List[str] | None = None,
     normalize_profile_model_id=None,
     deprecation_source: str = 'provider API',
     derive_title_fn=None,
@@ -384,6 +383,11 @@ def merge(
     Returns:
         Tuple of (updated_profiles dict, MergeResult describing what changed)
     """
+    if model_sources is None:
+        model_sources = ['provider', 'openrouter', 'litellm']
+    _use_openrouter = 'openrouter' in model_sources
+    _use_litellm = 'litellm' in model_sources
+
     _norm = normalize_profile_model_id  # short alias; None = identity
 
     # Build lookup: model_id → api entry
@@ -487,9 +491,9 @@ def merge(
         _model_source: str = _source_to_model_source.get(_api_entry_source, 'provider')
         _api_entry_out = api_entry.get('max_output_tokens')
         _api_entry_name: Optional[str] = api_entry.get('name')
-        _or_ctx, _or_out, _or_name, _or_exp = _openrouter_info(_token_lookup_id) if use_openrouter else (None, None, None, None)
+        _or_ctx, _or_out, _or_name, _or_exp = _openrouter_info(_token_lookup_id) if _use_openrouter else (None, None, None, None)
         _display_name: Optional[str] = _api_entry_name or _or_name
-        _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if use_litellm else (None, None)
+        _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if _use_litellm else (None, None)
         # Cast to int — config/litellm/openrouter values may arrive as float or str
         _override = int(_override) if _override is not None else None
         _api_ctx = int(_api_ctx) if _api_ctx is not None else None
@@ -499,45 +503,82 @@ def merge(
         _litellm_ctx = int(_litellm_ctx) if _litellm_ctx is not None else None
         _litellm_out = int(_litellm_out) if _litellm_out is not None else None
 
-        # Determine winning source for total tokens (for provenance annotation)
+        # Determine winning source for total tokens (for provenance annotation).
+        # Config override always wins; otherwise walk model_sources in order and
+        # take the first source that has data for this model.
+        authoritative_total_tokens: int | None = None
+        total_tokens_src: str | None = None
         if _override is not None:
-            authoritative_total_tokens: int | None = _override
+            authoritative_total_tokens = _override
             total_tokens_src = 'sync_models.config.json'
-        elif _api_ctx is not None:
-            authoritative_total_tokens = _api_ctx
-            total_tokens_src = _api_entry_source  # 'provider API' or 'openrouter' (fallback mode)
-        elif _or_ctx is not None:
-            authoritative_total_tokens = _or_ctx
-            total_tokens_src = 'openrouter'
-        elif _litellm_ctx is not None:
-            authoritative_total_tokens = _litellm_ctx
-            total_tokens_src = 'litellm'
         else:
-            authoritative_total_tokens = None
-            total_tokens_src = None
+            for _src in model_sources:
+                if _src == 'provider' and _api_entry_source == 'provider API' and _api_ctx is not None:
+                    authoritative_total_tokens = _api_ctx
+                    total_tokens_src = 'provider API'
+                    break
+                if _src == 'openrouter':
+                    # When OpenRouter is the primary discovery source the ctx is in _api_ctx;
+                    # otherwise it's in the supplemental _or_ctx lookup.
+                    if _api_entry_source == 'openrouter' and _api_ctx is not None:
+                        authoritative_total_tokens = _api_ctx
+                        total_tokens_src = 'openrouter'
+                        break
+                    if _or_ctx is not None:
+                        authoritative_total_tokens = _or_ctx
+                        total_tokens_src = 'openrouter'
+                        break
+                if _src == 'litellm':
+                    if _api_entry_source == 'litellm' and _api_ctx is not None:
+                        authoritative_total_tokens = _api_ctx
+                        total_tokens_src = 'litellm'
+                        break
+                    if _litellm_ctx is not None:
+                        authoritative_total_tokens = _litellm_ctx
+                        total_tokens_src = 'litellm'
+                        break
 
-        # Determine winning source for output tokens (for provenance annotation)
+        # Determine winning source for output tokens (for provenance annotation).
         if _token_lookup_id in output_token_overrides:
             _out_override = output_token_overrides[_token_lookup_id]
         elif model_id in output_token_overrides:
             _out_override = output_token_overrides[model_id]
         else:
             _out_override = None
+        api_output_tokens: int
+        output_tokens_src: str
         if _out_override is not None:
-            api_output_tokens: int = int(_out_override)
+            api_output_tokens = int(_out_override)
             output_tokens_src = 'sync_models.config.json'
-        elif _api_entry_out is not None:
-            api_output_tokens = _api_entry_out
-            output_tokens_src = _api_entry_source  # 'openrouter' when it's the fallback source
-        elif _or_out is not None:
-            api_output_tokens = _or_out
-            output_tokens_src = 'openrouter'
-        elif _litellm_out is not None:
-            api_output_tokens = _litellm_out
-            output_tokens_src = 'litellm'
         else:
-            api_output_tokens = int(default_output_tokens)
+            api_output_tokens = -1  # sentinel — replaced below
             output_tokens_src = 'default'
+            for _src in model_sources:
+                if _src == 'provider' and _api_entry_source == 'provider API' and _api_entry_out is not None:
+                    api_output_tokens = _api_entry_out
+                    output_tokens_src = 'provider API'
+                    break
+                if _src == 'openrouter':
+                    if _api_entry_source == 'openrouter' and _api_entry_out is not None:
+                        api_output_tokens = _api_entry_out
+                        output_tokens_src = 'openrouter'
+                        break
+                    if _or_out is not None:
+                        api_output_tokens = _or_out
+                        output_tokens_src = 'openrouter'
+                        break
+                if _src == 'litellm':
+                    if _api_entry_source == 'litellm' and _api_entry_out is not None:
+                        api_output_tokens = _api_entry_out
+                        output_tokens_src = 'litellm'
+                        break
+                    if _litellm_out is not None:
+                        api_output_tokens = _litellm_out
+                        output_tokens_src = 'litellm'
+                        break
+            if api_output_tokens < 0:
+                api_output_tokens = int(default_output_tokens)
+                output_tokens_src = 'default'
 
         if profile_key is None:
             # Skip models that arrive already deprecated from their discovery source
@@ -691,12 +732,25 @@ def merge(
             updated_profiles[key]['modelSource'] = 'manual'
             updated_fields.append((key, 'modelSource', None, 'manual'))
         # modelOutputTokens backfill only for active profiles.
-        if profile.get('deprecated'):
-            continue
-        if 'modelOutputTokens' not in profile:
+        if not profile.get('deprecated') and 'modelOutputTokens' not in profile:
             updated_profiles[key]['modelOutputTokens'] = int(default_output_tokens)
             updated_profiles[key]['_src_modelOutputTokens'] = 'default'
             updated_fields.append((key, 'modelOutputTokens', None, int(default_output_tokens)))
+
+    # --- Pass 4: ensure every token value carries a source annotation ---
+    # If Pass 1 didn't establish provenance for a token field (e.g. because the
+    # profile's model wasn't in the current source's response), label it 'manual'.
+    # This guarantees the patcher emits a // source comment on every token line,
+    # making the file self-documenting.
+    for key, profile in updated_profiles.items():
+        if not isinstance(profile, dict):
+            continue
+        if not profile.get('model'):
+            continue
+        if 'modelTotalTokens' in profile and '_src_modelTotalTokens' not in profile:
+            profile['_src_modelTotalTokens'] = 'manual'
+        if 'modelOutputTokens' in profile and '_src_modelOutputTokens' not in profile:
+            profile['_src_modelOutputTokens'] = 'manual'
 
     return updated_profiles, MergeResult(
         added=added,

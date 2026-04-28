@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from core.merger import _derive_title, get_openrouter_cache, merge
+from core.merger import _derive_title, _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available, merge
 from core.patcher import patch, _find_fields_block, _repair_field_objects
 from core.reporter import ProviderReport
 from core.smoke import run as smoke_run, SmokeResult
@@ -267,15 +267,14 @@ class CloudProvider(ABC):
         extra_profile_fields: Dict[str, Any] | None,
         apply: bool,
         services_json_path: str,
-        litellm_only: bool = False,
-        openrouter_only: bool = False,
-        use_litellm: bool = True,
-        use_openrouter: bool = True,
+        model_sources: List[str] | None = None,
+        enable_discovery: bool = False,
+        allow_fallback_discovery: bool = False,
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
     ) -> ProviderReport:
         """
-        Full sync pipeline: fetch → filter → smoke-test new models → merge.
+        Full sync pipeline: pick source → fetch → discovery gate → smoke (if applicable) → merge.
 
         Args:
             current_profiles: Current profiles dict from the node's services.json
@@ -285,154 +284,143 @@ class CloudProvider(ABC):
             extra_profile_fields: Fields to add to every new profile (e.g. {"apikey": ""})
             apply: If False, perform a dry run (no file writes)
             services_json_path: Path to the node's services.json file
-            litellm_only: If True, use LiteLLM database as the sole model source
-                          (no provider API calls, no smoke tests, no API key required)
-            openrouter_only: If True, use OpenRouter as the sole model source
-                             (no provider API calls, no smoke tests, no API key required)
-            use_litellm: If False, skip LiteLLM lookups entirely during merge
-            use_openrouter: If False, skip OpenRouter lookups entirely during merge
+            model_sources: Ordered list of sources to consult.  Allowed values:
+                ``"provider"``, ``"openrouter"``, ``"litellm"``.  Order matters —
+                first listed source has highest enrichment priority and is the
+                preferred discovery source.  Default ``["provider", "openrouter", "litellm"]``.
+            enable_discovery: If True, new models found in the discovery source
+                are added as profiles.  If False (default), the sync runs in
+                enrichment-only mode — token data and deprecation status are
+                updated on existing profiles, but no profile keys are added.
+            allow_fallback_discovery: If True, OpenRouter/LiteLLM may serve as
+                discovery sources for providers whose API key is missing.
+                Default False — strict mode: missing-key providers are skipped
+                for discovery (existing profiles still enriched).
             use_config_overrides: If False, ignore token_limit_overrides and
-                                  model_output_tokens.overrides from the config file.
-                                  Token limits come entirely from the live data sources.
+                model_output_tokens.overrides from the config file.
             global_protected_profiles: Profile keys that must never be deprecated
-                                        regardless of provider config (e.g. ["custom"])
+                regardless of provider config (e.g. ["custom"])
 
         Returns:
             ProviderReport describing what changed
         """
+        if model_sources is None:
+            model_sources = ['provider', 'openrouter', 'litellm']
+
         report = ProviderReport(provider=self.provider_name)
 
         # Per-provider config can force-disable OpenRouter (e.g. embedding providers
         # where OpenRouter has no coverage and would wrongly deprecate all models).
         if self._config.get('use_openrouter') is False:
-            use_openrouter = False
-
-        if litellm_only:
-            api_models = self._fetch_litellm_models()
-            return self._run_merge(
-                report=report,
-                api_models=api_models,
-                current_profiles=current_profiles,
-                title_mappings=title_mappings,
-                output_token_overrides=output_token_overrides,
-                default_output_tokens=default_output_tokens,
-                extra_profile_fields=extra_profile_fields,
-                apply=apply,
-                services_json_path=services_json_path,
-                use_litellm=use_litellm,
-                use_openrouter=False,  # litellm-only → no OpenRouter
-                use_config_overrides=use_config_overrides,
-                global_protected_profiles=global_protected_profiles,
-                deprecation_source='LiteLLM',
-            )
-
-        if openrouter_only:
-            api_models = self._fetch_openrouter_models()
-            return self._run_merge(
-                report=report,
-                api_models=api_models,
-                current_profiles=current_profiles,
-                title_mappings=title_mappings,
-                output_token_overrides=output_token_overrides,
-                default_output_tokens=default_output_tokens,
-                extra_profile_fields=extra_profile_fields,
-                apply=apply,
-                services_json_path=services_json_path,
-                use_litellm=use_litellm,
-                # context_window is already in api_entry from OpenRouter source;
-                # skip the fallback lookup to avoid redundant cache reads.
-                use_openrouter=False,
-                use_config_overrides=use_config_overrides,
-                global_protected_profiles=global_protected_profiles,
-                deprecation_source='OpenRouter',
-            )
+            model_sources = [s for s in model_sources if s != 'openrouter']
 
         api_key = self.get_api_key()
 
-        if not api_key:
-            # No API key — fall back to OpenRouter or LiteLLM as model source
-            # instead of skipping entirely.  Smoke tests are skipped (no client).
-            if use_openrouter:
-                report.warning = f'API key not set ({self.env_var}) — using OpenRouter as model source (no smoke tests)'
-                api_models = self._fetch_openrouter_models()
-                return self._run_merge(
-                    report=report,
-                    api_models=api_models,
-                    current_profiles=current_profiles,
-                    title_mappings=title_mappings,
-                    output_token_overrides=output_token_overrides,
-                    default_output_tokens=default_output_tokens,
-                    extra_profile_fields=extra_profile_fields,
-                    apply=apply,
-                    services_json_path=services_json_path,
-                    use_litellm=use_litellm,
-                    use_openrouter=False,  # context_window already in api_entry
-                    use_config_overrides=use_config_overrides,
-                    global_protected_profiles=global_protected_profiles,
-                    deprecation_source='OpenRouter',
-                )
-            elif use_litellm:
-                report.warning = f'API key not set ({self.env_var}) — using LiteLLM as model source (no smoke tests)'
-                api_models = self._fetch_litellm_models()
-                return self._run_merge(
-                    report=report,
-                    api_models=api_models,
-                    current_profiles=current_profiles,
-                    title_mappings=title_mappings,
-                    output_token_overrides=output_token_overrides,
-                    default_output_tokens=default_output_tokens,
-                    extra_profile_fields=extra_profile_fields,
-                    apply=apply,
-                    services_json_path=services_json_path,
-                    use_litellm=use_litellm,
-                    use_openrouter=False,
-                    use_config_overrides=use_config_overrides,
-                    global_protected_profiles=global_protected_profiles,
-                    deprecation_source='LiteLLM',
-                )
-            else:
-                report.warning = f'API key not set ({self.env_var}) and no fallback source available (OpenRouter and LiteLLM both disabled) — skipped'
-                return report
+        # --- Compute per-source availability for this provider ---
+        # Enrichment availability: can the source contribute token data at all.
+        # Discovery availability: can the source ADD new profiles (stricter — gated
+        # by --allow-fallback-discovery for non-provider sources).
+        def _enrichment_available(src: str) -> bool:
+            if src == 'provider':
+                return bool(api_key)
+            if src == 'openrouter':
+                # Trigger the cache load lazily; is_openrouter_available() reflects post-load state.
+                get_openrouter_cache()
+                return is_openrouter_available()
+            if src == 'litellm':
+                return _LITELLM_AVAILABLE
+            return False
 
-        try:
-            client = self.make_client(api_key)
-            raw_models = self.fetch_models(client)
-        except Exception as e:
-            report.error = f'Failed to fetch models: {e}'
+        def _discovery_available(src: str) -> bool:
+            if not _enrichment_available(src):
+                return False
+            if src == 'provider':
+                return True
+            return allow_fallback_discovery
+
+        # Pick the first enrichment-available source for fetching api_models.
+        primary_source: str | None = next((s for s in model_sources if _enrichment_available(s)), None)
+        if primary_source is None:
+            report.warning = f'No source available for {self.provider_name}: API key {self.env_var} not set; OpenRouter/LiteLLM also unavailable.'
             return report
 
-        # Filter and normalise model IDs
-        candidate_models: List[Dict[str, Any]] = []
-        for m in raw_models:
-            raw_id = m.get('id', '')
-            model_id = self.normalize_model_id(raw_id)
-            if self.should_include(model_id):
-                entry = dict(m)
-                entry['id'] = model_id
-                candidate_models.append(entry)
+        # Pick the first discovery-available source (may be None even when primary_source is set —
+        # e.g. provider key missing + allow_fallback_discovery=False).
+        discovery_source: str | None = next((s for s in model_sources if _discovery_available(s)), None)
 
-        # Determine which models are new (not already in profiles)
+        # --- Fetch api_models from primary_source ---
+        try:
+            if primary_source == 'provider':
+                client = self.make_client(api_key)
+                raw_models = self.fetch_models(client)
+                # Filter and normalise model IDs (provider source only — fallback
+                # sources do their own filtering inside _fetch_*_models()).
+                candidate_models: List[Dict[str, Any]] = []
+                for m in raw_models:
+                    raw_id = m.get('id', '')
+                    model_id = self.normalize_model_id(raw_id)
+                    if self.should_include(model_id):
+                        entry = dict(m)
+                        entry['id'] = model_id
+                        candidate_models.append(entry)
+                api_models = candidate_models
+            elif primary_source == 'openrouter':
+                client = None
+                api_models = self._fetch_openrouter_models()
+            else:  # 'litellm'
+                client = None
+                api_models = self._fetch_litellm_models()
+        except Exception as e:
+            report.error = f'Failed to fetch models from {primary_source}: {e}'
+            return report
+
+        # Set deprecation_source label based on the actual primary source.
+        if primary_source == 'provider':
+            provider_label = self.display_name or self.provider_name
+            deprecation_source = f'{provider_label} API'
+        elif primary_source == 'openrouter':
+            deprecation_source = 'OpenRouter'
+        else:
+            deprecation_source = 'LiteLLM'
+
+        # --- Discovery gate ---
+        # If discovery is off, OR no source qualifies for discovery, drop new models
+        # from api_models so the merger only enriches existing profiles.
         existing_model_ids = {p.get('model') for p in current_profiles.values() if isinstance(p, dict)}
+        discovery_skipped_due_to_strict_mode = False
+        if not enable_discovery:
+            api_models = [m for m in api_models if m['id'] in existing_model_ids]
+        elif discovery_source is None:
+            api_models = [m for m in api_models if m['id'] in existing_model_ids]
+            discovery_skipped_due_to_strict_mode = True
 
-        # Smoke-test only new models
-        verified_models: List[Dict[str, Any]] = []
-        for m in candidate_models:
-            model_id = m['id']
-            if model_id in existing_model_ids:
-                # Existing model — always include (just update token limits)
-                verified_models.append(m)
-            else:
-                # New model — smoke test first
-                result: SmokeResult = smoke_run(self.smoke_type, client, model_id)
-                if result.passed():
+        # --- Smoke gate ---
+        # Smoke tests run only when (a) discovery is enabled, (b) discovery_source
+        # is the native provider API (we have a client), and (c) there are new
+        # models surviving the discovery gate.
+        if enable_discovery and discovery_source == 'provider' and primary_source == 'provider' and client is not None:
+            verified_models: List[Dict[str, Any]] = []
+            for m in api_models:
+                model_id = m['id']
+                if model_id in existing_model_ids:
                     verified_models.append(m)
                 else:
-                    report.skipped.append((model_id, result.reason))
+                    result: SmokeResult = smoke_run(self.smoke_type, client, model_id)
+                    if result.passed():
+                        verified_models.append(m)
+                    else:
+                        report.skipped.append((model_id, result.reason))
+            api_models = verified_models
 
-        provider_label = self.display_name or self.provider_name
+        # --- Warning messages for partial-result modes ---
+        if primary_source != 'provider' and api_key is None:
+            report.warning = f'API key not set ({self.env_var}) — using {primary_source} as model source (no smoke tests).'
+        if discovery_skipped_due_to_strict_mode:
+            report.discovery_skipped = True
+
         return self._run_merge(
             report=report,
-            api_models=verified_models,
+            api_models=api_models,
             current_profiles=current_profiles,
             title_mappings=title_mappings,
             output_token_overrides=output_token_overrides,
@@ -440,11 +428,10 @@ class CloudProvider(ABC):
             extra_profile_fields=extra_profile_fields,
             apply=apply,
             services_json_path=services_json_path,
-            use_litellm=use_litellm,
-            use_openrouter=use_openrouter,
+            model_sources=model_sources,
             use_config_overrides=use_config_overrides,
             global_protected_profiles=global_protected_profiles,
-            deprecation_source=f'{provider_label} API',
+            deprecation_source=deprecation_source,
         )
 
     def _fetch_litellm_models(self) -> List[Dict[str, Any]]:
@@ -550,8 +537,7 @@ class CloudProvider(ABC):
         extra_profile_fields: Dict[str, Any] | None,
         apply: bool,
         services_json_path: str,
-        use_litellm: bool = True,
-        use_openrouter: bool = True,
+        model_sources: List[str] | None = None,
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
         deprecation_source: str = 'provider API',
@@ -569,8 +555,8 @@ class CloudProvider(ABC):
             extra_profile_fields: Fields to add to every new profile
             apply: If True, write changed profiles to disk
             services_json_path: Path to the node's services.json file
-            use_litellm: If False, skip LiteLLM lookups during merge
-            use_openrouter: If False, skip OpenRouter lookups during merge
+            model_sources: Ordered list of token-data sources (``"provider"``,
+                ``"openrouter"``, ``"litellm"``).  Determines enrichment priority.
             use_config_overrides: If False, ignore token_limit_overrides and
                                   output_token_overrides from the config file
             global_protected_profiles: Global keys that must never be deprecated
@@ -596,8 +582,7 @@ class CloudProvider(ABC):
             extra_profile_fields=extra_profile_fields,
             provider_default_context_window=provider_default_ctx,
             protected_profile_keys=protected,
-            use_litellm=use_litellm,
-            use_openrouter=use_openrouter,
+            model_sources=model_sources,
             normalize_profile_model_id=self.normalize_profile_model_id,
             deprecation_source=deprecation_source,
             derive_title_fn=self.derive_title,

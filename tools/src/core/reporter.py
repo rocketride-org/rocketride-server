@@ -46,6 +46,10 @@ class ProviderReport:
     unchanged_count: int = 0
     warning: Optional[str] = None
     error: Optional[str] = None
+    # True when --enable-discovery was set but no source was eligible for
+    # discovery (e.g. provider key missing and --allow-fallback-discovery off).
+    # The provider still ran enrichment-only.
+    discovery_skipped: bool = False
 
     def has_changes(self) -> bool:
         """Return True if any adds, updates, or deprecations occurred."""
@@ -119,6 +123,14 @@ def format_console(report: SyncReport) -> str:
         else:
             lines.append(_c(f'[{pr.provider}]', '1'))
 
+        if pr.discovery_skipped:
+            lines.append(
+                _c(
+                    '  (discovery skipped — set the provider API key or pass --allow-fallback-discovery)',
+                    '33',
+                )
+            )
+
         for key, model_id in pr.added:
             lines.append(_c(f'  + {key:<30} {model_id}', '32'))
 
@@ -160,7 +172,7 @@ def format_pr_body(report: SyncReport) -> str:
     lines.append('Automated sync of provider model lists against `services.json` profiles.')
     lines.append('')
 
-    if not report.has_any_changes() and not any(p.skipped for p in report.providers) and not any(p.warning for p in report.providers) and not any(p.error for p in report.providers):
+    if not report.has_any_changes() and not any(p.skipped for p in report.providers) and not any(p.warning for p in report.providers) and not any(p.error for p in report.providers) and not any(p.discovery_skipped for p in report.providers):
         lines.append('_No changes detected._')
         return '\n'.join(lines)
 
@@ -178,7 +190,7 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('')
             continue
 
-        if not pr.has_changes() and not pr.skipped:
+        if not pr.has_changes() and not pr.skipped and not pr.discovery_skipped:
             continue
 
         lines.append(f'### `{pr.provider}`')
@@ -186,6 +198,10 @@ def format_pr_body(report: SyncReport) -> str:
 
         if pr.warning:
             lines.append(f'_{pr.warning}_')
+            lines.append('')
+
+        if pr.discovery_skipped:
+            lines.append('_Discovery skipped — set the provider API key or pass `--allow-fallback-discovery` to enable discovery via OpenRouter/LiteLLM._')
             lines.append('')
 
         if pr.added:

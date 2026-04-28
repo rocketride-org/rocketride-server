@@ -32,7 +32,10 @@
 			"model_filter": {
 				"include_prefixes": ["gpt-", "o1", "o3", "o4", "chatgpt-"],
 				"exclude_prefixes": [],
-				"exclude_patterns": ["embedding", "tts", "whisper", "dall-e", "audio", "realtime", "davinci", "babbage", "curie", "ada", "instruct", "search", "transcribe", "codex", "image", "o1-pro"]
+				"exclude_patterns": ["embedding", "tts", "whisper", "dall-e", "audio", "realtime", "davinci", "babbage", "curie", "ada", "instruct", "search", "transcribe", "codex", "image"],
+				// Pro-tier models are Responses-API-only (not v1/chat/completions).  The
+				// chat smoke test would fail every run, so list them explicitly here.
+				"exclude_exact": ["o1-pro", "gpt-5-pro", "gpt-5.2-pro", "gpt-5.5-pro"]
 			},
 			// Drop models with dated snapshot suffixes like -2024-04-09 or -0613.
 			// These are point-in-time snapshots; keep only the canonical aliases.

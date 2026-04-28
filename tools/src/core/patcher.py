@@ -274,10 +274,16 @@ def _repair_field_objects(fields: Dict[str, Any]) -> bool:
     exposes ``llm.cloud.modelSource``, and that ``llm.cloud.modelSource`` is
     always the last entry in its ``properties`` list.
 
+    Also migrates the legacy per-provider ``<namespace>.apikey`` form (e.g.
+    ``gemini.apikey``) to the shared ``llm.cloud.apikey``.  Older nodes defined
+    their own apikey field locally; the canonical form is the shared one so the
+    UI renders the same widget across providers.  After migration the entry
+    also carries ``llm.cloud.modelSource``.
+
     This is a forward-compatibility repair: field objects created before
     ``llm.cloud.modelSource`` was introduced omit it from their properties list,
     and occasionally a provider-specific field gets inserted after it by hand.
-    Running this repair on every patch pass heals both cases even when no new
+    Running this repair on every patch pass heals these cases even when no new
     profiles are being added in the current sync run.
 
     Args:
@@ -293,6 +299,16 @@ def _repair_field_objects(fields: Dict[str, Any]) -> bool:
         props = value.get('properties')
         if not isinstance(props, list):
             continue
+
+        # Migrate legacy <namespace>.apikey → llm.cloud.apikey.  Only if the
+        # entry doesn't already use llm.cloud.apikey (avoid duplicates).
+        if 'llm.cloud.apikey' not in props:
+            for i, prop in enumerate(list(props)):
+                if isinstance(prop, str) and prop.endswith('.apikey') and prop != 'llm.cloud.apikey':
+                    props[i] = 'llm.cloud.apikey'
+                    repaired = True
+                    break  # only one apikey entry per object
+
         has_apikey = 'llm.cloud.apikey' in props
         has_model_source = 'llm.cloud.modelSource' in props
         if has_apikey and not has_model_source:
