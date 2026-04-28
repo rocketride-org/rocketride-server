@@ -913,7 +913,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(control, &IServiceFilterInstance::cb_control,
                 py::arg("classType"), py::arg("control"),
                 py::arg("nodeId") = "")
-        .PYBIND(setTargetFilter, &IServiceFilterInstance::cb_setTargetFilter)
         .PYBIND(open, &IServiceFilterInstance::cb_open)
         .PYBIND(writeTagBeginObject,
                 &IServiceFilterInstance::cb_writeTagBeginObject)
@@ -921,25 +920,36 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 &IServiceFilterInstance::cb_writeTagBeginStream)
         .PYBIND(writeTagData, &IServiceFilterInstance::cb_writeTagData)
         .PYBIND(writeTag, &IServiceFilterInstance::cb_writeTag)
-        .PYBIND(writeText, &IServiceFilterInstance::cb_writeText)
-        .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable)
+        .PYBIND(writeText, &IServiceFilterInstance::cb_writeText,
+                py::arg("text"), py::arg("targetNodeId") = "")
+        .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable,
+                py::arg("table"), py::arg("targetNodeId") = "")
         .PYBIND(writeAudio, &IServiceFilterInstance::cb_writeAudio,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
+                py::arg("streamData") = py::bytes(),
+                py::arg("targetNodeId") = "")
         .PYBIND(writeVideo, &IServiceFilterInstance::cb_writeVideo,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
+                py::arg("streamData") = py::bytes(),
+                py::arg("targetNodeId") = "")
         .PYBIND(writeImage, &IServiceFilterInstance::cb_writeImage,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
+                py::arg("streamData") = py::bytes(),
+                py::arg("targetNodeId") = "")
         .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions,
-                py::arg("questions"))
-        .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers)
-        .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments)
+                py::arg("questions"), py::arg("targetNodeId") = "")
+        .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers,
+                py::arg("answers"), py::arg("targetNodeId") = "")
+        .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments,
+                py::arg("documents"), py::arg("targetNodeId") = "")
         .PYBIND(writeClassifications,
-                &IServiceFilterInstance::cb_writeClassifications)
+                &IServiceFilterInstance::cb_writeClassifications,
+                py::arg("classifications"), py::arg("classificationPolicy"),
+                py::arg("classificationRules"),
+                py::arg("targetNodeId") = "")
         .PYBIND(writeClassificationContext,
-                &IServiceFilterInstance::cb_writeClassificationContext)
+                &IServiceFilterInstance::cb_writeClassificationContext,
+                py::arg("context"), py::arg("targetNodeId") = "")
         .PYBIND(writeTagEndStream,
                 &IServiceFilterInstance::cb_writeTagEndStream)
         .PYBIND(writeTagEndObject,

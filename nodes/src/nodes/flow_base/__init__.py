@@ -2,39 +2,19 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Shared async-first infrastructure for `flow_*` nodes.
+"""Shared base for `flow_*` conditional routers.
 
-Exposes the public API consumed by concrete flow drivers (today
-`flow_if_else`) and by user code running inside the sandbox
-(`rocketride.flow.cond`, `state`, `invoke`, `emit`).
+Two-branch routing built on a single abstract `checkCondition(condition, **kwargs)`
+hook. Concrete subclasses (`flow.pyeval`, `flow.llm`, ...) implement the
+hook with their own evaluation strategy. The base owns:
 
-See docs/nodes/conditional-node-action-plan.md for the architectural
-rationale: async-first + per-chunk state as foundational invariants.
+- Per-lane explicit writeXxx overrides (text, table, image, audio, video,
+  questions, answers, documents, classifications).
+- Streaming-aware buffering for the multi-call lanes (image, audio, video).
+- Branch dispatch via the engine's per-call `targetNodeId` argument — no
+  state on the C++ binder, no AutoGatingMixin magic.
 """
 
-from .types import Decision, FlowAction, FlowContext, FlowResult
-from .state import PerChunkState
-from .bounds import Bounds, BoundsError
-from .trace import FlowTrace
-from .invoker import AsyncInvoker
-from .sandbox import SandboxError, evaluate_expression
-from .driver import FlowDriverBase
-from .gating import AutoGatingMixin
-from . import cond
+from .IInstance import IInstance, FlowBaseIInstance
 
-__all__ = [
-    'Decision',
-    'FlowAction',
-    'FlowContext',
-    'FlowResult',
-    'PerChunkState',
-    'Bounds',
-    'BoundsError',
-    'FlowTrace',
-    'AsyncInvoker',
-    'SandboxError',
-    'evaluate_expression',
-    'FlowDriverBase',
-    'AutoGatingMixin',
-    'cond',
-]
+__all__ = ['IInstance', 'FlowBaseIInstance']
