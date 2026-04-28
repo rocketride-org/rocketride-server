@@ -1,0 +1,248 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Code",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "preprocessor_code://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["preprocessor"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.preprocessor_code",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Preprocessor",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A specialized component designed to parse and tokenize source code. It extracts ", "structural elements such as functions, classes, and comments, enabling deeper semantic ", "analysis. This component prepares source files for tasks like classification, embedding, ", "or search by breaking them into meaningful syntactic units. Supporting multiple programming ", "languages, it enables intelligent workflows involving code understanding, summarization, ", "and reasoning."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "preprocessor-code.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"output": [
+				{
+					"lane": "documents"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "auto",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"auto": {
+				"language": "auto",
+				"strlen": 512
+			},
+			"c": {
+				"language": "c",
+				"strlen": 512
+			},
+			"cpp": {
+				"language": "cpp",
+				"strlen": 512
+			},
+			"python": {
+				"language": "python",
+				"strlen": 512
+			},
+			"javascript": {
+				"language": "javascript",
+				"strlen": 512
+			},
+			"typescript": {
+				"language": "typescript",
+				"strlen": 512
+			}
+		}
+	},
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["python"],
+		"cases": [
+			{
+				"text": "def hello():\n    return \"world\"\n\nclass Foo:\n    pass",
+				"expect": {
+					"documents": {
+						"contains": "hello",
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"code.splitter.strlen": {
+			"type": "number",
+			"title": "Maximum string length",
+			"default": 512
+		},
+		"code.splitter.auto.language": {
+			"type": "string",
+			"const": "auto",
+			"default": "auto"
+		},
+		"code.splitter.auto": {
+			"object": "auto",
+			"properties": ["code.splitter.auto.language", "code.splitter.strlen"]
+		},
+		"code.splitter.c.language": {
+			"type": "string",
+			"const": "c",
+			"default": "c"
+		},
+		"code.splitter.c": {
+			"object": "c",
+			"properties": ["code.splitter.c.language", "code.splitter.strlen"]
+		},
+		"code.splitter.cpp.language": {
+			"type": "string",
+			"const": "cpp",
+			"default": "cpp"
+		},
+		"code.splitter.cpp": {
+			"object": "cpp",
+			"properties": ["code.splitter.cpp.language", "code.splitter.strlen"]
+		},
+		"code.splitter.python.language": {
+			"type": "string",
+			"const": "python",
+			"default": "python"
+		},
+		"code.splitter.python": {
+			"object": "python",
+			"properties": ["code.splitter.python.language", "code.splitter.strlen"]
+		},
+		"code.splitter.javascript.language": {
+			"type": "string",
+			"const": "javascript",
+			"default": "javascript"
+		},
+		"code.splitter.javascript": {
+			"object": "javascript",
+			"properties": ["code.splitter.javascript.language", "code.splitter.strlen"]
+		},
+		"code.splitter.typescript.language": {
+			"type": "string",
+			"const": "typescript",
+			"default": "typescript"
+		},
+		"code.splitter.typescript": {
+			"object": "typescript",
+			"properties": ["code.splitter.typescript.language", "code.splitter.strlen"]
+		},
+		"code.splitter.profile": {
+			"type": "string",
+			"title": "Code splitter profile",
+			"default": "auto",
+			"enum": [
+				["auto", "Auto detect - autodetect language based on filename extension"],
+				["c", "C/C++ source"],
+				["python", "Python source"],
+				["javascript", "Javascript source"],
+				["typescript", "Typescript source"]
+			],
+			"conditional": [
+				{
+					"value": "auto",
+					"properties": ["code.splitter.auto"]
+				},
+				{
+					"value": "c",
+					"properties": ["code.splitter.c"]
+				},
+				{
+					"value": "python",
+					"properties": ["code.splitter.python"]
+				},
+				{
+					"value": "javascript",
+					"properties": ["code.splitter.javascript"]
+				},
+				{
+					"value": "typescript",
+					"properties": ["code.splitter.typescript"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Code",
+			"properties": ["code.splitter.profile"]
+		}
+	]
+}
