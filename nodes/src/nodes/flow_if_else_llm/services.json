@@ -1,0 +1,71 @@
+{
+	"title": "Flow If/Else (LLM)",
+	"protocol": "flow_if_else_llm://",
+	"classType": ["flow_control"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.flow_if_else_llm",
+	"prefix": "flow_if_else_llm",
+	"description": ["A two-branch conditional router whose decision is made by an LLM. ", "Instead of a Python expression, the user supplies a natural-language ", "yes/no question (e.g. 'Is there a dog in this image?', 'Is this an ", "invoice?'). For every chunk, the node sends the chunk plus the ", "question to a wired LLM via the control channel and routes the chunk ", "to the THEN branch on YES or the ELSE branch on NO. The invoke ", "channel is provider-agnostic — connect any llm_* (Claude, OpenAI, ", "Mistral, Gemini, Ollama). For image lanes, connect a vision-capable ", "LLM. Audio and video lanes need preprocessing (frame grabber, STT) ", "upstream because LLM APIs do not accept raw media buffers."],
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Question: flow_if_else_llm.question"],
+	"lanes": {
+		"*": ["*"]
+	},
+	"branches": ["then", "else"],
+	"invoke": {
+		"llm": {
+			"description": "LLM that evaluates the natural-language condition. For text/table/questions/answers lanes any text LLM works; for image lanes connect a vision-capable LLM (Claude with vision, GPT-4V, Mistral Vision, Gemini Vision, LLaVA via Ollama).",
+			"min": 1
+		}
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"flow_if_else_llm.question": "Does the content match the criterion?",
+				"flow_if_else_llm.timeout_s": 30,
+				"flow_if_else_llm.branches": { "then": [], "else": [] }
+			}
+		}
+	},
+	"fields": {
+		"flow_if_else_llm.question": {
+			"type": "string",
+			"title": "Question",
+			"description": "Natural-language yes/no question evaluated by the connected LLM. The chunk being routed is provided as context. Examples: 'Is this image a screenshot?', 'Is this text in Spanish?', 'Does the image contain a person?'. Be specific — the LLM is instructed to answer with a single word YES or NO; ambiguity in the question costs accuracy.",
+			"default": "Does the content match the criterion?"
+		},
+		"flow_if_else_llm.timeout_s": {
+			"type": "integer",
+			"title": "Timeout (seconds)",
+			"description": "Maximum wall-clock time per evaluation. LLM inference is much slower than sandbox eval, so the default is 30s (vs flow_if_else's 5s). Timeout routes to ELSE (fail-closed).",
+			"default": 30,
+			"minimum": 5,
+			"maximum": 120,
+			"optional": true
+		},
+		"flow_if_else_llm.branches": {
+			"type": "object",
+			"title": "Branch targets",
+			"description": "Maps each branch name to the list of downstream node IDs on that branch. Populated automatically by the canvas when you wire edges from the THEN / ELSE output ports.",
+			"properties": {
+				"then": { "type": "array", "items": { "type": "string" } },
+				"else": { "type": "array", "items": { "type": "string" } }
+			},
+			"default": { "then": [], "else": [] },
+			"optional": true,
+			"hidden": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Flow If/Else (LLM)",
+			"properties": ["type", "flow_if_else_llm.question", "flow_if_else_llm.timeout_s"]
+		}
+	]
+}
