@@ -11,8 +11,9 @@ hook with their own evaluation strategy. The base owns:
 - Per-lane explicit writeXxx overrides (text, table, image, audio, video,
   questions, answers, documents, classifications).
 - Streaming-aware buffering for the multi-call lanes (image, audio, video).
-- Branch dispatch via the engine's per-call `targetNodeId` argument — no
-  state on the C++ binder, no AutoGatingMixin magic.
+- Branch dispatch via `peer = self.instance.getInstance(nodeId)` plus
+  `peer.writeXxx(...)` — no state on the C++ binder, no AutoGatingMixin
+  magic.
 """
 
 from .IInstance import IInstance, FlowBaseIInstance

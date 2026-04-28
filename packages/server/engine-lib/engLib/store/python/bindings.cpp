@@ -910,6 +910,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(getListeners, &IServiceFilterInstance::cb_getListeners)
         .PYBIND(getControllerNodeIds,
                 &IServiceFilterInstance::cb_getControllerNodeIds)
+        .PYBIND(getInstance, &IServiceFilterInstance::cb_getInstance,
+                py::arg("nodeId"),
+                py::return_value_policy::reference_internal)
         .PYBIND(control, &IServiceFilterInstance::cb_control,
                 py::arg("classType"), py::arg("control"),
                 py::arg("nodeId") = "")
@@ -920,36 +923,47 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 &IServiceFilterInstance::cb_writeTagBeginStream)
         .PYBIND(writeTagData, &IServiceFilterInstance::cb_writeTagData)
         .PYBIND(writeTag, &IServiceFilterInstance::cb_writeTag)
-        .PYBIND(writeText, &IServiceFilterInstance::cb_writeText,
-                py::arg("text"), py::arg("targetNodeId") = "")
-        .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable,
-                py::arg("table"), py::arg("targetNodeId") = "")
+        .PYBIND(writeText, &IServiceFilterInstance::cb_writeText)
+        .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable)
         .PYBIND(writeAudio, &IServiceFilterInstance::cb_writeAudio,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes(),
-                py::arg("targetNodeId") = "")
+                py::arg("streamData") = py::bytes())
         .PYBIND(writeVideo, &IServiceFilterInstance::cb_writeVideo,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes(),
-                py::arg("targetNodeId") = "")
+                py::arg("streamData") = py::bytes())
         .PYBIND(writeImage, &IServiceFilterInstance::cb_writeImage,
                 py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes(),
-                py::arg("targetNodeId") = "")
-        .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions,
-                py::arg("questions"), py::arg("targetNodeId") = "")
-        .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers,
-                py::arg("answers"), py::arg("targetNodeId") = "")
-        .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments,
-                py::arg("documents"), py::arg("targetNodeId") = "")
+                py::arg("streamData") = py::bytes())
+        .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions)
+        .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers)
+        .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments)
         .PYBIND(writeClassifications,
-                &IServiceFilterInstance::cb_writeClassifications,
-                py::arg("classifications"), py::arg("classificationPolicy"),
-                py::arg("classificationRules"),
-                py::arg("targetNodeId") = "")
+                &IServiceFilterInstance::cb_writeClassifications)
         .PYBIND(writeClassificationContext,
-                &IServiceFilterInstance::cb_writeClassificationContext,
-                py::arg("context"), py::arg("targetNodeId") = "")
+                &IServiceFilterInstance::cb_writeClassificationContext)
+        // acceptXxx: peer-direct delivery — invoke this->writeXxx()
+        // virtual so the trampoline reaches THIS node's Python override.
+        // Used after `peer = self.instance.getInstance(nodeId)` by
+        // conditional routers.
+        .PYBIND(acceptText, &IServiceFilterInstance::cb_acceptText)
+        .PYBIND(acceptTable, &IServiceFilterInstance::cb_acceptTable)
+        .PYBIND(acceptWords, &IServiceFilterInstance::cb_acceptWords)
+        .PYBIND(acceptAudio, &IServiceFilterInstance::cb_acceptAudio,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptVideo, &IServiceFilterInstance::cb_acceptVideo,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptImage, &IServiceFilterInstance::cb_acceptImage,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptQuestions, &IServiceFilterInstance::cb_acceptQuestions)
+        .PYBIND(acceptAnswers, &IServiceFilterInstance::cb_acceptAnswers)
+        .PYBIND(acceptDocuments, &IServiceFilterInstance::cb_acceptDocuments)
+        .PYBIND(acceptClassifications,
+                &IServiceFilterInstance::cb_acceptClassifications)
+        .PYBIND(acceptClassificationContext,
+                &IServiceFilterInstance::cb_acceptClassificationContext)
         .PYBIND(writeTagEndStream,
                 &IServiceFilterInstance::cb_writeTagEndStream)
         .PYBIND(writeTagEndObject,

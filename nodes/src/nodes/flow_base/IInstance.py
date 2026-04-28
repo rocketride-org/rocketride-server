@@ -11,9 +11,10 @@ Provides:
   BEGIN / WRITE+ / END are accumulated and the condition is evaluated
   once with the complete payload, then the buffered calls are replayed
   against the chosen branch's targets.
-- Branch dispatch via the per-call `targetNodeId` argument that the
-  engine's Binder accepts on every writeXxx — no state on the binder,
-  no magic mixin.
+- Branch dispatch via `peer = self.instance.getInstance(node_id)` plus
+  `peer.writeXxx(...)`. The peer's pybind11 trampoline routes the call
+  into the target node's Python `writeXxx` override directly — no
+  binder state, no broadcast fan-out.
 
 Concrete subclasses implement only ``checkCondition(condition, **kwargs)``.
 The lane handlers, the streaming buffer, the branch routing — all live
@@ -24,12 +25,49 @@ LLM-evaluated flow is the condition evaluation strategy.
 from __future__ import annotations
 
 import logging
+import os
+import time
+import traceback
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
 from rocketlib import AVI_ACTION, IInstanceBase
 
 _logger = logging.getLogger('rocketride.flow')
+
+# The engine spawns the python instance as a subprocess so stdlib
+# logging and rocketlib.warning go to a console the user never sees.
+# Write the debug trace to a fixed file path the user can `tail -f`.
+_FLOW_DEBUG_LOG = '/tmp/ifelse-debug.log'
+
+
+def _flow_log(level: str, fmt: str, *args: Any) -> None:
+    """Append one debug line to /tmp/ifelse-debug.log."""
+    try:
+        msg = fmt % args if args else fmt
+    except Exception:
+        msg = fmt + ' ' + repr(args)
+    try:
+        with open(_FLOW_DEBUG_LOG, 'a', buffering=1) as fh:
+            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} '
+                     f'{level.upper()}: {msg}\n')
+    except Exception:
+        pass
+
+
+def _flow_log_exc(fmt: str, *args: Any) -> None:
+    """Append a stack-traced error line."""
+    try:
+        msg = fmt % args if args else fmt
+    except Exception:
+        msg = fmt + ' ' + repr(args)
+    try:
+        with open(_FLOW_DEBUG_LOG, 'a', buffering=1) as fh:
+            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} '
+                     f'ERROR: {msg}\n')
+            fh.write(traceback.format_exc())
+    except Exception:
+        pass
 
 
 class FlowBaseIInstance(IInstanceBase):
@@ -76,61 +114,100 @@ class FlowBaseIInstance(IInstanceBase):
     # Routing primitive — used by every writeXxx override
     # ------------------------------------------------------------------
 
+    def _node_id(self) -> str:
+        node_id = getattr(self.instance, 'pipeType', None)
+        return getattr(node_id, 'id', '') if node_id else ''
+
+    def _resolve_targets(self, decision: bool) -> List[str]:
+        branches: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
+        return list(branches.get('then' if decision else 'else', []))
+
     def _route(self, lane: str, decision: bool, **write_kwargs: Any) -> None:
         """Dispatch a chunk to every node listed in the chosen branch's targets.
 
-        Looks up ``self.IGlobal.branches['then' if decision else 'else']``
-        and forwards via the engine's per-call ``targetNodeId`` argument
-        on the matching ``writeXxx`` of the engine instance. The binder
-        then delivers only to the listener whose ``pipeType.id`` matches —
-        no broadcast, no state.
-
-        ``write_kwargs`` is passed verbatim through to the engine's
-        ``writeXxx``; lifecycle args like ``action`` and ``mimeType`` are
-        included for streaming lanes so the downstream sees the same
-        BEGIN/WRITE/END sequence it would receive without the gate.
+        Resolves each target node id to its peer ``IServiceFilterInstance*``
+        via ``self.instance.getInstance(target_id)`` and hands the chunk
+        to that peer through ``peer.acceptXxx(...)`` — which in C++
+        invokes ``peer->writeXxx(...)`` virtual so the pybind11
+        trampoline lands in the target node's own Python ``writeXxx``
+        override (NOT in peer's downstream binder).
         """
-        branches: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
-        target_ids = list(branches.get('then' if decision else 'else', []))
+        target_ids = self._resolve_targets(decision)
+        node_id = self._node_id()
+        branch_label = 'then' if decision else 'else'
+        branches_dump: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
 
-        node_id = getattr(self.instance, 'pipeType', None)
-        node_id = getattr(node_id, 'id', '') if node_id else ''
+        _flow_log('warn',
+            '_route ENTER node=%s lane=%s decision=%s branch=%s '
+            'branches_cfg=%r resolved_targets=%r',
+            node_id, lane, decision, branch_label, branches_dump, target_ids,
+        )
 
         if not target_ids:
-            # Branch has no wires — drop the chunk silently. Mirror the
-            # engine's default by raising preventDefault so the binder
-            # also doesn't broadcast on its own.
-            _logger.info(
-                'flow node=%s lane=%s branch=%s targets=[] outcome=dropped',
-                node_id,
-                lane,
-                'then' if decision else 'else',
+            _flow_log('warn',
+                '_route DROP node=%s lane=%s branch=%s reason=no_targets_in_branch',
+                node_id, lane, branch_label,
             )
             return self.preventDefault()
 
-        _logger.info(
-            'flow node=%s lane=%s branch=%s targets=%r outcome=forwarded',
-            node_id,
-            lane,
-            'then' if decision else 'else',
-            target_ids,
-        )
-
-        write_method_name = 'write' + lane[0].upper() + lane[1:]
+        accept_method_name = 'accept' + lane[0].upper() + lane[1:]
         for target_id in target_ids:
-            method = getattr(self.instance, write_method_name, None)
-            if method is None:
-                _logger.error(
-                    'flow node=%s lane=%s — engine instance has no %s method',
-                    node_id,
-                    lane,
-                    write_method_name,
+            _flow_log('warn',
+                '_route resolving peer node=%s target=%r',
+                node_id, target_id,
+            )
+            try:
+                peer = self.instance.getInstance(target_id)
+            except Exception as exc:
+                _flow_log_exc(
+                    'getInstance(%r) RAISED %s: %s',
+                    target_id, type(exc).__name__, exc,
                 )
                 continue
-            method(*([] if not write_kwargs else []), targetNodeId=target_id, **write_kwargs)
 
-        # Block the engine's default fan-out — we already delivered to
-        # the chosen targets explicitly.
+            if peer is None:
+                _flow_log('error',
+                    'getInstance(%r) returned None — target node not found in pipe stack',
+                    target_id,
+                )
+                continue
+
+            peer_attrs = sorted(a for a in dir(peer) if a.startswith(('accept', 'write')))
+            _flow_log('warn',
+                'peer resolved target=%r type=%s has_accept_method=%s methods=%r',
+                target_id, type(peer).__name__,
+                hasattr(peer, accept_method_name), peer_attrs,
+            )
+
+            method = getattr(peer, accept_method_name, None)
+            if method is None:
+                _flow_log('error',
+                    'peer %s has no %s method (acceptXxx not exposed — '
+                    'engine may need rebuild)',
+                    target_id, accept_method_name,
+                )
+                continue
+
+            # Pybind binds acceptXxx as positional-only (no py::arg names).
+            # Pass values in insertion order — matches arg0 / arg0,arg1,arg2.
+            args = tuple(write_kwargs.values())
+            try:
+                _flow_log('warn',
+                    'invoking %s on peer=%s args_count=%d kwargs_keys=%r',
+                    accept_method_name, target_id, len(args),
+                    list(write_kwargs.keys()),
+                )
+                method(*args)
+                _flow_log('warn',
+                    '%s on peer=%s RETURNED OK',
+                    accept_method_name, target_id,
+                )
+            except Exception as exc:
+                _flow_log_exc(
+                    '%s on peer=%s RAISED %s: %s',
+                    accept_method_name, target_id, type(exc).__name__, exc,
+                )
+
         self.preventDefault()
 
     # ------------------------------------------------------------------
@@ -164,18 +241,22 @@ class FlowBaseIInstance(IInstanceBase):
         classificationRules: Any,
     ) -> None:
         decision = self._safe_check(classifications=classifications)
-        # Classifications has 3 args at the engine level — forward all of
-        # them so the downstream sees the same call shape.
-        branches: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
-        target_ids = list(branches.get('then' if decision else 'else', []))
+        target_ids = self._resolve_targets(decision)
+        node_id = self._node_id()
         if not target_ids:
             return self.preventDefault()
         for target_id in target_ids:
-            self.instance.writeClassifications(
+            peer = self.instance.getInstance(target_id)
+            if peer is None:
+                _flow_log('error',
+                    'flow node=%s lane=classifications — getInstance(%r) returned None',
+                    node_id, target_id,
+                )
+                continue
+            peer.acceptClassifications(
                 classifications,
                 classificationPolicy,
                 classificationRules,
-                targetNodeId=target_id,
             )
         self.preventDefault()
 
@@ -204,8 +285,8 @@ class FlowBaseIInstance(IInstanceBase):
         Accumulates the streaming chunks in a per-lane state attribute
         until END, then evaluates the condition with the complete payload
         and replays the BEGIN/WRITE/END sequence against the chosen
-        branch's targets. Each replay is a per-call `targetNodeId`
-        dispatch — no binder state, no fan-out.
+        branch's targets. Each replay is a peer-direct dispatch — no
+        binder state, no fan-out.
         """
         state_attr = f'_stream_state_{lane}'
         state: Optional[Dict[str, Any]] = getattr(self, state_attr, None)
@@ -232,43 +313,56 @@ class FlowBaseIInstance(IInstanceBase):
         full_buffer = bytes(state['buffer'])
         decision = self._safe_check(**{lane: full_buffer, 'mimeType': state['mime_type'], 'action': action})
 
-        branches: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
-        target_ids = list(branches.get('then' if decision else 'else', []))
+        target_ids = self._resolve_targets(decision)
+        calls = state['calls']
 
         # Reset state before forwarding so re-entrant calls don't see stale
         # buffers.
         delattr(self, state_attr)
 
-        node_id = getattr(self.instance, 'pipeType', None)
-        node_id = getattr(node_id, 'id', '') if node_id else ''
+        node_id = self._node_id()
+        branch_label = 'then' if decision else 'else'
 
         if not target_ids:
-            _logger.info(
-                'flow node=%s lane=%s branch=%s targets=[] outcome=dropped',
-                node_id,
-                lane,
-                'then' if decision else 'else',
+            _flow_log('warn',
+                'stream node=%s lane=%s branch=%s targets=[] outcome=dropped',
+                node_id, lane, branch_label,
             )
             return self.preventDefault()
 
-        _logger.info(
-            'flow node=%s lane=%s branch=%s targets=%r outcome=forwarded',
-            node_id,
-            lane,
-            'then' if decision else 'else',
-            target_ids,
+        _flow_log('warn',
+            'stream node=%s lane=%s branch=%s targets=%r outcome=forwarded',
+            node_id, lane, branch_label, target_ids,
         )
 
-        write_method_name = 'write' + lane[0].upper() + lane[1:]
-        write_method = getattr(self.instance, write_method_name)
+        accept_method_name = 'accept' + lane[0].upper() + lane[1:]
 
         for target_id in target_ids:
-            for call_action, call_mime, call_buffer in state['calls']:
-                write_method(
-                    call_action,
-                    call_mime,
-                    call_buffer,
-                    targetNodeId=target_id,
+            peer = self.instance.getInstance(target_id)
+            if peer is None:
+                _flow_log('error',
+                    'stream node=%s lane=%s — getInstance(%r) returned None',
+                    node_id, lane, target_id,
+                )
+                continue
+            accept_method = getattr(peer, accept_method_name, None)
+            if accept_method is None:
+                _flow_log('error',
+                    'stream node=%s lane=%s — peer %s has no %s method',
+                    node_id, lane, target_id, accept_method_name,
+                )
+                continue
+            try:
+                for call_action, call_mime, call_buffer in calls:
+                    accept_method(call_action, call_mime, call_buffer)
+                _flow_log('warn',
+                    'stream %s on peer=%s replayed %d calls OK',
+                    accept_method_name, target_id, len(calls),
+                )
+            except Exception as exc:
+                _flow_log_exc(
+                    'stream %s on peer=%s RAISED %s: %s',
+                    accept_method_name, target_id, type(exc).__name__, exc,
                 )
 
         self.preventDefault()
@@ -285,16 +379,27 @@ class FlowBaseIInstance(IInstanceBase):
         on a bad condition string or a transient failure.
         """
         condition = getattr(self.IGlobal, 'condition', '')
+        kwargs_preview = {
+            k: (f'<{type(v).__name__} len={len(v) if hasattr(v, "__len__") else "?"}>'
+                if not isinstance(v, (int, float, bool)) else v)
+            for k, v in kwargs.items()
+        }
+        _flow_log('warn',
+            '_safe_check ENTER node=%s condition=%r kwargs=%r',
+            self._node_id(), condition, kwargs_preview,
+        )
         try:
-            return bool(self.checkCondition(condition, **kwargs))
+            result = bool(self.checkCondition(condition, **kwargs))
+            _flow_log('warn',
+                '_safe_check RESULT node=%s decision=%s',
+                self._node_id(), result,
+            )
+            return result
         except Exception as exc:
-            node_id = getattr(self.instance, 'pipeType', None)
-            node_id = getattr(node_id, 'id', '') if node_id else ''
-            _logger.error(
-                'flow node=%s checkCondition raised %s: %s — failing closed to ELSE',
-                node_id,
-                type(exc).__name__,
-                exc,
+            _flow_log_exc(
+                '_safe_check FAIL node=%s checkCondition raised %s: %s — '
+                'failing closed to ELSE',
+                self._node_id(), type(exc).__name__, exc,
             )
             return False
 

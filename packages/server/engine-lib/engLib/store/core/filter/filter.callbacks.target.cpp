@@ -77,6 +77,24 @@ std::vector<std::string> IServiceFilterInstance::cb_getControllerNodeIds(
     return result;
 }
 
+// Returns the bound peer filter whose pipeType.id matches `nodeId`, or
+// nullptr if no peer matches. Used by Python conditional routers to
+// resolve a branch target id and then hand the chunk to that peer via
+// peer.acceptXxx(...). The returned pointer is non-owning and only
+// valid for the lifetime of the pipeline.
+IServiceFilterInstance *IServiceFilterInstance::cb_getInstance(
+    const std::string &nodeId) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use getInstance");
+
+    auto &stack = this->endpoint->m_instanceStacks[this->pipeId];
+    for (auto &filter : stack) {
+        if (filter && filter->pipeType.id == nodeId) return filter.get();
+    }
+    return nullptr;
+}
+
 void IServiceFilterInstance::cb_control(std::string &classType,
                                         py::object &control,
                                         std::string nodeId) noexcept(false) {
@@ -445,8 +463,7 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
     if (auto ccode = binder.writeTag(tag)) throw ccode;
 }
 
-void IServiceFilterInstance::cb_writeText(const std::u16string &text,
-                                          std::string targetNodeId) noexcept(
+void IServiceFilterInstance::cb_writeText(const std::u16string &text) noexcept(
     false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
@@ -457,12 +474,11 @@ void IServiceFilterInstance::cb_writeText(const std::u16string &text,
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeText(text, targetNodeId)) throw ccode;
+        if (auto ccode = binder.writeText(text)) throw ccode;
     }
 }
 
-void IServiceFilterInstance::cb_writeTable(const std::u16string &text,
-                                           std::string targetNodeId) noexcept(
+void IServiceFilterInstance::cb_writeTable(const std::u16string &text) noexcept(
     false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
@@ -473,12 +489,12 @@ void IServiceFilterInstance::cb_writeTable(const std::u16string &text,
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeTable(text, targetNodeId)) throw ccode;
+        if (auto ccode = binder.writeTable(text)) throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeWords(
-    const WordVector &textWords, std::string targetNodeId) noexcept(false) {
+    const WordVector &textWords) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -488,15 +504,13 @@ void IServiceFilterInstance::cb_writeWords(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeWords(textWords, targetNodeId))
-            throw ccode;
+        if (auto ccode = binder.writeWords(textWords)) throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeAudio(
     const AVI_ACTION action, Text &mimeType,
-    const pybind11::bytes &streamData,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -506,16 +520,14 @@ void IServiceFilterInstance::cb_writeAudio(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode =
-                binder.writeAudio(action, mimeType, streamData, targetNodeId))
+        if (auto ccode = binder.writeAudio(action, mimeType, streamData))
             throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeVideo(
     const AVI_ACTION action, Text &mimeType,
-    const pybind11::bytes &streamData,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -525,16 +537,14 @@ void IServiceFilterInstance::cb_writeVideo(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode =
-                binder.writeVideo(action, mimeType, streamData, targetNodeId))
+        if (auto ccode = binder.writeVideo(action, mimeType, streamData))
             throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeImage(
     const AVI_ACTION action, Text &mimeType,
-    const pybind11::bytes &streamData,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -544,15 +554,13 @@ void IServiceFilterInstance::cb_writeImage(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode =
-                binder.writeImage(action, mimeType, streamData, targetNodeId))
+        if (auto ccode = binder.writeImage(action, mimeType, streamData))
             throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeQuestions(
-    const pybind11::object &question,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::object &question) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -562,14 +570,12 @@ void IServiceFilterInstance::cb_writeQuestions(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeQuestions(question, targetNodeId))
-            throw ccode;
+        if (auto ccode = binder.writeQuestions(question)) throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeAnswers(
-    const pybind11::object &answers,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::object &answers) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -579,14 +585,12 @@ void IServiceFilterInstance::cb_writeAnswers(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeAnswers(answers, targetNodeId))
-            throw ccode;
+        if (auto ccode = binder.writeAnswers(answers)) throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeDocuments(
-    const pybind11::object &documents,
-    std::string targetNodeId) noexcept(false) {
+    const pybind11::object &documents) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -596,15 +600,13 @@ void IServiceFilterInstance::cb_writeDocuments(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeDocuments(documents, targetNodeId))
-            throw ccode;
+        if (auto ccode = binder.writeDocuments(documents)) throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeClassifications(
     const json::Value &classifications, const json::Value &classificationPolicy,
-    const json::Value &classificationRules,
-    std::string targetNodeId) noexcept(false) {
+    const json::Value &classificationRules) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -615,14 +617,13 @@ void IServiceFilterInstance::cb_writeClassifications(
         engine::python::UnlockPython unlock;
 
         if (auto ccode = binder.writeClassifications(
-                classifications, classificationPolicy, classificationRules,
-                targetNodeId))
+                classifications, classificationPolicy, classificationRules))
             throw ccode;
     }
 }
 
 void IServiceFilterInstance::cb_writeClassificationContext(
-    const json::Value &context, std::string targetNodeId) noexcept(false) {
+    const json::Value &context) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(
@@ -633,8 +634,7 @@ void IServiceFilterInstance::cb_writeClassificationContext(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode =
-                binder.writeClassificationContext(context, targetNodeId))
+        if (auto ccode = binder.writeClassificationContext(context))
             throw ccode;
     }
 }
@@ -725,6 +725,155 @@ void IServiceFilterInstance::cb_closing() noexcept(false) {
             ccode = binder.closing();
 
         if (ccode) throw ccode;
+    }
+}
+
+//-------------------------------------------------------------------------
+// cb_acceptXxx — peer-direct delivery
+//
+// These differ from cb_writeXxx in WHO receives the chunk:
+//   cb_writeXxx  : invokes this->binder.writeXxx → broadcasts to every
+//                  listener bound on the lane (the normal upstream
+//                  fan-out pattern).
+//   cb_acceptXxx : invokes this->writeXxx() virtual directly → fires
+//                  IPythonInstanceBase::writeXxx trampoline → calls
+//                  this node's own Python writeXxx override.
+//
+// Used by `flow_*` conditional routers: after `peer = self.instance
+// .getInstance(nodeId)`, the router calls `peer.acceptXxx(...)` to
+// hand the chunk to that peer's own handler — bypassing peer's
+// downstream binder so the peer actually processes the chunk.
+//-------------------------------------------------------------------------
+
+void IServiceFilterInstance::cb_acceptText(
+    const std::u16string &text) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptText");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeText(text)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptTable(
+    const std::u16string &text) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptTable");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeTable(text)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptWords(
+    const WordVector &textWords) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptWords");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeWords(textWords)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptAudio(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptAudio");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeAudio(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptVideo(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptVideo");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeVideo(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptImage(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptImage");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeImage(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptQuestions(
+    const pybind11::object &question) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptQuestions");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeQuestions(question)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptAnswers(
+    const pybind11::object &answers) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptAnswers");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeAnswers(answers)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptDocuments(
+    const pybind11::object &documents) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptDocuments");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeDocuments(documents)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptClassifications(
+    const json::Value &classifications, const json::Value &classificationPolicy,
+    const json::Value &classificationRules) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptClassifications");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeClassifications(
+                classifications, classificationPolicy, classificationRules))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptClassificationContext(
+    const json::Value &context) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(
+            Ec::InvalidParam,
+            "You must be in target mode to use acceptClassificationContext");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeClassificationContext(context))
+            throw ccode;
     }
 }
 }  // namespace engine::store
