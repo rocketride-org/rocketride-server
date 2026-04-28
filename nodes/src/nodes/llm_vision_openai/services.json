@@ -1,0 +1,164 @@
+{
+	"title": "OpenAI Vision",
+	"protocol": "image_vision_openai://",
+	"classType": ["image"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_vision_openai",
+	"prefix": "image_vision_openai",
+	"description": ["A component that connects to OpenAI's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports GPT-4.1 and GPT-4o model families ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
+	"icon": "openai.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.image_vision_openai.profile}"],
+	"lanes": {
+		"image": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image to analyze with OpenAI Vision models",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Text analysis of the image content"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to analyze with OpenAI Vision models",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "openai-4-1",
+		"profiles": {
+			"openai-4-1": {
+				"title": "GPT-4.1",
+				"model": "gpt-4.1",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-mini": {
+				"title": "GPT-4.1-mini",
+				"model": "gpt-4.1-mini",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-nano": {
+				"title": "GPT-4.1-nano",
+				"model": "gpt-4.1-nano",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4o": {
+				"title": "GPT-4o",
+				"model": "gpt-4o",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-4o-mini": {
+				"title": "GPT-4o-mini",
+				"model": "gpt-4o-mini",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"image_vision_openai.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "OpenAI API key. Get one at https://platform.openai.com/api-keys",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "OpenAI Vision model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Maximum context length in tokens"
+		},
+		"vision.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System Instructions",
+			"description": "Define the model's role and behavior for image analysis"
+		},
+		"vision.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Analysis Prompt",
+			"description": "Describe what you want to analyze or extract from the image"
+		},
+		"image_vision_openai.openai-4-1": {
+			"object": "openai-4-1",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4-1-mini": {
+			"object": "openai-4-1-mini",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4-1-nano": {
+			"object": "openai-4-1-nano",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4o": {
+			"object": "openai-4o",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4o-mini": {
+			"object": "openai-4o-mini",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.profile": {
+			"title": "Vision Model",
+			"description": "Select the OpenAI vision model to use",
+			"type": "string",
+			"default": "openai-4-1",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "openai-4-1",
+					"properties": ["image_vision_openai.openai-4-1"]
+				},
+				{
+					"value": "openai-4-1-mini",
+					"properties": ["image_vision_openai.openai-4-1-mini"]
+				},
+				{
+					"value": "openai-4-1-nano",
+					"properties": ["image_vision_openai.openai-4-1-nano"]
+				},
+				{
+					"value": "openai-4o",
+					"properties": ["image_vision_openai.openai-4o"]
+				},
+				{
+					"value": "openai-4o-mini",
+					"properties": ["image_vision_openai.openai-4o-mini"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "OpenAI Vision",
+			"properties": ["image_vision_openai.profile"]
+		}
+	]
+}
