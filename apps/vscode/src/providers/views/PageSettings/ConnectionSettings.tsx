@@ -15,7 +15,7 @@
  */
 
 import React, { useState } from 'react';
-import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S } from './SettingsWebview';
+import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 import { MessageDisplay } from './MessageDisplay';
 
 // ============================================================================
@@ -25,6 +25,7 @@ import { MessageDisplay } from './MessageDisplay';
 interface ConnectionSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 	onClearCredentials: () => void;
 	onTestDevelopmentConnection: () => void;
 	developmentTestMessage: MessageData | null;
@@ -43,7 +44,7 @@ interface ConnectionSettingsProps {
 // COMPONENT
 // ============================================================================
 
-export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams }) => {
+export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onSave, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 
@@ -112,7 +113,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 			}}
 			id="developmentSection"
 		>
-			<div style={S.cardHeader}>Development Mode</div>
+			<SettingsCardHeader title="Development Mode" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and On-prem modes require authentication.</div>
 				<div style={S.formGrid}>

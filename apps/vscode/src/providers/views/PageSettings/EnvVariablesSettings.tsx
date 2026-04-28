@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React, { useState, CSSProperties } from 'react';
-import { SettingsData, settingsStyles as S } from './SettingsWebview';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
 // TYPES
@@ -30,6 +30,7 @@ import { SettingsData, settingsStyles as S } from './SettingsWebview';
 
 interface EnvVariablesSettingsProps {
 	settings: SettingsData;
+	onSave: () => void;
 	onEnvVarAdd: (key: string, value: string) => void;
 	onEnvVarUpdate: (key: string, value: string) => void;
 	onEnvVarDelete: (key: string) => void;
@@ -80,7 +81,7 @@ const styles = {
 // COMPONENT
 // ============================================================================
 
-export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({ settings, onEnvVarAdd, onEnvVarUpdate, onEnvVarDelete }) => {
+export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({ settings, onSave, onEnvVarAdd, onEnvVarUpdate, onEnvVarDelete }) => {
 	const [newKey, setNewKey] = useState('');
 	const [newValue, setNewValue] = useState('');
 	const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -186,7 +187,7 @@ export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({ sett
 
 	return (
 		<div style={S.card} id="envVariablesSection">
-			<div style={S.cardHeader}>Environment Variables</div>
+			<SettingsCardHeader title="Environment Variables" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Manage environment variables for your .env file. Only variables prefixed with ROCKETRIDE_ can be used in pipeline configurations using the $&#123;ROCKETRIDE_VARIABLE_NAME&#125; syntax.</div>
 

@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData, settingsStyles as S } from './SettingsWebview';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
 // TYPES
@@ -31,20 +31,21 @@ import { SettingsData, settingsStyles as S } from './SettingsWebview';
 interface DebuggingSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange }) => {
+export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
 	const handleRestartBehaviorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onSettingsChange({ pipelineRestartBehavior: e.target.value as 'auto' | 'manual' | 'prompt' });
 	};
 
 	return (
 		<div style={S.card}>
-			<div style={S.cardHeader}>Debugging Settings</div>
+			<SettingsCardHeader title="Debugging Settings" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Configure debugging and pipeline restart behavior</div>
 				<div style={S.formGrid}>

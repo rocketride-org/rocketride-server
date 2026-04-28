@@ -40,7 +40,7 @@
  */
 
 import React, { useState } from 'react';
-import { SettingsData, settingsStyles as S } from './SettingsWebview';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // =============================================================================
 // TYPES
@@ -60,6 +60,7 @@ import { SettingsData, settingsStyles as S } from './SettingsWebview';
 interface DeployTargetSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 	teams: Array<{ id: string; name: string }>;
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
@@ -71,7 +72,7 @@ interface DeployTargetSettingsProps {
 // COMPONENT
 // =============================================================================
 
-export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ settings, onSettingsChange, teams, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut }) => {
+export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ settings, onSettingsChange, onSave, teams, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut }) => {
 	// ── Local UI state ──────────────────────────────────────────────────────
 	const [showDeployApiKey, setShowDeployApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
@@ -113,7 +114,7 @@ export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ sett
 
 	return (
 		<div style={S.card}>
-			<div style={S.cardHeader}>Deployment Target</div>
+			<SettingsCardHeader title="Deployment Target" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
 				<div style={S.formGrid}>

@@ -110,6 +110,11 @@
 					"default": true,
 					"description": "Automatically connect to RocketRide server when extension activates"
 				},
+				"rocketride.welcomeDismissed": {
+					"type": "boolean",
+					"default": false,
+					"description": "Set to true to skip the welcome/setup page on startup. Reset to false to show it again."
+				},
 				"rocketride.pipelineRestartBehavior": {
 					"type": "string",
 					"enum": [

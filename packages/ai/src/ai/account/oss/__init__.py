@@ -41,7 +41,6 @@ The single authenticated identity is a local "Developer" user who belongs to
 a synthetic ``local`` organisation and team with full admin permissions.
 """
 
-import hmac
 import os
 from depends import depends as _depends
 
@@ -89,12 +88,11 @@ class Account(AccountBase):
         # Read the expected key from the environment; empty string means
         # authentication has not been configured at all.
         oss_key = os.environ.get('ROCKETRIDE_APIKEY', '')
-        if not oss_key:
+
+        # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
+        # on the server env is what we expect. Up to 3rd part and key rotation
+        if oss_key and oss_key != credential:
             # No key configured — reject the connection immediately.
-            return (401, 'No authentication configured — set ROCKETRIDE_APIKEY')
-        if not hmac.compare_digest(credential, oss_key):
-            # Key was configured but did not match — reject with a generic message
-            # that does not reveal whether the key exists or its value.
             return (401, 'Invalid API key')
 
         # Credential matched — synthesise a local AccountInfo that grants the
@@ -103,7 +101,7 @@ class Account(AccountBase):
             auth=credential,
             userToken=credential,
             userId='local',
-            displayName='Developer',
+            displayName='RocketRide Developer',
             givenName='',
             familyName='',
             preferredUsername='developer',

@@ -203,6 +203,19 @@ export const settingsStyles = {
 };
 
 // ============================================================================
+// SHARED CARD HEADER WITH SAVE BUTTON
+// ============================================================================
+
+export const SettingsCardHeader: React.FC<{ title: string; onSave: () => void }> = ({ title, onSave }) => (
+	<div style={settingsStyles.cardHeader}>
+		{title}
+		<button style={commonStyles.buttonPrimary} onClick={onSave}>
+			Save All Settings
+		</button>
+	</div>
+);
+
+// ============================================================================
 // MAIN SETTINGS VIEW COMPONENT
 // ============================================================================
 
@@ -425,7 +438,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
+						<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
 					</div>
 				),
 			},
@@ -433,7 +446,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
+						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
 					</div>
 				),
 			},
@@ -441,7 +454,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
+						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
 					</div>
 				),
 			},
@@ -449,7 +462,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<EnvVariablesSettings settings={settings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
+						<EnvVariablesSettings settings={settings} onSave={handleSaveSettings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
 					</div>
 				),
 			},
@@ -457,7 +470,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} />
+						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
 					</div>
 				),
 			},
@@ -465,7 +478,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
+						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
 					</div>
 				),
 			},
@@ -475,17 +488,6 @@ export const PageSettings: React.FC = () => {
 
 	return (
 		<div style={commonStyles.columnFill}>
-			{/* ── Header bar ────────────────────────────────────────── */}
-			<div style={commonStyles.headerBar}>
-				<div>
-					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>RocketRide Extension Settings</div>
-					<div style={commonStyles.textMuted}>Configure your extension preferences and connection settings</div>
-				</div>
-				<button style={commonStyles.buttonPrimary} onClick={handleSaveSettings}>
-					Save All Settings
-				</button>
-			</div>
-
 			{/* ── Tab panel ─────────────────────────────────────────── */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} panels={panels} />
 		</div>

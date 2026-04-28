@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData, settingsStyles as S } from './SettingsWebview';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
 // TYPES
@@ -31,6 +31,7 @@ import { SettingsData, settingsStyles as S } from './SettingsWebview';
 interface IntegrationSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 }
 
 type BooleanKeys<T> = { [K in keyof T]: T[K] extends boolean ? K : never }[keyof T];
@@ -76,10 +77,10 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 // COMPONENT
 // ============================================================================
 
-export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange }) => {
+export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
 	return (
 		<div style={S.card}>
-			<div style={S.cardHeader}>Integrations</div>
+			<SettingsCardHeader title="Integrations" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
 				<div style={S.formGrid}>

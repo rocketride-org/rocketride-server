@@ -8,9 +8,8 @@
  *
  * Layout:  The bar is absolutely positioned at the top center, transparent,
  *          so content (e.g. the canvas) flows underneath.
- *
- * Only the active panel is mounted; switching tabs unmounts the previous
- * panel and mounts the new one.
+ *          Each panel fills the wrapper; scrolling is handled by the panel
+ *          content (e.g. tabContent) not the wrapper or panel itself.
  */
 
 import React, { CSSProperties } from 'react';
@@ -75,9 +74,10 @@ const styles = {
 		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-disabled)',
 	}),
 	panel: {
+		display: 'flex',
+		flexDirection: 'column',
 		width: '100%',
 		height: '100%',
-		overflow: 'auto',
 	} as CSSProperties,
 };
 

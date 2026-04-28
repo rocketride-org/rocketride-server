@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData, settingsStyles as S } from './SettingsWebview';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
 // TYPES
@@ -31,20 +31,21 @@ import { SettingsData, settingsStyles as S } from './SettingsWebview';
 interface PipelineSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, onSettingsChange }) => {
+export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
 	const handleDefaultPipelinePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ defaultPipelinePath: e.target.value });
 	};
 
 	return (
 		<div style={S.card}>
-			<div style={S.cardHeader}>Pipeline Settings</div>
+			<SettingsCardHeader title="Pipeline Settings" onSave={onSave} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Configure default settings for pipeline creation and management</div>
 				<div style={S.formGrid}>

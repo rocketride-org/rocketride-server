@@ -20,6 +20,7 @@
 import React, { useState, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
+import { commonStyles } from '../../themes/styles';
 import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
 import { ProfilePanel } from './components/ProfilePanel';
@@ -73,16 +74,6 @@ const styles = {
 		cursor: 'default',
 		letterSpacing: '0.05em',
 	} as CSSProperties,
-};
-
-/** Tab content area — top padding clears the overlay pill bar (15px + 38px + 15px + 11px buffer). */
-const tabContent: CSSProperties = {
-	padding: '79px 32px 60px',
-	overflow: 'auto',
-	flex: 1,
-	minHeight: 0,
-	maxWidth: 640,
-	margin: '0 auto',
 };
 
 // =============================================================================
@@ -541,28 +532,28 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		() => ({
 			profile: {
 				content: (
-					<div style={tabContent}>
+					<div style={commonStyles.tabContent}>
 						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
 					</div>
 				),
 			},
 			'api-keys': {
 				content: (
-					<div style={tabContent}>
+					<div style={commonStyles.tabContent}>
 						<ApiKeysPanel keys={keys} onCreateKey={openCreateKey} onRevokeKey={openRevokeKey} />
 					</div>
 				),
 			},
 			organization: {
 				content: (
-					<div style={tabContent}>
+					<div style={commonStyles.tabContent}>
 						<OrganizationPanel org={org} editOrgName={editOrgName} orgSaving={orgSaving} orgError={orgError} onOrgNameChange={setEditOrgName} onOrgNameSave={saveOrgName} />
 					</div>
 				),
 			},
 			teams: {
 				content: (
-					<div style={tabContent}>
+					<div style={commonStyles.tabContent}>
 						<TeamsPanel
 							teams={teams}
 							teamDetail={teamDetail}
@@ -588,12 +579,11 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			},
 			members: {
 				content: (
-					<div style={tabContent}>
+					<div style={commonStyles.tabContent}>
 						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={handleRemoveMember} />
 					</div>
 				),
 			},
-			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}),
 		[profile, authUser, keys, org, editOrgName, orgSaving, orgError, teams, teamDetail, activeTeamId, members]
 	);

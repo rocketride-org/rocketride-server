@@ -276,13 +276,13 @@ const splitHeader: CSSProperties = {
 
 /**
  * Tab content area — scrollable body for views that have an overlay tab/pill
- * bar at the top (15px padding + 34px pill height + 15px gap + 15px bottom = 79px top padding).
+ * bar at the top (15px padding + 38px pill height + 15px gap + 15px bottom = 79px top padding).
  * Also centres content to a max-width of 800px.
- * Use as the flex child below `headerBar` when tabs are present.
- * For tab-less views use `viewPadding`.
+ * The panel is a flex column, so flex:1 + minHeight:0 makes this the sole
+ * scroll container (the panel itself does not scroll).
  */
 const tabContent: CSSProperties = {
-	padding: '79px 30px 0',
+	padding: '79px 30px 30px',
 	overflow: 'auto',
 	flex: 1,
 	minHeight: 0,
