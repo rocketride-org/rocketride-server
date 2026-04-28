@@ -32,8 +32,44 @@ jobs:
       - name: Install sync script dependencies
         run: pip install -r tools/requirements.txt
 
-      - name: Run model sync (dry run first — fail fast if script errors)
-        run: python tools/src/sync_models.py --all
+      # Partition providers by whether their API key secret is configured.
+      # Providers WITH a key run in strict mode (native API discovery only).
+      # Providers WITHOUT a key run with --allow-fallback-discovery (OpenRouter discovery).
+      - name: Partition providers by API key availability
+        id: partition
+        shell: bash
+        run: |
+          WITH_KEY=""
+          WITHOUT_KEY=""
+
+          # Provider name → env var name holding the API key.
+          # embedding_openai shares ROCKETRIDE_OPENAI_KEY with llm_openai.
+          declare -A PROVIDER_KEY=(
+            [llm_openai]=ROCKETRIDE_OPENAI_KEY
+            [embedding_openai]=ROCKETRIDE_OPENAI_KEY
+            [llm_anthropic]=ROCKETRIDE_ANTHROPIC_KEY
+            [llm_gemini]=ROCKETRIDE_GEMINI_KEY
+            [llm_mistral]=ROCKETRIDE_MISTRAL_KEY
+            [llm_deepseek]=ROCKETRIDE_DEEPSEEK_KEY
+            [llm_xai]=ROCKETRIDE_XAI_KEY
+            [llm_perplexity]=ROCKETRIDE_PERPLEXITY_KEY
+            [llm_qwen]=ROCKETRIDE_QWEN_KEY
+          )
+
+          for PROVIDER in "${!PROVIDER_KEY[@]}"; do
+            KEY_NAME="${PROVIDER_KEY[$PROVIDER]}"
+            KEY_VALUE="${!KEY_NAME:-}"
+            if [ -n "$KEY_VALUE" ]; then
+              WITH_KEY="$WITH_KEY --provider $PROVIDER"
+            else
+              WITHOUT_KEY="$WITHOUT_KEY --provider $PROVIDER"
+            fi
+          done
+
+          echo "with_key=$WITH_KEY" >> "$GITHUB_OUTPUT"
+          echo "without_key=$WITHOUT_KEY" >> "$GITHUB_OUTPUT"
+          echo "Strict providers: $WITH_KEY"
+          echo "Fallback providers: $WITHOUT_KEY"
         env:
           ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
           ROCKETRIDE_ANTHROPIC_KEY: ${{ secrets.ROCKETRIDE_ANTHROPIC_KEY }}
@@ -44,8 +80,14 @@ jobs:
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
 
-      - name: Apply model sync and capture PR body
-        run: python tools/src/sync_models.py --all --apply --pr-body
+      # Strict sync: only providers whose API key is configured. Native API
+      # discovers and smoke-tests new models. No OpenRouter pollution.
+      - name: Sync providers WITH key (strict, native API)
+        if: steps.partition.outputs.with_key != ''
+        shell: bash
+        run: |
+          # Capture markdown PR body to a file; tee to stdout so it is also visible in CI logs.
+          python tools/src/sync_models.py ${{ steps.partition.outputs.with_key }} --enable-discovery --apply --pr-body | tee /tmp/body-strict.md
         env:
           ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
           ROCKETRIDE_ANTHROPIC_KEY: ${{ secrets.ROCKETRIDE_ANTHROPIC_KEY }}
@@ -55,6 +97,39 @@ jobs:
           ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
+
+      # Fallback sync: providers without an API key. OpenRouter / LiteLLM
+      # are permitted as discovery sources for these. Smoke tests are skipped
+      # (no client). Output may include OpenRouter routing aliases — review
+      # the PR body before merging.
+      - name: Sync providers WITHOUT key (fallback discovery)
+        if: steps.partition.outputs.without_key != ''
+        shell: bash
+        run: |
+          python tools/src/sync_models.py ${{ steps.partition.outputs.without_key }} --enable-discovery --allow-fallback-discovery --apply --pr-body | tee /tmp/body-fallback.md
+
+      # Combine the two PR bodies and write a single SYNC_OUTPUT to GITHUB_ENV.
+      # This overrides whatever each --pr-body step appended individually.
+      - name: Compose combined PR body
+        shell: bash
+        run: |
+          {
+            echo 'SYNC_OUTPUT<<SYNC_EOF'
+            if [ -s /tmp/body-strict.md ]; then
+              echo "## Sync — strict mode (native provider API)"
+              echo
+              cat /tmp/body-strict.md
+              echo
+            fi
+            if [ -s /tmp/body-fallback.md ]; then
+              echo "## Sync — fallback mode (OpenRouter / LiteLLM discovery)"
+              echo
+              echo "_Providers below were synced without their native API key configured. Discovery used OpenRouter/LiteLLM as a fallback. Verify each newly added model ID against the provider's docs before merging — some may be OpenRouter routing aliases that do not work via the native SDK._"
+              echo
+              cat /tmp/body-fallback.md
+            fi
+            echo 'SYNC_EOF'
+          } >> "$GITHUB_ENV"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
