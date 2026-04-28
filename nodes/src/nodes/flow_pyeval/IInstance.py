@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from ..flow_base import FlowBaseIInstance
+from ..flow_base.IInstance import _flow_log, _flow_log_exc
 from .IGlobal import IGlobal
 
 _logger = logging.getLogger('rocketride.flow')
@@ -141,8 +142,17 @@ class IInstance(FlowBaseIInstance):
         namespace['obj'] = getattr(self.instance, 'currentObject', None)
 
         try:
-            return bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
+            result = bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
+            _flow_log('warn',
+                'flow_pyeval evaluated condition=%r kwargs_keys=%r → %s',
+                expression, list(kwargs.keys()), result,
+            )
+            return result
         except Exception as exc:
+            _flow_log_exc(
+                'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',
+                expression, exc,
+            )
             _logger.error(
                 'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',
                 expression,

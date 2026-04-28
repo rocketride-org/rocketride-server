@@ -90,58 +90,36 @@ public:
     virtual std::vector<std::string> getListeners() noexcept;
     virtual bool hasListener(const std::string &methodName) noexcept;
 
-    // `targetNodeId` empty → broadcast to every bound instance on the
-    // lane (default, pre-PR behaviour). Non-empty → dispatch only to
-    // the instance whose `pipeType.id == targetNodeId`. Used by
-    // conditional routers (e.g. `flow/base`) to deliver one chunk to
-    // a single chosen branch target without leaving any state on the
-    // Binder between calls.
     static Error callMethods(
         Binder *pThis, const std::string &methodName,
-        const std::string &targetNodeId,
         std::function<Error(IServiceFilterInstance *)> fcn,
         std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
             serializeTrace) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		Methods that we support. Every content-bearing writeXxx
-    ///		takes an optional `targetNodeId`; when empty the call
-    ///		broadcasts to all bound listeners (default), when non-empty
-    ///		it is delivered only to the listener whose pipeType.id
-    ///		matches.
+    ///		Methods that we support
     //-----------------------------------------------------------------
     virtual Error open(Entry &entry) noexcept;
     virtual Error writeTag(const TAG *pTag) noexcept;
-    virtual Error writeText(const Utf16View &text,
-                            const std::string &targetNodeId = "") noexcept;
-    virtual Error writeTable(const Utf16View &text,
-                             const std::string &targetNodeId = "") noexcept;
-    virtual Error writeWords(const WordVector &textWords,
-                             const std::string &targetNodeId = "") noexcept;
+    virtual Error writeText(const Utf16View &text) noexcept;
+    virtual Error writeTable(const Utf16View &text) noexcept;
+    virtual Error writeWords(const WordVector &textWords) noexcept;
     virtual Error writeAudio(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData,
-                             const std::string &targetNodeId = "") noexcept;
+                             const pybind11::bytes &streamData) noexcept;
     virtual Error writeVideo(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData,
-                             const std::string &targetNodeId = "") noexcept;
+                             const pybind11::bytes &streamData) noexcept;
     virtual Error writeImage(const AVI_ACTION action, Text &mimeType,
-                             const pybind11::bytes &streamData,
-                             const std::string &targetNodeId = "") noexcept;
-    virtual Error writeQuestions(const pybind11::object &question,
-                                 const std::string &targetNodeId = "") noexcept;
-    virtual Error writeAnswers(const pybind11::object &answers,
-                               const std::string &targetNodeId = "") noexcept;
+                             const pybind11::bytes &streamData) noexcept;
+    virtual Error writeQuestions(const pybind11::object &question) noexcept;
+    virtual Error writeAnswers(const pybind11::object &answers) noexcept;
     virtual Error writeClassifications(
         const json::Value &classifications,
         const json::Value &classificationPolicy,
-        const json::Value &classificationRules,
-        const std::string &targetNodeId = "") noexcept;
+        const json::Value &classificationRules) noexcept;
     virtual Error writeClassificationContext(
-        const json::Value &classifications,
-        const std::string &targetNodeId = "") noexcept;
-    virtual Error writeDocuments(const pybind11::object &documents,
-                                 const std::string &targetNodeId = "") noexcept;
+        const json::Value &classifications) noexcept;
+    virtual Error writeDocuments(const pybind11::object &documents) noexcept;
     virtual Error closing() noexcept;
     virtual Error close() noexcept;
 };

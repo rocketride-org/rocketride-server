@@ -318,6 +318,8 @@ public:
     virtual std::vector<std::string> cb_getListeners() noexcept(false);
     virtual std::vector<std::string> cb_getControllerNodeIds(
         std::string &classType) noexcept(false);
+    virtual IServiceFilterInstance *cb_getInstance(
+        const std::string &nodeId) noexcept(false);
     virtual void cb_control(std::string &filter, py::object &control,
                             std::string nodeId = "") noexcept(false);
     virtual void cb_open(py::object entry) noexcept(false);
@@ -325,40 +327,51 @@ public:
     virtual void cb_writeTagBeginStream() noexcept(false);
     virtual void cb_writeTagData(py::object &data) noexcept(false);
     virtual void cb_writeTag(py::bytes data) noexcept(false);
-    // Every content writeXxx accepts an optional `targetNodeId`. When
-    // empty the call broadcasts to every bound listener on the lane;
-    // when non-empty only the listener with matching pipeType.id is
-    // dispatched to. Used by conditional routers to deliver to a single
-    // chosen branch without leaving any state on the Binder.
-    virtual void cb_writeText(const std::u16string &text,
-                              std::string targetNodeId = "") noexcept(false);
-    virtual void cb_writeTable(const std::u16string &text,
-                               std::string targetNodeId = "") noexcept(false);
-    virtual void cb_writeWords(const WordVector &textWords,
-                               std::string targetNodeId = "") noexcept(false);
+    virtual void cb_writeText(const std::u16string &text) noexcept(false);
+    virtual void cb_writeTable(const std::u16string &text) noexcept(false);
+    virtual void cb_writeWords(const WordVector &textWords) noexcept(false);
     virtual void cb_writeAudio(const AVI_ACTION action, Text &mimeType,
-                               const pybind11::bytes &streamData,
-                               std::string targetNodeId = "") noexcept(false);
+                               const pybind11::bytes &streamData) noexcept(false);
     virtual void cb_writeVideo(const AVI_ACTION action, Text &mimeType,
-                               const pybind11::bytes &streamData,
-                               std::string targetNodeId = "") noexcept(false);
+                               const pybind11::bytes &streamData) noexcept(false);
     virtual void cb_writeImage(const AVI_ACTION action, Text &mimeType,
-                               const pybind11::bytes &streamData,
-                               std::string targetNodeId = "") noexcept(false);
-    virtual void cb_writeQuestions(const pybind11::object &question,
-                                   std::string targetNodeId = "") noexcept(false);
-    virtual void cb_writeAnswers(const pybind11::object &answers,
-                                 std::string targetNodeId = "") noexcept(false);
+                               const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_writeQuestions(const pybind11::object &question) noexcept(false);
+    virtual void cb_writeAnswers(const pybind11::object &answers) noexcept(false);
     virtual void cb_writeClassifications(
         const json::Value &classifications,
         const json::Value &classificationPolicy,
-        const json::Value &classificationRules,
-        std::string targetNodeId = "") noexcept(false);
+        const json::Value &classificationRules) noexcept(false);
     virtual void cb_writeClassificationContext(
+        const json::Value &classifications) noexcept(false);
+    virtual void cb_writeDocuments(const pybind11::object &documents) noexcept(false);
+
+    // cb_acceptXxx: deliver INTO this instance (peer-direct). Unlike
+    // cb_writeXxx (which broadcasts via this->binder to downstream
+    // listeners), cb_acceptXxx invokes this->writeXxx() virtual so the
+    // pybind11 trampoline IPythonInstanceBase::writeXxx fires and the
+    // call lands in the Python override of THIS node. Used by
+    // conditional routers (`flow_*`) that have already resolved a peer
+    // via cb_getInstance and want to hand the chunk to that peer's
+    // own writeXxx — not its downstream binder.
+    virtual void cb_acceptText(const std::u16string &text) noexcept(false);
+    virtual void cb_acceptTable(const std::u16string &text) noexcept(false);
+    virtual void cb_acceptWords(const WordVector &textWords) noexcept(false);
+    virtual void cb_acceptAudio(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptVideo(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptImage(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptQuestions(const pybind11::object &question) noexcept(false);
+    virtual void cb_acceptAnswers(const pybind11::object &answers) noexcept(false);
+    virtual void cb_acceptDocuments(const pybind11::object &documents) noexcept(false);
+    virtual void cb_acceptClassifications(
         const json::Value &classifications,
-        std::string targetNodeId = "") noexcept(false);
-    virtual void cb_writeDocuments(const pybind11::object &documents,
-                                   std::string targetNodeId = "") noexcept(false);
+        const json::Value &classificationPolicy,
+        const json::Value &classificationRules) noexcept(false);
+    virtual void cb_acceptClassificationContext(
+        const json::Value &classifications) noexcept(false);
     virtual void cb_writeTagEndStream() noexcept(false);
     virtual void cb_writeTagEndObject() noexcept(false);
     virtual void cb_close() noexcept(false);
