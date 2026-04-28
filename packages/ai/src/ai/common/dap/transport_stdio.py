@@ -40,11 +40,23 @@ Usage Patterns:
     For background subprocess monitoring:
     ```python
     # Create subprocess
-    process = await asyncio.create_subprocess_exec('python', 'task_engine.py', stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(
+        'python',
+        'task_engine.py',
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
 
     # Setup transport
     transport = TransportStdio(process)
-    transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_protocol_message, on_connected=handle_process_connected, on_disconnected=handle_process_disconnected)
+    transport.bind(
+        on_debug_message=logger.debug,
+        on_debug_protocol=protocol_logger.debug,
+        on_receive=handle_protocol_message,
+        on_connected=handle_process_connected,
+        on_disconnected=handle_process_disconnected,
+    )
 
     # Start monitoring (returns immediately, runs in background)
     await transport.connect()
@@ -561,19 +573,45 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 3:
                     _, s_size, name = parts
                     size = int(s_size, 16)
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_object', 'body': {'object': name, 'size': size}})
+                    await self._transport_receive(
+                        {'type': 'event', 'event': 'apaevt_status_object', 'body': {'object': name, 'size': size}}
+                    )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete OBJ message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete OBJ message: {message}\n'},
+                        }
+                    )
             except (ValueError, IndexError) as e:
                 self._debug_message(f'Malformed OBJ message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed OBJ message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed OBJ message: {message}\n'},
+                    }
+                )
 
         # Parse comprehensive statistics: '>CNT*total_size*total_count*completed_size*...'
         elif message.startswith('>CNT*'):
             try:
                 parts = message.split('*')
                 if len(parts) >= 11:
-                    (_, s_totalSize, s_totalCount, s_completedSize, s_completedCount, s_failedSize, s_failedCount, s_wordsSize, s_wordsCount, s_rateSize, s_rateCount) = parts[:11]
+                    (
+                        _,
+                        s_totalSize,
+                        s_totalCount,
+                        s_completedSize,
+                        s_completedCount,
+                        s_failedSize,
+                        s_failedCount,
+                        s_wordsSize,
+                        s_wordsCount,
+                        s_rateSize,
+                        s_rateCount,
+                    ) = parts[:11]
 
                     await self._transport_receive(
                         {
@@ -594,28 +632,52 @@ class TransportStdio(TransportBase):
                         }
                     )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete CNT message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete CNT message: {message}\n'},
+                        }
+                    )
             except (ValueError, IndexError) as e:
                 self._debug_message(f'Malformed CNT message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed CNT message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed CNT message: {message}\n'},
+                    }
+                )
 
         # Parse error messages: '>ERR*error_message'
         elif message.startswith('>ERR*'):
             try:
                 parts = message.split('*', 1)
                 msg = parts[1] if len(parts) >= 2 else 'Empty error message'
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_error', 'body': {'message': msg}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_error', 'body': {'message': msg}}
+                )
             except IndexError:
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_error', 'body': {'message': 'Malformed error message'}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_error', 'body': {'message': 'Malformed error message'}}
+                )
 
         # Parse warning messages: '>WRN*warning_message'
         elif message.startswith('>WRN*'):
             try:
                 parts = message.split('*', 1)
                 msg = parts[1] if len(parts) >= 2 else 'Empty warning message'
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_warning', 'body': {'message': msg}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_warning', 'body': {'message': msg}}
+                )
             except IndexError:
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_warning', 'body': {'message': 'Malformed warning message'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'apaevt_status_warning',
+                        'body': {'message': 'Malformed warning message'},
+                    }
+                )
 
         # Parse metrics messages: '>MET*json_data'
         elif message.startswith('>DL*'):
@@ -630,12 +692,26 @@ class TransportStdio(TransportBase):
                         'status': download_info.get('status', ''),
                         'error': download_info.get('error', []),
                     }
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_download', 'body': {'info': message_info}})
+                    await self._transport_receive(
+                        {'type': 'event', 'event': 'apaevt_status_download', 'body': {'info': message_info}}
+                    )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete DL message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete DL message: {message}\n'},
+                        }
+                    )
             except (json.JSONDecodeError, IndexError) as e:
                 self._debug_message(f'Malformed DL message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed DL message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed DL message: {message}\n'},
+                    }
+                )
 
         # Parse user messages: '>USR*htmlstr'
         elif message.startswith('>USR*'):
@@ -646,10 +722,18 @@ class TransportStdio(TransportBase):
                     value = json.loads(jsonmessage)
                 else:
                     value = []
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_user', 'body': {'notes': value}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_user', 'body': {'notes': value}}
+                )
             except (json.JSONDecodeError, IndexError) as e:
                 self._debug_message(f'Malformed USR message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed USR message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed USR message: {message}\n'},
+                    }
+                )
 
         # Parse metrics messages: '>MET*json_data'
         elif message.startswith('>MET*'):
@@ -658,12 +742,26 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 2:
                     _, json_str = parts
                     metrics = json.loads(json_str)
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_metrics', 'body': {'metrics': metrics}})
+                    await self._transport_receive(
+                        {'type': 'event', 'event': 'apaevt_status_metrics', 'body': {'metrics': metrics}}
+                    )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete MET message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete MET message: {message}\n'},
+                        }
+                    )
             except (json.JSONDecodeError, IndexError) as e:
                 self._debug_message(f'Malformed MET message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed MET message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed MET message: {message}\n'},
+                    }
+                )
 
         # Parse info messages: '>INF*json_data'
         elif message.startswith('>INF*'):
@@ -672,12 +770,26 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 2:
                     _, json_str = parts
                     info = json.loads(json_str)
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_info', 'body': {'info': info}})
+                    await self._transport_receive(
+                        {'type': 'event', 'event': 'apaevt_status_info', 'body': {'info': info}}
+                    )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete INF message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete INF message: {message}\n'},
+                        }
+                    )
             except (json.JSONDecodeError, IndexError) as e:
                 self._debug_message(f'Malformed INF message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed INF message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed INF message: {message}\n'},
+                    }
+                )
 
         # Parse service status messages: '>SVC*status_flag'
         elif message.startswith('>SVC*'):
@@ -686,21 +798,39 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 2:
                     _, s_status = parts
                     status = bool(int(s_status))
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_state', 'body': {'service': status}})
+                    await self._transport_receive(
+                        {'type': 'event', 'event': 'apaevt_status_state', 'body': {'service': status}}
+                    )
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete SVC message: {message}\n'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'output',
+                            'body': {'category': 'console', 'output': f'Incomplete SVC message: {message}\n'},
+                        }
+                    )
             except (ValueError, IndexError) as e:
                 self._debug_message(f'Malformed SVC message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed SVC message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed SVC message: {message}\n'},
+                    }
+                )
 
         # Parse job status messages: '>JOB*status_message'
         elif message.startswith('>JOB*'):
             try:
                 parts = message.split('*', 1)
                 status = parts[1] if len(parts) >= 2 else 'Empty job status'
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_message', 'body': {'message': status}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_message', 'body': {'message': status}}
+                )
             except IndexError:
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_status_message', 'body': {'message': 'Malformed job message'}})
+                await self._transport_receive(
+                    {'type': 'event', 'event': 'apaevt_status_message', 'body': {'message': 'Malformed job message'}}
+                )
 
         # Parse debug command messages: '>DBG*operation*id*total_pipes*pipe_id'
         elif message.startswith('>DBG*'):
@@ -719,12 +849,24 @@ class TransportStdio(TransportBase):
                     {
                         'type': 'event',
                         'event': 'apaevt_trace',
-                        'body': {'op': op.lower(), 'id': int(id, 16), 'total_pipes': int(total_pipes, 16), 'pipe_id': pipe_id, 'trace': trace},
+                        'body': {
+                            'op': op.lower(),
+                            'id': int(id, 16),
+                            'total_pipes': int(total_pipes, 16),
+                            'pipe_id': pipe_id,
+                            'trace': trace,
+                        },
                     }
                 )
             except (ValueError, IndexError) as e:
                 self._debug_message(f'Malformed DBG message: {message}, error: {e}')
-                await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Malformed DBG message: {message}\n'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'output',
+                        'body': {'category': 'console', 'output': f'Malformed DBG message: {message}\n'},
+                    }
+                )
 
         # Parse exit status messages: '>EXIT*exit_code_hex*exit_message'
         elif message.startswith('>EXIT*'):
@@ -736,10 +878,18 @@ class TransportStdio(TransportBase):
                         exitCode = int(s_exitCode, 16)
                     except ValueError:
                         exitCode = 0 if s_exitCode == 'CANCELLED' else 1
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': exitCode, 'message': exitMessage}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'apaevt_exit',
+                            'body': {'exitCode': exitCode, 'message': exitMessage},
+                        }
+                    )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
-                    await self._transport_disconnected(f'Process exited: {exitMessage} (code: {exitCode})', has_error=(exitCode != 0))
+                    await self._transport_disconnected(
+                        f'Process exited: {exitMessage} (code: {exitCode})', has_error=(exitCode != 0)
+                    )
 
                 elif len(parts) == 3:
                     _, s_exitCode, exitMessage = parts
@@ -747,18 +897,38 @@ class TransportStdio(TransportBase):
                         exitCode = int(s_exitCode, 16)
                     except ValueError:
                         exitCode = 1
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': exitCode, 'message': exitMessage}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'apaevt_exit',
+                            'body': {'exitCode': exitCode, 'message': exitMessage},
+                        }
+                    )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
-                    await self._transport_disconnected(f'Process exited with code: {exitCode}', has_error=(exitCode != 0))
+                    await self._transport_disconnected(
+                        f'Process exited with code: {exitCode}', has_error=(exitCode != 0)
+                    )
 
                 else:
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 1, 'message': 'Incomplete exit message'}})
+                    await self._transport_receive(
+                        {
+                            'type': 'event',
+                            'event': 'apaevt_exit',
+                            'body': {'exitCode': 1, 'message': 'Incomplete exit message'},
+                        }
+                    )
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                     await self._transport_disconnected('Process exited with incomplete exit message', has_error=True)
             except IndexError:
-                await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 1, 'message': 'Malformed exit message'}})
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'apaevt_exit',
+                        'body': {'exitCode': 1, 'message': 'Malformed exit message'},
+                    }
+                )
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
 
@@ -780,8 +950,16 @@ class TransportStdio(TransportBase):
         # Handle unknown control messages starting with '>'
         elif message.startswith('>'):
             self._debug_message(f'Unknown control message: {message}')
-            await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Unknown control: {message}\n'}})
+            await self._transport_receive(
+                {
+                    'type': 'event',
+                    'event': 'output',
+                    'body': {'category': 'console', 'output': f'Unknown control: {message}\n'},
+                }
+            )
 
         # Handle regular console output (non-control messages)
         else:
-            await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'{message}\n'}})
+            await self._transport_receive(
+                {'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'{message}\n'}}
+            )

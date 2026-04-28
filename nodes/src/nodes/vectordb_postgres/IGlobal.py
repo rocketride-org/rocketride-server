@@ -90,7 +90,9 @@ class IGlobal(IGlobalTransform):
 
             # Table name validation: unquoted identifier rules, total ≤63 chars
             if not VALID_TABLE.fullmatch(table or ''):
-                warning('Table name must be ≤63 chars; start with letter/underscore; only letters, digits, underscore; no spaces or special characters (- . / \\ \' " ` ( ) [ ] { } , ; : * + = | & # @ % ^ ! ? ~ $)')
+                warning(
+                    'Table name must be ≤63 chars; start with letter/underscore; only letters, digits, underscore; no spaces or special characters (- . / \\ \' " ` ( ) [ ] { } , ; : * + = | & # @ % ^ ! ? ~ $)'
+                )
                 return
 
             # Load deps on demand

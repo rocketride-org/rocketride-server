@@ -417,7 +417,12 @@ class IServiceFilterInstance(Protocol):
         """Send a list of documents."""
         pass
 
-    def sendClassifications(self, classifications: Dict[str, Any], classificationsPolicies: Dict[str, Any], classificationsRules: Dict[str, Any]) -> None:
+    def sendClassifications(
+        self,
+        classifications: Dict[str, Any],
+        classificationsPolicies: Dict[str, Any],
+        classificationsRules: Dict[str, Any],
+    ) -> None:
         """Send classification data."""
         pass
 
@@ -536,7 +541,9 @@ class IServiceFilterInstance(Protocol):
         """Send a list of documents."""
         pass
 
-    def writeClassifications(self, classifications: Dict[str, Any], classificationPolicy: Dict[str, Any], classificationRules: Dict[str, Any]) -> None:
+    def writeClassifications(
+        self, classifications: Dict[str, Any], classificationPolicy: Dict[str, Any], classificationRules: Dict[str, Any]
+    ) -> None:
         """Send classification data."""
         pass
 
@@ -902,7 +909,9 @@ class IInstanceBase:
         if control.control == 'invoke':
             control.result = self.invoke(control.param)
         else:
-            raise APERR(Ec.InvalidParam, f'Unrecognized control {control.control} sent to {self.IGlobal.glb.logicalType}')
+            raise APERR(
+                Ec.InvalidParam, f'Unrecognized control {control.control} sent to {self.IGlobal.glb.logicalType}'
+            )
 
     def beginInstance(self) -> None:
         """Begin the instance lifecycle."""
@@ -968,7 +977,9 @@ class IInstanceBase:
         """Send a list of documents."""
         pass
 
-    def writeClassifications(self, classifications: Dict[str, Any], classificationPolicy: Dict[str, Any], classificationRules: Dict[str, Any]) -> None:
+    def writeClassifications(
+        self, classifications: Dict[str, Any], classificationPolicy: Dict[str, Any], classificationRules: Dict[str, Any]
+    ) -> None:
         """Send classification data."""
         pass
 

@@ -292,7 +292,11 @@ def execute_sandboxed(
 
     if result_val is not None:
         try:
-            response['result'] = result_val if isinstance(result_val, (str, int, float, bool, list, dict, type(None))) else repr(result_val)
+            response['result'] = (
+                result_val
+                if isinstance(result_val, (str, int, float, bool, list, dict, type(None)))
+                else repr(result_val)
+            )
         except Exception:
             response['result'] = repr(result_val)
 

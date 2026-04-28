@@ -236,7 +236,9 @@ class AVIReader(ABC):
         debug(f'[Reader] Starting {self._name} with args: {" ".join(ffargs)}')
 
         # Start FFmpeg process
-        self._ffmpeg_process = subprocess.Popen(ffargs, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=16384)
+        self._ffmpeg_process = subprocess.Popen(
+            ffargs, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=16384
+        )
 
         # If we could not start the process, raise an error
         if not self._ffmpeg_process:

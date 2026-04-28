@@ -57,7 +57,9 @@ class Chat(ChatBase):
     """
     _llm: ChatVertexAI
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any], parameters: Dict[str, Any] = None):
+    def __init__(
+        self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any], parameters: Dict[str, Any] = None
+    ):
         """
         Initialize the vertex chat bot.
         """
@@ -92,10 +94,20 @@ class Chat(ChatBase):
                 token = credentials_dict.get('access_token')
                 expiry_ts = credentials_dict.get('expiry_date')
                 expiry_dt = datetime.fromtimestamp(expiry_ts / 1000) if expiry_ts else None
-                credentials = ExternalRefreshCredentials(token=token, refresh_token=credentials_dict.get('refresh_token'), expiry=expiry_dt, scopes=credentials_dict.get('scopes'), oauth_server_url=credentials_dict.get('oauth_server_url'))
+                credentials = ExternalRefreshCredentials(
+                    token=token,
+                    refresh_token=credentials_dict.get('refresh_token'),
+                    expiry=expiry_dt,
+                    scopes=credentials_dict.get('scopes'),
+                    oauth_server_url=credentials_dict.get('oauth_server_url'),
+                )
 
             if not credentials or not credentials.valid or (credentials.expiry and credentials.expiry < datetime.now()):
-                if credentials and (credentials.expiry and credentials.expiry < datetime.now()) and credentials.refresh_token:
+                if (
+                    credentials
+                    and (credentials.expiry and credentials.expiry < datetime.now())
+                    and credentials.refresh_token
+                ):
                     # Refresh user credentals
                     credentials.refresh(AuthRequest())
         else:
@@ -111,7 +123,14 @@ class Chat(ChatBase):
         vertex_model_name = self._model
 
         # Initialize LLM using unified ChatVertexAI for all models
-        self._llm = ChatVertexAI(model=vertex_model_name, temperature=0, credentials=credentials, project=project, location=location, max_output_tokens=self._modelOutputTokens)
+        self._llm = ChatVertexAI(
+            model=vertex_model_name,
+            temperature=0,
+            credentials=credentials,
+            project=project,
+            location=location,
+            max_output_tokens=self._modelOutputTokens,
+        )
 
         # Save our chat class into the bag
         bag['chat'] = self

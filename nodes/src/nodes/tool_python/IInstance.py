@@ -55,7 +55,10 @@ class IInstance(IInstanceBase):
             'properties': {
                 'stdout': {'type': 'string', 'description': 'Captured print() output from the script.'},
                 'stderr': {'type': 'string', 'description': 'Error traceback if the script raised an exception.'},
-                'exit_code': {'type': 'integer', 'description': 'Exit code (0 = success, 1 = exception, -1 = timeout).'},
+                'exit_code': {
+                    'type': 'integer',
+                    'description': 'Exit code (0 = success, 1 = exception, -1 = timeout).',
+                },
                 'timed_out': {'type': 'boolean', 'description': 'True if the script was killed due to timeout.'},
                 'result': {'description': 'Value of the "result" variable if set by the script.'},
             },

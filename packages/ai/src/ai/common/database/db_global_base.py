@@ -38,14 +38,22 @@ Everything else — schema reflection, type inference, table auto-creation,
 session lifecycle — is handled here and is dialect-agnostic.
 """
 
-import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import (
-    Column, DateTime, Float, Integer, MetaData, String, Text,
-    Table as SQLTable, create_engine, inspect, text,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    Table as SQLTable,
+    create_engine,
+    inspect,
+    text,
 )
 from sqlalchemy.exc import DBAPIError
 
@@ -355,7 +363,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {}
             for column in columns:
                 col_name = column['name']
-                col_type = column['type']   # renamed to avoid shadowing the 'type' builtin
+                col_type = column['type']  # renamed to avoid shadowing the 'type' builtin
                 comment = column.get('comment', '')
                 self.schema[col_name] = (str(col_type), comment)
 
@@ -454,9 +462,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         table_schema = self._getTableSchema(self.table)
         if table_schema is None:
             warning(
-                f'Table "{self.table}" does not exist in database "{self.database}". '
-                f'It will be created automatically when data is received. '
-                f'If you prefer to create it manually, please do so before running the pipeline.'
+                f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.'
             )
             self.schema = {}
         else:

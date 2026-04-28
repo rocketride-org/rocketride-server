@@ -42,10 +42,12 @@ os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 # Track if we've already run suppression
 _suppressed = False
 
+
 # Determine if we are in verbose mode
 def _is_verbose() -> bool:
     """Check if --verbose or -v flag is present on command line."""
     return '--verbose' in sys.argv or '-v' in sys.argv
+
 
 # Apply warning suppressions
 def _apply_suppressions():

@@ -121,17 +121,17 @@ from typing import List, Dict, Any
 
 class Pinecone:
     '''Mock Pinecone client.'''
-    
+
     _indexes: Dict[str, 'Index'] = {}
-    
+
     def __init__(self, api_key: str = None, **kwargs):
         pass
-    
+
     def Index(self, name: str) -> 'Index':
         if name not in Pinecone._indexes:
             Pinecone._indexes[name] = Index(name)
         return Pinecone._indexes[name]
-    
+
     @classmethod
     def reset(cls):
         cls._indexes = {}
@@ -139,15 +139,15 @@ class Pinecone:
 
 class Index:
     '''Mock Pinecone index.'''
-    
+
     def __init__(self, name: str):
         self.name = name
         self._vectors: List[Dict[str, Any]] = []
-    
+
     def upsert(self, vectors: List[Dict]) -> dict:
         self._vectors.extend(vectors)
         return {"upserted_count": len(vectors)}
-    
+
     def query(self, vector: List[float], top_k: int = 10, **kwargs) -> dict:
         matches = [
             {"id": v["id"], "score": 0.95, "metadata": v.get("metadata", {})}

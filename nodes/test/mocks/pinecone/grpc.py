@@ -29,4 +29,3 @@ from . import MockPinecone
 
 # Re-export for import compatibility
 PineconeGRPC = MockPinecone
-

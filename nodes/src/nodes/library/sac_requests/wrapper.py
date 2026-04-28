@@ -81,7 +81,15 @@ class HttpRequestWrapper:
         """
         return HttpRequest(self.url, self.config, self.headers, refresh_headers=self.refresh_headers)
 
-    def send(self, method: str, endpoint: str = '', headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Optional[Dict[str, Any]]) -> Response:  # pylint: disable=line-too-long,too-many-arguments
+    def send(
+        self,
+        method: str,
+        endpoint: str = '',
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Optional[Dict[str, Any]],
+    ) -> Response:  # pylint: disable=line-too-long,too-many-arguments
         """Send request to the endpoint with parameters and data supplied.
 
         kwargs can have:

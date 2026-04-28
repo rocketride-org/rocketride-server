@@ -75,7 +75,9 @@ class Store(DocumentStoreBase):
         if similarity in ['cosine', 'euclidean', 'dot_product']:
             self.similarity = similarity
         else:
-            raise Exception('The similarity metric you provided in the config.json does not match required astra configurations')
+            raise Exception(
+                'The similarity metric you provided in the config.json does not match required astra configurations'
+            )
 
         # Strip API key also
         self.application_token = config.get('application_token', None)
@@ -128,7 +130,10 @@ class Store(DocumentStoreBase):
         """
         try:
             # Define collection with custom embedding support
-            collection_definition = CollectionDefinition(vector=CollectionVectorOptions(dimension=vectorSize, metric=self.similarity), lexical=CollectionLexicalOptions(enabled=True, analyzer='standard'))
+            collection_definition = CollectionDefinition(
+                vector=CollectionVectorOptions(dimension=vectorSize, metric=self.similarity),
+                lexical=CollectionLexicalOptions(enabled=True, analyzer='standard'),
+            )
 
             # Create the collection
             self.database.create_collection(name=self.collection_name, definition=collection_definition)

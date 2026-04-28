@@ -200,7 +200,9 @@ class RocketRideDriver(AgentBase):
 
             # Inform the UI which tools are about to run this wave
             tool_names = [c.get('tool', '?') for c in tool_calls]
-            self.sendSSE(context, 'thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names)
+            self.sendSSE(
+                context, 'thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names
+            )
 
             # Execute all tool calls in this wave concurrently.  Each result is
             # stored in memory under "wave-N.rM" and a structural summary is

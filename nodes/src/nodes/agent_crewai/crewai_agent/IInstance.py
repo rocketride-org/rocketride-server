@@ -35,7 +35,9 @@ class IInstance(IInstanceBase):
         description=lambda self: (
             f'This agent: {self.IGlobal.agent._agent_description} Invoke this agent as a tool. Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
             if getattr(self.IGlobal.agent, '_agent_description', '')
-            else ('Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.')
+            else (
+                'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+            )
         ),
     )
     def run_agent(self, input_obj: Any) -> Any:  # noqa: ANN401

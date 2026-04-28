@@ -8,7 +8,14 @@ class Pipe:
     Define our class to keep track of a processing pipe.
     """
 
-    def __init__(self, apikey: str = '', loader: Any = None, input_keys: Optional[List[str]] = None, output: Optional[List[str]] = None, usage: Optional[Dict[str, int]] = None):
+    def __init__(
+        self,
+        apikey: str = '',
+        loader: Any = None,
+        input_keys: Optional[List[str]] = None,
+        output: Optional[List[str]] = None,
+        usage: Optional[Dict[str, int]] = None,
+    ):
         """
         Create an instance of the pipe context.
         """

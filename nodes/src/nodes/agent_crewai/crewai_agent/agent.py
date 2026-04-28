@@ -142,5 +142,9 @@ class CrewAgent(CrewBase):
         # Result extraction handles both CrewOutput (has .raw) and
         # CrewStreamingOutput (final answer at .result.raw).  Verified in
         # CrewAI 1.14.1 source.
-        final_text = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+        final_text = (
+            self._safe_str(getattr(result, 'raw', None))
+            or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None))
+            or self._safe_str(result)
+        )
         return final_text, result

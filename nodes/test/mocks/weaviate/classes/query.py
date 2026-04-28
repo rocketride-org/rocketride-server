@@ -29,4 +29,3 @@ Mock Weaviate query classes.
 from .. import Filter, MetadataQuery
 
 __all__ = ['Filter', 'MetadataQuery']
-

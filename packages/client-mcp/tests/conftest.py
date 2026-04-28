@@ -29,6 +29,7 @@ import pytest_asyncio
 PROJECT_ROOT = _REPO_ROOT
 try:
     from dotenv import load_dotenv
+
     load_dotenv(PROJECT_ROOT / '.env')
 except ImportError:
     pass
@@ -61,6 +62,7 @@ async def server_available() -> bool:
     """Skip if RocketRide server is not reachable (same pattern as nodes/test)."""
     try:
         from rocketride import RocketRideClient
+
         client = RocketRideClient(uri=TEST_CONFIG['uri'], auth=TEST_CONFIG['auth'])
         await client.connect()
         await client.ping()
@@ -68,8 +70,7 @@ async def server_available() -> bool:
         return True
     except Exception:
         pytest.skip(
-            f"Server not available at {TEST_CONFIG['uri']}. "
-            "Set ROCKETRIDE_URI and ROCKETRIDE_APIKEY and ensure server is running."
+            f'Server not available at {TEST_CONFIG["uri"]}. Set ROCKETRIDE_URI and ROCKETRIDE_APIKEY and ensure server is running.'
         )
 
 
@@ -80,6 +81,7 @@ async def client(server_available: bool) -> AsyncGenerator[Any, None]:
     Skips the test when server is not running (e.g. unit-only runs).
     """
     from rocketride import RocketRideClient
+
     _client = RocketRideClient(uri=TEST_CONFIG['uri'], auth=TEST_CONFIG['auth'])
     await _client.connect()
     try:
@@ -93,6 +95,7 @@ async def client(server_available: bool) -> AsyncGenerator[Any, None]:
 # Unit-test fixtures (no server required)
 # -----------------------------------------------------------------------------
 
+
 @pytest.fixture
 def env_rocketride(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set ROCKETRIDE_* env vars so load_settings() succeeds."""
@@ -105,14 +108,16 @@ def mock_rocketride_client() -> MagicMock:
     """Minimal mock RocketRideClient for unit tests (no server)."""
     client = MagicMock()
     client.build_request = MagicMock(return_value={'command': 'rrext_get_tasks'})
-    client.request = AsyncMock(return_value={
-        'body': {
-            'tasks': [
-                {'name': 'Task1', 'description': 'First task'},
-                {'name': 'Task2', 'description': 'Second task'},
-            ],
-        },
-    })
+    client.request = AsyncMock(
+        return_value={
+            'body': {
+                'tasks': [
+                    {'name': 'Task1', 'description': 'First task'},
+                    {'name': 'Task2', 'description': 'Second task'},
+                ],
+            },
+        }
+    )
     return client
 
 

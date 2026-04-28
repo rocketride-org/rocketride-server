@@ -108,4 +108,6 @@ class CrewSubagent(CrewBase):
         `questions` lane, so this method is unreachable under the happy path.
         If anything ever reaches it, fail loud with an actionable message.
         """
-        raise NotImplementedError('CrewSubagent cannot be invoked directly; wire it into a CrewAI Manager via the crewai channel.')
+        raise NotImplementedError(
+            'CrewSubagent cannot be invoked directly; wire it into a CrewAI Manager via the crewai channel.'
+        )

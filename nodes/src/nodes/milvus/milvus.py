@@ -371,7 +371,13 @@ class Store(DocumentStoreBase):
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
         # Perform the search
-        points = self.client.search(collection_name=self.collection, data=[query.embedding], filter=filter_expression, limit=25 if docFilter.limit <= 10 else docFilter.limit, output_fields=['meta', 'content'])
+        points = self.client.search(
+            collection_name=self.collection,
+            data=[query.embedding],
+            filter=filter_expression,
+            limit=25 if docFilter.limit <= 10 else docFilter.limit,
+            output_fields=['meta', 'content'],
+        )
 
         docs = self._convertToDocs(points[0])
 
@@ -394,7 +400,13 @@ class Store(DocumentStoreBase):
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
         # Perform the query
-        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['meta', 'content'], offset=docFilter.offset, limit=docFilter.limit)
+        results = self.client.query(
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['meta', 'content'],
+            offset=docFilter.offset,
+            limit=docFilter.limit,
+        )
 
         # Convert results to Docs
         return self._convertToDocs(results)
@@ -416,7 +428,9 @@ class Store(DocumentStoreBase):
             filter_expr += f' and meta["parent"] == {json.dumps(parent)}'
 
         # Perform the query
-        results = self.client.query(collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit)
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit
+        )
 
         # Build paths dictionary
         paths = {}
@@ -485,7 +499,12 @@ class Store(DocumentStoreBase):
                 raise Exception('No embedding in document')
 
             # Append the points // create a unique identifier that fits into an int64 id field
-            tmp_struct = {'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)), 'vector': embedding, 'content': chunk.page_content, 'meta': chunk.metadata}
+            tmp_struct = {
+                'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)),
+                'vector': embedding,
+                'content': chunk.page_content,
+                'meta': chunk.metadata,
+            }
 
             batch.append(tmp_struct)
 
@@ -567,7 +586,9 @@ class Store(DocumentStoreBase):
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta'])
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+        )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
         self._batchUpsertResults(results, isDeleted=True)
@@ -595,7 +616,9 @@ class Store(DocumentStoreBase):
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta'])
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+        )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
         self._batchUpsertResults(results, isDeleted=False)
@@ -623,7 +646,9 @@ class Store(DocumentStoreBase):
             # Build filter for getting a set of chunks within the offset range
             must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
-            results = self.client.query(collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content'])
+            results = self.client.query(
+                collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content']
+            )
 
             # Create a renderChunkSize array with empty
             # entries. This will allow us to join even when

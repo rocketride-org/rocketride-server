@@ -66,7 +66,9 @@ class Parser(ReaderBase):
         # Track whether figure summarization was requested for this parser instance
         self._summarize_text = False
 
-        debug(f'Reducto Parser initialized with parse_mode: {"Advanced" if self._parse_mode else "Simple"}, api_key: {"set" if self._api_key else "not set"}')
+        debug(
+            f'Reducto Parser initialized with parse_mode: {"Advanced" if self._parse_mode else "Simple"}, api_key: {"set" if self._api_key else "not set"}'
+        )
 
     def read(self, file_data: bytes) -> str:
         """Read and parse document data using Reducto.
@@ -144,7 +146,9 @@ class Parser(ReaderBase):
                     debug('Reducto Parser: Enabled multilingual OCR system')
 
                 # 2. AI Figure/Image summarization
-                summarize_text = bool(self.config.get('Summarize_Text') or self.config.get('reducto.Summarize_Text', False))
+                summarize_text = bool(
+                    self.config.get('Summarize_Text') or self.config.get('reducto.Summarize_Text', False)
+                )
                 enhance_options['summarize_figures'] = summarize_text
                 # SDK 0.13.0 doesn't support table summaries effectively, disable it
                 enhance_options['summarize_tables'] = False
@@ -171,7 +175,9 @@ class Parser(ReaderBase):
                 parse_kwargs['enhance'] = enhance_options
                 debug(f'Reducto Parser: Including enhance parameter: {enhance_options}')
 
-            debug(f'Reducto Parser: API call parameters: input={file_id}, enhance={enhance_options if enhance_options else "None"}')
+            debug(
+                f'Reducto Parser: API call parameters: input={file_id}, enhance={enhance_options if enhance_options else "None"}'
+            )
 
             try:
                 parse_result = reducto.parse.run(**parse_kwargs)
@@ -185,7 +191,9 @@ class Parser(ReaderBase):
 
             debug('Reducto Parser: Extracting content from API response...')
             text_content, table_content = self.extract_content(parse_result)
-            debug(f'Reducto Parser: extract_content() completed. Text length: {len(text_content)}, Tables: {len(table_content)}')
+            debug(
+                f'Reducto Parser: extract_content() completed. Text length: {len(text_content)}, Tables: {len(table_content)}'
+            )
             return text_content, table_content
 
         except Exception as e:
@@ -222,7 +230,9 @@ class Parser(ReaderBase):
                     for i, chunk in enumerate(chunks):
                         if hasattr(chunk, 'blocks') and chunk.blocks:
                             # Log block types for this chunk (useful for debugging)
-                            block_types_in_chunk = [getattr(b, 'type', 'unknown') for b in chunk.blocks if hasattr(b, 'type')]
+                            block_types_in_chunk = [
+                                getattr(b, 'type', 'unknown') for b in chunk.blocks if hasattr(b, 'type')
+                            ]
                             debug(f'Reducto Parser: Chunk {i} block types: {block_types_in_chunk}')
                             block_texts = []
 

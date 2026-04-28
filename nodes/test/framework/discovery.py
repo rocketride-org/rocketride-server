@@ -30,7 +30,19 @@ from typing import List, Dict, Any, Optional
 
 
 # Known input lane names for detecting which key is the input
-KNOWN_INPUT_LANES = {'text', 'image', 'documents', 'audio', 'video', 'questions', 'answers', 'table', 'classifications', 'tags', '_source'}
+KNOWN_INPUT_LANES = {
+    'text',
+    'image',
+    'documents',
+    'audio',
+    'video',
+    'questions',
+    'answers',
+    'table',
+    'classifications',
+    'tags',
+    '_source',
+}
 
 # Lanes where the value is a file path (not inline content)
 FILE_INPUT_LANES = {'image', 'audio', 'video', 'documents'}
@@ -176,7 +188,12 @@ def _parse_test_case(case_data: Dict[str, Any]) -> TestCase:
     """
     # Check for legacy format first
     if 'inputLane' in case_data:
-        return TestCase(input_lane=case_data.get('inputLane', 'text'), input_data=case_data.get('inputData', ''), expect=case_data.get('expect'), name=case_data.get('name'))
+        return TestCase(
+            input_lane=case_data.get('inputLane', 'text'),
+            input_data=case_data.get('inputData', ''),
+            expect=case_data.get('expect'),
+            name=case_data.get('name'),
+        )
 
     # New format: find the input lane key
     input_lane = None
@@ -191,7 +208,9 @@ def _parse_test_case(case_data: Dict[str, Any]) -> TestCase:
     if input_lane is None:
         raise ValueError('Test case is missing a recognized input lane key')
 
-    return TestCase(input_lane=input_lane, input_data=input_data, expect=case_data.get('expect'), name=case_data.get('name'))
+    return TestCase(
+        input_lane=input_lane, input_data=input_data, expect=case_data.get('expect'), name=case_data.get('name')
+    )
 
 
 def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
@@ -213,7 +232,9 @@ def _ensure_list_field(value: Any, field_name: str, service_file: str) -> List[A
     return []
 
 
-def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test') -> List[NodeTestConfig]:
+def _parse_test_config(
+    node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test'
+) -> List[NodeTestConfig]:
     """Parse a test key (e.g. 'test' or 'fulltest') from a service.json into a list of NodeTestConfig.
 
     The value may be a single object or an array of objects (array format allows
@@ -240,7 +261,9 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
     configs = []
     for group_index, group in enumerate(groups):
         if not isinstance(group, dict):
-            print(f'Warning: Skipping invalid {test_key} group in {service_file}; expected object, got {type(group).__name__}')
+            print(
+                f'Warning: Skipping invalid {test_key} group in {service_file}; expected object, got {type(group).__name__}'
+            )
             continue
         base_id = f'{node_name}:{Path(service_file).stem}'
         config_id = base_id if total_groups == 1 else f'{base_id}:{test_key}{group_index + 1}'
@@ -250,12 +273,16 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         cases = []
         for case_index, case_data in enumerate(raw_cases, start=1):
             if not isinstance(case_data, dict):
-                print(f'Warning: Skipping invalid test case in {service_file}; expected object, got {type(case_data).__name__}')
+                print(
+                    f'Warning: Skipping invalid test case in {service_file}; expected object, got {type(case_data).__name__}'
+                )
                 continue
             try:
                 cases.append(_parse_test_case(case_data))
             except ValueError as exc:
-                print(f'Warning: Skipping invalid test case {case_index} in {test_key} group {group_index + 1} of {service_file}: {exc}')
+                print(
+                    f'Warning: Skipping invalid test case {case_index} in {test_key} group {group_index + 1} of {service_file}: {exc}'
+                )
 
         # Infer outputs from expect keys only when outputs key is not present
         raw_outputs = group.get('outputs')
@@ -273,7 +300,11 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
                 avoid_mocks=bool(group.get('avoidMocks', False)),
                 profiles=_ensure_list_field(group.get('profiles'), 'profiles', service_file),
                 controls=_ensure_list_field(group.get('controls'), 'controls', service_file),
-                chain=(['*'] if group.get('chain') is None else _ensure_list_field(group.get('chain'), 'chain', service_file)),
+                chain=(
+                    ['*']
+                    if group.get('chain') is None
+                    else _ensure_list_field(group.get('chain'), 'chain', service_file)
+                ),
                 outputs=outputs,
                 timeout=group.get('timeout', 60),
                 cases=cases,

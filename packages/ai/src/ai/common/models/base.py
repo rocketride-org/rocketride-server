@@ -57,7 +57,7 @@ class BaseLoader:
         the actual ML libraries.
         """
         if cls._REQUIREMENTS_FILE and not cls._dependencies_loaded:
-            import ai.common.torch
+            import ai.common.torch  # noqa: F401
             from depends import depends
 
             depends(cls._REQUIREMENTS_FILE)
@@ -412,7 +412,9 @@ class ModelClient:
             Exception: If command fails and retry_on_error is False, or if retry fails
         """
         # Run async command on global event loop
-        future = asyncio.run_coroutine_threadsafe(self._send_command_async(command, arguments, retry_on_error), ai_node.server_loop)
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_command_async(command, arguments, retry_on_error), ai_node.server_loop
+        )
         return future.result()  # Block until complete
 
     async def _send_command_async(self, command: str, arguments: Dict[str, Any], retry_on_error: bool) -> Any:

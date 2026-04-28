@@ -36,7 +36,9 @@ class IInstance(IInstanceBase):
     def writeQuestions(self, question: Question):
         # Defense-in-depth.  CrewSubagent has no questions lane — the engine
         # should never reach this method through normal pipeline routing.
-        raise RuntimeError('CrewAI Subagent cannot be invoked directly; wire it into a CrewAI Manager via the crewai channel.')
+        raise RuntimeError(
+            'CrewAI Subagent cannot be invoked directly; wire it into a CrewAI Manager via the crewai channel.'
+        )
 
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
         """DEBUG: log every invoke that reaches the Subagent IInstance, then
@@ -46,10 +48,16 @@ class IInstance(IInstanceBase):
         debug('crewai_subagent IInstance.invoke called: param_type={} op={!r}'.format(type(param).__name__, op))
         try:
             result = super().invoke(param)
-            debug('crewai_subagent IInstance.invoke completed: op={!r} result_type={}'.format(op, type(result).__name__))
+            debug(
+                'crewai_subagent IInstance.invoke completed: op={!r} result_type={}'.format(op, type(result).__name__)
+            )
             return result
         except Exception as e:
-            debug('crewai_subagent IInstance.invoke raised: op={!r} exc_type={} msg={}'.format(op, type(e).__name__, str(e)))
+            debug(
+                'crewai_subagent IInstance.invoke raised: op={!r} exc_type={} msg={}'.format(
+                    op, type(e).__name__, str(e)
+                )
+            )
             raise
 
     @invoke_function
@@ -83,7 +91,15 @@ class IInstance(IInstanceBase):
                 param.agents = existing
             except Exception as e:
                 debug('crewai_subagent describe() setattr param.agents failed: {}'.format(e))
-            debug('crewai_subagent describe() EXIT (mutated): param.agents now has {} entries, returning param'.format(len(existing)))
+            debug(
+                'crewai_subagent describe() EXIT (mutated): param.agents now has {} entries, returning param'.format(
+                    len(existing)
+                )
+            )
             return param
-        debug('crewai_subagent describe() EXIT (fallback): param.agents was {}, returning [descriptor]'.format(type(existing).__name__))
+        debug(
+            'crewai_subagent describe() EXIT (fallback): param.agents was {}, returning [descriptor]'.format(
+                type(existing).__name__
+            )
+        )
         return [descriptor]

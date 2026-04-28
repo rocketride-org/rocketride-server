@@ -2,10 +2,7 @@
 Mock langchain_anthropic for llm_anthropic node testing.
 """
 
-MOCK_LLM_RESPONSE = (
-    'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set '
-    'so tests run without API keys or external services.'
-)
+MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
 
 
 class _MockMessage:

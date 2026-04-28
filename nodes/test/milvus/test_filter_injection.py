@@ -86,7 +86,9 @@ class TestFilterInjectionPrevention(unittest.TestCase):
     def test_inject_read_deleted_documents(self):
         payload = "anything' || meta['isDeleted'] == False || '"
         result = _escape_milvus_str(payload)
-        self.assertFalse(result.endswith("'") and not result.endswith("\\'"), 'Unescaped trailing quote would allow injection')
+        self.assertFalse(
+            result.endswith("'") and not result.endswith("\\'"), 'Unescaped trailing quote would allow injection'
+        )
 
     def test_inject_via_keyword_search(self):
         payload = "%' || 1==1 || content like '%"

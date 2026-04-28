@@ -121,7 +121,11 @@ class Embedding(EmbeddingBase):
         # Encode all questions in one batch; encode(list) returns (N, dim), assign vectors[i] per question
         if not question.questions:
             return
-        texts = [f'{self._query_prefix}{q.text}' for q in question.questions] if self._query_prefix else [q.text for q in question.questions]
+        texts = (
+            [f'{self._query_prefix}{q.text}' for q in question.questions]
+            if self._query_prefix
+            else [q.text for q in question.questions]
+        )
         # Get the vectors
         vectors = self._embedding.encode(texts, show_progress_bar=False)
         # Check the return type
@@ -144,7 +148,9 @@ class Embedding(EmbeddingBase):
         # For each document, if specified
         embeddings: List[str] = []
         for chunk in chunks:
-            embeddings.append(f'{self._document_prefix}{chunk.page_content}' if self._document_prefix else chunk.page_content)
+            embeddings.append(
+                f'{self._document_prefix}{chunk.page_content}' if self._document_prefix else chunk.page_content
+            )
 
         # Get the vectors
         array_vectors = self._embedding.encode(embeddings, show_progress_bar=False)

@@ -152,7 +152,9 @@ def _build_wave_question(
     peek_descriptor = json.dumps(
         {
             'name': 'memory.peek',
-            'description': ('Extract data from a stored result using a JMESPath expression, or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.'),
+            'description': (
+                'Extract data from a stored result using a JMESPath expression, or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.'
+            ),
             'inputSchema': {
                 'type': 'object',
                 'required': ['key'],
@@ -160,12 +162,20 @@ def _build_wave_question(
                     'key': {'type': 'string', 'description': 'Memory key to read from'},
                     'path': {
                         'type': 'string',
-                        'description': ('JMESPath expression to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at 50 items — use indexed paths for specific elements.'),
+                        'description': (
+                            'JMESPath expression to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at 50 items — use indexed paths for specific elements.'
+                        ),
                     },
                     # offset/length enable chunked reading of large raw values
                     # when the LLM needs to page through data too large to load at once
-                    'offset': {'type': 'integer', 'description': 'Character offset for chunk reading (default 0). Only when path is omitted.'},
-                    'length': {'type': 'integer', 'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.'},
+                    'offset': {
+                        'type': 'integer',
+                        'description': 'Character offset for chunk reading (default 0). Only when path is omitted.',
+                    },
+                    'length': {
+                        'type': 'integer',
+                        'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.',
+                    },
                 },
             },
             'outputSchema': {
@@ -176,7 +186,10 @@ def _build_wave_question(
                     'offset': {'type': 'integer', 'description': 'Character offset used (chunk mode only)'},
                     'total_chars': {'type': 'integer', 'description': 'Total length of the value (chunk mode only)'},
                     'truncated': {'type': 'boolean', 'description': 'True if an array result was capped'},
-                    'returned_items': {'type': 'integer', 'description': 'Number of array items returned when truncated'},
+                    'returned_items': {
+                        'type': 'integer',
+                        'description': 'Number of array items returned when truncated',
+                    },
                     'total_items': {'type': 'integer', 'description': 'Total array length when truncated'},
                 },
             },
@@ -384,7 +397,9 @@ def _build_wave_question(
     if all_results:
         # indent=2 for readability in the prompt; _json_default handles any
         # non-serializable values that sneak through from tool result summaries
-        q.addContext('Previous tool results:\n' + json.dumps(all_results, ensure_ascii=False, indent=2, default=_json_default))
+        q.addContext(
+            'Previous tool results:\n' + json.dumps(all_results, ensure_ascii=False, indent=2, default=_json_default)
+        )
 
     # This is the actual planning question — placed last so it is the freshest
     # thing in the LLM's context window when it generates its response.

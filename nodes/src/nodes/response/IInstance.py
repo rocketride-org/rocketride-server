@@ -200,7 +200,12 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key] = []
 
         # Create the tracking info
-        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
+        info = {
+            'url': self.instance.currentObject.url,
+            'aviAction': str(aviAction),
+            'mimeType': mimeType,
+            'size': len(data),
+        }
 
         # Add the documents
         self.instance.currentObject.response[key].append(info)
@@ -214,7 +219,12 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key] = []
 
         # Create the tracking info
-        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
+        info = {
+            'url': self.instance.currentObject.url,
+            'aviAction': str(aviAction),
+            'mimeType': mimeType,
+            'size': len(data),
+        }
 
         # Add the documents
         self.instance.currentObject.response[key].append(info)

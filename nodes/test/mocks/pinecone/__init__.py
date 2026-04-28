@@ -89,7 +89,14 @@ class MockIndex:
         """Get index statistics."""
         return {'total_vector_count': len(self._storage), 'dimension': MockIndex._dimensions.get(self.name, 0)}
 
-    def query(self, vector: List[float], top_k: int = 10, filter: Optional[Dict] = None, include_metadata: bool = True, include_values: bool = False) -> Dict[str, Any]:
+    def query(
+        self,
+        vector: List[float],
+        top_k: int = 10,
+        filter: Optional[Dict] = None,
+        include_metadata: bool = True,
+        include_values: bool = False,
+    ) -> Dict[str, Any]:
         """Query the index for similar vectors."""
         matches = []
 

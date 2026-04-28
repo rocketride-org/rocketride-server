@@ -79,19 +79,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'type': 'object',
             'required': ['question'],
             'properties': {
-                'question': {'type': 'string', 'description': 'Natural-language description of the data you want to retrieve'},
-                'limit': {'type': 'integer', 'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.'},
+                'question': {
+                    'type': 'string',
+                    'description': 'Natural-language description of the data you want to retrieve',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.',
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'description': 'Result rows returned by the query.', 'items': {'type': 'object'}},
+                'rows': {
+                    'type': 'array',
+                    'description': 'Result rows returned by the query.',
+                    'items': {'type': 'object'},
+                },
                 'sql': {'type': 'string', 'description': 'The generated SQL SELECT statement that was executed.'},
                 'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
                 'valid': {'type': 'boolean', 'description': 'Whether a valid SQL query was generated.'},
                 'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
-                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a database query.'},
+                'answer': {
+                    'type': 'string',
+                    'description': 'LLM text response when the question is not a database query.',
+                },
             },
         },
         description=lambda self: (
@@ -134,7 +147,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         input_schema={
             'type': 'object',
             'properties': {
-                'table': {'type': 'string', 'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.'},
+                'table': {
+                    'type': 'string',
+                    'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.',
+                },
             },
         },
         output_schema={
@@ -197,7 +213,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 'answer': {'type': 'string'},
             },
         },
-        description=lambda self: f'Accepts a natural-language description and returns the equivalent {self._db_display_name()} SQL SELECT statement without executing it. Only use when the user explicitly asks to see the SQL -- for actual data retrieval, use get_data instead.',
+        description=lambda self: (
+            f'Accepts a natural-language description and returns the equivalent {self._db_display_name()} SQL SELECT statement without executing it. Only use when the user explicitly asks to see the SQL -- for actual data retrieval, use get_data instead.'
+        ),
     )
     def get_sql(self, args):
         """Translate natural language to SQL without executing."""
@@ -282,14 +300,20 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             # EXPLAIN rejected the query — log and feed the error back so the
             # LLM can produce a corrected statement on the next attempt.
-            warning(f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}')
+            warning(
+                f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
+            )
             previous_sql = sql_query
             last_error = explain_error
 
-        warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.')
+        warning(
+            f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.'
+        )
         return result
 
-    def _buildSQLQueryOnce(self, question_text: str, *, limit: int = 250, previous_sql: str | None = None, error: str | None = None) -> dict:
+    def _buildSQLQueryOnce(
+        self, question_text: str, *, limit: int = 250, previous_sql: str | None = None, error: str | None = None
+    ) -> dict:
         """Single LLM call: translate a natural-language question into SQL.
 
         ``previous_sql`` and ``error`` are supplied on retry attempts so the
@@ -363,19 +387,26 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'Tell me the salaries of department managers',
             {
                 'isValid': 'true',
-                'query': ('SELECT dm.emp_no, e.first_name, e.last_name, s.salary\nFROM dept_manager dm\nJOIN employees e ON dm.emp_no = e.emp_no\nJOIN salaries s ON dm.emp_no = s.emp_no\nWHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\nLIMIT 250'),
+                'query': (
+                    'SELECT dm.emp_no, e.first_name, e.last_name, s.salary\nFROM dept_manager dm\nJOIN employees e ON dm.emp_no = e.emp_no\nJOIN salaries s ON dm.emp_no = s.emp_no\nWHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\nLIMIT 250'
+                ),
             },
         )
         # Off-topic example so the LLM knows how to handle non-DB questions.
         question.addExample(
             'When did the Visigoths sack Rome?',
-            {'isValid': 'false', 'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.'},
+            {
+                'isValid': 'false',
+                'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.',
+            },
         )
 
         # On a retry, provide the rejected SQL and the EXPLAIN error so the
         # LLM knows exactly what was wrong and can produce a corrected query.
         if previous_sql and error:
-            question.addContext(f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.')
+            question.addContext(
+                f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.'
+            )
 
         result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
@@ -514,8 +545,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal._tableExists(self.IGlobal.table):
             debug(f'Table "{self.IGlobal.table}" does not exist. Creating it from data structure...')
             if not self.IGlobal._createTableFromData(self.IGlobal.table, items):
-                error(f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.')
-                raise RuntimeError(f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.')
+                error(
+                    f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.'
+                )
+                raise RuntimeError(
+                    f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.'
+                )
             debug(f'Successfully created table "{self.IGlobal.table}" from data structure.')
 
         # Fetch the schema if it wasn't populated at startup (e.g. the table
@@ -537,7 +572,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             table = SQLTable(self.IGlobal.table, metadata, autoload_with=engine)
         except NoSuchTableError:
-            error(f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.')
+            error(
+                f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.'
+            )
             raise
 
         def prepare_value(value: Any) -> Any:

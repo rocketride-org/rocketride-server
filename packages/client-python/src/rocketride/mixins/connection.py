@@ -89,10 +89,16 @@ class ConnectionMixin(DAPClient):
         self._persist = persist
         self._max_retry_time = max_retry_time  # ms; None = retry forever
         self._retry_start_time: Optional[float] = None  # when first failure occurred; used to enforce max_retry_time
-        self._current_reconnect_delay: float = 0.5  # seconds until next retry; increments by 0.5s each failure, capped at 5s
-        self._manual_disconnect = False  # True only after user calls disconnect(); stops on_disconnected from scheduling reconnect
+        self._current_reconnect_delay: float = (
+            0.5  # seconds until next retry; increments by 0.5s each failure, capped at 5s
+        )
+        self._manual_disconnect = (
+            False  # True only after user calls disconnect(); stops on_disconnected from scheduling reconnect
+        )
         self._reconnect_task: Optional[asyncio.Task] = None  # task that sleeps then calls _attempt_connection
-        self._did_notify_connected = False  # True after we called on_connected; gates whether we invoke user on_disconnected
+        self._did_notify_connected = (
+            False  # True after we called on_connected; gates whether we invoke user on_disconnected
+        )
         self._connect_result: Optional[ConnectResult] = None  # stored on successful connect
 
     async def on_connected(self, connection_info: Optional[str] = None) -> None:

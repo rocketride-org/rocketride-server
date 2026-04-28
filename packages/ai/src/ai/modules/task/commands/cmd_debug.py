@@ -223,7 +223,9 @@ class DebugCommands(DAPConn):
                 if org_id is not None:
                     break
             if org_id is None:
-                raise PermissionError(f'Default team {self._account_info.defaultTeam!r} does not belong to any organisation for user {self._account_info.userId!r}')
+                raise PermissionError(
+                    f'Default team {self._account_info.defaultTeam!r} does not belong to any organisation for user {self._account_info.userId!r}'
+                )
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(

@@ -35,7 +35,9 @@ class IInstance(IInstanceBase):
     def writeQuestions(self, question: Question) -> None:
         # Defense-in-depth. DeepAgent Subagent has no questions lane — the
         # engine should never reach this method through normal pipeline routing.
-        raise RuntimeError('DeepAgent Subagent cannot be invoked directly; wire it into a DeepAgent via the deepagent channel.')
+        raise RuntimeError(
+            'DeepAgent Subagent cannot be invoked directly; wire it into a DeepAgent via the deepagent channel.'
+        )
 
     @invoke_function
     def describe(self, param: Any) -> Any:  # noqa: ANN401

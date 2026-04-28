@@ -222,7 +222,11 @@ class MiscCommands(DAPConn):
 
             # Snapshot and filter to caller's own data (cross-team: match on userId)
             task_controls = [c for c in server._task_control.values() if c.userId == caller_user_id]
-            conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id]
+            conn_items = [
+                (cid, conn)
+                for cid, conn in server._connections.items()
+                if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
+            ]
 
             # Task-scoped tokens (tk_) can only see their own task
             caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
@@ -242,7 +246,12 @@ class MiscCommands(DAPConn):
                     project_key = f'p.{control.project_id}.{control.source}'
                     project_wildcard_key = f'p.{control.project_id}.*'
                     pipe_prefix = f'{project_key}.'
-                    if project_key in conn._monitors or project_wildcard_key in conn._monitors or '*' in conn._monitors or any(k.startswith(pipe_prefix) for k in conn._monitors):
+                    if (
+                        project_key in conn._monitors
+                        or project_wildcard_key in conn._monitors
+                        or '*' in conn._monitors
+                        or any(k.startswith(pipe_prefix) for k in conn._monitors)
+                    ):
                         conn_tasks.setdefault(cid, []).append(task_name)
 
             # Build project ID → friendly name map from task controls
@@ -257,7 +266,9 @@ class MiscCommands(DAPConn):
                 # Use the task_name prefix (before the dot) as project label
                 name_parts = task_name.split('.', 1)
                 project_names.setdefault(control.project_id, name_parts[0])
-                source_names.setdefault(f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source)
+                source_names.setdefault(
+                    f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source
+                )
 
             # Build connections list
             connections = []
@@ -272,7 +283,9 @@ class MiscCommands(DAPConn):
                     'clientId': None,
                     'apikey': '****',
                     'clientInfo': getattr(conn, '_client_info', {}),
-                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names) if hasattr(conn, '_monitors') else [],
+                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
+                    if hasattr(conn, '_monitors')
+                    else [],
                     'attachedTasks': conn_tasks.get(conn_id, []),
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:

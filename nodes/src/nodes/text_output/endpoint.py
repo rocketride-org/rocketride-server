@@ -59,10 +59,16 @@ class Endpoint:
             SERVER_REGEX = f'{IP_REGEX}|{HOSTNAME_REGEX}'
             Endpoint.validate_param('Server Name', self.server, pattern=SERVER_REGEX)
 
-            Endpoint.validate_param('User Name', self.username, is_required=bool(self.password), validator=Endpoint.validate_smb_username)
+            Endpoint.validate_param(
+                'User Name', self.username, is_required=bool(self.password), validator=Endpoint.validate_smb_username
+            )
             Endpoint.validate_param('Password', self.password, is_required=bool(self.username), max_length=127)
-            Endpoint.validate_param('Store Path', self.store_path, min_lenght=3, max_length=256, validator=Endpoint.validate_smb_path)
-            Endpoint.validate_param('Anonymization Character', self.anonymize_char, is_required=self.anonymize, min_lenght=1, max_length=1)
+            Endpoint.validate_param(
+                'Store Path', self.store_path, min_lenght=3, max_length=256, validator=Endpoint.validate_smb_path
+            )
+            Endpoint.validate_param(
+                'Anonymization Character', self.anonymize_char, is_required=self.anonymize, min_lenght=1, max_length=1
+            )
 
             if not syntaxOnly:
                 # Do not try to connect as validation is run by Platform
@@ -122,7 +128,15 @@ class Endpoint:
         engLib.debug('Connected', server_path)
 
     @staticmethod
-    def validate_param(param_name: str, param_value: str, is_required: bool = True, min_lenght: int = None, max_length: int = None, pattern: str = None, validator: Any = None) -> bool:
+    def validate_param(
+        param_name: str,
+        param_value: str,
+        is_required: bool = True,
+        min_lenght: int = None,
+        max_length: int = None,
+        pattern: str = None,
+        validator: Any = None,
+    ) -> bool:
         """Validate parameter to match the requirements."""
         if not param_value:
             if is_required:

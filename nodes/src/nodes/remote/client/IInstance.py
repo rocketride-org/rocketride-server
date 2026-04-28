@@ -36,7 +36,9 @@ class IInstance(IInstanceBase):
 
     def beginInstance(self):
         # Connect to the WebSocket synchronously and keep it open
-        webSocket = connect(self.IGlobal.urlProcess, additional_headers=self.IGlobal.headers, open_timeout=None, close_timeout=None)
+        webSocket = connect(
+            self.IGlobal.urlProcess, additional_headers=self.IGlobal.headers, open_timeout=None, close_timeout=None
+        )
 
         self.connect(webSocket)
 

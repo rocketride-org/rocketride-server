@@ -873,7 +873,9 @@ class WebServer:
         # Without this check, an attacker could load arbitrary Python modules
         # via importlib.import_module(), leading to remote code execution.
         if moduleName not in ALLOWED_MODULES:
-            raise ValueError(f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}')
+            raise ValueError(
+                f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}'
+            )
 
         # If it is already loaded, return success
         if moduleName in self.app.state.modules:

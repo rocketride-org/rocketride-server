@@ -77,9 +77,13 @@ class Chat(ChatBase):
         if not api_key:
             raise ValueError('Missing Mistral AI API key. Please check your configuration.')
         if api_key.startswith('sk-'):
-            raise ValueError('Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.'
+            )
         if api_key.startswith('AI'):
-            raise ValueError('Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.'
+            )
 
         # Initialize the client with error handling
         try:
@@ -227,7 +231,20 @@ class Chat(ChatBase):
         """Determine if an error is retryable."""
         error_msg = str(error).lower()
 
-        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'bad gateway', 'rate limit']
+        retryable_errors = [
+            'timeout',
+            'timed out',
+            'connection',
+            'network',
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'service unavailable',
+            'bad gateway',
+            'rate limit',
+        ]
 
         return any(phrase in error_msg for phrase in retryable_errors)
 
