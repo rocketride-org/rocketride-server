@@ -359,8 +359,8 @@ export const PageSettings: React.FC = () => {
 	 */
 	const handleSettingsChange = (newSettings: Partial<SettingsData>): void => {
 		setSettings((prev) => {
-			// If switching to local mode, fetch engine versions
-			if (newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') {
+			// If switching to local mode (dev or deploy), fetch engine versions
+			if ((newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') || (newSettings.deployTargetMode === 'local' && prev.deployTargetMode !== 'local')) {
 				setEngineVersionsLoading(true);
 				sendMessage({ type: 'fetchEngineVersions' });
 			}
@@ -446,7 +446,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} teams={teams} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
+						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} teams={teams} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} onClearCredentials={handleClearCredentials} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
 					</div>
 				),
 			},
