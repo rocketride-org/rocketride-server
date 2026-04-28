@@ -56,7 +56,7 @@
 				"model": "sonar-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"sonar-deep-research": {

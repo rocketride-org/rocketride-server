@@ -38,14 +38,14 @@
 				"model": "mistral-large-2512",
 				"modelSource": "provider",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"mistral-medium": {
 				"title": "Mistral Medium 3.1",
 				"model": "mistral-medium-2508",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072,
+				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -53,7 +53,7 @@
 				"title": "Mistral Small 3.2",
 				"model": "mistral-small-2506",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072,
+				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -62,22 +62,22 @@
 				"model": "codestral-2508",
 				"modelSource": "provider",
 				"modelTotalTokens": 256000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 256000, // litellm
 				"apikey": ""
 			},
 			"magistral-medium": {
 				"title": "Magistral Medium 1.2",
 				"model": "magistral-medium-2509",
 				"modelSource": "provider",
-				"modelTotalTokens": 40960,
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 40000, // litellm
+				"modelOutputTokens": 40000, // litellm
 				"apikey": ""
 			},
 			"magistral-small": {
 				"title": "Magistral Small 1.2",
 				"model": "magistral-small-2509",
 				"modelSource": "provider",
-				"modelTotalTokens": 40960,
+				"modelTotalTokens": 40960, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -85,16 +85,16 @@
 				"title": "Devstral Medium 1.0",
 				"model": "devstral-medium-2507",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 128000, // litellm
 				"apikey": ""
 			},
 			"devstral-small": {
 				"title": "Devstral Small 1.1",
 				"model": "devstral-small-2507",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 128000, // litellm
+				"modelOutputTokens": 128000, // litellm
 				"apikey": ""
 			},
 			"ministral-14b": {
@@ -125,8 +125,8 @@
 				"title": "Codestral-latest",
 				"model": "codestral-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 8191, // litellm
 				"apikey": ""
 			},
 			"devstral-2512": {
@@ -134,46 +134,46 @@
 				"model": "devstral-2512",
 				"modelSource": "provider",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 256000, // litellm
 				"apikey": ""
 			},
 			"devstral-latest": {
 				"title": "Devstral-latest",
 				"model": "devstral-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 256000, // litellm
+				"modelOutputTokens": 256000, // litellm
 				"apikey": ""
 			},
 			"devstral-medium-latest": {
 				"title": "Devstral-medium-latest",
 				"model": "devstral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 256000, // litellm
+				"modelOutputTokens": 256000, // litellm
 				"apikey": ""
 			},
 			"magistral-medium-latest": {
 				"title": "Magistral-medium-latest",
 				"model": "magistral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 40000, // litellm
+				"modelOutputTokens": 40000, // litellm
 				"apikey": ""
 			},
 			"magistral-small-latest": {
 				"title": "Magistral-small-latest",
 				"model": "magistral-small-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 40000, // litellm
+				"modelOutputTokens": 40000, // litellm
 				"apikey": ""
 			},
 			"ministral-14b-latest": {
 				"title": "Ministral-14b-latest",
 				"model": "ministral-14b-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -181,7 +181,7 @@
 				"title": "Ministral-3b-latest",
 				"model": "ministral-3b-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -189,7 +189,7 @@
 				"title": "Ministral-8b-latest",
 				"model": "ministral-8b-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -198,14 +198,14 @@
 				"model": "mistral-large-2411",
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 128000, // litellm
 				"apikey": ""
 			},
 			"mistral-large-latest": {
 				"title": "Mistral Large Latest",
 				"model": "mistral-large-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 32000, // litellm
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -213,48 +213,48 @@
 				"title": "Mistral Medium 2505",
 				"model": "mistral-medium-2505",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 8191, // litellm
 				"apikey": ""
 			},
 			"mistral-medium-2604": {
 				"title": "Mistral Medium 2604",
 				"model": "mistral-medium-2604",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-medium-3": {
 				"title": "Mistral: Mistral Medium 3",
 				"model": "mistral-medium-3",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-medium-3-5": {
 				"title": "Mistral Medium 3.5",
 				"model": "mistral-medium-3-5",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-medium-c21211-r0-75": {
 				"title": "Mistral Medium C21211 R0 75",
 				"model": "mistral-medium-c21211-r0-75",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-medium-latest": {
 				"title": "Mistral Medium Latest",
 				"model": "mistral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 131072, // litellm
+				"modelOutputTokens": 131072, // litellm
 				"apikey": ""
 			},
 			"mistral-small-2603": {
@@ -269,15 +269,15 @@
 				"title": "Mistral Small Latest",
 				"model": "mistral-small-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 131072, // litellm
+				"modelOutputTokens": 131072, // litellm
 				"apikey": ""
 			},
 			"mistral-tiny-2407": {
 				"title": "Mistral Tiny 2407",
 				"model": "mistral-tiny-2407",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -285,7 +285,7 @@
 				"title": "Mistral Tiny Latest",
 				"model": "mistral-tiny-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -293,7 +293,7 @@
 				"title": "Mistral Vibe Cli Fast",
 				"model": "mistral-vibe-cli-fast",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -301,7 +301,7 @@
 				"title": "Mistral Vibe Cli Latest",
 				"model": "mistral-vibe-cli-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -309,7 +309,7 @@
 				"title": "Mistral Vibe Cli With Tools",
 				"model": "mistral-vibe-cli-with-tools",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // estimated
+				"modelTotalTokens": 16384, // manual
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			}

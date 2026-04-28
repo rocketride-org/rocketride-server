@@ -168,14 +168,6 @@
 				"modelOutputTokens": 32000, // openrouter
 				"apikey": ""
 			},
-			"claude-opus-4-6-fast": {
-				"title": "Anthropic: Claude Opus 4.6 (Fast)",
-				"model": "claude-opus-4-6-fast",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
-				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
-			},
 			"claude-opus-4-7": {
 				"title": "Anthropic: Claude Opus 4.7",
 				"model": "claude-opus-4-7",
@@ -290,10 +282,6 @@
 					"properties": ["anthropic.claude-opus-4-1"]
 				},
 				{
-					"value": "claude-opus-4-6-fast",
-					"properties": ["anthropic.claude-opus-4-6-fast"]
-				},
-				{
 					"value": "claude-opus-4-7",
 					"properties": ["anthropic.claude-opus-4-7"]
 				},
@@ -321,10 +309,6 @@
 		},
 		"anthropic.claude-opus-4-1": {
 			"object": "claude-opus-4-1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"anthropic.claude-opus-4-6-fast": {
-			"object": "claude-opus-4-6-fast",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-opus-4-7": {

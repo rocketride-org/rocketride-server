@@ -179,7 +179,7 @@
 				"model": "gpt-5-nano",
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 128000, // litellm
 				"apikey": ""
 			},
 			"gpt-3-5-turbo": {
@@ -211,7 +211,7 @@
 				"model": "gpt-4.1",
 				"modelSource": "provider",
 				"modelTotalTokens": 1047576, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 32768, // litellm
 				"apikey": ""
 			},
 			"gpt-4-1-mini": {
@@ -242,32 +242,32 @@
 				"title": "GPT-5.1 Chat Latest",
 				"model": "gpt-5.1-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // default_context_window
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // litellm
+				"modelOutputTokens": 16384, // litellm
 				"apikey": ""
 			},
 			"gpt-5-2-chat-latest": {
 				"title": "GPT-5.2 Chat Latest",
 				"model": "gpt-5.2-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // default_context_window
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // litellm
+				"modelOutputTokens": 16384, // litellm
 				"apikey": ""
 			},
 			"gpt-5-3-chat-latest": {
 				"title": "GPT-5.3 Chat Latest",
 				"model": "gpt-5.3-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // default_context_window
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // litellm
+				"modelOutputTokens": 16384, // litellm
 				"apikey": ""
 			},
 			"gpt-5-chat-latest": {
 				"title": "GPT-5 Chat Latest",
 				"model": "gpt-5-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // default_context_window
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 16384, // litellm
+				"modelOutputTokens": 16384, // litellm
 				"apikey": ""
 			},
 			"o1": {
@@ -300,6 +300,14 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
+				"apikey": ""
+			},
+			"gpt-5-5": {
+				"title": "OpenAI: GPT-5.5",
+				"model": "gpt-5.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": ""
 			}
 		}
@@ -483,6 +491,10 @@
 				{
 					"value": "o4-mini",
 					"properties": ["openai.o4-mini"]
+				},
+				{
+					"value": "gpt-5-5",
+					"properties": ["openai.gpt-5-5"]
 				}
 			]
 		},
@@ -544,6 +556,10 @@
 		},
 		"openai.o4-mini": {
 			"object": "o4-mini",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai.gpt-5-5": {
+			"object": "gpt-5-5",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},

@@ -100,14 +100,14 @@
 				"model": "grok-4-1-fast-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000,
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 4096
 			},
 			"grok-4-1-fast-non-reasoning": {
 				"title": "Grok 4.1 Fast Non-Reasoning",
 				"model": "grok-4-1-fast-non-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000,
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 4096
 			},
 			"grok-code-fast-1": {
 				"title": "Grok Code Fast 1",
@@ -121,42 +121,42 @@
 				"model": "grok-4-fast-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000,
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 4096
 			},
 			"grok-4-fast-non-reasoning": {
 				"title": "Grok 4 Fast Non-Reasoning",
 				"model": "grok-4-fast-non-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000,
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 4096
 			},
 			"grok-4": {
 				"title": "Grok 4",
 				"model": "grok-4-0709",
 				"modelSource": "manual",
 				"modelTotalTokens": 256000, // openrouter
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 256000 // litellm
 			},
 			"grok-3-mini": {
 				"title": "Grok 3 Mini",
 				"model": "grok-3-mini",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 131072 // litellm
 			},
 			"grok-3": {
 				"title": "Grok 3",
 				"model": "grok-3",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 131072 // litellm
 			},
 			"grok-3-beta": {
 				"title": "xAI: Grok 3 Beta",
 				"model": "grok-3-beta",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 131072, // litellm
 				"apikey": ""
 			},
 			"grok-3-mini-beta": {
@@ -164,7 +164,7 @@
 				"model": "grok-3-mini-beta",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 131072, // litellm
 				"apikey": ""
 			},
 			"grok-4-1-fast": {

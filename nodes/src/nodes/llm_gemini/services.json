@@ -144,8 +144,8 @@
 				"title": "Gemini 2.5 Flash",
 				"model": "models/gemini-2.5-flash",
 				"modelSource": "manual",
-				"modelTotalTokens": 1048576,
-				"modelOutputTokens": 65536,
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65535, // openrouter
 				"apikey": ""
 			},
 			"gemini-2.5-flash-lite": {
@@ -186,10 +186,10 @@
 			},
 			"gemini-2_0-flash": {
 				"title": "Gemini 2.0 Flash",
-				"model": "models/gemini-2.5-flash",
+				"model": "models/gemini-2.0-flash",
 				"modelSource": "manual",
-				"modelTotalTokens": 1048576, // sync_models.config.json
-				"modelOutputTokens": 65535, // openrouter
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65535,
 				"deprecated": true,
 				"migration": "Please use 'gemini-2.5-flash' instead",
 				"apikey": ""
@@ -234,6 +234,22 @@
 				"modelTotalTokens": 1048576, // sync_models.config.json
 				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
+			},
+			"models-gemini-flash-latest": {
+				"title": "Google Gemini Flash Latest",
+				"model": "models/gemini-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-pro-latest": {
+				"title": "Google Gemini Pro Latest",
+				"model": "models/gemini-pro-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
 			}
 		}
 	},
@@ -259,6 +275,15 @@
 			"type": "number",
 			"title": "Output Tokens",
 			"description": "Maximum number of output tokens"
+		},
+		"gemini.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Google AI Developer API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
 		},
 		"gemini.gemini-3.1-pro-preview": {
 			"object": "gemini-3.1-pro-preview",
@@ -394,6 +419,14 @@
 				{
 					"value": "models-gemini-3-1-pro-preview-customtools",
 					"properties": ["gemini.models-gemini-3-1-pro-preview-customtools"]
+				},
+				{
+					"value": "models-gemini-flash-latest",
+					"properties": ["gemini.models-gemini-flash-latest"]
+				},
+				{
+					"value": "models-gemini-pro-latest",
+					"properties": ["gemini.models-gemini-pro-latest"]
 				}
 			]
 		},
@@ -411,6 +444,14 @@
 		},
 		"gemini.models-gemini-3-1-pro-preview-customtools": {
 			"object": "models-gemini-3-1-pro-preview-customtools",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-flash-latest": {
+			"object": "models-gemini-flash-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-pro-latest": {
+			"object": "models-gemini-pro-latest",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
