@@ -32,6 +32,7 @@
  *   - Connects ReactFlow event handlers to FlowGraphContext
  *   - Renders the canvas background (dotted grid)
  *   - Applies navigation mode (pan vs lasso-select) and lock state
+ *   - Forces read-only mode while a pipeline is executing
  */
 
 import { ReactElement, useCallback, useEffect, useState } from 'react';
@@ -201,7 +202,11 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { features, onUndo, onRedo, onViewportChange } = useFlowProject();
+	// --- Project / runtime state ------------------------------------------
+	// `isPipelineExecuting` is derived from taskStatuses in FlowProjectContext;
+	// we compose it with the manual `isLocked` here so the canvas stays read-only
+	// while a pipeline is running, without polluting FlowPreferencesContext.
+	const { features, onUndo, onRedo, onViewportChange, isPipelineExecuting } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
 
 	// --- Auto-layout -------------------------------------------------------
@@ -241,7 +246,9 @@ export default function Canvas(): ReactElement {
 	);
 
 	// --- Compute ReactFlow props from navigation mode and lock state --------
-	const editable = !isLocked;
+	// Editing is disabled when the user has manually locked the canvas OR when
+	// a pipeline is actively executing.
+	const editable = !isLocked && !isPipelineExecuting;
 	const isPanMode = navigationMode === NavigationMode.DRAG;
 
 	// --- Annotation shortcut -----------------------------------------------
@@ -305,8 +312,8 @@ export default function Canvas(): ReactElement {
 				</ToolbarButton>
 			)}
 			<ToolbarDivider />
-			<ToolbarButton title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} isActive={isLocked}>
-				{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
+			<ToolbarButton title={isPipelineExecuting ? 'Canvas locked — pipeline is running' : isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={isPipelineExecuting ? () => {} : toggleLock} isActive={isLocked || isPipelineExecuting} disabled={isPipelineExecuting} forceColor={isPipelineExecuting ? 'var(--rr-warning, #ff9800)' : undefined}>
+				{isLocked || isPipelineExecuting ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
 			</ToolbarButton>
 			<ToolbarButton title="Fit to screen" onClick={() => fitView()}>
 				<FitIcon color="currentColor" size={18} />
@@ -347,6 +354,15 @@ export default function Canvas(): ReactElement {
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
+
+			{/* Execution lock banner — shown when a pipeline is actively running */}
+			{isPipelineExecuting && (
+				<div className="rr-execution-lock-banner" role="status" aria-live="polite">
+					<div className="rr-execution-lock-spinner" />
+					<span>Pipeline is running — canvas is read-only</span>
+				</div>
+			)}
+
 			<ReactFlow
 				nodes={nodes}
 				edges={edges}
@@ -367,7 +383,7 @@ export default function Canvas(): ReactElement {
 				panOnScroll={!isPanMode}
 				panOnDrag={isPanMode}
 				selectionOnDrag={!isPanMode}
-				/* Lock state: disable editing when locked */
+				/* Lock state: disable editing when locked or while executing */
 				nodesDraggable={editable}
 				nodesConnectable={editable}
 				nodesFocusable={editable}

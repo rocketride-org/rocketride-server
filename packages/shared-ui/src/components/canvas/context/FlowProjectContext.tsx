@@ -64,8 +64,8 @@ export interface IFlowProjectContext {
 	/** Toggles developer mode on/off. */
 	toggleDevMode: () => void;
 
-	/** Whether any pipeline task is currently running (derived from taskStatuses). */
-	isPipelineRunning: boolean;
+	/** Whether any pipeline task is actively executing (derived from taskStatuses). */
+	isPipelineExecuting: boolean;
 
 	// --- Feature flags -----------------------------------------------------
 
@@ -224,7 +224,8 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 	// --- Derived state -----------------------------------------------------
 
 	/** True if any task is neither completed nor cancelled. */
-	const isPipelineRunning = useMemo(() => Object.values(taskStatuses ?? {}).some((status) => status.state !== ITaskState.COMPLETED && status.state !== ITaskState.CANCELLED), [taskStatuses]);
+	/** True if any task is actively executing (explicit whitelist of active states). */
+	const isPipelineExecuting = useMemo(() => Object.values(taskStatuses ?? {}).some((s) => s.state === ITaskState.STARTING || s.state === ITaskState.INITIALIZING || s.state === ITaskState.RUNNING), [taskStatuses]);
 
 	// Type-narrow the raw servicesJson into our IServiceCatalog
 	const servicesJson = useMemo(() => (rawServicesJson ?? {}) as IServiceCatalog, [rawServicesJson]);
@@ -236,7 +237,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		toolchainState,
 		patchToolchainState,
 		toggleDevMode,
-		isPipelineRunning,
+		isPipelineExecuting,
 		features,
 		taskStatuses,
 		componentPipeCounts,
