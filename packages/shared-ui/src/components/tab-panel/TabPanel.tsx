@@ -8,8 +8,10 @@
  *
  * Layout:  The bar is absolutely positioned at the top center, transparent,
  *          so content (e.g. the canvas) flows underneath.
- *          Each panel fills the wrapper; scrolling is handled by the panel
- *          content (e.g. tabContent) not the wrapper or panel itself.
+ *          Each panel fills the wrapper with overflow:auto, so scrollable
+ *          content (e.g. settings) scrolls within the panel while the pill
+ *          bar stays pinned. The canvas doesn't overflow, so no scrollbar
+ *          appears on the design tab.
  */
 
 import React, { CSSProperties } from 'react';
@@ -74,10 +76,9 @@ const styles = {
 		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-disabled)',
 	}),
 	panel: {
-		display: 'flex',
-		flexDirection: 'column',
 		width: '100%',
 		height: '100%',
+		overflow: 'auto',
 	} as CSSProperties,
 };
 
