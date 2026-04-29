@@ -196,12 +196,41 @@ jobs:
           category: 'trivy-${{ matrix.dockerfile }}'
 
   # ---------------------------------------------------------------------------
+  #  Ruff — Python lint + format check. Mirrors the local lefthook hook so
+  #  contributors who bypass lefthook (--no-verify) still get caught in CI.
+  # ---------------------------------------------------------------------------
+  ruff-check:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
+      - run: ruff check
+      - run: ruff format --check
+
+  # ---------------------------------------------------------------------------
+  #  gitleaks — secret scan. Mirrors the local lefthook hook.
+  # ---------------------------------------------------------------------------
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
   #  Aggregates all CI results so skipped builds don't block PRs.
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build]
+    needs: [init, changes, build, ruff-check, gitleaks]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -209,11 +238,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
