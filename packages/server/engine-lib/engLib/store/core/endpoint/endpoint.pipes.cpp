@@ -111,8 +111,17 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
             boundConnections[connectionKey] = true;
         }
 
-        // Bind the connection
-        if (auto ccode = (*pFrom)->binder.bind(lane, pTo->get())) {
+        // `lane == "*"` (wildcard-to-wildcard edge) → bind every content
+        // method except lifecycle ones already bound above.
+        if (lane == "*") {
+            for (const char *methodName : Binder::MethodNames) {
+                const std::string mn = methodName;
+                if (mn == "open" || mn == "closing" || mn == "close") continue;
+                if (auto ccode = (*pFrom)->binder.bind(mn, pTo->get())) {
+                    return ccode;
+                }
+            }
+        } else if (auto ccode = (*pFrom)->binder.bind(lane, pTo->get())) {
             return ccode;
         }
     }

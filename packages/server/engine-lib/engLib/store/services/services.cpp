@@ -1790,6 +1790,33 @@ Error IServices::init() noexcept {
                 // Get the lanes array
                 const auto &lanes = serviceInfo["lanes"];
 
+                // Reject ambiguous wildcard shapes that silently drop
+                // user intent (e.g. {"*": ["*", "answers"]} or
+                // {"*": ["*"], "answers": ["text"]}).
+                if (lanes.isMember("*")) {
+                    for (const auto &key : lanes.getMemberNames()) {
+                        if (key != "*")
+                            return APERR(Ec::InvalidParam, "Service",
+                                         def.logicalType,
+                                         "lanes with wildcard \"*\" cannot "
+                                         "also contain specific lane key:",
+                                         key);
+                    }
+                    const auto &outDef = lanes["*"];
+                    bool hasWildcardOut = false;
+                    for (const auto &dst : outDef) {
+                        if (dst.asString() == "*") {
+                            hasWildcardOut = true;
+                            break;
+                        }
+                    }
+                    if (hasWildcardOut && outDef.size() > 1)
+                        return APERR(Ec::InvalidParam, "Service",
+                                     def.logicalType,
+                                     "lanes[\"*\"] cannot mix wildcard \"*\" "
+                                     "with concrete lane names");
+                }
+
                 // Iterate through each lane
                 for (const auto &laneId : lanes.getMemberNames()) {
                     // Get the lane
@@ -2058,6 +2085,10 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
         // Copy over the lane info
         if (def.serviceDefinition.isMember("lanes"))
             schemas[logicalType]["lanes"] = def.serviceDefinition["lanes"];
+
+        // Expose `branches` to the UI (e.g. flow_if_else ["then","else"]).
+        if (def.serviceDefinition.isMember("branches"))
+            schemas[logicalType]["branches"] = def.serviceDefinition["branches"];
 
         // Copy over the input info (replaces lanes)
         if (def.serviceDefinition.isMember("input"))

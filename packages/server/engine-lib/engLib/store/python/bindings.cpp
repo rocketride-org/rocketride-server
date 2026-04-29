@@ -910,6 +910,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(getListeners, &IServiceFilterInstance::cb_getListeners)
         .PYBIND(getControllerNodeIds,
                 &IServiceFilterInstance::cb_getControllerNodeIds)
+        .PYBIND(getInstance, &IServiceFilterInstance::cb_getInstance,
+                py::arg("nodeId"),
+                py::return_value_policy::reference_internal)
         .PYBIND(control, &IServiceFilterInstance::cb_control,
                 py::arg("classType"), py::arg("control"),
                 py::arg("nodeId") = "")
@@ -931,14 +934,33 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(writeImage, &IServiceFilterInstance::cb_writeImage,
                 py::arg("action"), py::arg("mimeType"),
                 py::arg("streamData") = py::bytes())
-        .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions,
-                py::arg("questions"))
+        .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions)
         .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers)
         .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments)
         .PYBIND(writeClassifications,
                 &IServiceFilterInstance::cb_writeClassifications)
         .PYBIND(writeClassificationContext,
                 &IServiceFilterInstance::cb_writeClassificationContext)
+        // acceptXxx: peer-direct delivery (see filter.hpp).
+        .PYBIND(acceptText, &IServiceFilterInstance::cb_acceptText)
+        .PYBIND(acceptTable, &IServiceFilterInstance::cb_acceptTable)
+        .PYBIND(acceptWords, &IServiceFilterInstance::cb_acceptWords)
+        .PYBIND(acceptAudio, &IServiceFilterInstance::cb_acceptAudio,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptVideo, &IServiceFilterInstance::cb_acceptVideo,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptImage, &IServiceFilterInstance::cb_acceptImage,
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(acceptQuestions, &IServiceFilterInstance::cb_acceptQuestions)
+        .PYBIND(acceptAnswers, &IServiceFilterInstance::cb_acceptAnswers)
+        .PYBIND(acceptDocuments, &IServiceFilterInstance::cb_acceptDocuments)
+        .PYBIND(acceptClassifications,
+                &IServiceFilterInstance::cb_acceptClassifications)
+        .PYBIND(acceptClassificationContext,
+                &IServiceFilterInstance::cb_acceptClassificationContext)
         .PYBIND(writeTagEndStream,
                 &IServiceFilterInstance::cb_writeTagEndStream)
         .PYBIND(writeTagEndObject,

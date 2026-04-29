@@ -56,7 +56,7 @@ const styles = {
 export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const [isStopping, setIsStopping] = useState(false);
 
-	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected } = useFlowProject();
+	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected, servicesJson } = useFlowProject();
 	const { nodes } = useFlowGraph();
 
 	// ── Running state ──────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			e?.stopPropagation();
 			if (isRunning || !onRunPipeline) return;
 
-			const components = getProjectComponents(nodes as INode[]);
+			const components = getProjectComponents(nodes as INode[], servicesJson);
 			const project: IProject = {
 				...currentProject,
 				components,

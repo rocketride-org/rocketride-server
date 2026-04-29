@@ -87,7 +87,7 @@ export function useTemplateInstantiator() {
 		// Notify host directly — onContentUpdated is blocked by isLoadingRef
 		// which hasn't been cleared yet (parent effect runs after child)
 		if (onContentChanged) {
-			const components = getProjectComponents(nodes as unknown as INode[]);
+			const components = getProjectComponents(nodes as unknown as INode[], servicesJson);
 			const project: IProject = { ...currentProject, components };
 			delete (project as any).viewport;
 			onContentChanged(project);
@@ -177,7 +177,7 @@ export function useTemplateInstantiator() {
 
 			// Merge existing + new nodes and compute edges, then load via loadCanvas
 			const allNodes = [...currentNodes, ...newNodes];
-			const edges = getEdgesFromNodes(allNodes as unknown as INode[]);
+			const edges = getEdgesFromNodes(allNodes as unknown as INode[], servicesJson);
 			loadCanvas(allNodes, edges);
 
 			// Track new IDs so the post-ready effect can update internals + fitView

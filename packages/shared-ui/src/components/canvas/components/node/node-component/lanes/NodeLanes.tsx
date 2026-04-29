@@ -121,7 +121,23 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 		setBoxEl(node);
 	}, []);
 
+	// A wildcard-lanes node (e.g. flow_if_else) declares `{"*": […]}` and
+	// accepts/emits any content type at runtime. It renders as a single
+	// "any" input port (no per-type fanout) + one output port per branch
+	// (labelled with the branch name) — or a single "any" output if no
+	// branches are declared. Branch names come from `service.branches`
+	// when available; for wildcard nodes we default to ["then", "else"]
+	// so the UI stays useful even before the engine catalog is rebuilt.
+	const isWildcard = Boolean(lanes && '*' in lanes);
+	const branchNames = useMemo<string[]>(() => {
+		if (service?.branches?.length) return service.branches;
+		return isWildcard ? ['then', 'else'] : [];
+	}, [service, isWildcard]);
+
 	const inputLanes = useMemo(() => {
+		if (isWildcard) {
+			return [{ type: 'any', targetId: 'target-any', label: 'any' }];
+		}
 		const _inputLanes = Object.keys(lanes ?? {});
 		return _inputLanes
 			.map((lane: string) => ({
@@ -130,26 +146,56 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 				label: renameLanes(lane),
 			}))
 			.sort((a, b) => a.label.localeCompare(b.label));
-	}, [lanes]);
+	}, [lanes, isWildcard]);
 
 	const outputLanes = useMemo(() => {
-		const uniqueOutputTypes = new Set<string>();
-		const outputLanesByType = new Map<string, { type: string; required: boolean; sourceId: string; label: string }>();
+		if (isWildcard) {
+			// Wildcard node: one port per branch, or a single "any" port.
+			const entries =
+				branchNames.length > 0
+					? branchNames.map((branch) => ({
+							type: 'any',
+							required: false,
+							sourceId: `source-any-${branch}`,
+							label: branch,
+							branch,
+						}))
+					: [{ type: 'any', required: false, sourceId: 'source-any', label: 'any' }];
+			return inputLanes.map(() => entries);
+		}
+
+		const uniqueKeys = new Set<string>();
+		const outputLanesByKey = new Map<string, { type: string; required: boolean; sourceId: string; label: string; branch?: string }>();
 
 		inputLanes.forEach((inputLane: { type: string; targetId: string; label: string }) => {
 			const sortedOutputLaneList = sortOutputLanes(lanes[inputLane?.type]);
 			sortedOutputLaneList.forEach((outputLane) => {
 				const { type, required, sourceId, label } = getOutputLaneDisplayValues(outputLane);
-				if (!uniqueOutputTypes.has(type)) {
-					uniqueOutputTypes.add(type);
-					outputLanesByType.set(type, { type, required, sourceId, label });
+				if (branchNames.length > 0) {
+					// Concrete-lane branched node: render one port per (type, branch) pair.
+					for (const branch of branchNames) {
+						const key = `${type}-${branch}`;
+						if (!uniqueKeys.has(key)) {
+							uniqueKeys.add(key);
+							outputLanesByKey.set(key, {
+								type,
+								required,
+								sourceId: `source-${type}-${branch}`,
+								label: `${label} · ${branch}`,
+								branch,
+							});
+						}
+					}
+				} else if (!uniqueKeys.has(type)) {
+					uniqueKeys.add(type);
+					outputLanesByKey.set(type, { type, required, sourceId, label });
 				}
 			});
 		});
 
-		const deduplicatedLanes = Array.from(outputLanesByType.values()).sort((a, b) => a.label.localeCompare(b.label));
+		const deduplicatedLanes = Array.from(outputLanesByKey.values()).sort((a, b) => a.label.localeCompare(b.label));
 		return inputLanes.map(() => deduplicatedLanes);
-	}, [lanes, inputLanes]);
+	}, [lanes, inputLanes, branchNames, isWildcard]);
 
 	const isInputConnected = useCallback((targetId: string) => edges.some((edge) => edge.targetHandle === targetId && edge.target === nodeId), [edges, nodeId]);
 
@@ -261,12 +307,12 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 				>
 					<ConditionalRender condition={uniqueOutputLanes.length > 0}>
 						<>
-							{uniqueOutputLanes.map((outputLane: { type: string; required: string | boolean; sourceId: string; label: string }) => {
-								const { type, required, sourceId, label } = outputLane;
+							{uniqueOutputLanes.map((outputLane: { type: string; required: string | boolean; sourceId: string; label: string; branch?: string }) => {
+								const { type, required, sourceId, label, branch } = outputLane;
 
 								return (
 									<div
-										key={`output-${title}-${type}`}
+										key={`output-${title}-${sourceId}`}
 										style={{
 											...styles.connectionType,
 											justifyContent: 'end',
@@ -294,6 +340,7 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 														isSource: true,
 														position: { x: e.clientX, y: e.clientY },
 														mode: 'lane',
+														branch,
 													})
 												}
 											/>

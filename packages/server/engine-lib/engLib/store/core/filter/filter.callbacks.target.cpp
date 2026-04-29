@@ -77,6 +77,20 @@ std::vector<std::string> IServiceFilterInstance::cb_getControllerNodeIds(
     return result;
 }
 
+// Resolve a branch target id to its peer filter (non-owning, pipe lifetime).
+IServiceFilterInstance *IServiceFilterInstance::cb_getInstance(
+    const std::string &nodeId) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use getInstance");
+
+    auto &stack = this->endpoint->m_instanceStacks[this->pipeId];
+    for (auto &filter : stack) {
+        if (filter && filter->pipeType.id == nodeId) return filter.get();
+    }
+    return nullptr;
+}
+
 void IServiceFilterInstance::cb_control(std::string &classType,
                                         py::object &control,
                                         std::string nodeId) noexcept(false) {
@@ -707,6 +721,141 @@ void IServiceFilterInstance::cb_closing() noexcept(false) {
             ccode = binder.closing();
 
         if (ccode) throw ccode;
+    }
+}
+
+// cb_acceptXxx: deliver via this->writeXxx() (fires Python trampoline)
+// instead of this->binder.writeXxx (broadcast). Used by flow_* routers.
+
+void IServiceFilterInstance::cb_acceptText(
+    const std::u16string &text) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptText");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeText(text)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptTable(
+    const std::u16string &text) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptTable");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeTable(text)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptWords(
+    const WordVector &textWords) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptWords");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeWords(textWords)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptAudio(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptAudio");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeAudio(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptVideo(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptVideo");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeVideo(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptImage(
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptImage");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeImage(action, mimeType, streamData))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptQuestions(
+    const pybind11::object &question) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptQuestions");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeQuestions(question)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptAnswers(
+    const pybind11::object &answers) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptAnswers");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeAnswers(answers)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptDocuments(
+    const pybind11::object &documents) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptDocuments");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeDocuments(documents)) throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptClassifications(
+    const json::Value &classifications, const json::Value &classificationPolicy,
+    const json::Value &classificationRules) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use acceptClassifications");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeClassifications(
+                classifications, classificationPolicy, classificationRules))
+            throw ccode;
+    }
+}
+
+void IServiceFilterInstance::cb_acceptClassificationContext(
+    const json::Value &context) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(
+            Ec::InvalidParam,
+            "You must be in target mode to use acceptClassificationContext");
+    _block() {
+        engine::python::UnlockPython unlock;
+        if (auto ccode = this->writeClassificationContext(context))
+            throw ccode;
     }
 }
 }  // namespace engine::store

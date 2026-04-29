@@ -224,11 +224,23 @@ export default function QuickAddPopup(): ReactElement | null {
 				const lanes = service.lanes as Record<string, IServiceLane> | undefined;
 				if (!lanes) continue;
 
+				// Wildcard handling on either side:
+				//  - The *clicked* handle may be a wildcard (laneType === 'any'),
+				//    in which case any candidate service with visible lanes is ok.
+				//  - The *candidate* service may declare `"*"` as a key in its
+				//    lanes map (e.g. flow_if_else), meaning it accepts/produces
+				//    any lane type.
+				const candidateIsWildcard = '*' in lanes;
+				const clickedIsWildcard = laneType === 'any';
+
 				if (isSource) {
 					// Clicked a source handle — find services that accept this lane type as input
-					if (laneType in lanes) {
+					if (clickedIsWildcard || candidateIsWildcard || laneType in lanes) {
 						results.push({ key: providerKey, service });
 					}
+				} else if (clickedIsWildcard || candidateIsWildcard) {
+					// Clicked a target handle on a wildcard side — any producer is fine
+					results.push({ key: providerKey, service });
 				} else {
 					// Clicked a target handle — find services that produce this lane type as output
 					let produces = false;
@@ -330,19 +342,33 @@ export default function QuickAddPopup(): ReactElement | null {
 				}
 			}
 		} else {
-			// Connect lane handles
+			// Connect lane handles. When the clicked side is a wildcard
+			// (laneType === 'any'), resolve the *other* side's lane from the
+			// newly-added service's own lanes map — otherwise the reconstructed
+			// handle (e.g. `target-any`) wouldn't match any real port.
+			const newService = catalog[providerKey];
+			const newServiceLanes = (newService?.lanes ?? {}) as Record<string, IServiceLane>;
+			const firstInputLane = Object.keys(newServiceLanes).find((k) => k !== '*' && !k.startsWith('_')) ?? laneType;
+			const firstOutputLane =
+				Object.values(newServiceLanes)
+					.flatMap((list) => list)
+					.map((entry) => (typeof entry === 'string' ? entry : entry.type))
+					.find((t) => t && t !== '*') ?? laneType;
+
 			if (isSource) {
+				const resolvedTargetLane = laneType === 'any' ? firstInputLane : laneType;
 				onEdgeConnect({
 					source: nodeId,
 					target: newNodeId,
 					sourceHandle: handleId,
-					targetHandle: `target-${laneType}`,
+					targetHandle: `target-${resolvedTargetLane}`,
 				});
 			} else {
+				const resolvedSourceLane = laneType === 'any' ? firstOutputLane : laneType;
 				onEdgeConnect({
 					source: newNodeId,
 					target: nodeId,
-					sourceHandle: `source-${laneType}`,
+					sourceHandle: `source-${resolvedSourceLane}`,
 					targetHandle: handleId,
 				});
 			}

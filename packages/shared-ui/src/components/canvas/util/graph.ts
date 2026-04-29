@@ -41,7 +41,7 @@ import { INodeType } from '../types';
 
 import type { PipelineComponent } from 'rocketride';
 
-import { IProject, IProjectComponent, INode, INodeData, IControlConnection, IInputConnection, INodeConfig } from '../types';
+import { IProject, IProjectComponent, INode, INodeData, IControlConnection, IInputConnection, INodeConfig, IServiceCatalog } from '../types';
 
 /**
  * Minimal node shape accepted by utility functions.
@@ -239,8 +239,14 @@ export const getNodesFromProject = (project: IProject): INode[] => {
  * // => [Edge, Edge, ...]
  * ```
  */
-export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
+export const getEdgesFromNodes = (nodes: INodeLike[], servicesJson?: IServiceCatalog): Edge[] => {
 	const edges: Edge[] = [];
+
+	// Pre-compute which providers declare wildcard lanes so we can rebuild
+	// `target-any` / `source-any[-branch]` handles for those nodes at load
+	// time (mirroring how NodeLanes.tsx renders them).
+	const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+	const isWildcardProvider = (provider: string | undefined): boolean => Boolean(provider && servicesJson?.[provider]?.lanes && '*' in (servicesJson[provider].lanes as Record<string, unknown>));
 
 	for (const node of nodes) {
 		const { data } = node;
@@ -268,13 +274,21 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 		// -----------------------------------------------------------------
 		if (data.input?.length) {
 			data.input.forEach((input: IInputConnection) => {
+				const sourceNode = nodeById.get(input.from);
+				const sourceWildcard = isWildcardProvider(sourceNode?.data.provider);
+				const targetWildcard = isWildcardProvider(node.data.provider);
+
+				const sourceLaneToken = sourceWildcard ? 'any' : input.lane;
+				const sourceHandle = input.branch ? `source-${sourceLaneToken}-${input.branch}` : `source-${sourceLaneToken}`;
+				const targetHandle = targetWildcard ? 'target-any' : `target-${input.lane}`;
+
 				edges.push({
 					...DEFAULT_EDGE,
 					id: uuid(),
 					source: input.from,
 					target: node.id,
-					sourceHandle: `source-${input.lane}`,
-					targetHandle: `target-${input.lane}`,
+					sourceHandle,
+					targetHandle,
 				});
 			});
 		}
@@ -356,7 +370,13 @@ export const getChildComponents = (allNodes: INode[], parentId?: string): IProje
  * @param allNodes - All nodes currently on the canvas.
  * @returns The top-level component array with groups containing nested children.
  */
-export const getProjectComponents = (allNodes: INode[]): IProjectComponent[] => {
+export const getProjectComponents = (allNodes: INode[], servicesJson?: IServiceCatalog): IProjectComponent[] => {
+	// For every node whose provider declares `branches` in the service
+	// catalog, collect the downstream node IDs grouped by branch and later
+	// inject them as `<provider>.branches` into the source node's config.
+	// This is the source of truth Python reads (see flow_if_else.IGlobal).
+	const branchTargets = collectBranchTargets(allNodes, servicesJson);
+
 	/**
 	 * Gets components at a given level and recursively nests
 	 * children into any group nodes found.
@@ -375,6 +395,15 @@ export const getProjectComponents = (allNodes: INode[]): IProjectComponent[] => 
 					};
 				}
 			}
+
+			// Inject auto-computed branch targets for branched-source nodes
+			const branches = branchTargets[component.id];
+			if (branches) {
+				component.config = {
+					...component.config,
+					[`${component.provider}.branches`]: branches,
+				};
+			}
 		}
 
 		return components;
@@ -382,4 +411,33 @@ export const getProjectComponents = (allNodes: INode[]): IProjectComponent[] => 
 
 	// Start from root level (no parent)
 	return buildLevel(undefined);
+};
+
+/**
+ * Walks every node's input connections and, for any input with a `branch`
+ * field, groups the target node IDs by source+branch. Returns a map keyed
+ * by source node ID, where each value is a `{ [branch]: targetId[] }` map.
+ *
+ * Only source nodes whose provider declares `branches` in the service
+ * catalog are included in the result; branches declared by edges pointing
+ * to/from non-branched providers are ignored.
+ */
+const collectBranchTargets = (allNodes: INodeLike[], servicesJson?: IServiceCatalog): Record<string, Record<string, string[]>> => {
+	const result: Record<string, Record<string, string[]>> = {};
+	if (!servicesJson) return result;
+
+	for (const node of allNodes) {
+		const inputs = node.data.input ?? [];
+		for (const input of inputs) {
+			if (!input.branch) continue;
+			const source = allNodes.find((n) => n.id === input.from);
+			const sourceBranches = source ? servicesJson[source.data.provider]?.branches : undefined;
+			if (!sourceBranches?.includes(input.branch)) continue;
+
+			const perBranch = (result[input.from] ??= Object.fromEntries(sourceBranches.map((b) => [b, [] as string[]])));
+			perBranch[input.branch].push(node.id);
+		}
+	}
+
+	return result;
 };

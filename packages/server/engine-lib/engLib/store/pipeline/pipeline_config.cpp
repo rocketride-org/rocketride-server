@@ -193,8 +193,10 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "input 'lane' must be a non-empty string");
 
-                // [Rule 12] Ensure 'lane' is a valid method name
-                if (std::find(Binder::MethodNames.begin(),
+                // [Rule 12] 'lane' must be a valid method name or "*"
+                // (wildcard sentinel; expanded at bind-time).
+                if (lane != "*" &&
+                    std::find(Binder::MethodNames.begin(),
                               Binder::MethodNames.end(),
                               lane) == Binder::MethodNames.end())
                     return APERR(Ec::InvalidParam, "Component", id,
@@ -285,17 +287,35 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     //     }
     _block() {
         for (auto &[id, comp] : comps) {
+            // Components without I/O are skipped (pre-wildcard behaviour).
+            if (comp.inputs.empty() || comp.outputs.empty()) continue;
+
+            // Unresolved provider — fail loud rather than silently skip.
+            if (!comp.def)
+                return APERR(Ec::InvalidParam, "Component", id,
+                             "has no resolvable service definition "
+                             "(unknown provider or service catalog failed to load)");
+
+            // `"*"` lane = accept any input; `{"*":["*"]}` = passthrough.
+            const auto &lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
+            const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {
-                    if (!comp.def->serviceDefinition["lanes"].isMember(
-                            input->name))
+                    if (!wildcard && !lanesDef.isMember(input->name))
                         return APERR(Ec::InvalidParam, "Component", id,
                                      "input lane", input->name,
                                      "not found in service definition");
 
-                    if (_anyOf(
-                            comp.def->serviceDefinition["lanes"][input->name],
-                            output->name))
+                    const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
+                    // `input->name == "*"` (canvas wildcard-to-wildcard
+                    // sentinel) matches every output → passthrough fan-out.
+                    const bool matches =
+                        input->name == "*"
+                            ? true
+                        : wildcard && _anyOf(outDef, "*")
+                            ? (input->name == output->name)
+                            : _anyOf(outDef, output->name);
+                    if (matches)
                         input->outputs.push_back(output);
                 }
             }

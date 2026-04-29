@@ -202,6 +202,14 @@ export interface IService {
 	 */
 	lanes?: Record<string, IServiceLaneEntry[]>;
 
+	/**
+	 * Branch names when this service is a conditional router. When set, each
+	 * output lane renders as N separate ports (one per branch) with
+	 * `sourceHandle = source-${lane}-${branch}`. Used by `flow_if_else`
+	 * (e.g. `["then", "else"]`).
+	 */
+	branches?: string[];
+
 	/** Execution plan identifiers. */
 	plans?: string[];
 
