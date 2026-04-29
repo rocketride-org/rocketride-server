@@ -210,7 +210,9 @@ jobs:
       - run: ruff format --check
 
   # ---------------------------------------------------------------------------
-  #  gitleaks — secret scan. Mirrors the local lefthook hook.
+  #  gitleaks — secret scan. Installs the binary directly because the upstream
+  #  gitleaks-action v2 requires a paid GITLEAKS_LICENSE for org-owned repos;
+  #  the binary itself is MIT-licensed and free. Mirrors the local lefthook hook.
   # ---------------------------------------------------------------------------
   gitleaks:
     name: gitleaks
@@ -220,9 +222,15 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Run gitleaks
+        run: gitleaks detect --config .gitleaks.toml --verbose --redact
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
