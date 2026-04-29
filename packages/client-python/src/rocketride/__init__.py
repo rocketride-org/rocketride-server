@@ -144,7 +144,7 @@ from .client import RocketRideClient, RocketRideException
 from .core.exceptions import AuthenticationException
 
 # Import identity types returned by connect()
-from .types.client import TeamInfo, OrgInfo, ConnectResult
+from .types.client import TeamInfo, OrgInfo, ConnectResult, ServerInfoResult
 
 # Import server/connection constants so callers can reference defaults without
 # diving into the internal core package.
@@ -168,6 +168,7 @@ __all__ = [
     'TeamInfo',
     'OrgInfo',
     'ConnectResult',
+    'ServerInfoResult',
     'RocketRideClient',
     'RocketRideClientConfig',
     'RocketRideException',

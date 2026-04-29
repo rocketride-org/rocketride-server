@@ -58,7 +58,7 @@ from .mixins.store import StoreMixin
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .types.client import DAPMessage
+    from .types.client import DAPMessage, ServerInfoResult
 
 # Module-level counter used to generate unique client identifiers (CLIENT-0, CLIENT-1, …)
 # so multiple client instances running in the same process are distinguishable in logs.
@@ -297,3 +297,61 @@ class RocketRideClient(
     def billing(self) -> BillingApi:
         """Billing and subscription operations (plans, checkout, credits)."""
         return BillingApi(self)
+
+    # =========================================================================
+    # SERVER INFO — PRE-AUTH PROBE
+    # =========================================================================
+
+    @staticmethod
+    async def get_server_info(uri: str, timeout: float = None) -> 'ServerInfoResult':
+        """
+        Probe a server for its capabilities without authenticating.
+
+        Opens a WebSocket, sends an ``auth`` request with ``infoOnly: True``,
+        and returns the server's version, capabilities, and platform. The
+        connection is closed immediately after.
+
+        Uses transport-only connect (no auth handshake) because the normal
+        ``connect()`` bundles transport open + auth with credentials — here we
+        need to send our own ``auth`` message with ``infoOnly`` instead.
+
+        Args:
+            uri: Server URI (e.g. ``"localhost:5565"`` or ``"https://cloud.example.com"``).
+            timeout: Optional timeout in milliseconds for the entire operation.
+
+        Returns:
+            A :class:`~rocketride.types.ServerInfoResult` dict with ``version``,
+            ``capabilities``, and ``platform`` keys.
+
+        Raises:
+            RuntimeError: If the server is unreachable or does not support info probes.
+
+        Example::
+
+            info = await RocketRideClient.get_server_info('localhost:5565')
+            if 'saas' in info.get('capabilities', []):
+                # Show cloud sign-in options
+                pass
+        """
+        from .core.transport_websocket import TransportWebSocket
+
+        # Build a throwaway client — no auth credential needed for info probes
+        client = RocketRideClient(uri=uri, auth='', persist=False)
+        try:
+            # Open the transport without the normal auth handshake —
+            # connect() would send auth with credentials, but we need to
+            # send our own auth message with infoOnly instead.
+            client._transport = TransportWebSocket(uri=client._uri, auth='')
+            client._bind_transport(client._transport)
+            await client._transport.connect(timeout)
+
+            # Send auth with infoOnly flag — server returns metadata without authenticating
+            message = client.build_request('auth', arguments={'infoOnly': True})
+            response = await client.request(message, timeout=timeout)
+
+            if client.did_fail(response):
+                raise RuntimeError(response.get('message', 'Server info request failed'))
+
+            return response.get('body', {})
+        finally:
+            await client.disconnect()
