@@ -67,6 +67,7 @@ from .commands.stop import StopCommand
 from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
+from .commands.init import InitCommand
 
 try:
     # Try importing from installed package first
@@ -463,6 +464,40 @@ class RocketRideCLI:
             help='Output results in JSON format',
         )
 
+        # Init command - scaffolds a RocketRide workspace; no server required.
+        init_parser = subparsers.add_parser(
+            'init',
+            help='Initialize a RocketRide workspace in the current directory',
+            description=('Scaffold a RocketRide workspace: copy agent docs into .rocketride/docs/, install agent stubs (CLAUDE.md, cursor rules, etc.) for any detected coding agents, and add .rocketride/ to .gitignore.'),
+        )
+        init_parser.add_argument(
+            'path',
+            nargs='?',
+            default=None,
+            help='Target directory (default: current working directory)',
+        )
+        init_parser.add_argument(
+            '--agent',
+            action='append',
+            choices=['cursor', 'claude-code', 'windsurf', 'copilot', 'claude-md', 'agents-md', 'all'],
+            help='Force-install a specific agent stub. Repeatable. Use "all" for every stub.',
+        )
+        init_parser.add_argument(
+            '--no-agents',
+            action='store_true',
+            help='Skip agent stubs; only write docs and update .gitignore.',
+        )
+        init_parser.add_argument(
+            '--force',
+            action='store_true',
+            help='Overwrite existing files in .rocketride/docs/ without prompting.',
+        )
+        init_parser.add_argument(
+            '--no-overwrite',
+            action='store_true',
+            help='Keep existing files in .rocketride/docs/ instead of prompting.',
+        )
+
         # Store command - file store and domain storage operations
         store_common_parser = argparse.ArgumentParser(add_help=False)
         add_common_args(store_common_parser)
@@ -535,6 +570,17 @@ class RocketRideCLI:
             parser.print_help()
             return 1
 
+        # Init runs entirely offline — no server, no apikey, no client lifecycle.
+        if self.args.command == 'init':
+            try:
+                self.command = InitCommand(self, self.args)
+                return await self.command.execute(None)
+            except KeyboardInterrupt:
+                print('\nOperation interrupted by user')
+                return 1
+            finally:
+                self.cancel()
+
         # Validate we have something for apikey
         if not self.args.apikey:
             self.args.apikey = ''
@@ -603,6 +649,7 @@ class RocketRideCLI:
                 'events': EventsCommand,
                 'list': ListCommand,
                 'store': StoreCommand,
+                'init': InitCommand,
             }
 
             if self.args.command in command_map:

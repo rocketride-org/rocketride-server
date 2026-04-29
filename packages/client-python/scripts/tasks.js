@@ -52,6 +52,13 @@ const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
 const README_SRC = path.join(DOCS_DIR, 'README-python-client.md');
 const README_DEST = path.join(BUILD_DIR, 'README.md');
 
+// Init ships the agent docs and stubs as wheel package data;
+// Source of truth lives in the repo at docs/agents/ + docs/stubs/; the build
+// copies them into BUILD_DIR so they end up at the package_data path declared
+const AGENT_DOCS_SRC = path.join(DOCS_DIR, 'agents');
+const AGENT_STUBS_SRC = path.join(DOCS_DIR, 'stubs');
+const TEMPLATES_DEST_BASE = path.join(BUILD_DIR, 'src', 'rocketride', 'cli', 'templates');
+
 // ============================================================================
 // Action Factories
 // ============================================================================
@@ -61,6 +68,16 @@ function makeCopyReadmeAction() {
 		run: async (ctx, task) => {
 			await copyFile(README_SRC, README_DEST);
 			task.output = 'Copied README into build dir';
+		},
+	};
+}
+
+function makeCopyInitTemplatesAction() {
+	return {
+		run: async (ctx, task) => {
+			const docsStats = await syncDir(AGENT_DOCS_SRC, path.join(TEMPLATES_DEST_BASE, 'docs'), { package: true });
+			const stubsStats = await syncDir(AGENT_STUBS_SRC, path.join(TEMPLATES_DEST_BASE, 'stubs'), { package: true });
+			task.output = `docs: ${formatSyncStats(docsStats)} | stubs: ${formatSyncStats(stubsStats)}`;
 		},
 	};
 }
@@ -223,6 +240,7 @@ module.exports = {
 	actions: [
 		// Internal actions
 		{ name: 'client-python:copy-readme', action: makeCopyReadmeAction },
+		{ name: 'client-python:copy-init-templates', action: makeCopyInitTemplatesAction },
 		{ name: 'client-python:sync-source', action: makeSyncClientPythonAction },
 		{ name: 'client-python:wheel-source', action: makeWheelSourceAction },
 		{ name: 'client-python:wheel-build', action: makeWheelBuildAction },
@@ -236,7 +254,7 @@ module.exports = {
 			name: 'client-python:build',
 			action: () => ({
 				description: 'Build Python client',
-				steps: ['server:build', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
+				steps: ['server:build', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:copy-init-templates', 'client-python:wheel-build', 'client-python:sync'],
 			}),
 		},
 		{

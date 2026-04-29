@@ -527,6 +527,7 @@ asyncio.run(main())
 The `rocketride` command is installed automatically with the package.
 
 ```bash
+rocketride init                              # Scaffold .rocketride/ in the current directory
 rocketride start pipeline.json              # Start a pipeline
 rocketride upload *.pdf --token <token>      # Upload files to a running pipeline
 rocketride status --token <token>            # Monitor task progress
@@ -536,7 +537,8 @@ rocketride events ALL --token <token>        # Stream task events
 rocketride rrext_store get_all_projects      # List stored projects
 ```
 
-All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+`rocketride init` runs entirely offline — it creates `.rocketride/docs/`, installs agent stubs (CLAUDE.md, cursor rules, etc.) for any detected coding agents, and adds `.rocketride/` to `.gitignore`. Pass `--agent <name>` to force a specific stub or `--no-agents` to skip them.
+All other commands accept `--uri` and `--apikey` flags, or read from environment variables.
 
 ## Configuration
 

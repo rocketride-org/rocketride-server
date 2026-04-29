@@ -75,4 +75,8 @@ where = ["src"]
 include = ["rocketride*"]
 
 [tool.setuptools.package-data]
-rocketride = ["py.typed"]
+rocketride = [
+    "py.typed",
+    "cli/templates/docs/*.md",
+    "cli/templates/stubs/*",
+]
