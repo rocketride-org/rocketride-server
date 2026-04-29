@@ -20,8 +20,3 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 // =============================================================================
-
-// The external pipeline editor URL
-export const PIPELINE_EDITOR_URL = 'https://cloud.rocketride.ai';
-
-

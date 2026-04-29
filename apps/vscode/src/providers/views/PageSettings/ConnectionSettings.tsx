@@ -6,13 +6,13 @@
 /**
  * ConnectionSettings — "Development Mode" section of the VS Code Settings page.
  *
- * Renders a mode dropdown (Local/Cloud/On-prem/Docker/Service) and delegates
- * to the appropriate target panel in views/components/panels/.
+ * Wraps the shared ConnectionConfig component in a card with a header and
+ * save button. Passes through all connection-related props.
  */
 
 import React from 'react';
 import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
-import { LocalPanel, CloudPanel, OnPremPanel, DockerPanel, ServicePanel } from '../components/panels';
+import { ConnectionConfig } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 // ============================================================================
@@ -72,14 +72,13 @@ interface ConnectionSettingsProps {
 // ============================================================================
 
 export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => {
-	const { settings, onSettingsChange, onSave, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams } = props;
+	const { settings, onSettingsChange, onSave } = props;
 
-	const handleConnectionModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-		const mode = e.target.value as SettingsData['connectionMode'];
+	const handleConnectionModeChange = (mode: SettingsData['connectionMode']) => {
 		const updates: Partial<SettingsData> = { connectionMode: mode };
 
 		if (mode === 'onprem') {
-			if (!settings.hostUrl || settings.hostUrl === 'https://cloud.rocketride.ai' || settings.hostUrl.startsWith('http://localhost')) {
+			if (!settings.hostUrl || settings.hostUrl.includes('cloud.rocketride') || settings.hostUrl.startsWith('http://localhost')) {
 				updates.hostUrl = '';
 			}
 		}
@@ -106,32 +105,54 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and On-prem modes require authentication.</div>
 				<div style={S.formGrid}>
-					<div style={S.formGroup}>
-						<label htmlFor="dev-connectionMode" style={S.label}>
-							Connection mode
-						</label>
-						<select id="dev-connectionMode" value={settings.connectionMode} onChange={handleConnectionModeChange}>
-							<option value="cloud">RocketRide Cloud</option>
-							<option value="docker">Docker</option>
-							<option value="service">Service</option>
-							<option value="onprem">On-prem (your own hosted server)</option>
-							<option value="local">Local</option>
-						</select>
-						<div style={S.helpText}>Choose where your server runs for development</div>
-					</div>
-
-					{/* Mode-specific panel */}
-					<div style={S.modeConfigBox}>
-						{settings.connectionMode === 'cloud' && <CloudPanel idPrefix="dev" cloudSignedIn={cloudSignedIn ?? false} cloudUserName={cloudUserName ?? ''} onCloudSignIn={onCloudSignIn!} onCloudSignOut={onCloudSignOut!} teams={teams ?? []} selectedTeamId={settings.developmentTeamId} onTeamChange={(id) => onSettingsChange({ developmentTeamId: id })} />}
-
-						{settings.connectionMode === 'onprem' && <OnPremPanel idPrefix="dev" hostUrl={settings.hostUrl} onHostUrlChange={(url) => onSettingsChange({ hostUrl: url })} apiKey={settings.apiKey} onApiKeyChange={(key) => onSettingsChange({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} onTestConnection={onTestDevelopmentConnection} testMessage={developmentTestMessage} />}
-
-						{settings.connectionMode === 'local' && <LocalPanel idPrefix="dev" engineVersion={settings.localEngineVersion} onVersionChange={(v) => onSettingsChange({ localEngineVersion: v })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} engineArgs={settings.localEngineArgs} onEngineArgsChange={(a) => onSettingsChange({ localEngineArgs: a })} />}
-
-						{settings.connectionMode === 'docker' && <DockerPanel idPrefix="dev" status={props.dockerStatus} progress={props.dockerProgress} error={props.dockerError} busy={props.dockerBusy} action={props.dockerAction} versions={props.dockerVersions} selectedVersion={props.dockerSelectedVersion} onVersionChange={props.onDockerVersionChange} onInstall={props.onDockerInstall} onUpdate={props.onDockerUpdate} onRemove={props.onDockerRemove} onStart={props.onDockerStart} onStop={props.onDockerStop} />}
-
-						{settings.connectionMode === 'service' && <ServicePanel idPrefix="dev" status={props.serviceStatus} progress={props.serviceProgress} error={props.serviceError} busy={props.serviceBusy} action={props.serviceAction} versions={props.serviceVersions} selectedVersion={props.serviceSelectedVersion} onVersionChange={props.onServiceVersionChange} onInstall={props.onServiceInstall} onUpdate={props.onServiceUpdate} onRemove={props.onServiceRemove} onStart={props.onServiceStart} onStop={props.onServiceStop} sudoPromptVisible={props.sudoPromptVisible} sudoPasswordInput={props.sudoPasswordInput} onSudoPasswordChange={props.onSudoPasswordChange} onSudoSubmit={props.onSudoSubmit} />}
-					</div>
+					<ConnectionConfig
+						simplified={false}
+						idPrefix="dev"
+						connectionMode={settings.connectionMode}
+						onConnectionModeChange={handleConnectionModeChange}
+						settings={settings}
+						onSettingsChange={onSettingsChange}
+						cloudSignedIn={props.cloudSignedIn ?? false}
+						cloudUserName={props.cloudUserName ?? ''}
+						onCloudSignIn={props.onCloudSignIn!}
+						onCloudSignOut={props.onCloudSignOut!}
+						teams={props.teams ?? []}
+						onClearCredentials={props.onClearCredentials}
+						onTestConnection={props.onTestDevelopmentConnection}
+						testMessage={props.developmentTestMessage}
+						engineVersions={props.engineVersions}
+						engineVersionsLoading={props.engineVersionsLoading}
+						dockerStatus={props.dockerStatus}
+						dockerProgress={props.dockerProgress}
+						dockerError={props.dockerError}
+						dockerBusy={props.dockerBusy}
+						dockerAction={props.dockerAction}
+						dockerVersions={props.dockerVersions}
+						dockerSelectedVersion={props.dockerSelectedVersion}
+						onDockerVersionChange={props.onDockerVersionChange}
+						onDockerInstall={props.onDockerInstall}
+						onDockerUpdate={props.onDockerUpdate}
+						onDockerRemove={props.onDockerRemove}
+						onDockerStart={props.onDockerStart}
+						onDockerStop={props.onDockerStop}
+						serviceStatus={props.serviceStatus}
+						serviceProgress={props.serviceProgress}
+						serviceError={props.serviceError}
+						serviceBusy={props.serviceBusy}
+						serviceAction={props.serviceAction}
+						serviceVersions={props.serviceVersions}
+						serviceSelectedVersion={props.serviceSelectedVersion}
+						onServiceVersionChange={props.onServiceVersionChange}
+						onServiceInstall={props.onServiceInstall}
+						onServiceUpdate={props.onServiceUpdate}
+						onServiceRemove={props.onServiceRemove}
+						onServiceStart={props.onServiceStart}
+						onServiceStop={props.onServiceStop}
+						sudoPromptVisible={props.sudoPromptVisible}
+						sudoPasswordInput={props.sudoPasswordInput}
+						onSudoPasswordChange={props.onSudoPasswordChange}
+						onSudoSubmit={props.onSudoSubmit}
+					/>
 				</div>
 			</div>
 		</div>

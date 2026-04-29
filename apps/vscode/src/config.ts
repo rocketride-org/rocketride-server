@@ -248,8 +248,11 @@ export class ConfigManager {
 			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 		}
 
-		// Cloud mode: no hostUrl override — uses the same hostUrl from settings.
+		// Cloud mode: fall back to ROCKETRIDE_URI when hostUrl is not set.
 		// Cloud changes the auth method (OAuth), not the server endpoint.
+		if (connectionMode === 'cloud' && !hostUrl) {
+			hostUrl = process.env.ROCKETRIDE_URI || 'http://localhost:5565';
+		}
 
 		this.config = {
 			connectionMode,
@@ -530,13 +533,9 @@ export class ConfigManager {
 	 */
 	public getApiHost(): string {
 		const config = this.getConfig();
-
-		if (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') {
-			return config.hostUrl;
-		}
-		// Local mode — use the build-time ROCKETRIDE_URI default, falling back
-		// to loopback if not baked in. Runtime .env overrides this.
-		return process.env.ROCKETRIDE_URI || 'http://localhost:5565';
+		// On-prem always uses the user-provided hostUrl.
+		// All other modes fall back to ROCKETRIDE_URI when hostUrl is empty.
+		return config.hostUrl || (config.connectionMode === 'onprem' ? '' : process.env.ROCKETRIDE_URI || 'http://localhost:5565');
 	}
 
 	/**

@@ -35,6 +35,7 @@ export interface DockerPanelProps {
 	onRemove: () => void;
 	onStart: () => void;
 	onStop: () => void;
+	simplified?: boolean;
 }
 
 // =============================================================================

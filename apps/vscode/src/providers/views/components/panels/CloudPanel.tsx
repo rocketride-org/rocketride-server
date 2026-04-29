@@ -29,6 +29,7 @@ export interface CloudPanelProps {
 	selectedTeamId: string;
 	onTeamChange: (teamId: string) => void;
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================

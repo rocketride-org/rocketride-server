@@ -27,6 +27,7 @@ export interface LocalPanelProps {
 	engineArgs: string;
 	onEngineArgsChange: (args: string) => void;
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================

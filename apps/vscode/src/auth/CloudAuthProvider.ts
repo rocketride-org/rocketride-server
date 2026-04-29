@@ -23,7 +23,7 @@
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
-import { ConfigManager } from '../config';
+
 import { EventEmitter } from 'events';
 
 // =============================================================================
@@ -117,10 +117,10 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		// Exchange the code for a persistent rr_* token using a temporary
 		// client connection. This is auth only — not a persistent connection.
 		try {
-			// Use the hostUrl from ConfigManager -- this is already set correctly
-			// for whichever connection mode is active (cloud URL for cloud mode,
-			// localhost for local mode, etc.).
-			const cloudUrl = ConfigManager.getInstance().getConfig().hostUrl;
+			// Always use the cloud URI for token exchange -- the OAuth code must
+			// be exchanged against the cloud server regardless of the current
+			// connection mode (local, docker, etc.).
+			const cloudUrl = process.env.ROCKETRIDE_URI || '';
 			const tempClient = new RocketRideClient({ persist: false });
 			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
 

@@ -40,6 +40,7 @@ export interface ServicePanelProps {
 	sudoPasswordInput: string;
 	onSudoPasswordChange: (password: string) => void;
 	onSudoSubmit: () => void;
+	simplified?: boolean;
 }
 
 // =============================================================================

@@ -30,6 +30,7 @@ export interface OnPremPanelProps {
 	onTestConnection?: () => void;
 	testMessage?: MessageData | null;
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
