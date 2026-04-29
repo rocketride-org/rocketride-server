@@ -80,7 +80,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	async signIn(zitadelUrl: string, clientId: string): Promise<void> {
 		if (!zitadelUrl || !clientId) {
-			vscode.window.showErrorMessage('RocketRide Cloud sign-in requires RR_ZITADEL_URL and RR_ZITADEL_CLIENT_ID.');
+			vscode.window.showErrorMessage('RocketRide Cloud sign-in required.');
 			return;
 		}
 
@@ -117,9 +117,12 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		// Exchange the code for a persistent rr_* token using a temporary
 		// client connection. This is auth only — not a persistent connection.
 		try {
-			const config = ConfigManager.getInstance().getConfig();
+			// Use the hostUrl from ConfigManager -- this is already set correctly
+			// for whichever connection mode is active (cloud URL for cloud mode,
+			// localhost for local mode, etc.).
+			const cloudUrl = ConfigManager.getInstance().getConfig().hostUrl;
 			const tempClient = new RocketRideClient({ persist: false });
-			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: config.hostUrl });
+			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
 
 			const token = (result as any)?.userToken || '';
 			const displayName = (result as any)?.displayName || '';

@@ -55,9 +55,6 @@ export interface ConfigManagerInfo {
 		debugOutput: boolean;
 	};
 
-	/** General settings */
-	autoConnect: boolean;
-
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 
@@ -76,9 +73,6 @@ export interface ConfigManagerInfo {
 	/** Separate API key for deploy target (on-prem deploy) — from secure storage */
 	deployApiKey: string;
 
-	/** Auto-connect to deploy target on startup */
-	deployAutoConnect: boolean;
-
 	/** Deploy local engine configuration */
 	deployLocal: {
 		/** Engine version for local deploy target */
@@ -95,6 +89,35 @@ export interface ConfigManagerInfo {
 }
 
 /**
+ * Full settings snapshot sent from the Settings UI on save.
+ * Maps 1:1 with SettingsData from the webview.  ConfigManager writes all
+ * fields atomically and refreshes its cache once.
+ */
+export interface SettingsSnapshot {
+	connectionMode: ConnectionMode;
+	hostUrl: string;
+	apiKey: string;
+	defaultPipelinePath: string;
+	localEngineVersion: string;
+	localEngineArgs: string;
+	localDebugOutput: boolean;
+	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	developmentTeamId: string;
+	deployTargetMode: ConnectionMode | null;
+	deployTargetTeamId: string;
+	deployHostUrl: string;
+	deployApiKey: string;
+	envVars?: Record<string, string>;
+	autoAgentIntegration: boolean;
+	integrationCopilot: boolean;
+	integrationClaudeCode: boolean;
+	integrationCursor: boolean;
+	integrationWindsurf: boolean;
+	integrationClaudeMd: boolean;
+	integrationAgentsMd: boolean;
+}
+
+/**
  * Configuration manager class providing centralized access to RocketRide settings
  */
 export class ConfigManager {
@@ -107,6 +130,8 @@ export class ConfigManager {
 	private envFileWatcher?: vscode.FileSystemWatcher;
 	private disposables: vscode.Disposable[] = [];
 	private envRawText: string = '';
+	/** While true, config-change listeners are suppressed (inside applyAllSettings). */
+	private isBatchApplying: boolean = false;
 	private envChangeEmitter = new vscode.EventEmitter<Record<string, string>>();
 	public readonly onEnvVarsChanged = this.envChangeEmitter.event;
 
@@ -121,14 +146,12 @@ export class ConfigManager {
 			engineVersion: 'latest',
 			debugOutput: false,
 		},
-		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
 		developmentTeamId: '',
 		deployTargetMode: null,
 		deployTargetTeamId: '',
 		deployHostUrl: '',
 		deployApiKey: '',
-		deployAutoConnect: false,
 		deployLocal: {
 			engineVersion: 'latest',
 			debugOutput: false,
@@ -162,9 +185,10 @@ export class ConfigManager {
 		// Ensure .env file exists with current settings if workspace is open
 		await this.ensureEnvFileSync();
 
-		// Listen for configuration changes
+		// Listen for configuration changes (suppressed during applyAllSettings)
 		this.disposables.push(
 			vscode.workspace.onDidChangeConfiguration(async (event) => {
+				if (this.isBatchApplying) return;
 				if (event.affectsConfiguration(this.configSection)) {
 					await this.refreshConfig();
 
@@ -176,9 +200,10 @@ export class ConfigManager {
 			})
 		);
 
-		// Listen for secret storage changes (API key changes)
+		// Listen for secret storage changes (suppressed during applyAllSettings)
 		this.disposables.push(
 			context.secrets.onDidChange(async (event) => {
+				if (this.isBatchApplying) return;
 				if (event.key === this.API_KEY_SECRET_KEY) {
 					await this.refreshConfig();
 					// API key changed, sync to .env
@@ -223,10 +248,8 @@ export class ConfigManager {
 			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 		}
 
-		// Cloud mode: workspace .env override, then build-time default, then hardcoded fallback
-		if (connectionMode === 'cloud') {
-			hostUrl = env.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
-		}
+		// Cloud mode: no hostUrl override — uses the same hostUrl from settings.
+		// Cloud changes the auth method (OAuth), not the server endpoint.
 
 		this.config = {
 			connectionMode,
@@ -238,14 +261,12 @@ export class ConfigManager {
 				engineVersion: config.get('local.engineVersion', 'latest'),
 				debugOutput: config.get('local.debugOutput', false),
 			},
-			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
 			developmentTeamId: config.get('developmentTeamId', ''),
 			deployTargetMode: config.get<ConnectionMode | null>('deployTargetMode', null),
 			deployTargetTeamId: config.get('deployTargetTeamId', ''),
 			deployHostUrl: config.get('deployHostUrl', ''),
 			deployApiKey: await this.getDeployApiKeyFromStorage(),
-			deployAutoConnect: config.get('deployAutoConnect', false),
 			deployLocal: {
 				engineVersion: config.get('deploy.local.engineVersion', 'latest'),
 				debugOutput: config.get('deploy.local.debugOutput', false),
@@ -651,20 +672,87 @@ export class ConfigManager {
 		if (this.config) this.config.deployApiKey = apiKey.trim();
 	}
 
+	// =========================================================================
+	// ATOMIC SETTINGS APPLY (used by Settings UI save)
+	// =========================================================================
+
+	/**
+	 * Writes every setting from the Settings UI in one transaction.
+	 *
+	 * 1. Suppresses all intermediate config-change listeners so no
+	 *    connection manager reacts to half-written state.
+	 * 2. Persists VS Code settings, secure-storage keys, and .env file.
+	 * 3. Refreshes the in-memory cache once from the final state.
+	 * 4. Syncs .env with final hostUrl/apiKey.
+	 *
+	 * The caller is responsible for explicitly driving connection transitions
+	 * after this method returns (the normal debounced handlers are suppressed).
+	 */
+	public async applyAllSettings(s: SettingsSnapshot): Promise<void> {
+		if (!this.context) {
+			throw new Error('ConfigManager not initialized with context');
+		}
+
+		this.isBatchApplying = true;
+		try {
+			const wc = vscode.workspace.getConfiguration(this.configSection);
+
+			// --- VS Code workspace settings ---
+			await wc.update('connectionMode', s.connectionMode, vscode.ConfigurationTarget.Global);
+			await wc.update('hostUrl', s.hostUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
+			await wc.update('local.engineVersion', s.localEngineVersion, vscode.ConfigurationTarget.Global);
+			await wc.update('local.debugOutput', s.localDebugOutput, vscode.ConfigurationTarget.Global);
+			await wc.update('engineArgs', s.localEngineArgs, vscode.ConfigurationTarget.Global);
+			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+			await wc.update('developmentTeamId', s.developmentTeamId, vscode.ConfigurationTarget.Global);
+			await wc.update('deployTargetMode', s.deployTargetMode, vscode.ConfigurationTarget.Global);
+			await wc.update('deployTargetTeamId', s.deployTargetTeamId, vscode.ConfigurationTarget.Global);
+			await wc.update('deployHostUrl', s.deployHostUrl, vscode.ConfigurationTarget.Global);
+
+			// Integration settings
+			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.cursor', s.integrationCursor, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.windsurf', s.integrationWindsurf, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
+			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
+
+			// --- Secure storage (API keys) ---
+			if (s.apiKey.trim()) {
+				await this.context.secrets.store(this.API_KEY_SECRET_KEY, s.apiKey.trim());
+			} else {
+				await this.context.secrets.delete(this.API_KEY_SECRET_KEY);
+			}
+
+			if (s.deployApiKey.trim()) {
+				await this.context.secrets.store(this.DEPLOY_API_KEY_SECRET_KEY, s.deployApiKey.trim());
+			} else {
+				await this.context.secrets.delete(this.DEPLOY_API_KEY_SECRET_KEY);
+			}
+
+			// --- .env file ---
+			if (s.envVars !== undefined) {
+				await this.saveAllEnvVars(s.envVars);
+			}
+
+			// --- Single cache refresh from final state ---
+			await this.refreshConfig();
+
+			// --- Sync .env with final hostUrl/apiKey ---
+			await this.syncSettingsToEnv();
+		} finally {
+			this.isBatchApplying = false;
+		}
+	}
+
 	/**
 	 * Updates the deploy host URL in settings.
 	 */
 	public async updateDeployHostUrl(hostUrl: string): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		await config.update('deployHostUrl', hostUrl, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
-	 * Updates the deploy auto-connect setting.
-	 */
-	public async updateDeployAutoConnect(autoConnect: boolean): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('deployAutoConnect', autoConnect, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
@@ -741,6 +829,7 @@ export class ConfigManager {
 	 */
 	public onConfigurationChanged(callback: (config: ConfigManagerInfo) => void): vscode.Disposable {
 		return vscode.workspace.onDidChangeConfiguration(async (event) => {
+			if (this.isBatchApplying) return;
 			if (event.affectsConfiguration(this.configSection)) {
 				const config = this.getConfig();
 				callback(config);

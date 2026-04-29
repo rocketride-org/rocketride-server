@@ -37,7 +37,6 @@ interface WelcomeSettings {
 	hostUrl: string;
 	apiKey: string;
 	hasApiKey: boolean;
-	autoConnect: boolean;
 	autoAgentIntegration: boolean;
 	localEngineVersion: string;
 }
@@ -140,7 +139,6 @@ export const PageWelcome: React.FC = () => {
 		hostUrl: 'http://localhost:5565',
 		apiKey: '',
 		hasApiKey: false,
-		autoConnect: true,
 		autoAgentIntegration: true,
 		localEngineVersion: 'latest',
 	});
@@ -198,7 +196,6 @@ export const PageWelcome: React.FC = () => {
 				updates.hostUrl = '';
 			}
 		} else if (mode === 'local') {
-			updates.autoConnect = true;
 			setEngineVersionsLoading(true);
 			sendMessage({ type: 'fetchEngineVersions' });
 		}
@@ -408,16 +405,6 @@ export const PageWelcome: React.FC = () => {
 							</label>
 							<input type="text" id="hostUrl" placeholder="your-server:5565" value={settings.hostUrl} onChange={(e) => setSettings((prev) => ({ ...prev, hostUrl: e.target.value }))} />
 							<div style={styles.help}>Base URL of your hosted RocketRide server</div>
-						</div>
-					)}
-
-					{/* Auto-connect — On-prem */}
-					{settings.connectionMode === 'onprem' && (
-						<div style={{ ...styles.formGroup, display: 'flex', alignItems: 'center', gap: 8 }}>
-							<input type="checkbox" id="autoConnect" checked={settings.autoConnect} style={{ width: 'auto', margin: 0 }} onChange={(e) => setSettings((prev) => ({ ...prev, autoConnect: e.target.checked }))} />
-							<label htmlFor="autoConnect" style={{ fontWeight: 400, marginBottom: 0, fontSize: 12.5, color: 'var(--rr-text-primary)' }}>
-								Auto-connect on startup
-							</label>
 						</div>
 					)}
 

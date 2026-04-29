@@ -6,20 +6,19 @@
 /**
  * DeployTargetSettings — full settings section for the deployment target.
  *
- * Mirrors ConnectionSettings in structure: mode dropdown + mode-specific config
- * via shared components in views/components/.
+ * Mirrors ConnectionSettings in structure: mode dropdown + target-specific panel.
  *
  * Key differences from ConnectionSettings:
  *   - Uses deploy-specific fields: deployHostUrl, deployApiKey (not shared with dev)
  *   - Cloud sign-in state is SHARED — signing in here or in dev section updates both
  *   - "Deploy to a different target" checkbox controls whether the section is expanded
  *   - When collapsed (deployTargetMode = null), deploy uses the same target as dev
- *   - Local engine settings (version, args, debug) are SHARED with dev
  */
 
 import React from 'react';
 import { SettingsData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
-import { LocalModeFields, CloudModeFields, OnPremModeFields, SimpleModeFields } from '../components';
+import { LocalPanel, CloudPanel, OnPremPanel, DockerPanel, ServicePanel } from '../components/panels';
+import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 // =============================================================================
 // TYPES
@@ -37,18 +36,47 @@ interface DeployTargetSettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
+	// Docker panel props
+	dockerStatus: DockerStatus;
+	dockerProgress: string | null;
+	dockerError: string | null;
+	dockerBusy: boolean;
+	dockerAction: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	dockerVersions: VersionOption[];
+	dockerSelectedVersion: string;
+	onDockerVersionChange: (v: string) => void;
+	onDockerInstall: () => void;
+	onDockerUpdate: () => void;
+	onDockerRemove: () => void;
+	onDockerStart: () => void;
+	onDockerStop: () => void;
+	// Service panel props
+	serviceStatus: ServiceStatus;
+	serviceProgress: string | null;
+	serviceError: string | null;
+	serviceBusy: boolean;
+	serviceAction: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	serviceVersions: VersionOption[];
+	serviceSelectedVersion: string;
+	onServiceVersionChange: (v: string) => void;
+	onServiceInstall: () => void;
+	onServiceUpdate: () => void;
+	onServiceRemove: () => void;
+	onServiceStart: () => void;
+	onServiceStop: () => void;
+	sudoPromptVisible: boolean;
+	sudoPasswordInput: string;
+	onSudoPasswordChange: (pw: string) => void;
+	onSudoSubmit: () => void;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ settings, onSettingsChange, onSave, teams, engineVersions, engineVersionsLoading, onClearCredentials, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut }) => {
+export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = (props) => {
+	const { settings, onSettingsChange, onSave, teams, engineVersions, engineVersionsLoading, onClearCredentials, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut } = props;
 	const hasDeployTarget = settings.deployTargetMode !== null;
-
-	// =========================================================================
-	// EVENT HANDLERS
-	// =========================================================================
 
 	const handleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.checked) {
@@ -63,10 +91,6 @@ export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ sett
 		const mode = e.target.value as SettingsData['deployTargetMode'];
 		onSettingsChange({ deployTargetMode: mode });
 	};
-
-	// =========================================================================
-	// RENDER
-	// =========================================================================
 
 	return (
 		<div style={S.card}>
@@ -102,17 +126,17 @@ export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = ({ sett
 								<div style={S.helpText}>Choose where to deploy pipelines for production</div>
 							</div>
 
-							{/* Mode fields */}
+							{/* Target panel */}
 							<div style={S.modeConfigBox}>
-								{settings.deployTargetMode === 'local' && <LocalModeFields idPrefix="deploy" engineVersion={settings.localEngineVersion} onVersionChange={(v) => onSettingsChange({ localEngineVersion: v })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} engineArgs={settings.localEngineArgs} onEngineArgsChange={(a) => onSettingsChange({ localEngineArgs: a })} />}
+								{settings.deployTargetMode === 'local' && <LocalPanel idPrefix="deploy" engineVersion={settings.localEngineVersion} onVersionChange={(v) => onSettingsChange({ localEngineVersion: v })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} engineArgs={settings.localEngineArgs} onEngineArgsChange={(a) => onSettingsChange({ localEngineArgs: a })} />}
 
-								{settings.deployTargetMode === 'cloud' && <CloudModeFields idPrefix="deploy" cloudSignedIn={cloudSignedIn ?? false} cloudUserName={cloudUserName ?? ''} onCloudSignIn={onCloudSignIn!} onCloudSignOut={onCloudSignOut!} teams={teams} selectedTeamId={settings.deployTargetTeamId} onTeamChange={(id) => onSettingsChange({ deployTargetTeamId: id })} autoConnect={settings.deployAutoConnect} onAutoConnectChange={(c) => onSettingsChange({ deployAutoConnect: c })} />}
+								{settings.deployTargetMode === 'cloud' && <CloudPanel idPrefix="deploy" cloudSignedIn={cloudSignedIn ?? false} cloudUserName={cloudUserName ?? ''} onCloudSignIn={onCloudSignIn!} onCloudSignOut={onCloudSignOut!} teams={teams} selectedTeamId={settings.deployTargetTeamId} onTeamChange={(id) => onSettingsChange({ deployTargetTeamId: id })} />}
 
-								{settings.deployTargetMode === 'onprem' && <OnPremModeFields idPrefix="deploy" hostUrl={settings.deployHostUrl} onHostUrlChange={(url) => onSettingsChange({ deployHostUrl: url })} apiKey={settings.deployApiKey} onApiKeyChange={(key) => onSettingsChange({ deployApiKey: key })} onClearApiKey={onClearCredentials} autoConnect={settings.deployAutoConnect} onAutoConnectChange={(c) => onSettingsChange({ deployAutoConnect: c })} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} />}
+								{settings.deployTargetMode === 'onprem' && <OnPremPanel idPrefix="deploy" hostUrl={settings.deployHostUrl} onHostUrlChange={(url) => onSettingsChange({ deployHostUrl: url })} apiKey={settings.deployApiKey} onApiKeyChange={(key) => onSettingsChange({ deployApiKey: key })} onClearApiKey={onClearCredentials} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} />}
 
-								{settings.deployTargetMode === 'docker' && <SimpleModeFields idPrefix="deploy" description="Deploy pipelines to a Docker container." autoConnect={settings.deployAutoConnect} onAutoConnectChange={(c) => onSettingsChange({ deployAutoConnect: c })} />}
+								{settings.deployTargetMode === 'docker' && <DockerPanel idPrefix="deploy" status={props.dockerStatus} progress={props.dockerProgress} error={props.dockerError} busy={props.dockerBusy} action={props.dockerAction} versions={props.dockerVersions} selectedVersion={props.dockerSelectedVersion} onVersionChange={props.onDockerVersionChange} onInstall={props.onDockerInstall} onUpdate={props.onDockerUpdate} onRemove={props.onDockerRemove} onStart={props.onDockerStart} onStop={props.onDockerStop} />}
 
-								{settings.deployTargetMode === 'service' && <SimpleModeFields idPrefix="deploy" description="Deploy pipelines to a local system service." autoConnect={settings.deployAutoConnect} onAutoConnectChange={(c) => onSettingsChange({ deployAutoConnect: c })} />}
+								{settings.deployTargetMode === 'service' && <ServicePanel idPrefix="deploy" status={props.serviceStatus} progress={props.serviceProgress} error={props.serviceError} busy={props.serviceBusy} action={props.serviceAction} versions={props.serviceVersions} selectedVersion={props.serviceSelectedVersion} onVersionChange={props.onServiceVersionChange} onInstall={props.onServiceInstall} onUpdate={props.onServiceUpdate} onRemove={props.onServiceRemove} onStart={props.onServiceStart} onStop={props.onServiceStop} sudoPromptVisible={props.sudoPromptVisible} sudoPasswordInput={props.sudoPasswordInput} onSudoPasswordChange={props.onSudoPasswordChange} onSudoSubmit={props.onSudoSubmit} />}
 							</div>
 						</>
 					)}

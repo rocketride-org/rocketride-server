@@ -163,7 +163,6 @@ export class PageWelcomeProvider {
 				hostUrl: workspaceConfig.get('hostUrl', 'http://localhost:5565'),
 				apiKey,
 				hasApiKey: this.configManager.hasApiKey(),
-				autoConnect: workspaceConfig.get('autoConnect', true),
 				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
 				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
 			},
@@ -180,9 +179,6 @@ export class PageWelcomeProvider {
 			}
 			if (settings.hostUrl !== undefined) {
 				await workspaceConfig.update('hostUrl', settings.hostUrl, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.autoConnect !== undefined) {
-				await workspaceConfig.update('autoConnect', settings.autoConnect, vscode.ConfigurationTarget.Global);
 			}
 			if (settings.localEngineVersion !== undefined) {
 				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);

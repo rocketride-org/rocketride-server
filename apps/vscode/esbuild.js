@@ -29,36 +29,47 @@ const production = process.argv.includes('--production');
 const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
 // ---------------------------------------------------------------------------
+// Parse a key=value file (comments and blank lines ignored).
+// ---------------------------------------------------------------------------
+function parseFile(filePath) {
+	try {
+		const text = fs.readFileSync(filePath, 'utf8');
+		const result = {};
+		for (const line of text.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) continue;
+			const eq = trimmed.indexOf('=');
+			if (eq < 0) continue;
+			result[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+		}
+		return result;
+	} catch {
+		return {};
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Load build-time constants from the repo root .env file.
 // These are baked into the extension bundle so they don't need to be in the
 // user's workspace .env — they are our infrastructure values, not user config.
 // ---------------------------------------------------------------------------
-function loadEnv() {
-	// Walk up from apps/vscode to find the repo root .env
-	const candidates = [
-		path.resolve(__dirname, '../../.env'), // rocketride-server root
-		path.resolve(__dirname, '../../../.env'), // saas repo root
+// Load .config first (defaults), then .env on top (overrides).
+// ---------------------------------------------------------------------------
+function loadBuildEnv() {
+	const roots = [
+		path.resolve(__dirname, '../..'), // rocketride repo root
+		path.resolve(__dirname, '../../..'), // saas repo root
 	];
-	for (const p of candidates) {
-		try {
-			const text = fs.readFileSync(p, 'utf8');
-			const env = {};
-			for (const line of text.split('\n')) {
-				const trimmed = line.trim();
-				if (!trimmed || trimmed.startsWith('#')) continue;
-				const eq = trimmed.indexOf('=');
-				if (eq < 0) continue;
-				env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-			}
-			return env;
-		} catch {
-			/* try next */
-		}
+	for (const root of roots) {
+		const config = parseFile(path.join(root, '.config'));
+		const env = parseFile(path.join(root, '.env'));
+		const merged = { ...config, ...env };
+		if (Object.keys(merged).length > 0) return merged;
 	}
 	return {};
 }
 
-const env = loadEnv();
+const env = loadBuildEnv();
 
 esbuild
 	.build({
@@ -83,10 +94,9 @@ esbuild
 		define: {
 			// Disable AMD detection
 			define: 'undefined',
-			// Bake in Zitadel / cloud config from .env at build time
-			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || 'https://auth.rocketride.ai'),
-			'process.env.RR_ZITADEL_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || env.RR_ZITADEL_CLIENT_ID || ''),
-			'process.env.RR_CLOUD_URL': JSON.stringify(env.RR_CLOUD_URL || 'https://cloud.rocketride.ai'),
+			// Zitadel OIDC config (.config defaults, .env overrides)
+			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || ''),
+			'process.env.RR_ZITADEL_VSCODE_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || ''),
 		},
 		loader: {
 			'.json': 'json',

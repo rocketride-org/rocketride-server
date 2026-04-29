@@ -41,7 +41,7 @@ import { PageSidebarProvider } from './providers/PageSidebarProvider';
 import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageMonitorProvider } from './providers/PageMonitorProvider';
-import { PageDeployProvider } from './providers/PageDeployProvider';
+// PageDeployProvider removed — Docker/Service operations now live in Settings panels
 import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
@@ -60,7 +60,7 @@ let pageSidebar: PageSidebarProvider | undefined;
 let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let _pageMonitor: PageMonitorProvider | undefined;
-let pageDeploy: PageDeployProvider | undefined;
+// pageDeploy removed — functionality moved to Settings panels
 let pageStatus: PageStatusProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -181,7 +181,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				_pageMonitor = new PageMonitorProvider(context);
-				pageDeploy = new PageDeployProvider(context);
+				// pageDeploy removed — register redirect command so sidebar "Deploy" opens Settings
+				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 				new PageAccountProvider(context);
@@ -450,16 +451,6 @@ export async function deactivate(): Promise<void> {
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
 				console.error('[ROCKETRIDE] Error disposing monitor page:', error);
-			}
-		}
-	}
-
-	if (pageDeploy) {
-		try {
-			pageDeploy.dispose();
-		} catch (error: unknown) {
-			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing deploy page:', error);
 			}
 		}
 	}

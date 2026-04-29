@@ -63,7 +63,7 @@ const S = {
 	sectionHeader: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: 6,
+		gap: 0,
 		padding: '6px 12px 4px',
 		flexShrink: 0,
 		borderTop: '1px solid var(--rr-border)',
@@ -77,8 +77,8 @@ const S = {
 		background: 'none',
 		border: 'none',
 		cursor: 'pointer',
-		padding: 2,
-		borderRadius: 3,
+		padding: 4,
+		borderRadius: 5,
 		color: 'var(--rr-text-secondary)',
 		display: 'flex',
 		alignItems: 'center',
@@ -354,6 +354,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [hoveredNav, setHoveredNav] = useState<string | null>(null);
+	const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
 	// ── Selection state ─────────────────────────────────────────────────────
@@ -485,6 +486,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 
 	const hoverBg = (id: string): CSSProperties => (hoveredRow === id ? { background: HOVER_BG } : {});
 	const navHoverBg = (id: string): CSSProperties => (hoveredNav === id ? { background: HOVER_BG } : {});
+	const actionHoverBg = (id: string): CSSProperties => (hoveredAction === id ? { background: 'var(--rr-bg-toolbar-hover)' } : {});
 
 	// ── Render tree recursively ────────────────────────────────────────────
 
@@ -771,22 +773,22 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 				<span style={S.sectionLabel}>Pipelines</span>
 				{hasFileManage && (
 					<>
-						<button style={S.headerAction} title="New Pipeline" onClick={() => startCreate('file')}>
-							<BxFilePlus size={14} />
+						<button style={{ ...S.headerAction, ...actionHoverBg('newFile') }} title="New Pipeline" onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
+							<BxFilePlus size={16} />
 						</button>
-						<button style={S.headerAction} title="New Folder" onClick={() => startCreate('folder')}>
-							<BxFolderPlus size={14} />
+						<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} title="New Folder" onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
+							<BxFolderPlus size={16} />
 						</button>
 					</>
 				)}
-				<button style={S.headerAction} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))}>
-					{viewMode === 'tree' ? <BxListUl size={14} /> : <BxGridAlt size={14} />}
+				<button style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
+					{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
 				</button>
-				<button style={S.headerAction} title="Collapse All" onClick={collapseAll}>
-					<BxCollapseAll size={14} />
+				<button style={{ ...S.headerAction, ...actionHoverBg('collapse') }} title="Collapse All" onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
+					<BxCollapseAll size={16} />
 				</button>
-				<button style={S.headerAction} title="Refresh" onClick={onRefresh}>
-					<BxRefresh size={14} />
+				<button style={{ ...S.headerAction, ...actionHoverBg('refresh') }} title="Refresh" onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
+					<BxRefresh size={16} />
 				</button>
 			</div>
 

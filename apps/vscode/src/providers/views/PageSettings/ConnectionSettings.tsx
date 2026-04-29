@@ -7,15 +7,13 @@
  * ConnectionSettings — "Development Mode" section of the VS Code Settings page.
  *
  * Renders a mode dropdown (Local/Cloud/On-prem/Docker/Service) and delegates
- * mode-specific fields to shared components in views/components/.
- *
- * Cloud sign-in state is shared with DeployTargetSettings — signing in here
- * updates both sections.
+ * to the appropriate target panel in views/components/panels/.
  */
 
 import React from 'react';
 import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
-import { LocalModeFields, CloudModeFields, OnPremModeFields, SimpleModeFields } from '../components';
+import { LocalPanel, CloudPanel, OnPremPanel, DockerPanel, ServicePanel } from '../components/panels';
+import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 // ============================================================================
 // TYPES
@@ -35,16 +33,46 @@ interface ConnectionSettingsProps {
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
 	teams?: Array<{ id: string; name: string }>;
+	// Docker panel props
+	dockerStatus: DockerStatus;
+	dockerProgress: string | null;
+	dockerError: string | null;
+	dockerBusy: boolean;
+	dockerAction: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	dockerVersions: VersionOption[];
+	dockerSelectedVersion: string;
+	onDockerVersionChange: (v: string) => void;
+	onDockerInstall: () => void;
+	onDockerUpdate: () => void;
+	onDockerRemove: () => void;
+	onDockerStart: () => void;
+	onDockerStop: () => void;
+	// Service panel props
+	serviceStatus: ServiceStatus;
+	serviceProgress: string | null;
+	serviceError: string | null;
+	serviceBusy: boolean;
+	serviceAction: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	serviceVersions: VersionOption[];
+	serviceSelectedVersion: string;
+	onServiceVersionChange: (v: string) => void;
+	onServiceInstall: () => void;
+	onServiceUpdate: () => void;
+	onServiceRemove: () => void;
+	onServiceStart: () => void;
+	onServiceStop: () => void;
+	sudoPromptVisible: boolean;
+	sudoPasswordInput: string;
+	onSudoPasswordChange: (pw: string) => void;
+	onSudoSubmit: () => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings, onSettingsChange, onSave, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams }) => {
-	// ========================================================================
-	// EVENT HANDLERS
-	// ========================================================================
+export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => {
+	const { settings, onSettingsChange, onSave, onClearCredentials, onTestDevelopmentConnection, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams } = props;
 
 	const handleConnectionModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		const mode = e.target.value as SettingsData['connectionMode'];
@@ -54,18 +82,12 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 			if (!settings.hostUrl || settings.hostUrl === 'https://cloud.rocketride.ai' || settings.hostUrl.startsWith('http://localhost')) {
 				updates.hostUrl = '';
 			}
-		} else if (mode === 'local') {
-			updates.autoConnect = true;
 		}
 
 		onSettingsChange(updates);
 	};
 
 	const showAccountWarning = settings.connectionMode === 'onprem' && !settings.apiKey.trim();
-
-	// ========================================================================
-	// RENDER
-	// ========================================================================
 
 	return (
 		<div
@@ -98,17 +120,17 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({ settings
 						<div style={S.helpText}>Choose where your server runs for development</div>
 					</div>
 
-					{/* Mode-specific fields */}
+					{/* Mode-specific panel */}
 					<div style={S.modeConfigBox}>
-						{settings.connectionMode === 'cloud' && <CloudModeFields idPrefix="dev" cloudSignedIn={cloudSignedIn ?? false} cloudUserName={cloudUserName ?? ''} onCloudSignIn={onCloudSignIn!} onCloudSignOut={onCloudSignOut!} teams={teams ?? []} selectedTeamId={settings.developmentTeamId} onTeamChange={(id) => onSettingsChange({ developmentTeamId: id })} autoConnect={settings.autoConnect} onAutoConnectChange={(c) => onSettingsChange({ autoConnect: c })} />}
+						{settings.connectionMode === 'cloud' && <CloudPanel idPrefix="dev" cloudSignedIn={cloudSignedIn ?? false} cloudUserName={cloudUserName ?? ''} onCloudSignIn={onCloudSignIn!} onCloudSignOut={onCloudSignOut!} teams={teams ?? []} selectedTeamId={settings.developmentTeamId} onTeamChange={(id) => onSettingsChange({ developmentTeamId: id })} />}
 
-						{settings.connectionMode === 'onprem' && <OnPremModeFields idPrefix="dev" hostUrl={settings.hostUrl} onHostUrlChange={(url) => onSettingsChange({ hostUrl: url })} apiKey={settings.apiKey} onApiKeyChange={(key) => onSettingsChange({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} autoConnect={settings.autoConnect} onAutoConnectChange={(c) => onSettingsChange({ autoConnect: c })} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} onTestConnection={onTestDevelopmentConnection} testMessage={developmentTestMessage} />}
+						{settings.connectionMode === 'onprem' && <OnPremPanel idPrefix="dev" hostUrl={settings.hostUrl} onHostUrlChange={(url) => onSettingsChange({ hostUrl: url })} apiKey={settings.apiKey} onApiKeyChange={(key) => onSettingsChange({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} onTestConnection={onTestDevelopmentConnection} testMessage={developmentTestMessage} />}
 
-						{settings.connectionMode === 'local' && <LocalModeFields idPrefix="dev" engineVersion={settings.localEngineVersion} onVersionChange={(v) => onSettingsChange({ localEngineVersion: v })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} engineArgs={settings.localEngineArgs} onEngineArgsChange={(a) => onSettingsChange({ localEngineArgs: a })} />}
+						{settings.connectionMode === 'local' && <LocalPanel idPrefix="dev" engineVersion={settings.localEngineVersion} onVersionChange={(v) => onSettingsChange({ localEngineVersion: v })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={settings.localDebugOutput} onDebugOutputChange={(c) => onSettingsChange({ localDebugOutput: c })} engineArgs={settings.localEngineArgs} onEngineArgsChange={(a) => onSettingsChange({ localEngineArgs: a })} />}
 
-						{settings.connectionMode === 'docker' && <SimpleModeFields idPrefix="dev" description="Connects to your local Docker instance." autoConnect={settings.autoConnect} onAutoConnectChange={(c) => onSettingsChange({ autoConnect: c })} />}
+						{settings.connectionMode === 'docker' && <DockerPanel idPrefix="dev" status={props.dockerStatus} progress={props.dockerProgress} error={props.dockerError} busy={props.dockerBusy} action={props.dockerAction} versions={props.dockerVersions} selectedVersion={props.dockerSelectedVersion} onVersionChange={props.onDockerVersionChange} onInstall={props.onDockerInstall} onUpdate={props.onDockerUpdate} onRemove={props.onDockerRemove} onStart={props.onDockerStart} onStop={props.onDockerStop} />}
 
-						{settings.connectionMode === 'service' && <SimpleModeFields idPrefix="dev" description="Connects to your local RocketRide service." autoConnect={settings.autoConnect} onAutoConnectChange={(c) => onSettingsChange({ autoConnect: c })} />}
+						{settings.connectionMode === 'service' && <ServicePanel idPrefix="dev" status={props.serviceStatus} progress={props.serviceProgress} error={props.serviceError} busy={props.serviceBusy} action={props.serviceAction} versions={props.serviceVersions} selectedVersion={props.serviceSelectedVersion} onVersionChange={props.onServiceVersionChange} onInstall={props.onServiceInstall} onUpdate={props.onServiceUpdate} onRemove={props.onServiceRemove} onStart={props.onServiceStart} onStop={props.onServiceStop} sudoPromptVisible={props.sudoPromptVisible} sudoPasswordInput={props.sudoPasswordInput} onSudoPasswordChange={props.onSudoPasswordChange} onSudoSubmit={props.onSudoSubmit} />}
 					</div>
 				</div>
 			</div>

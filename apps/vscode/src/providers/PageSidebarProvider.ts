@@ -143,7 +143,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'cloudSignIn': {
 						const auth = CloudAuthProvider.getInstance();
-						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
 						break;
 					}
 				}

@@ -35,19 +35,22 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
-import { ConfigManager } from '../config';
+import { ConfigManager, SettingsSnapshot } from '../config';
 import { getConnectionManager } from '../extension';
 import { EngineInstaller } from '../connection/engine-installer';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { AgentManager } from '../agents/agent-manager';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { DeployManager } from '../connection/deploy-manager';
+import { EngineOperations } from '../deploy/engine-operations';
 
 export class PageSettingsProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager: ConfigManager;
 	private engineInstaller: EngineInstaller;
 	private activeWebviews: Set<vscode.Webview> = new Set();
+	private engineOps: EngineOperations;
+	private pendingSudoPassword: ((pw: string) => void) | null = null;
 	private _isSaving = false;
 	private panel: vscode.WebviewPanel | undefined;
 
@@ -59,6 +62,20 @@ export class PageSettingsProvider {
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.configManager = ConfigManager.getInstance();
 		this.engineInstaller = new EngineInstaller(extensionUri.fsPath);
+		this.engineOps = new EngineOperations({
+			postMessage: (msg) => {
+				for (const w of this.activeWebviews) {
+					w.postMessage(msg);
+				}
+			},
+			requestSudoPassword: () =>
+				new Promise((resolve) => {
+					this.pendingSudoPassword = resolve;
+					for (const w of this.activeWebviews) {
+						w.postMessage({ type: 'serviceNeedsSudo' });
+					}
+				}),
+		});
 		this.registerCommands();
 		this.setupEnvChangeListener();
 	}
@@ -156,6 +173,10 @@ export class PageSettingsProvider {
 							panel.webview.postMessage({ type: 'setFocus', focus: this.pendingFocus });
 							this.pendingFocus = undefined;
 						}
+						// Send initial Docker/Service status and start polling
+						await this.engineOps.sendDockerStatus();
+						await this.engineOps.sendServiceStatus();
+						this.engineOps.startStatusPolling();
 						break;
 
 					case 'saveSettings':
@@ -176,7 +197,7 @@ export class PageSettingsProvider {
 
 					case 'cloud:signIn': {
 						const cloudAuth = CloudAuthProvider.getInstance();
-						await cloudAuth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						await cloudAuth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
 						break;
 					}
 
@@ -194,10 +215,32 @@ export class PageSettingsProvider {
 					case 'fetchTeams':
 						await this.fetchCloudTeams(panel.webview);
 						break;
+
+					case 'sudoPassword':
+						if (this.pendingSudoPassword) {
+							this.pendingSudoPassword(message.password as string);
+							this.pendingSudoPassword = null;
+						}
+						break;
+
+					default: {
+						// Route Docker/Service operation messages to EngineOperations
+						const handled = await this.engineOps.handleMessage(message);
+						if (handled) break;
+						break;
+					}
 				}
 			} catch (error) {
 				console.error('[PageSettingsProvider] Message handling error:', error);
-				this.showMessage(panel.webview, 'error', `Error: ${error}`);
+				// Route error to the correct panel based on message type
+				const msgType = message.type as string;
+				if (msgType.startsWith('docker')) {
+					panel.webview.postMessage({ type: 'dockerError', message: `${error}` });
+				} else if (msgType.startsWith('service')) {
+					panel.webview.postMessage({ type: 'serviceError', message: `${error}` });
+				} else {
+					this.showMessage(panel.webview, 'error', `Error: ${error}`);
+				}
 			}
 		});
 
@@ -218,6 +261,7 @@ export class PageSettingsProvider {
 		panel.onDidDispose(() => {
 			this.panel = undefined;
 			this.activeWebviews.delete(panelWebview);
+			this.engineOps.stopStatusPolling();
 
 			const index = this.disposables.indexOf(messageDisposable);
 			if (index !== -1) {
@@ -253,8 +297,6 @@ export class PageSettingsProvider {
 			connectionMode: workspaceConfig.get('connectionMode', 'local'),
 			hasApiKey: hasApiKey,
 			apiKey: apiKey, // Include the actual API key for form editing
-			autoConnect: workspaceConfig.get('autoConnect', true),
-
 			// Pipeline settings
 			defaultPipelinePath: workspaceConfig.get('defaultPipelinePath', 'pipelines'),
 
@@ -272,8 +314,6 @@ export class PageSettingsProvider {
 			deployTargetTeamId: workspaceConfig.get('deployTargetTeamId', ''),
 			deployHostUrl: workspaceConfig.get('deployHostUrl', ''),
 			deployApiKey: config.deployApiKey || '',
-			deployAutoConnect: workspaceConfig.get('deployAutoConnect', false),
-
 			// Environment variables
 			envVars: envVars,
 
@@ -297,110 +337,37 @@ export class PageSettingsProvider {
 	}
 
 	/**
-	 * Saves all settings to workspace configuration and secure storage
+	 * Saves all settings atomically, then drives each connection manager
+	 * into its new desired state in sequence.
+	 *
+	 * Flow:
+	 *   1. ConfigManager.applyAllSettings() — writes everything, suppresses
+	 *      intermediate change events, refreshes cache once.
+	 *   2. Dev connection — settingsApplied() → disconnect old → initialize new.
+	 *   3. Deploy connection — settingsApplied() → transition shared/independent.
+	 *   4. Reload webview with the authoritative cached config.
 	 */
 	private async saveAllSettings(settings: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
 		this._isSaving = true;
 		try {
-			const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
+			// Cast to the typed snapshot (webview sends the full SettingsData shape)
+			const snapshot = settings as unknown as SettingsSnapshot;
 
-			// Save connection settings
-			if (settings.hostUrl !== undefined) {
-				await workspaceConfig.update('hostUrl', settings.hostUrl, vscode.ConfigurationTarget.Global);
-			}
+			// 1. Write everything atomically — no listeners fire during this
+			await this.configManager.applyAllSettings(snapshot);
 
-			if (settings.connectionMode !== undefined) {
-				await workspaceConfig.update('connectionMode', settings.connectionMode, vscode.ConfigurationTarget.Global);
-			}
-
-			if (settings.autoConnect !== undefined) {
-				await workspaceConfig.update('autoConnect', settings.autoConnect, vscode.ConfigurationTarget.Global);
+			// 2. Dev connection: disconnect old mode, connect with new config
+			const connectionManager = getConnectionManager();
+			if (connectionManager) {
+				await connectionManager.settingsApplied();
 			}
 
-			// Save pipeline settings
-			if (settings.defaultPipelinePath !== undefined) {
-				await workspaceConfig.update('defaultPipelinePath', settings.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			}
+			// 3. Deploy connection: transition shared↔independent as needed
+			const deployManager = DeployManager.getDeployInstance();
+			await deployManager.settingsApplied();
 
-			// Save local engine settings
-			if (settings.localEngineVersion !== undefined) {
-				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.localDebugOutput !== undefined) {
-				await workspaceConfig.update('local.debugOutput', settings.localDebugOutput, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.localEngineArgs !== undefined) {
-				await workspaceConfig.update('engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
-			}
-
-			// Save debugging settings
-			if (settings.pipelineRestartBehavior !== undefined) {
-				await workspaceConfig.update('pipelineRestartBehavior', settings.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
-			}
-
-			// Save development team / deploy target settings
-			if (settings.developmentTeamId !== undefined) {
-				await workspaceConfig.update('developmentTeamId', settings.developmentTeamId, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.deployTargetMode !== undefined) {
-				await workspaceConfig.update('deployTargetMode', settings.deployTargetMode, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.deployTargetTeamId !== undefined) {
-				await workspaceConfig.update('deployTargetTeamId', settings.deployTargetTeamId, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.deployHostUrl !== undefined) {
-				await workspaceConfig.update('deployHostUrl', settings.deployHostUrl, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.deployAutoConnect !== undefined) {
-				await workspaceConfig.update('deployAutoConnect', settings.deployAutoConnect, vscode.ConfigurationTarget.Global);
-			}
-
-			// Save deploy API key to secure storage (separate from dev key)
-			if (typeof settings.deployApiKey === 'string') {
-				await this.configManager.setDeployApiKey(settings.deployApiKey);
-			}
-
-			// Save integration settings
-			if (settings.autoAgentIntegration !== undefined) {
-				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationCopilot !== undefined) {
-				await workspaceConfig.update('integrations.copilot', settings.integrationCopilot, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationClaudeCode !== undefined) {
-				await workspaceConfig.update('integrations.claudeCode', settings.integrationClaudeCode, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationCursor !== undefined) {
-				await workspaceConfig.update('integrations.cursor', settings.integrationCursor, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationWindsurf !== undefined) {
-				await workspaceConfig.update('integrations.windsurf', settings.integrationWindsurf, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationClaudeMd !== undefined) {
-				await workspaceConfig.update('integrations.claudeMd', settings.integrationClaudeMd, vscode.ConfigurationTarget.Global);
-			}
-			if (settings.integrationAgentsMd !== undefined) {
-				await workspaceConfig.update('integrations.agentsMd', settings.integrationAgentsMd, vscode.ConfigurationTarget.Global);
-			}
-
-			// Save API key to secure storage whenever provided (used for cloud dev and deployment)
-			if (typeof settings.apiKey === 'string') {
-				if (settings.apiKey.trim() !== '') {
-					await this.configManager.setApiKey(settings.apiKey.trim());
-				} else {
-					// If API key is empty, clear it from secure storage
-					await this.configManager.deleteApiKey();
-				}
-			}
-
-			// Save environment variables to .env file
-			// ConfigManager will ensure ROCKETRIDE_URI and ROCKETRIDE_APIKEY are always present
-			if (settings.envVars !== undefined) {
-				await this.configManager.saveAllEnvVars(settings.envVars as Record<string, string>);
-			}
-
+			// 4. Reload webview from authoritative cache
 			this.showMessage(webview, 'success', 'Settings saved successfully!');
-			// Reload all active webviews now that every setting has been persisted
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
 			}
@@ -585,7 +552,7 @@ export class PageSettingsProvider {
 			const token = await cloudAuth.getToken();
 			if (!token) return;
 
-			const cloudUrl = process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+			const cloudUrl = this.configManager.getConfig().hostUrl;
 			client = new RocketRideClient({
 				module: 'SETTINGS',
 				requestTimeout: 8000,
@@ -739,6 +706,7 @@ export class PageSettingsProvider {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
+		this.engineOps.dispose();
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 		this.activeWebviews.clear();
