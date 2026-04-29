@@ -512,6 +512,9 @@ importers:
       react-canny:
         specifier: ~0.0.8
         version: 0.0.9(react@18.3.1)
+      react-chartjs-2:
+        specifier: ^5.2.0
+        version: 5.3.1(chart.js@4.5.1)(react@18.3.1)
       react-device-detect:
         specifier: ~2.2.3
         version: 2.2.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
