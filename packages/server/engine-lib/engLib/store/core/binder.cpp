@@ -167,7 +167,6 @@ Error Binder::callMethods(
                                                           leaveTrace);
         }
     }
-
     return ccode;
 }
 
