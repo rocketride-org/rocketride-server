@@ -346,14 +346,9 @@ public:
         const json::Value &classifications) noexcept(false);
     virtual void cb_writeDocuments(const pybind11::object &documents) noexcept(false);
 
-    // cb_acceptXxx: deliver INTO this instance (peer-direct). Unlike
-    // cb_writeXxx (which broadcasts via this->binder to downstream
-    // listeners), cb_acceptXxx invokes this->writeXxx() virtual so the
-    // pybind11 trampoline IPythonInstanceBase::writeXxx fires and the
-    // call lands in the Python override of THIS node. Used by
-    // conditional routers (`flow_*`) that have already resolved a peer
-    // via cb_getInstance and want to hand the chunk to that peer's
-    // own writeXxx — not its downstream binder.
+    // cb_acceptXxx: peer-direct delivery. Invokes this->writeXxx()
+    // virtual (fires the Python trampoline) instead of broadcasting
+    // through this->binder like cb_writeXxx does.
     virtual void cb_acceptText(const std::u16string &text) noexcept(false);
     virtual void cb_acceptTable(const std::u16string &text) noexcept(false);
     virtual void cb_acceptWords(const WordVector &textWords) noexcept(false);

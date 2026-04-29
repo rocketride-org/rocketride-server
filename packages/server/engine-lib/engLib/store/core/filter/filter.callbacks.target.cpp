@@ -77,11 +77,7 @@ std::vector<std::string> IServiceFilterInstance::cb_getControllerNodeIds(
     return result;
 }
 
-// Returns the bound peer filter whose pipeType.id matches `nodeId`, or
-// nullptr if no peer matches. Used by Python conditional routers to
-// resolve a branch target id and then hand the chunk to that peer via
-// peer.acceptXxx(...). The returned pointer is non-owning and only
-// valid for the lifetime of the pipeline.
+// Resolve a branch target id to its peer filter (non-owning, pipe lifetime).
 IServiceFilterInstance *IServiceFilterInstance::cb_getInstance(
     const std::string &nodeId) noexcept(false) {
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
@@ -728,22 +724,8 @@ void IServiceFilterInstance::cb_closing() noexcept(false) {
     }
 }
 
-//-------------------------------------------------------------------------
-// cb_acceptXxx — peer-direct delivery
-//
-// These differ from cb_writeXxx in WHO receives the chunk:
-//   cb_writeXxx  : invokes this->binder.writeXxx → broadcasts to every
-//                  listener bound on the lane (the normal upstream
-//                  fan-out pattern).
-//   cb_acceptXxx : invokes this->writeXxx() virtual directly → fires
-//                  IPythonInstanceBase::writeXxx trampoline → calls
-//                  this node's own Python writeXxx override.
-//
-// Used by `flow_*` conditional routers: after `peer = self.instance
-// .getInstance(nodeId)`, the router calls `peer.acceptXxx(...)` to
-// hand the chunk to that peer's own handler — bypassing peer's
-// downstream binder so the peer actually processes the chunk.
-//-------------------------------------------------------------------------
+// cb_acceptXxx: deliver via this->writeXxx() (fires Python trampoline)
+// instead of this->binder.writeXxx (broadcast). Used by flow_* routers.
 
 void IServiceFilterInstance::cb_acceptText(
     const std::u16string &text) noexcept(false) {

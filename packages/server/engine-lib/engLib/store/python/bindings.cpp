@@ -941,10 +941,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 &IServiceFilterInstance::cb_writeClassifications)
         .PYBIND(writeClassificationContext,
                 &IServiceFilterInstance::cb_writeClassificationContext)
-        // acceptXxx: peer-direct delivery — invoke this->writeXxx()
-        // virtual so the trampoline reaches THIS node's Python override.
-        // Used after `peer = self.instance.getInstance(nodeId)` by
-        // conditional routers.
+        // acceptXxx: peer-direct delivery (see filter.hpp).
         .PYBIND(acceptText, &IServiceFilterInstance::cb_acceptText)
         .PYBIND(acceptTable, &IServiceFilterInstance::cb_acceptTable)
         .PYBIND(acceptWords, &IServiceFilterInstance::cb_acceptWords)
