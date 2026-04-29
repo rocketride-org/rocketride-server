@@ -258,3 +258,4 @@ class ConnectResult(TypedDict, total=False):
     locale: str
     defaultTeam: str
     organizations: list[OrgInfo]
+    capabilities: list[str]

@@ -534,9 +534,9 @@ export class ConfigManager {
 		if (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') {
 			return config.hostUrl;
 		}
-		// Local mode — always return the loopback fallback for .env sync;
-		// runtime resolution is handled by ConnectionManager.
-		return 'http://localhost:5565';
+		// Local mode — use the build-time ROCKETRIDE_URI default, falling back
+		// to loopback if not baked in. Runtime .env overrides this.
+		return process.env.ROCKETRIDE_URI || 'http://localhost:5565';
 	}
 
 	/**

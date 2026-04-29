@@ -358,4 +358,10 @@ export interface ConnectResult {
 	 * Empty for free-tier orgs with no paid app subscriptions.
 	 */
 	subscribedApps: string[];
+
+	/**
+	 * Server capability tags describing the account provider in use.
+	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
+	 */
+	capabilities: string[];
 }

@@ -4,17 +4,21 @@
  * See LICENSE file for details.
  */
 
-import { defineConfig, loadEnv } from '@rsbuild/core';
+import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 import path from 'path';
 
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+
 export default defineConfig(({ command }) => {
 	const isDev = command === 'dev';
-	const { parsed } = loadEnv({ prefixes: ['ROCKETRIDE_'] });
+	const fullEnv = getenv();
+	const parsed = Object.fromEntries(Object.entries(fullEnv).filter(([k]) => k.startsWith('ROCKETRIDE_')));
 
-	if (isDev && !process.env.ROCKETRIDE_APIKEY) {
-		throw new Error('ROCKETRIDE_APIKEY environment variable is required to start the dev server');
+	requireKeys(parsed, ['ROCKETRIDE_URI'], 'dropper-ui');
+	if (isDev) {
+		requireKeys(parsed, ['ROCKETRIDE_APIKEY'], 'dropper-ui');
 	}
 
 	return {
