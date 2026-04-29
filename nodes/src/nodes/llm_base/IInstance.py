@@ -21,30 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase, invoke_function
-from ai.common.schema import Question, Answer
+from ai.common import llm_base as _llm_base
 
+LLMBase = _llm_base.LLMBase
+IInstanceGenericLLM = _llm_base.IInstanceGenericLLM
 
-class IInstanceGenericLLM(IInstanceBase):
-    def _question(self, question: Question) -> Answer:
-        return self.IGlobal._chat.chat(question)
-
-    def writeQuestions(self, question: Question):
-        answer = self._question(question)
-        self.instance.writeAnswers(answer)
-
-    @invoke_function
-    def getContextLength(self, _param):
-        return self.IGlobal._chat.getTotalTokens()
-
-    @invoke_function
-    def getOutputLength(self, _param):
-        return self.IGlobal._chat.getOutputTokens()
-
-    @invoke_function
-    def getTokenCounter(self, _param):
-        return self.IGlobal._chat.getTokens
-
-    @invoke_function
-    def ask(self, param):
-        return self._question(param.question)
+__all__ = ['LLMBase', 'IInstanceGenericLLM']
