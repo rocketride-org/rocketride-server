@@ -760,8 +760,8 @@ function makeInstallPipAction() {
             // Bootstrap pip, install build tools, and test requirements (once; tracked in state).
             // State key version bumped to force re-run on upgrade: pre-existing environments
             // with `pipInstalled === true` from the old bootstrap would otherwise skip
-            // `pip install -r nodes/test/requirements.txt` and silently miss `pytest-timeout`.
-            const pipInstalled = await getState('server.pipInstalledV2');
+            // `pip install -r nodes/test/requirements.txt` and silently miss `pytest-xdist`.
+            const pipInstalled = await getState('server.pipInstalledV3');
             if (!pipInstalled) {
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });

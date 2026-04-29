@@ -197,9 +197,9 @@ function makeRunPytestAction(options = {}) {
             // fan-out make >8 workers counterproductive on this test shape. Explicit
             // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
             const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
-            const parallel = String(parallelRaw).trim().toLowerCase();
-            if (parallel && parallel !== 'off' && parallel !== '0') {
-                pytestArgs.push('-n', String(parallelRaw).trim());
+            const parallelVal = String(parallelRaw).trim().toLowerCase();
+            if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
+                pytestArgs.push('-n', parallelVal);
             }
 
             await execCommand(ENGINE, pytestArgs, {
