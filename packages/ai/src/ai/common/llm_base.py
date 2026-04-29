@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Aparavi Software AG
+
 from rocketlib import IInstanceBase, invoke_function
 from ai.common.schema import Question, Answer
 
@@ -31,7 +33,3 @@ class LLMBase(IInstanceBase):
     @invoke_function
     def ask(self, param):
         return self._question(param.question)
-
-
-# Temporary compatibility alias for legacy imports/usages.
-IInstanceGenericLLM = LLMBase
