@@ -30,8 +30,6 @@ The features that _do_ exist:
 | Real-time node→UI custom messages (`monitorSSE`)                          | DAP event `apaevt_sse`                                              | Per pipe           |
 | File upload progress                                                      | DAP event `apaevt_status_upload`                                    | Per upload         |
 | Server/admin dashboard events (connection added/removed, monitor changes) | DAP event `apaevt_dashboard`                                        | Server-wide        |
-| Synchronous HTTP status query                                             | `GET /task?token=...`                                               | On-demand          |
-| Synchronous HTTP server status                                            | `GET /status`                                                       | On-demand          |
 
 ---
 
@@ -44,14 +42,10 @@ The RocketRide server is a FastAPI app bound by default to:
 - Host: `0.0.0.0`
 - Port: `5565` (constant `CONST_DEFAULT_WEB_PORT`)
 
-Two relevant transports run on that port:
+Observability uses a single transport: a WebSocket DAP connection at
+`/task/service`. All events, commands, and status queries flow over this socket.
 
-| Transport       | Path                                                              | Use                                                          |
-| --------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
-| WebSocket (DAP) | `/task/service`                                                   | Streaming events + commands. **Use this for observability.** |
-| HTTP (REST)     | `/task`, `/task/data`, `/status`, `/version`, `/ping`, `/webhook` | Synchronous task control & status                            |
-
-So the WebSocket URL is:
+The WebSocket URL is:
 
 ```text
 ws://<host>:5565/task/service
@@ -61,11 +55,8 @@ ws://<host>:5565/task/service
 
 ### 2.2 Auth
 
-All non-public endpoints require an API key.
-
-- **HTTP:** `Authorization: Bearer <ROCKETRIDE_APIKEY>` header.
-- **WebSocket DAP:** the _first_ DAP request you send after the socket opens
-  must be the `auth` command:
+All connections require an API key. The _first_ DAP request you send after the
+socket opens must be the `auth` command:
 
 ```json
 {
@@ -388,30 +379,7 @@ record _who_ subscribed/unsubscribed to monitors (operator-level audit).
 
 ---
 
-## 6. Out-of-band: synchronous HTTP for one-off queries
-
-If you don't want a persistent WebSocket and just want to poll, the HTTP REST
-surface is:
-
-| Method   | Path                   | Auth   | Purpose                                                                                            |
-| -------- | ---------------------- | ------ | -------------------------------------------------------------------------------------------------- |
-| `GET`    | `/ping`                | public | Liveness                                                                                           |
-| `GET`    | `/version`             | public | Server version                                                                                     |
-| `GET`    | `/status`              | Bearer | Server uptime / version / startTime                                                                |
-| `POST`   | `/task`                | Bearer | Start a pipeline. Body = pipeline config. Query: `token?`, `threads`, `trace`. Returns `{ token }` |
-| `GET`    | `/task?token=<t>`      | Bearer | Returns the same `TASK_STATUS` shape as `apaevt_status_update`                                     |
-| `DELETE` | `/task?token=<t>`      | Bearer | Cancel                                                                                             |
-| `POST`   | `/task/data?token=<t>` | Bearer | Send data payload to a running task                                                                |
-| `POST`   | `/webhook?token=<t>`   | Bearer | Alias for `/task/data`                                                                             |
-
-These all use `Authorization: Bearer <api-key>`.
-
-There is no streaming HTTP endpoint (no SSE route, no `/logs` endpoint). For
-streaming you must use the WebSocket DAP path.
-
----
-
-## 7. DAP commands you may need (besides `rrext_monitor`)
+## 6. DAP commands you may need (besides `rrext_monitor`)
 
 Sent the same way as `rrext_monitor`:
 
@@ -425,7 +393,7 @@ Sent the same way as `rrext_monitor`:
 
 ---
 
-## 8. Reference SDKs
+## 7. Reference SDKs
 
 If you'd rather not implement DAP-over-WebSocket from scratch, two first-party
 clients exist in this repo and ship to npm/PyPI:
@@ -440,7 +408,7 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ---
 
-## 9. Recommended ingestion design for the agents database
+## 8. Recommended ingestion design for the agents database
 
 1. Open one long-lived WebSocket to `ws://<rocketride-host>:5565/task/service`.
 2. Send `auth` with the service-account API key.
@@ -468,7 +436,7 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ---
 
-## 10. Things to NOT assume
+## 9. Things to NOT assume
 
 - There is no built-in dead-letter queue — if your ingester is offline, you
   miss events for that window. The next `apaevt_task` `running` snapshot is
