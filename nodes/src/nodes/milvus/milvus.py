@@ -269,7 +269,7 @@ class Store(DocumentStoreBase):
                 else:
                     score = float(1.0 / (1.0 + np.exp(point.get('distance') / -100)))  # expit function unwrapped
                 # Ignore it if it doesn't have a high enough score
-                if score < 0.20:
+                if score < self.threshold_search:
                     continue
 
             # Process the entity as needed
@@ -374,6 +374,9 @@ class Store(DocumentStoreBase):
         points = self.client.search(collection_name=self.collection, data=[query.embedding], filter=filter_expression, limit=25 if docFilter.limit <= 10 else docFilter.limit, output_fields=['meta', 'content'])
 
         docs = self._convertToDocs(points[0])
+
+        # Filter results based on retrieval_score_threshold (self.threshold_search)
+        docs = [doc for doc in docs if doc.score >= self.threshold_search]
 
         # Return the results
         return docs
