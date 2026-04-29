@@ -3,7 +3,7 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import React, { useState, type CSSProperties } from 'react';
+import React, { useRef, useState, type CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 
 const S = {
@@ -53,17 +53,21 @@ export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled
 	const [value, setValue] = useState('');
 	const [focused, setFocused] = useState(false);
 	const [hovered, setHovered] = useState(false);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	const submit = () => {
 		if (!value.trim() || disabled) return;
 		onSend(value.trim());
 		setValue('');
+		// Reset auto-expanded height so the textarea snaps back to one row
+		if (textareaRef.current) textareaRef.current.style.height = 'auto';
 	};
 
 	return (
 		<div style={S.container}>
 			<div style={S.inner}>
 				<textarea
+					ref={textareaRef}
 					rows={1}
 					style={S.textarea(focused, disabled)}
 					value={value}
@@ -77,7 +81,8 @@ export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled
 					onFocus={() => setFocused(true)}
 					onBlur={() => setFocused(false)}
 					onKeyDown={(e) => {
-						if (e.key === 'Enter' && !e.shiftKey) {
+						// Guard against firing during IME composition (CJK input methods)
+						if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
 							e.preventDefault();
 							submit();
 						}

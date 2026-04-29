@@ -116,11 +116,15 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				),
 				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: 12, color: 'var(--rr-text-secondary)' }}>{children}</th>,
 				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: 12 }}>{children}</td>,
-				a: ({ href, children }: any) => (
-					<a href={href} target="_blank" rel="noopener noreferrer" style={S.link} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}>
-						{children}
-					</a>
-				),
+				a: ({ href, children }: any) => {
+					// Only allow safe URL schemes — reject javascript:, data:, vbscript: etc.
+					const safeHref = /^(https?|mailto|tel):/i.test(href ?? '') ? href : undefined;
+					return (
+						<a href={safeHref} target="_blank" rel="noopener noreferrer" style={S.link} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}>
+							{children}
+						</a>
+					);
+				},
 				blockquote: ({ children }: any) => <blockquote style={S.blockquote}>{children}</blockquote>,
 				ul: ({ children }: any) => <ul style={{ margin: '6px 0', paddingLeft: 20 }}>{children}</ul>,
 				ol: ({ children }: any) => <ol style={{ margin: '6px 0', paddingLeft: 20 }}>{children}</ol>,
