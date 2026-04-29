@@ -1,0 +1,212 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Context Optimizer",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "context_optimizer://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["transform"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.context_optimizer",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "context_optimizer",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A transformation component that manages LLM context window budgets. ", "It counts tokens, allocates budgets across system prompt, query, documents, ", "and conversation history, then truncates or summarizes content to fit within ", "model-specific token limits.</br>", "</br>", "Supports GPT, Claude, and Gemini model families with configurable budget ", "percentages and priority-based allocation."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["questions"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Questions with context to optimize",
+			"min": 1,
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions with optimized context fitting within model token limits"
+				}
+			]
+		}
+	],
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["auto"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [{ "text": "What is the capital of France?" }]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "auto",
+		"profiles": {
+			"auto": {
+				"title": "Auto - Use default model limits",
+				"model_name": "gpt-5",
+				"max_context_tokens": 0,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 15,
+				"document_budget_pct": 50,
+				"history_budget_pct": 25
+			},
+			"manual": {
+				"title": "Manual - Specify token limits",
+				"model_name": "custom",
+				"max_context_tokens": 128000,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 15,
+				"document_budget_pct": 50,
+				"history_budget_pct": 25
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"context_optimizer.model_name": {
+			"type": "string",
+			"title": "Model name",
+			"description": "Model identifier for token limit lookup (e.g. gpt-5, claude-sonnet, gemini-pro)"
+		},
+		"context_optimizer.max_context_tokens": {
+			"type": "number",
+			"title": "Max context tokens",
+			"description": "Override model token limit (0 = use model default)",
+			"minimum": 0,
+			"default": 0
+		},
+		"context_optimizer.system_prompt_budget_pct": {
+			"type": "number",
+			"title": "System prompt budget (%)",
+			"description": "Percentage of context window for system prompt",
+			"minimum": 0,
+			"maximum": 100,
+			"default": 10
+		},
+		"context_optimizer.query_budget_pct": {
+			"type": "number",
+			"title": "Query budget (%)",
+			"description": "Percentage of context window for the query/question",
+			"minimum": 0,
+			"maximum": 100,
+			"default": 15
+		},
+		"context_optimizer.document_budget_pct": {
+			"type": "number",
+			"title": "Document budget (%)",
+			"description": "Percentage of context window for retrieved documents",
+			"minimum": 0,
+			"maximum": 100,
+			"default": 50
+		},
+		"context_optimizer.history_budget_pct": {
+			"type": "number",
+			"title": "History budget (%)",
+			"description": "Percentage of context window for conversation history",
+			"minimum": 0,
+			"maximum": 100,
+			"default": 25
+		},
+		"context_optimizer.auto": {
+			"object": "auto",
+			"properties": ["context_optimizer.model_name", "context_optimizer.system_prompt_budget_pct", "context_optimizer.query_budget_pct", "context_optimizer.document_budget_pct", "context_optimizer.history_budget_pct"]
+		},
+		"context_optimizer.manual": {
+			"object": "manual",
+			"properties": ["context_optimizer.model_name", "context_optimizer.max_context_tokens", "context_optimizer.system_prompt_budget_pct", "context_optimizer.query_budget_pct", "context_optimizer.document_budget_pct", "context_optimizer.history_budget_pct"]
+		},
+		"context_optimizer.profile": {
+			"title": "Mode",
+			"description": "Context optimization mode",
+			"type": "string",
+			"default": "auto",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "auto",
+					"properties": ["context_optimizer.auto"]
+				},
+				{
+					"value": "manual",
+					"properties": ["context_optimizer.manual"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Context Optimizer",
+			"properties": ["context_optimizer.profile"]
+		}
+	]
+}
