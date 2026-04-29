@@ -1,0 +1,357 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Conditional Branch",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "branch://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["branch"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.branch",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "branch",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A conditional routing component that evaluates data against configurable ", "rules and sends it to different output lanes based on the results. ", "Supports keyword matching, regex patterns, text length checks, numeric ", "score thresholds, metadata field comparison, and basic sentiment ", "classification. Rules are evaluated in order and the first match wins. ", "If no rule matches, data is routed to the configured default lane. ", "Cross-lane conversions: answers routed to the questions lane are wrapped ", "as a Question whose conversation history includes an 'assistant' turn with ", "the answer text and whose context list carries the same text. Questions ", "routed to the answers lane are wrapped as an Answer containing only the ", "rendered prompt text -- Question enrichment fields (history, documents, ", "context) cannot be preserved because the Answer schema has no equivalents."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-infrastructure.svg",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["questions", "answers"],
+		"answers": ["questions", "answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Questions to evaluate and route",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions routed to the questions output lane"
+				},
+				{
+					"lane": "answers",
+					"description": "Questions converted to Answer (text only -- history/documents/context are not carried over)"
+				}
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answers to evaluate and route",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Answers converted to Question with the answer text preserved as context and as an 'assistant' entry in the conversation history"
+				},
+				{
+					"lane": "answers",
+					"description": "Answers routed to the answers output lane"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "keyword",
+		"profiles": {
+			"keyword": {
+				"title": "Keyword Match",
+				"type": "contains",
+				"keywords": "",
+				"mode": "any",
+				"default_lane": "questions"
+			},
+			"regex": {
+				"title": "Regex Pattern",
+				"type": "regex",
+				"pattern": "",
+				"default_lane": "questions"
+			},
+			"length": {
+				"title": "Text Length",
+				"type": "length",
+				"min": null,
+				"max": null,
+				"default_lane": "questions"
+			},
+			"score": {
+				"title": "Score Threshold",
+				"type": "score_threshold",
+				"threshold": "0.5",
+				"operator": ">=",
+				"default_lane": "questions"
+			},
+			"sentiment": {
+				"title": "Sentiment Filter",
+				"type": "sentiment",
+				"expected": "positive",
+				"default_lane": "questions"
+			}
+		}
+	},
+	//
+	//	Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["keyword"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [{ "text": "Tell me about artificial intelligence and machine learning" }]
+				},
+				"config": {
+					"rules": [
+						{
+							"condition": { "type": "contains", "keywords": "artificial,intelligence", "mode": "any" },
+							"lane": "questions"
+						}
+					],
+					"default_lane": "answers"
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"questions": {
+					"questions": [{ "text": "Hello world" }]
+				},
+				"config": {
+					"rules": [
+						{
+							"condition": { "type": "contains", "keywords": "python,java", "mode": "any" },
+							"lane": "answers"
+						}
+					],
+					"default_lane": "questions"
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"type": {
+			"type": "string",
+			"title": "Condition Type",
+			"description": "Type of condition to evaluate",
+			"enum": [
+				["contains", "Keyword Match"],
+				["regex", "Regex Pattern"],
+				["length", "Text Length"],
+				["score_threshold", "Score Threshold"],
+				["field_equals", "Field Equals"],
+				["sentiment", "Sentiment"],
+				["always_true", "Always True"],
+				["always_false", "Always False"]
+			]
+		},
+		"keywords": {
+			"type": "string",
+			"title": "Keywords",
+			"description": "Comma-separated list of keywords to match against",
+			"minLength": 0,
+			"maxLength": 1024
+		},
+		"mode": {
+			"type": "string",
+			"title": "Match Mode",
+			"description": "Match any keyword or require all keywords",
+			"enum": [
+				["any", "Any (match at least one)"],
+				["all", "All (match every keyword)"]
+			]
+		},
+		"pattern": {
+			"type": "string",
+			"title": "Regex Pattern",
+			"description": "Regular expression pattern to match against text",
+			"minLength": 0,
+			"maxLength": 512
+		},
+		"threshold": {
+			"type": "string",
+			"title": "Threshold",
+			"description": "Numeric threshold value for score comparison"
+		},
+		"operator": {
+			"type": "string",
+			"title": "Operator",
+			"description": "Comparison operator for score threshold",
+			"enum": [
+				[">=", "Greater than or equal"],
+				["<=", "Less than or equal"],
+				["==", "Equal to"],
+				[">", "Greater than"],
+				["<", "Less than"]
+			]
+		},
+		"field": {
+			"type": "string",
+			"title": "Field Name",
+			"description": "Metadata field name to check",
+			"minLength": 0,
+			"maxLength": 128
+		},
+		"value": {
+			"type": "string",
+			"title": "Field Value",
+			"description": "Expected value for metadata field comparison",
+			"minLength": 0,
+			"maxLength": 256
+		},
+		"min": {
+			"type": "number",
+			"title": "Minimum Length",
+			"description": "Minimum text length (inclusive). Leave empty for no lower bound."
+		},
+		"max": {
+			"type": "number",
+			"title": "Maximum Length",
+			"description": "Maximum text length (inclusive). Leave empty for no upper bound."
+		},
+		"expected": {
+			"type": "string",
+			"title": "Expected Sentiment",
+			"description": "Route when text sentiment matches this value",
+			"enum": [
+				["positive", "Positive"],
+				["negative", "Negative"],
+				["neutral", "Neutral"]
+			]
+		},
+		"default_lane": {
+			"type": "string",
+			"title": "Default Lane",
+			"description": "Output lane when no conditions match",
+			"enum": [
+				["questions", "Questions"],
+				["answers", "Answers"]
+			]
+		},
+		"branch.keyword": {
+			"object": "keyword",
+			"properties": ["keywords", "mode", "default_lane"]
+		},
+		"branch.regex": {
+			"object": "regex",
+			"properties": ["pattern", "default_lane"]
+		},
+		"branch.score": {
+			"object": "score",
+			"properties": ["threshold", "operator", "default_lane"]
+		},
+		"branch.length": {
+			"object": "length",
+			"properties": ["min", "max", "default_lane"]
+		},
+		"branch.sentiment": {
+			"object": "sentiment",
+			"properties": ["expected", "default_lane"]
+		},
+		"branch.profile": {
+			"title": "Profile",
+			"description": "Branch routing profile",
+			"type": "string",
+			"default": "keyword",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "keyword",
+					"properties": ["branch.keyword"]
+				},
+				{
+					"value": "regex",
+					"properties": ["branch.regex"]
+				},
+				{
+					"value": "length",
+					"properties": ["branch.length"]
+				},
+				{
+					"value": "score",
+					"properties": ["branch.score"]
+				},
+				{
+					"value": "sentiment",
+					"properties": ["branch.sentiment"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Conditional Branch",
+			"properties": ["branch.profile"]
+		}
+	]
+}

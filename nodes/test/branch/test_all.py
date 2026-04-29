@@ -1,0 +1,1030 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+Tests for the Conditional Branch pipeline node.
+
+Covers:
+- BranchEngine condition evaluators (contains, regex, length, score_threshold,
+  field_equals, sentiment, always_true, always_false)
+- Rule ordering and first-match-wins semantics
+- Default lane routing when no rules match
+- IGlobal / IInstance lifecycle (import-level validation)
+- Deep copy mutation prevention
+- services.json contract validation
+"""
+
+import copy
+import json
+import sys
+import types
+from pathlib import Path
+from unittest.mock import MagicMock, Mock
+
+import pytest
+
+# ---------------------------------------------------------------------------
+# Path setup and mock engine runtime modules via session-scoped fixture
+# ---------------------------------------------------------------------------
+NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
+
+_MOCK_MODULE_NAMES = [
+    'rocketlib',
+    'rocketlib.types',
+    'ai',
+    'ai.common',
+    'ai.common.schema',
+    'ai.common.config',
+    'depends',
+    'engLib',
+]
+
+
+class _MockIGlobalBase:
+    IEndpoint = None
+    glb = None
+
+    def beginGlobal(self):
+        pass
+
+    def endGlobal(self):
+        pass
+
+
+class _MockIInstanceBase:
+    IGlobal = None
+    IEndpoint = None
+    instance = None
+
+    def beginInstance(self):
+        pass
+
+    def endInstance(self):
+        pass
+
+    def preventDefault(self):
+        raise Exception('PreventDefault')
+
+    def writeText(self, text):
+        pass
+
+    def writeQuestions(self, q):
+        pass
+
+    def writeDocuments(self, docs):
+        pass
+
+    def writeAnswers(self, a):
+        pass
+
+    def writeTable(self, t):
+        pass
+
+    def writeImage(self, *args):
+        pass
+
+    def writeAudio(self, *args):
+        pass
+
+    def writeVideo(self, *args):
+        pass
+
+    def writeClassifications(self, *args):
+        pass
+
+    def open(self, obj):
+        pass
+
+    def closing(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class _MockOPEN_MODE:
+    CONFIG = 'CONFIG'
+    SOURCE = 'SOURCE'
+    TARGET = 'TARGET'
+
+
+class _MockQuestion:
+    def __init__(self, **kwargs):
+        self.questions = []
+        self.context = []
+        self.history = []
+
+    def addQuestion(self, text):
+        self.questions.append({'text': text})
+
+    def addContext(self, ctx):
+        self.context.append(ctx)
+
+    def addHistory(self, item):
+        self.history.append(item)
+
+    def getPrompt(self):
+        parts = [q['text'] for q in self.questions]
+        return ' '.join(parts) if parts else ''
+
+    def model_dump(self):
+        return {'questions': self.questions, 'context': self.context, 'history': self.history}
+
+
+class _MockAnswer:
+    def __init__(self, **kwargs):
+        self._text = kwargs.get('text', '')
+
+    def getText(self):
+        return self._text
+
+    def setText(self, text):
+        self._text = text
+
+    def model_dump(self):
+        return {'text': self._text}
+
+
+class _MockQuestionHistory:
+    def __init__(self, role, content):
+        self.role = role
+        self.content = content
+
+
+def _install_mocks():
+    """Install mock modules for rocketlib, ai.common.schema, etc.
+
+    Returns a teardown callable that restores the original sys.path and
+    sys.modules state so other test modules are not affected.
+    """
+    original_path = sys.path[:]
+    original_modules = {name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES}
+    path_entry = str(NODES_SRC)
+
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
+    mock_rocketlib = types.ModuleType('rocketlib')
+    mock_rocketlib.IGlobalBase = _MockIGlobalBase
+    mock_rocketlib.IInstanceBase = _MockIInstanceBase
+    mock_rocketlib.OPEN_MODE = _MockOPEN_MODE
+    mock_rocketlib.Entry = MagicMock
+    mock_rocketlib.debug = lambda *a, **kw: None
+
+    mock_ai = types.ModuleType('ai')
+    mock_ai_common = types.ModuleType('ai.common')
+    mock_ai_schema = types.ModuleType('ai.common.schema')
+    mock_ai_schema.Question = _MockQuestion
+    mock_ai_schema.Answer = _MockAnswer
+    mock_ai_schema.QuestionHistory = _MockQuestionHistory
+    mock_ai_schema.Doc = MagicMock
+
+    mock_ai_config = types.ModuleType('ai.common.config')
+    mock_config_cls = MagicMock()
+    mock_config_cls.getNodeConfig = Mock(return_value={})
+    mock_ai_config.Config = mock_config_cls
+
+    mock_ai.common = mock_ai_common
+    mock_ai_common.schema = mock_ai_schema
+    mock_ai_common.config = mock_ai_config
+
+    sys.modules['rocketlib'] = mock_rocketlib
+    sys.modules['rocketlib.types'] = MagicMock()
+    sys.modules['ai'] = mock_ai
+    sys.modules['ai.common'] = mock_ai_common
+    sys.modules['ai.common.schema'] = mock_ai_schema
+    sys.modules['ai.common.config'] = mock_ai_config
+    sys.modules['depends'] = MagicMock()
+    sys.modules['engLib'] = MagicMock()
+
+    def _teardown():
+        sys.path[:] = original_path
+        for name, orig in original_modules.items():
+            if orig is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = orig
+
+    return _teardown
+
+
+# Install mocks at import time so the branch module can be imported.
+# The module-scoped fixture below ensures teardown restores original state
+# once all tests in THIS module have finished, so the mocked rocketlib / ai
+# modules do not leak to other test modules in the same pytest session.
+_teardown_mocks = _install_mocks()
+
+
+@pytest.fixture(autouse=True, scope='module')
+def _engine_mocks():
+    """Restore sys.path/sys.modules after this module's tests complete."""
+    yield
+    _teardown_mocks()
+
+
+from branch.branch_engine import BranchEngine  # noqa: E402
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _engine(rules=None, default_lane='questions'):
+    """Create a BranchEngine with the given rules and default lane."""
+    return BranchEngine({'rules': rules or [], 'default_lane': default_lane})
+
+
+# =============================================================================
+# Contains condition
+# =============================================================================
+
+
+class TestContainsCondition:
+    """Tests for BranchEngine.contains()."""
+
+    def test_any_mode_single_keyword_match(self):
+        result = BranchEngine.contains('I love artificial intelligence', 'artificial', 'any')
+        assert result['matched'] is True
+
+    def test_any_mode_multiple_keywords_one_matches(self):
+        result = BranchEngine.contains('The weather is nice today', 'rain,snow,nice', 'any')
+        assert result['matched'] is True
+
+    def test_any_mode_no_match(self):
+        result = BranchEngine.contains('Hello world', 'python,java,rust', 'any')
+        assert result['matched'] is False
+
+    def test_all_mode_all_present(self):
+        result = BranchEngine.contains('python and java are languages', 'python,java', 'all')
+        assert result['matched'] is True
+
+    def test_all_mode_partial_match(self):
+        result = BranchEngine.contains('python is great', 'python,java', 'all')
+        assert result['matched'] is False
+
+    def test_case_insensitive(self):
+        result = BranchEngine.contains('PYTHON is Amazing', 'python,amazing', 'all')
+        assert result['matched'] is True
+
+    def test_empty_text(self):
+        result = BranchEngine.contains('', 'keyword', 'any')
+        assert result['matched'] is False
+
+    def test_empty_keywords(self):
+        result = BranchEngine.contains('some text', '', 'any')
+        assert result['matched'] is False
+
+    def test_whitespace_in_keywords(self):
+        result = BranchEngine.contains('hello world', ' hello , world ', 'all')
+        assert result['matched'] is True
+
+    def test_invalid_mode_returns_non_match(self):
+        result = BranchEngine.contains('hello', 'hello', 'invalid')
+        assert result['matched'] is False
+        assert 'unsupported mode' in result['details']
+
+    def test_mode_case_insensitive(self):
+        result = BranchEngine.contains('hello world', 'hello', 'ANY')
+        assert result['matched'] is True
+        result = BranchEngine.contains('hello world', 'hello,world', 'ALL')
+        assert result['matched'] is True
+
+
+# =============================================================================
+# Regex condition
+# =============================================================================
+
+
+class TestRegexCondition:
+    """Tests for BranchEngine.regex()."""
+
+    def test_match(self):
+        result = BranchEngine.regex('order-12345', r'order-\d+')
+        assert result['matched'] is True
+
+    def test_no_match(self):
+        result = BranchEngine.regex('hello world', r'^\d+$')
+        assert result['matched'] is False
+
+    def test_invalid_regex_does_not_crash(self):
+        result = BranchEngine.regex('test', r'[invalid')
+        assert result['matched'] is False
+        assert 'invalid regex' in result['details']
+
+    def test_empty_text(self):
+        result = BranchEngine.regex('', r'.*')
+        assert result['matched'] is False  # empty text guard
+
+    def test_empty_pattern(self):
+        result = BranchEngine.regex('some text', '')
+        assert result['matched'] is False
+
+    def test_regex_does_not_use_stdlib_timeout_kwarg(self):
+        """Regression: re.search has no timeout kwarg. Must not raise TypeError on Py 3.11+."""
+        # The implementation previously attempted re.search(..., timeout=...) which
+        # raises TypeError on Python >= 3.11. This test exercises the path on any
+        # Python 3.x and asserts we get a normal result dict, not an exception.
+        result = BranchEngine.regex('hello 42', r'\d+')
+        assert isinstance(result, dict)
+        assert result['matched'] is True
+
+
+# =============================================================================
+# Length condition
+# =============================================================================
+
+
+class TestLengthCondition:
+    """Tests for BranchEngine.length()."""
+
+    def test_within_range(self):
+        result = BranchEngine.length('hello', 3, 10)
+        assert result['matched'] is True
+
+    def test_too_short(self):
+        result = BranchEngine.length('hi', 5, 100)
+        assert result['matched'] is False
+
+    def test_too_long(self):
+        result = BranchEngine.length('a very long string indeed', 1, 5)
+        assert result['matched'] is False
+
+    def test_no_min(self):
+        result = BranchEngine.length('hi', None, 100)
+        assert result['matched'] is True
+
+    def test_no_max(self):
+        result = BranchEngine.length('hello world', 3, None)
+        assert result['matched'] is True
+
+    def test_exact_boundary(self):
+        result = BranchEngine.length('hello', 5, 5)
+        assert result['matched'] is True
+
+    def test_empty_text(self):
+        result = BranchEngine.length('', 0, 10)
+        assert result['matched'] is True
+
+
+# =============================================================================
+# Score threshold condition
+# =============================================================================
+
+
+class TestScoreThresholdCondition:
+    """Tests for BranchEngine.score_threshold()."""
+
+    def test_gte_pass(self):
+        result = BranchEngine.score_threshold(0.8, 0.5, '>=')
+        assert result['matched'] is True
+
+    def test_gte_fail(self):
+        result = BranchEngine.score_threshold(0.3, 0.5, '>=')
+        assert result['matched'] is False
+
+    def test_gte_equal(self):
+        result = BranchEngine.score_threshold(0.5, 0.5, '>=')
+        assert result['matched'] is True
+
+    def test_lte_pass(self):
+        result = BranchEngine.score_threshold(0.3, 0.5, '<=')
+        assert result['matched'] is True
+
+    def test_lte_fail(self):
+        result = BranchEngine.score_threshold(0.8, 0.5, '<=')
+        assert result['matched'] is False
+
+    def test_eq_pass(self):
+        result = BranchEngine.score_threshold(0.5, 0.5, '==')
+        assert result['matched'] is True
+
+    def test_eq_fail(self):
+        result = BranchEngine.score_threshold(0.6, 0.5, '==')
+        assert result['matched'] is False
+
+    def test_gt_pass(self):
+        result = BranchEngine.score_threshold(0.6, 0.5, '>')
+        assert result['matched'] is True
+
+    def test_gt_boundary(self):
+        result = BranchEngine.score_threshold(0.5, 0.5, '>')
+        assert result['matched'] is False
+
+    def test_lt_pass(self):
+        result = BranchEngine.score_threshold(0.3, 0.5, '<')
+        assert result['matched'] is True
+
+    def test_lt_boundary(self):
+        result = BranchEngine.score_threshold(0.5, 0.5, '<')
+        assert result['matched'] is False
+
+    def test_unknown_operator(self):
+        result = BranchEngine.score_threshold(0.5, 0.5, '!=')
+        assert result['matched'] is False
+        assert 'unknown operator' in result['details']
+
+
+# =============================================================================
+# Field equals condition
+# =============================================================================
+
+
+class TestFieldEqualsCondition:
+    """Tests for BranchEngine.field_equals()."""
+
+    def test_match(self):
+        result = BranchEngine.field_equals({'category': 'science'}, 'category', 'science')
+        assert result['matched'] is True
+
+    def test_no_match(self):
+        result = BranchEngine.field_equals({'category': 'art'}, 'category', 'science')
+        assert result['matched'] is False
+
+    def test_missing_field(self):
+        result = BranchEngine.field_equals({'name': 'test'}, 'category', 'science')
+        assert result['matched'] is False
+
+    def test_non_dict_metadata(self):
+        result = BranchEngine.field_equals('not a dict', 'field', 'value')
+        assert result['matched'] is False
+
+    def test_numeric_value_string_comparison(self):
+        result = BranchEngine.field_equals({'priority': 1}, 'priority', '1')
+        assert result['matched'] is True
+
+
+# =============================================================================
+# Sentiment condition
+# =============================================================================
+
+
+class TestSentimentCondition:
+    """Tests for BranchEngine.sentiment()."""
+
+    def test_positive(self):
+        result = BranchEngine.sentiment('This is a great and wonderful product!')
+        assert result['matched'] is True
+        assert result['details'] == 'positive'
+
+    def test_negative(self):
+        result = BranchEngine.sentiment('This is terrible, I hate it and it failed.')
+        assert result['matched'] is True
+        assert result['details'] == 'negative'
+
+    def test_neutral(self):
+        result = BranchEngine.sentiment('The meeting is at 3pm in room 204.')
+        assert result['matched'] is True
+        assert result['details'] == 'neutral'
+
+    def test_empty_text(self):
+        result = BranchEngine.sentiment('')
+        assert result['details'] == 'neutral'
+
+    def test_mixed_but_positive_dominant(self):
+        # More positive words than negative
+        result = BranchEngine.sentiment('Great amazing excellent product, but one bad feature')
+        assert result['details'] == 'positive'
+
+    def test_mixed_but_negative_dominant(self):
+        # More negative words than positive
+        result = BranchEngine.sentiment('Terrible awful horrible product, but one nice feature')
+        assert result['details'] == 'negative'
+
+    def test_repeated_words_counted_individually(self):
+        # "bad bad bad good" has 3 negative words vs 1 positive -- should be negative, not neutral
+        result = BranchEngine.sentiment('bad bad bad good')
+        assert result['details'] == 'negative'
+
+
+# =============================================================================
+# Always true / always false
+# =============================================================================
+
+
+class TestConstantConditions:
+    """Tests for always_true and always_false."""
+
+    def test_always_true(self):
+        result = BranchEngine.always_true()
+        assert result['matched'] is True
+
+    def test_always_false(self):
+        result = BranchEngine.always_false()
+        assert result['matched'] is False
+
+
+# =============================================================================
+# Evaluate method
+# =============================================================================
+
+
+class TestEvaluate:
+    """Tests for BranchEngine.evaluate() dispatch."""
+
+    def test_evaluate_contains(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': 'python is cool'},
+            {'type': 'contains', 'keywords': 'python'},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_regex(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': 'error-404'},
+            {'type': 'regex', 'pattern': r'error-\d+'},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_length(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': 'short'},
+            {'type': 'length', 'min': 1, 'max': 10},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_score_threshold(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': '', 'score': 0.9},
+            {'type': 'score_threshold', 'threshold': 0.5, 'operator': '>='},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_field_equals(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': '', 'metadata': {'lang': 'en'}},
+            {'type': 'field_equals', 'field': 'lang', 'value': 'en'},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_sentiment_with_expected(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': 'I love this amazing product'},
+            {'type': 'sentiment', 'expected': 'positive'},
+        )
+        assert result['matched'] is True
+
+    def test_evaluate_sentiment_mismatch(self):
+        engine = _engine()
+        result = engine.evaluate(
+            {'text': 'I love this amazing product'},
+            {'type': 'sentiment', 'expected': 'negative'},
+        )
+        assert result['matched'] is False
+
+    def test_evaluate_sentiment_uses_services_json_expected_key(self):
+        """Regression: evaluate() must look up the 'expected' key (matching the
+        services.json schema), not an out-of-band 'expected_sentiment' alias.
+        """
+        engine = _engine()
+        # 'expected' is the canonical key emitted by services.json sentiment profile
+        ok = engine.evaluate(
+            {'text': 'thanks, this is great and helpful'},
+            {'type': 'sentiment', 'expected': 'positive'},
+        )
+        assert ok['matched'] is True
+        # An 'expected_sentiment' key should NOT be silently honored -- if no
+        # 'expected' is passed, sentiment matches unconditionally (details carries label).
+        legacy = engine.evaluate(
+            {'text': 'thanks, this is great and helpful'},
+            {'type': 'sentiment', 'expected_sentiment': 'negative'},
+        )
+        assert legacy['matched'] is True  # default behavior: match unconditionally
+        assert legacy['details'] == 'positive'
+
+    def test_evaluate_always_true(self):
+        engine = _engine()
+        result = engine.evaluate({'text': ''}, {'type': 'always_true'})
+        assert result['matched'] is True
+
+    def test_evaluate_always_false(self):
+        engine = _engine()
+        result = engine.evaluate({'text': ''}, {'type': 'always_false'})
+        assert result['matched'] is False
+
+    def test_evaluate_unknown_type(self):
+        engine = _engine()
+        result = engine.evaluate({'text': ''}, {'type': 'nonexistent'})
+        assert result['matched'] is False
+        assert 'unknown' in result['details']
+
+
+# =============================================================================
+# Route method -- first match wins + default lane
+# =============================================================================
+
+
+class TestRoute:
+    """Tests for BranchEngine.route() rule ordering and default lane."""
+
+    def test_first_match_wins(self):
+        rules = [
+            {'condition': {'type': 'contains', 'keywords': 'python'}, 'lane': 'answers'},
+            {'condition': {'type': 'always_true'}, 'lane': 'questions'},
+        ]
+        engine = _engine(rules, default_lane='questions')
+        lane = engine.route({'text': 'python is great'})
+        assert lane == 'answers'
+
+    def test_second_rule_matches(self):
+        rules = [
+            {'condition': {'type': 'contains', 'keywords': 'java'}, 'lane': 'answers'},
+            {'condition': {'type': 'contains', 'keywords': 'python'}, 'lane': 'questions'},
+        ]
+        engine = _engine(rules)
+        lane = engine.route({'text': 'python rocks'})
+        assert lane == 'questions'
+
+    def test_no_match_returns_default(self):
+        rules = [
+            {'condition': {'type': 'contains', 'keywords': 'java'}, 'lane': 'answers'},
+        ]
+        engine = _engine(rules, default_lane='questions')
+        lane = engine.route({'text': 'hello world'})
+        assert lane == 'questions'
+
+    def test_empty_rules_returns_default(self):
+        engine = _engine([], default_lane='answers')
+        lane = engine.route({'text': 'anything'})
+        assert lane == 'answers'
+
+    def test_multiple_rules_evaluation(self):
+        rules = [
+            {'condition': {'type': 'contains', 'keywords': 'error'}, 'lane': 'answers'},
+            {'condition': {'type': 'length', 'min': 100}, 'lane': 'answers'},
+            {'condition': {'type': 'always_true'}, 'lane': 'questions'},
+        ]
+        engine = _engine(rules, default_lane='answers')
+        # Text is short and has no "error" -- third rule (always_true) matches
+        lane = engine.route({'text': 'short text'})
+        assert lane == 'questions'
+
+    def test_route_with_explicit_rules_overrides_config(self):
+        engine = _engine(
+            [{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
+            default_lane='questions',
+        )
+        explicit = [{'condition': {'type': 'always_false'}, 'lane': 'answers'}]
+        lane = engine.route({'text': 'test'}, rules=explicit)
+        assert lane == 'questions'  # explicit rules don't match, falls to default
+
+
+# =============================================================================
+# IGlobal / IInstance lifecycle -- import validation
+# =============================================================================
+
+
+class TestModuleImports:
+    """Verify the node module can be imported without a running engine."""
+
+    def test_branch_engine_import(self):
+        from branch.branch_engine import BranchEngine as BE
+
+        assert BE is not None
+
+    def test_init_exports(self):
+        import branch
+
+        assert hasattr(branch, 'IGlobal')
+        assert hasattr(branch, 'IInstance')
+
+    def test_iglobal_has_begin_end(self):
+        from branch.IGlobal import IGlobal
+
+        assert hasattr(IGlobal, 'beginGlobal')
+        assert hasattr(IGlobal, 'endGlobal')
+
+    def test_iinstance_has_write_methods(self):
+        from branch.IInstance import IInstance
+
+        assert hasattr(IInstance, 'writeQuestions')
+        assert hasattr(IInstance, 'writeAnswers')
+
+
+# =============================================================================
+# IInstance routing integration
+# =============================================================================
+
+
+class TestIInstanceRouting:
+    """Integration tests for IInstance write methods with mocked engine."""
+
+    def _make_instance(self, rules=None, default_lane='questions'):
+        from branch.IInstance import IInstance
+
+        inst = IInstance()
+        # Set up mock IGlobal with engine
+        inst.IGlobal = MagicMock()
+        inst.IGlobal.engine = BranchEngine(
+            {
+                'rules': rules or [],
+                'default_lane': default_lane,
+            }
+        )
+        # Set up mock instance (the C++ bridge)
+        inst.instance = MagicMock()
+        return inst
+
+    def test_write_questions_routes_to_questions(self):
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('What is Python?')
+        inst.writeQuestions(question)
+        inst.instance.writeQuestions.assert_called_once()
+
+    def test_write_questions_routes_to_answers(self):
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('What is Python?')
+        inst.writeQuestions(question)
+        inst.instance.writeAnswers.assert_called_once()
+
+    def test_write_answers_routes_to_answers(self):
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
+        )
+        answer = _MockAnswer(text='Python is a programming language.')
+        inst.writeAnswers(answer)
+        inst.instance.writeAnswers.assert_called_once()
+
+    def test_write_answers_routes_to_questions(self):
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        answer = _MockAnswer(text='Python is a programming language.')
+        inst.writeAnswers(answer)
+        inst.instance.writeQuestions.assert_called_once()
+
+    def test_default_lane_when_no_rules_match(self):
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'contains', 'keywords': 'java'}, 'lane': 'answers'}],
+            default_lane='questions',
+        )
+        question = _MockQuestion()
+        question.addQuestion('Tell me about Python')
+        inst.writeQuestions(question)
+        inst.instance.writeQuestions.assert_called_once()
+        inst.instance.writeAnswers.assert_not_called()
+
+    def test_original_object_passed_directly(self):
+        """Verify that the original question is passed directly (no deepcopy) since first-match-wins means only one downstream consumer."""
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('Original question')
+        inst.writeQuestions(question)
+
+        routed = inst.instance.writeQuestions.call_args[0][0]
+        assert routed is question
+
+    def test_none_engine_raises_runtime_error(self):
+        """Verify that a RuntimeError is raised when the engine is None."""
+        from branch.IInstance import IInstance
+
+        inst = IInstance()
+        inst.IGlobal = MagicMock()
+        inst.IGlobal.engine = None
+        inst.instance = MagicMock()
+
+        question = _MockQuestion()
+        question.addQuestion('test')
+        with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
+            inst.writeQuestions(question)
+
+        answer = _MockAnswer(text='test')
+        with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
+            inst.writeAnswers(answer)
+
+    def test_answer_to_question_lane_preserves_text_as_context_and_history(self):
+        """Cross-lane enrichment: answer->question conversion must carry the
+        answer text into both Question.context and Question.history to avoid
+        silent data loss.
+        """
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        answer = _MockAnswer(text='Paris is the capital of France.')
+        inst.writeAnswers(answer)
+        inst.instance.writeQuestions.assert_called_once()
+        routed_question = inst.instance.writeQuestions.call_args[0][0]
+        # Question text still matches the answer text
+        assert routed_question.getPrompt() == 'Paris is the capital of France.'
+        # Context preserves the answer text
+        assert 'Paris is the capital of France.' in routed_question.context
+        # History includes an assistant turn with the answer text
+        assert len(routed_question.history) == 1
+        assert routed_question.history[0].role == 'assistant'
+        assert routed_question.history[0].content == 'Paris is the capital of France.'
+
+    def test_answer_to_question_skips_enrichment_on_empty_text(self):
+        """Empty-text answers should still route but not inject empty context/history entries."""
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        answer = _MockAnswer(text='')
+        inst.writeAnswers(answer)
+        routed_question = inst.instance.writeQuestions.call_args[0][0]
+        assert routed_question.context == []
+        assert routed_question.history == []
+
+    def test_question_to_answer_lane_carries_prompt_text(self):
+        """Question->answer conversion preserves the rendered prompt text as the
+        answer payload. History/context enrichment is intentionally not
+        possible (Answer schema has no such fields).
+        """
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('What is Python?')
+        inst.writeQuestions(question)
+        inst.instance.writeAnswers.assert_called_once()
+        routed_answer = inst.instance.writeAnswers.call_args[0][0]
+        assert routed_answer.getText() == 'What is Python?'
+
+
+# =============================================================================
+# Deep copy standalone tests
+# =============================================================================
+
+
+class TestDeepCopy:
+    """Reference copy.deepcopy behavior only; IInstance intentionally does not deep-copy routed data."""
+
+    def test_question_mutation_prevention(self):
+        original = {'text': 'original', 'metadata': {'key': 'value'}}
+        routed = copy.deepcopy(original)
+        original['text'] = 'mutated'
+        original['metadata']['key'] = 'mutated'
+        assert routed['text'] == 'original'
+        assert routed['metadata']['key'] == 'value'
+
+    def test_nested_list_mutation_prevention(self):
+        original = {'items': [1, 2, {'nested': True}]}
+        routed = copy.deepcopy(original)
+        original['items'][2]['nested'] = False
+        assert routed['items'][2]['nested'] is True
+
+
+# =============================================================================
+# Services.json contract validation
+# =============================================================================
+
+
+def _strip_json_comments(raw: str) -> str:
+    """Remove JS-style // comments from JSON (respecting strings)."""
+    cleaned = ''
+    in_string = False
+    i = 0
+    while i < len(raw):
+        if raw[i] == '"' and (i == 0 or raw[i - 1] != '\\'):
+            in_string = not in_string
+            cleaned += raw[i]
+        elif not in_string and raw[i : i + 2] == '//':
+            while i < len(raw) and raw[i] != '\n':
+                i += 1
+            continue
+        else:
+            cleaned += raw[i]
+        i += 1
+    return cleaned
+
+
+class TestServicesJson:
+    """Validate the services.json contract file."""
+
+    @pytest.fixture(scope='class')
+    def services(self):
+        services_path = NODES_SRC / 'branch' / 'services.json'
+        assert services_path.exists(), f'services.json not found at {services_path}'
+        raw = services_path.read_text()
+        cleaned = _strip_json_comments(raw)
+        return json.loads(cleaned)
+
+    def test_has_title(self, services):
+        assert services['title'] == 'Conditional Branch'
+
+    def test_has_protocol(self, services):
+        assert services['protocol'] == 'branch://'
+
+    def test_has_class_type(self, services):
+        assert 'branch' in services['classType']
+
+    def test_register_is_filter(self, services):
+        assert services['register'] == 'filter'
+
+    def test_node_is_python(self, services):
+        assert services['node'] == 'python'
+
+    def test_path_is_correct(self, services):
+        assert services['path'] == 'nodes.branch'
+
+    def test_has_questions_lane(self, services):
+        lanes = services['lanes']
+        assert 'questions' in lanes
+        assert 'questions' in lanes['questions']
+        assert 'answers' in lanes['questions']
+
+    def test_has_answers_lane(self, services):
+        lanes = services['lanes']
+        assert 'answers' in lanes
+        assert 'questions' in lanes['answers']
+        assert 'answers' in lanes['answers']
+
+    def test_has_profiles(self, services):
+        profiles = services['preconfig']['profiles']
+        assert 'keyword' in profiles
+        assert 'regex' in profiles
+        assert 'length' in profiles
+        assert 'score' in profiles
+        assert 'sentiment' in profiles
+
+    def test_no_custom_profile(self, services):
+        profiles = services['preconfig']['profiles']
+        assert 'custom' not in profiles
+
+    def test_has_test_cases(self, services):
+        assert 'test' in services
+        assert len(services['test']['cases']) >= 2
+
+    def test_has_fields(self, services):
+        fields = services['fields']
+        assert 'type' in fields
+        assert 'keywords' in fields
+        assert 'pattern' in fields
+        assert 'threshold' in fields
+        assert 'operator' in fields
+        assert 'field' in fields
+        assert 'value' in fields
+        assert 'default_lane' in fields
+
+    def test_has_shape(self, services):
+        assert len(services['shape']) >= 1
+        assert services['shape'][0]['title'] == 'Conditional Branch'
+
+    def test_length_profile_is_exposed_in_preconfig_and_shape(self, services):
+        profiles = services['preconfig']['profiles']
+        assert profiles['length']['type'] == 'length'
+        assert 'min' in profiles['length']
+        assert 'max' in profiles['length']
+
+        fields = services['fields']
+        assert fields['branch.length']['properties'] == ['min', 'max', 'default_lane']
+
+        conditional = fields['branch.profile']['conditional']
+        assert any(entry['value'] == 'length' and entry['properties'] == ['branch.length'] for entry in conditional)
+
+    def test_sentiment_profile_exposes_expected_selector(self, services):
+        profiles = services['preconfig']['profiles']
+        assert profiles['sentiment']['type'] == 'sentiment'
+        assert profiles['sentiment']['expected'] == 'positive'
+
+        fields = services['fields']
+        assert fields['expected']['enum'] == [
+            ['positive', 'Positive'],
+            ['negative', 'Negative'],
+            ['neutral', 'Neutral'],
+        ]
+        assert fields['branch.sentiment']['properties'] == ['expected', 'default_lane']
+
+    def test_description_documents_cross_lane_conversion(self, services):
+        """The services.json description must document the answer->question
+        enrichment so users know what to expect when lanes are crossed.
+        """
+        description = ' '.join(services['description']).lower()
+        # Mentions both enrichment vectors for the answer->question direction
+        assert 'history' in description
+        assert 'context' in description
+        # And acknowledges the irreducible question->answer schema mismatch
+        assert 'answer schema' in description or 'cannot be preserved' in description
