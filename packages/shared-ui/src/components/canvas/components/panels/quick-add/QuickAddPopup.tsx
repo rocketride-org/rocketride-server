@@ -97,7 +97,7 @@ const styles = {
 		zIndex: 50,
 	},
 	popup: {
-		position: 'absolute' as const,
+		position: 'fixed' as const,
 		width: '220px',
 		maxHeight: '300px',
 		display: 'flex',

@@ -1,0 +1,154 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+from rocketlib import IInstanceBase, Entry, warning
+from ai.common.schema import Question, Answer
+from .IGlobal import IGlobal
+
+
+class IInstance(IInstanceBase):
+    IGlobal: IGlobal
+
+    def __init__(self):
+        """Initialize the guardrails instance state."""
+        super().__init__()
+        self.source_documents = []
+
+    def open(self, entry: Entry):
+        """Reset per-object state."""
+        self.source_documents = []
+
+    def writeQuestions(self, question: Question):
+        """Run input guardrails on the question before forwarding.
+
+        Extracts the question text, runs input-mode evaluation, then
+        either blocks, warns (logs + forwards), or passes (forwards
+        silently) depending on the policy mode.
+
+        Args:
+            question: The incoming Question object.
+        """
+        engine = self.IGlobal.engine
+        if engine is None:
+            self.instance.writeQuestions(question)
+            return
+
+        # Collect question text for evaluation
+        text_parts = []
+        if question.questions:
+            text_parts.extend(q.text for q in question.questions)
+        if question.context:
+            text_parts.extend(question.context)
+
+        full_text = ' '.join(text_parts)
+
+        if not full_text.strip():
+            # Nothing to check, forward as-is
+            self.instance.writeQuestions(question)
+            return
+
+        # Run input guardrails
+        result = engine.evaluate(full_text, mode='input')
+
+        if result['action'] == 'block':
+            for violation in result['violations']:
+                warning(f'Guardrails input blocked: {violation["rule"]} \u2014 {violation["details"]}')
+            self.preventDefault()
+            return
+
+        if result['action'] == 'warn':
+            for violation in result['violations']:
+                warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
+
+        # Forward the question downstream
+        self.instance.writeQuestions(question)
+
+    def writeAnswers(self, answer: Answer):
+        """Run output guardrails on the answer before forwarding.
+
+        Extracts the answer text, runs output-mode evaluation with
+        any collected source documents as context, then applies the
+        configured policy.
+
+        Args:
+            answer: The incoming Answer object.
+        """
+        engine = self.IGlobal.engine
+        if engine is None:
+            self.instance.writeAnswers(answer)
+            return
+
+        # Extract answer text
+        text = answer.getText() if answer else ''
+
+        if not text.strip():
+            # Nothing to check, forward as-is
+            self.instance.writeAnswers(answer)
+            return
+
+        # Build context for output checks
+        context = {
+            'source_documents': self.source_documents,
+        }
+
+        # Run output guardrails
+        result = engine.evaluate(text, mode='output', context=context)
+
+        if result['action'] == 'block':
+            for violation in result['violations']:
+                warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
+            self.preventDefault()
+            return
+
+        if result['action'] == 'warn':
+            for violation in result['violations']:
+                warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
+
+        # Forward the answer downstream
+        self.instance.writeAnswers(answer)
+
+    def writeDocuments(self, documents):
+        """Collect source documents for hallucination checks.
+
+        Documents received here are stored and used as ground-truth
+        context when checking answers for hallucination.
+
+        Args:
+            documents: List of Doc objects from the pipeline.
+        """
+        for doc in documents:
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+            elif isinstance(doc, dict):
+                content = doc.get('page_content')
+            else:
+                content = doc
+            if content and str(content).strip():
+                self.source_documents.append(str(content))
+
+        # Forward documents downstream
+        self.instance.writeDocuments(documents)
+
+    def close(self):
+        """Reset state on close."""
+        self.source_documents = []

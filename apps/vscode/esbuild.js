@@ -23,38 +23,76 @@
 
 const esbuild = require('esbuild');
 const path = require('path');
+const fs = require('fs');
 
 const production = process.argv.includes('--production');
 const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
-esbuild.build({
-	entryPoints: ['src/extension.ts'],
-	bundle: true,
-	format: 'cjs',
-	minify: production,
-	sourcemap: true,
-	platform: 'node',
-	target: 'node16',
-	outfile,
-	external: ['vscode'],
-	alias: {
-		// docker-modem requires ssh2 at load time, but we only use local socket.
-		// Stub it out so no native .node binaries are needed.
-		'ssh2': path.resolve(__dirname, 'src/stubs/ssh2.js'),
-	},
-	mainFields: ['main'],
-	resolveExtensions: ['.ts', '.js', '.json'],
-	logLevel: 'info',
-	packages: 'bundle',
-	// Disable AMD detection properly
-	define: {
-		'define': 'undefined'
-	},
-	loader: {
-		'.json': 'json'
+// ---------------------------------------------------------------------------
+// Load build-time constants from the repo root .env file.
+// These are baked into the extension bundle so they don't need to be in the
+// user's workspace .env — they are our infrastructure values, not user config.
+// ---------------------------------------------------------------------------
+function loadEnv() {
+	// Walk up from apps/vscode to find the repo root .env
+	const candidates = [
+		path.resolve(__dirname, '../../.env'), // rocketride-server root
+		path.resolve(__dirname, '../../../.env'), // saas repo root
+	];
+	for (const p of candidates) {
+		try {
+			const text = fs.readFileSync(p, 'utf8');
+			const env = {};
+			for (const line of text.split('\n')) {
+				const trimmed = line.trim();
+				if (!trimmed || trimmed.startsWith('#')) continue;
+				const eq = trimmed.indexOf('=');
+				if (eq < 0) continue;
+				env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+			}
+			return env;
+		} catch {
+			/* try next */
+		}
 	}
-}).catch((error) => {
-	console.error('esbuild failed:', error);
-	process.exit(1);
-});
+	return {};
+}
 
+const env = loadEnv();
+
+esbuild
+	.build({
+		entryPoints: ['src/extension.ts'],
+		bundle: true,
+		format: 'cjs',
+		minify: production,
+		sourcemap: true,
+		platform: 'node',
+		target: 'node16',
+		outfile,
+		external: ['vscode'],
+		alias: {
+			// docker-modem requires ssh2 at load time, but we only use local socket.
+			// Stub it out so no native .node binaries are needed.
+			ssh2: path.resolve(__dirname, 'src/stubs/ssh2.js'),
+		},
+		mainFields: ['main'],
+		resolveExtensions: ['.ts', '.js', '.json'],
+		logLevel: 'info',
+		packages: 'bundle',
+		define: {
+			// Disable AMD detection
+			define: 'undefined',
+			// Bake in Zitadel / cloud config from .env at build time
+			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || 'https://auth.rocketride.ai'),
+			'process.env.RR_ZITADEL_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || env.RR_ZITADEL_CLIENT_ID || ''),
+			'process.env.RR_CLOUD_URL': JSON.stringify(env.RR_CLOUD_URL || 'https://cloud.rocketride.ai'),
+		},
+		loader: {
+			'.json': 'json',
+		},
+	})
+	.catch((error) => {
+		console.error('esbuild failed:', error);
+		process.exit(1);
+	});

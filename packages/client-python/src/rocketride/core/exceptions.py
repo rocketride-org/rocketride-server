@@ -110,10 +110,11 @@ class RocketRideException(DAPException):
     RocketRide operations while still having access to detailed error context.
 
     Example:
+        client = RocketRideClient(uri)
         try:
-            async with RocketRideClient(uri, auth) as client:
-                result = await client.use(filepath="pipeline.json")
-                await client.send(result['token'], data)
+            await client.connect(auth)
+            result = await client.use(filepath="pipeline.json")
+            await client.send(result['token'], data)
         except RocketRideException as e:
             print(f"RocketRide operation failed: {e}")
             # This catches all RocketRide-specific errors

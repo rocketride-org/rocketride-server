@@ -2,9 +2,9 @@
 	"name": "shared",
 	"version": "1.0.0",
 	"private": true,
-	"main": "./index.tsx",
-	"module": "./index.tsx",
-	"types": "./index.tsx",
+	"main": "./index.ts",
+	"module": "./index.ts",
+	"types": "./index.ts",
 	"peerDependencies": {
 		"chart.js": "^4.4.0",
 		"@dnd-kit/core": "~6.1.0",
@@ -82,7 +82,7 @@
 		"@rspack/binding-win32-x64-msvc": "1.1.8"
 	},
 	"exports": {
-		".": "./index.tsx",
+		".": "./index.ts",
 		"./api/*": "./src/api/*",
 		"./components/*": "./src/components/*",
 		"./services/*": "./src/services/*",

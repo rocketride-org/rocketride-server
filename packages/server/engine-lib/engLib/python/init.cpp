@@ -110,10 +110,29 @@ Error setPaths() {
         std::vector<file::Path> paths;
 
         if (const auto &projectDir = application::projectDir()) {
-            paths.push_back(projectDir / "packages/server/engine-lib/rocketlib-python/lib");
-            paths.push_back(projectDir / "packages/client-python/src");
-            paths.push_back(projectDir / "packages/ai/src");
-            paths.push_back(projectDir / "nodes/src");
+            // Determine if we are a super module including the rr server repo
+            auto subModule = projectDir / "rocketride-server";
+            auto issubModule = file::exists(subModule);
+            // If we are running in submodule mode
+            if (issubModule) {
+                // We will target the extension/src directory which is how we can
+                // extend the base server
+                auto target = projectDir / "extension/src";
+                if (file::exists(target))
+                    paths.push_back(target);
+
+                // Add the normal dev paths but in the submodule
+                paths.push_back(subModule / "packages/server/engine-lib/rocketlib-python/lib");
+                paths.push_back(subModule / "packages/client-python/src");
+                paths.push_back(subModule / "packages/ai/src");
+                paths.push_back(subModule / "nodes/src");
+            } else {
+                // Add the normal dev paths
+                paths.push_back(projectDir / "packages/server/engine-lib/rocketlib-python/lib");
+                paths.push_back(projectDir / "packages/client-python/src");
+                paths.push_back(projectDir / "packages/ai/src");
+                paths.push_back(projectDir / "nodes/src");
+            }
 
             if (_allOf(paths, file::exists)) {
                 // We found all the paths, we are in dev mode

@@ -39,30 +39,37 @@ Quick Start:
     from rocketride import RocketRideClient, Question
 
     # Connect and process data
-    async with RocketRideClient(auth='your_api_key') as client:
-        # Start a pipeline
-        result = await client.use(filepath='pipeline.json')
+    client = RocketRideClient()
+    result = await client.connect('your_api_key')  # returns ConnectResult
+    try:
+        token = await client.use(filepath='pipeline.json')
+        response = await client.send(token, 'your data')
 
-        # Send data for processing
-        response = await client.send(result['token'], 'your data')
-
-        # Chat with AI
         question = Question()
         question.addQuestion('What are the key findings?')
-        answer = await client.chat(token=result['token'], question=question)
+        answer = await client.chat(token=token, question=question)
+    finally:
+        await client.disconnect()
 
 For more information, see the documentation at https://docs.rocketride.ai
 """
 
+# Package metadata — __version__ is populated at runtime from the installed
+# package metadata so it always matches the installed wheel/egg-info version.
 __version__ = ''
 __author__ = 'RocketRide, Inc.'
 __email__ = 'dev@rocketride.ai'
 
 try:
+    # importlib.metadata is available from Python 3.8+ and reads the version
+    # string from the installed distribution without requiring a hard-coded value.
     from importlib.metadata import version as _get_version
 
+    # Look up the version of the 'rocketride' distribution package.
     __version__ = _get_version('rocketride')
 except Exception:
+    # Package metadata is unavailable (e.g. editable install without build step);
+    # leave __version__ as the empty string set above — callers can check for ''.
     pass
 
 # Import main classes for convenient access
@@ -79,6 +86,7 @@ from .schema import (
     DocGroup,
 )
 
+# Import type definitions, constants, and callback signatures used throughout the SDK
 from .types import (
     RocketRideClientConfig,
     ConnectCallback,
@@ -105,9 +113,41 @@ from .types import (
     UPLOAD_RESULT,
 )
 
+# Import account and billing types for user profile, org, keys, teams,
+# subscriptions, and compute credit management.
+from .types.account import (
+    AccountProfile,
+    AccountOrganization,
+    AccountOrgTeam,
+    ApiKeyRecord,
+    OrgDetail,
+    MemberRecord,
+    TeamRecord,
+    TeamDetail,
+    TeamMemberRecord,
+    ProfileUpdate,
+    CreateKeyParams,
+    CreateKeyResult,
+    InviteMemberParams,
+    TeamMemberParams,
+)
+from .types.billing import (
+    BillingDetail,
+    StripePlan,
+    CreditBalance,
+    CreditPack,
+)
+
+# Import the primary client class and its exception, plus the specialised
+# authentication exception for callers that need to distinguish auth failures.
 from .client import RocketRideClient, RocketRideException
 from .core.exceptions import AuthenticationException
 
+# Import identity types returned by connect()
+from .types.client import TeamInfo, OrgInfo, ConnectResult
+
+# Import server/connection constants so callers can reference defaults without
+# diving into the internal core package.
 from .core.constants import (
     CONST_DEFAULT_SERVICE,
     CONST_DEFAULT_WEB_CLOUD,
@@ -118,10 +158,16 @@ from .core.constants import (
     CONST_SOCKET_TIMEOUT,
     CONST_WS_PING_INTERVAL,
     CONST_WS_PING_TIMEOUT,
+    PROJECT_DIR,
 )
 
+# Declare all public symbols so ``from rocketride import *`` and static analysis
+# tools see a complete, explicit surface area for this package.
 __all__ = [
     'Answer',
+    'TeamInfo',
+    'OrgInfo',
+    'ConnectResult',
     'RocketRideClient',
     'RocketRideClientConfig',
     'RocketRideException',
@@ -135,6 +181,7 @@ __all__ = [
     'CONST_SOCKET_TIMEOUT',
     'CONST_WS_PING_INTERVAL',
     'CONST_WS_PING_TIMEOUT',
+    'PROJECT_DIR',
     'ConnectCallback',
     'ConnectErrorCallback',
     'ConnectionInfo',
@@ -166,4 +213,24 @@ __all__ = [
     'TraceInfo',
     'TransportCallbacks',
     'UPLOAD_RESULT',
+    # Account types
+    'AccountProfile',
+    'AccountOrganization',
+    'AccountOrgTeam',
+    'ApiKeyRecord',
+    'OrgDetail',
+    'MemberRecord',
+    'TeamRecord',
+    'TeamDetail',
+    'TeamMemberRecord',
+    'ProfileUpdate',
+    'CreateKeyParams',
+    'CreateKeyResult',
+    'InviteMemberParams',
+    'TeamMemberParams',
+    # Billing types
+    'BillingDetail',
+    'StripePlan',
+    'CreditBalance',
+    'CreditPack',
 ]

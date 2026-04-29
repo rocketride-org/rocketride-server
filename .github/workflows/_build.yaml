@@ -124,6 +124,14 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false
+        # Integration tests boot a local server on :5565 and connect a test
+        # client. Both sides need the same shared secret to authenticate;
+        # without ROCKETRIDE_APIKEY the server raises AuthenticationException
+        # and the client tests fail with "No authentication configured".
+        # The secret value itself doesn't matter — it just has to match
+        # between server and client in this single CI run.
+        env:
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
         run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Perform CodeQL Analysis

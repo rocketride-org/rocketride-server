@@ -16,6 +16,11 @@
 			"types": "./dist/types/index.d.ts",
 			"import": "./dist/esm/index.js",
 			"require": "./dist/cjs/index.js"
+		},
+		"./app-sdk": {
+			"types": "./dist/types/app-sdk/index.d.ts",
+			"import": "./dist/esm/app-sdk/index.js",
+			"require": "./dist/cjs/app-sdk/index.js"
 		}
 	},
 	"files": [

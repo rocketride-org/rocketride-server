@@ -22,11 +22,11 @@
 # =============================================================================
 
 from .IGlobal import IGlobal
-from nodes.llm_base import IInstanceGenericLLM
+from ai.common.llm_base import LLMBase
 from rocketlib import AVI_ACTION
 
 
-class IInstance(IInstanceGenericLLM):
+class IInstance(LLMBase):
     """Instance handler for the Accessibility Scene Description node.
 
     Accepts image input and produces an accessibility-optimized text description
@@ -38,6 +38,7 @@ class IInstance(IInstanceGenericLLM):
     IGlobal: IGlobal
 
     def __init__(self):
+        """Initialize per-instance image buffer state."""
         super().__init__()
         self.image_data: bytearray | None = None
 
