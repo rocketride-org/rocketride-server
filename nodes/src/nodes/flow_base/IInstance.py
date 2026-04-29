@@ -2,24 +2,11 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Abstract base class for `flow_*` conditional routers.
+"""Abstract base for `flow_*` conditional routers.
 
-Provides:
-- Explicit `writeXxx` overrides for every content lane (text, table,
-  image, audio, video, questions, answers, documents, classifications).
-- Streaming-aware buffering for the AVI lanes (image / audio / video):
-  BEGIN / WRITE+ / END are accumulated and the condition is evaluated
-  once with the complete payload, then the buffered calls are replayed
-  against the chosen branch's targets.
-- Branch dispatch via `peer = self.instance.getInstance(node_id)` plus
-  `peer.writeXxx(...)`. The peer's pybind11 trampoline routes the call
-  into the target node's Python `writeXxx` override directly — no
-  binder state, no broadcast fan-out.
-
-Concrete subclasses implement only ``checkCondition(condition, **kwargs)``.
-The lane handlers, the streaming buffer, the branch routing — all live
-here so the only difference between a Python-eval flow and an
-LLM-evaluated flow is the condition evaluation strategy.
+Subclasses implement only ``checkCondition``; lane handlers, AVI
+streaming buffer, and peer-direct branch dispatch (via ``getInstance``
++ ``acceptXxx``) live here.
 """
 
 from __future__ import annotations
@@ -49,8 +36,7 @@ def _flow_log(level: str, fmt: str, *args: Any) -> None:
         msg = fmt + ' ' + repr(args)
     try:
         with open(_FLOW_DEBUG_LOG, 'a', buffering=1) as fh:
-            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} '
-                     f'{level.upper()}: {msg}\n')
+            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} {level.upper()}: {msg}\n')
     except Exception:
         pass
 
@@ -63,8 +49,7 @@ def _flow_log_exc(fmt: str, *args: Any) -> None:
         msg = fmt + ' ' + repr(args)
     try:
         with open(_FLOW_DEBUG_LOG, 'a', buffering=1) as fh:
-            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} '
-                     f'ERROR: {msg}\n')
+            fh.write(f'{time.strftime("%H:%M:%S")} pid={os.getpid()} ERROR: {msg}\n')
             fh.write(traceback.format_exc())
     except Exception:
         pass
@@ -137,54 +122,71 @@ class FlowBaseIInstance(IInstanceBase):
         branch_label = 'then' if decision else 'else'
         branches_dump: Dict[str, List[str]] = getattr(self.IGlobal, 'branches', {}) or {}
 
-        _flow_log('warn',
-            '_route ENTER node=%s lane=%s decision=%s branch=%s '
-            'branches_cfg=%r resolved_targets=%r',
-            node_id, lane, decision, branch_label, branches_dump, target_ids,
+        _flow_log(
+            'warn',
+            '_route ENTER node=%s lane=%s decision=%s branch=%s branches_cfg=%r resolved_targets=%r',
+            node_id,
+            lane,
+            decision,
+            branch_label,
+            branches_dump,
+            target_ids,
         )
 
         if not target_ids:
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 '_route DROP node=%s lane=%s branch=%s reason=no_targets_in_branch',
-                node_id, lane, branch_label,
+                node_id,
+                lane,
+                branch_label,
             )
             return self.preventDefault()
 
         accept_method_name = 'accept' + lane[0].upper() + lane[1:]
         for target_id in target_ids:
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 '_route resolving peer node=%s target=%r',
-                node_id, target_id,
+                node_id,
+                target_id,
             )
             try:
                 peer = self.instance.getInstance(target_id)
             except Exception as exc:
                 _flow_log_exc(
                     'getInstance(%r) RAISED %s: %s',
-                    target_id, type(exc).__name__, exc,
+                    target_id,
+                    type(exc).__name__,
+                    exc,
                 )
                 continue
 
             if peer is None:
-                _flow_log('error',
+                _flow_log(
+                    'error',
                     'getInstance(%r) returned None — target node not found in pipe stack',
                     target_id,
                 )
                 continue
 
             peer_attrs = sorted(a for a in dir(peer) if a.startswith(('accept', 'write')))
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 'peer resolved target=%r type=%s has_accept_method=%s methods=%r',
-                target_id, type(peer).__name__,
-                hasattr(peer, accept_method_name), peer_attrs,
+                target_id,
+                type(peer).__name__,
+                hasattr(peer, accept_method_name),
+                peer_attrs,
             )
 
             method = getattr(peer, accept_method_name, None)
             if method is None:
-                _flow_log('error',
-                    'peer %s has no %s method (acceptXxx not exposed — '
-                    'engine may need rebuild)',
-                    target_id, accept_method_name,
+                _flow_log(
+                    'error',
+                    'peer %s has no %s method (acceptXxx not exposed — engine may need rebuild)',
+                    target_id,
+                    accept_method_name,
                 )
                 continue
 
@@ -192,20 +194,28 @@ class FlowBaseIInstance(IInstanceBase):
             # Pass values in insertion order — matches arg0 / arg0,arg1,arg2.
             args = tuple(write_kwargs.values())
             try:
-                _flow_log('warn',
+                _flow_log(
+                    'warn',
                     'invoking %s on peer=%s args_count=%d kwargs_keys=%r',
-                    accept_method_name, target_id, len(args),
+                    accept_method_name,
+                    target_id,
+                    len(args),
                     list(write_kwargs.keys()),
                 )
                 method(*args)
-                _flow_log('warn',
+                _flow_log(
+                    'warn',
                     '%s on peer=%s RETURNED OK',
-                    accept_method_name, target_id,
+                    accept_method_name,
+                    target_id,
                 )
             except Exception as exc:
                 _flow_log_exc(
                     '%s on peer=%s RAISED %s: %s',
-                    accept_method_name, target_id, type(exc).__name__, exc,
+                    accept_method_name,
+                    target_id,
+                    type(exc).__name__,
+                    exc,
                 )
 
         self.preventDefault()
@@ -248,9 +258,11 @@ class FlowBaseIInstance(IInstanceBase):
         for target_id in target_ids:
             peer = self.instance.getInstance(target_id)
             if peer is None:
-                _flow_log('error',
+                _flow_log(
+                    'error',
                     'flow node=%s lane=classifications — getInstance(%r) returned None',
-                    node_id, target_id,
+                    node_id,
+                    target_id,
                 )
                 continue
             peer.acceptClassifications(
@@ -324,15 +336,22 @@ class FlowBaseIInstance(IInstanceBase):
         branch_label = 'then' if decision else 'else'
 
         if not target_ids:
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 'stream node=%s lane=%s branch=%s targets=[] outcome=dropped',
-                node_id, lane, branch_label,
+                node_id,
+                lane,
+                branch_label,
             )
             return self.preventDefault()
 
-        _flow_log('warn',
+        _flow_log(
+            'warn',
             'stream node=%s lane=%s branch=%s targets=%r outcome=forwarded',
-            node_id, lane, branch_label, target_ids,
+            node_id,
+            lane,
+            branch_label,
+            target_ids,
         )
 
         accept_method_name = 'accept' + lane[0].upper() + lane[1:]
@@ -340,29 +359,42 @@ class FlowBaseIInstance(IInstanceBase):
         for target_id in target_ids:
             peer = self.instance.getInstance(target_id)
             if peer is None:
-                _flow_log('error',
+                _flow_log(
+                    'error',
                     'stream node=%s lane=%s — getInstance(%r) returned None',
-                    node_id, lane, target_id,
+                    node_id,
+                    lane,
+                    target_id,
                 )
                 continue
             accept_method = getattr(peer, accept_method_name, None)
             if accept_method is None:
-                _flow_log('error',
+                _flow_log(
+                    'error',
                     'stream node=%s lane=%s — peer %s has no %s method',
-                    node_id, lane, target_id, accept_method_name,
+                    node_id,
+                    lane,
+                    target_id,
+                    accept_method_name,
                 )
                 continue
             try:
                 for call_action, call_mime, call_buffer in calls:
                     accept_method(call_action, call_mime, call_buffer)
-                _flow_log('warn',
+                _flow_log(
+                    'warn',
                     'stream %s on peer=%s replayed %d calls OK',
-                    accept_method_name, target_id, len(calls),
+                    accept_method_name,
+                    target_id,
+                    len(calls),
                 )
             except Exception as exc:
                 _flow_log_exc(
                     'stream %s on peer=%s RAISED %s: %s',
-                    accept_method_name, target_id, type(exc).__name__, exc,
+                    accept_method_name,
+                    target_id,
+                    type(exc).__name__,
+                    exc,
                 )
 
         self.preventDefault()
@@ -379,27 +411,29 @@ class FlowBaseIInstance(IInstanceBase):
         on a bad condition string or a transient failure.
         """
         condition = getattr(self.IGlobal, 'condition', '')
-        kwargs_preview = {
-            k: (f'<{type(v).__name__} len={len(v) if hasattr(v, "__len__") else "?"}>'
-                if not isinstance(v, (int, float, bool)) else v)
-            for k, v in kwargs.items()
-        }
-        _flow_log('warn',
+        kwargs_preview = {k: (f'<{type(v).__name__} len={len(v) if hasattr(v, "__len__") else "?"}>' if not isinstance(v, (int, float, bool)) else v) for k, v in kwargs.items()}
+        _flow_log(
+            'warn',
             '_safe_check ENTER node=%s condition=%r kwargs=%r',
-            self._node_id(), condition, kwargs_preview,
+            self._node_id(),
+            condition,
+            kwargs_preview,
         )
         try:
             result = bool(self.checkCondition(condition, **kwargs))
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 '_safe_check RESULT node=%s decision=%s',
-                self._node_id(), result,
+                self._node_id(),
+                result,
             )
             return result
         except Exception as exc:
             _flow_log_exc(
-                '_safe_check FAIL node=%s checkCondition raised %s: %s — '
-                'failing closed to ELSE',
-                self._node_id(), type(exc).__name__, exc,
+                '_safe_check FAIL node=%s checkCondition raised %s: %s — failing closed to ELSE',
+                self._node_id(),
+                type(exc).__name__,
+                exc,
             )
             return False
 

@@ -193,11 +193,8 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "input 'lane' must be a non-empty string");
 
-                // [Rule 12] Ensure 'lane' is a valid method name.
-                // `"*"` is accepted as a wildcard sentinel emitted by
-                // the canvas when both source and target ports are
-                // wildcards (flow_if_else → flow_if_else). Bind-time
-                // logic expands it into every content method.
+                // [Rule 12] 'lane' must be a valid method name or "*"
+                // (wildcard sentinel; expanded at bind-time).
                 if (lane != "*" &&
                     std::find(Binder::MethodNames.begin(),
                               Binder::MethodNames.end(),
@@ -290,25 +287,16 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     //     }
     _block() {
         for (auto &[id, comp] : comps) {
-            // Preserve pre-wildcard behaviour: the original implementation only
-            // dereferenced `comp.def` inside the input/output double loop, so
-            // components without I/O were skipped implicitly. Keep that.
+            // Components without I/O are skipped (pre-wildcard behaviour).
             if (comp.inputs.empty() || comp.outputs.empty()) continue;
 
-            // A null `comp.def` at this point means the pipeline JSON
-            // references a provider the service registry couldn't resolve
-            // (typo, missing package, catalog loader failure). Pre-PR this
-            // null-derefd inside the inner loop and crashed; a silent skip
-            // would mask the user's real config error. Fail loud at load
-            // time, matching the `input lane not found` pattern below.
+            // Unresolved provider — fail loud rather than silently skip.
             if (!comp.def)
                 return APERR(Ec::InvalidParam, "Component", id,
                              "has no resolvable service definition "
                              "(unknown provider or service catalog failed to load)");
 
-            // Wildcard `"*"` lanes accept any input; `{"*":["*"]}` enforces
-            // input==output (passthrough router). Non-wildcard path unchanged.
-            // Use `get` to avoid mutating serviceDefinition when "lanes" is absent.
+            // `"*"` lane = accept any input; `{"*":["*"]}` = passthrough.
             const auto &lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
             const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
@@ -319,10 +307,8 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                                      "not found in service definition");
 
                     const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
-                    // `input->name == "*"` is the wildcard sentinel used when
-                    // both source and target ports are wildcards (canvas emits
-                    // it for flow_if_else → flow_if_else edges). Match every
-                    // output so the passthrough fan-out is preserved.
+                    // `input->name == "*"` (canvas wildcard-to-wildcard
+                    // sentinel) matches every output → passthrough fan-out.
                     const bool matches =
                         input->name == "*"
                             ? true

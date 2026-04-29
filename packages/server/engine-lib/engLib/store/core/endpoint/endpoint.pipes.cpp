@@ -111,10 +111,8 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
             boundConnections[connectionKey] = true;
         }
 
-        // Bind the connection. A `lane == "*"` sentinel (emitted by the
-        // canvas for wildcard-to-wildcard edges like flow_if_else → flow_if_else)
-        // expands into every content method — excluding the lifecycle
-        // names already bound above (open/closing/close).
+        // `lane == "*"` (wildcard-to-wildcard edge) → bind every content
+        // method except lifecycle ones already bound above.
         if (lane == "*") {
             for (const char *methodName : Binder::MethodNames) {
                 const std::string mn = methodName;
