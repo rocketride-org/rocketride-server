@@ -6,7 +6,6 @@
 import React, { type CSSProperties } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ChartRenderer } from './ChartRenderer';
@@ -73,7 +72,6 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 	<div style={S.wrapper}>
 		<ReactMarkdown
 			remarkPlugins={[remarkGfm]}
-			rehypePlugins={[rehypeRaw]}
 			components={{
 				pre: ({ children, ...rest }: any) => {
 					// Skip <pre> wrapper for non-code elements (charts, iframes)

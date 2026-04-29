@@ -102,7 +102,7 @@ export function useChatMessages({ welcomeMessage }: UseChatMessagesOptions = {})
 				token: authToken,
 				question,
 				onSSE: async (type: string, data: Record<string, unknown>) => {
-					const text = data.message as string | undefined;
+					const text = typeof data.message === 'string' ? data.message : undefined;
 					if (text) {
 						updateMessages((prev) => [
 							...prev,
