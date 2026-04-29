@@ -83,9 +83,20 @@ esbuild
 		define: {
 			// Disable AMD detection
 			define: 'undefined',
-			// Bake in Zitadel / cloud config from .env at build time
+			// Bake in Zitadel / cloud config at build time.
+			//
+			// All three values are PUBLIC and safe to ship in the bundle.
+			// The Zitadel client is a PKCE/public-client (no secret), the same
+			// pattern GitHub Desktop, gh CLI, VS Code's first-party auth
+			// providers, and Slack desktop all use. The defense against a
+			// leaked client_id is the strict redirect-URI allowlist on the
+			// Zitadel side — only `vscode://rocketride.rocketride/auth/callback`
+			// is accepted, so a hostile rebuild can't redirect tokens elsewhere.
+			//
+			// Forks / contributors pointing at their own Zitadel can override
+			// any of these via env vars at build time.
 			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || 'https://auth.rocketride.ai'),
-			'process.env.RR_ZITADEL_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || env.RR_ZITADEL_CLIENT_ID || ''),
+			'process.env.RR_ZITADEL_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || env.RR_ZITADEL_CLIENT_ID || '368801673541427525'),
 			'process.env.RR_CLOUD_URL': JSON.stringify(env.RR_CLOUD_URL || 'https://cloud.rocketride.ai'),
 		},
 		loader: {
