@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+import contextlib
 import copy
 
 from rocketlib import IInstanceBase, debug
@@ -65,27 +66,19 @@ class IInstance(IInstanceBase):
             text = item.get('text', '')
             if text:
                 if hasattr(q, 'questions'):
-                    try:
+                    with contextlib.suppress(ValueError, AttributeError):
                         q.questions = []
-                    except (ValueError, AttributeError):
-                        pass
                 q.addQuestion(text)
 
             # Attach metadata to the question without injecting expected
             # answers into the prompt context (which the LLM would see).
-            # The shared Question schema does not declare a metadata field
-            # and does not allow extras, so assignment may raise ValueError
-            # on Pydantic v2; degrade gracefully so the pipeline still runs.
             metadata = item.get('metadata', {})
             if metadata:
-                try:
-                    existing = getattr(q, 'metadata', None)
-                    if isinstance(existing, dict):
-                        existing.update(metadata)
-                    else:
-                        q.metadata = dict(metadata)
-                except (ValueError, AttributeError) as exc:
-                    debug(f'Cobalt Dataset Instance: Question schema does not accept metadata; expected/context will not reach eval_cobalt ({exc})')
+                existing = getattr(q, 'metadata', None)
+                if isinstance(existing, dict):
+                    existing.update(metadata)
+                else:
+                    q.metadata = dict(metadata)
 
             self.instance.writeQuestions(q)
 

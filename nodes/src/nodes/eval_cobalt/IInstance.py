@@ -88,14 +88,22 @@ class IInstance(IInstanceBase):
         # standalone quality). For similarity mode, a missing expected
         # value will produce a zero score.
         expected = ''
-        if hasattr(answer, 'expected'):
-            expected = answer.expected or ''
-        elif hasattr(answer, 'metadata') and isinstance(getattr(answer, 'metadata', None), dict):
-            expected = answer.metadata.get('expected', '')
-        elif hasattr(answer, 'context') and isinstance(getattr(answer, 'context', None), str):
-            expected = answer.context
-        elif isinstance(json_data, dict):
-            expected = json_data.get('expected', '') or json_data.get('context', '')
+        metadata = getattr(answer, 'metadata', None)
+        context = getattr(answer, 'context', None)
+        candidates = [
+            getattr(answer, 'expected', None),
+            metadata.get('expected') if isinstance(metadata, dict) else None,
+            metadata.get('reference') if isinstance(metadata, dict) else None,
+            metadata.get('context') if isinstance(metadata, dict) else None,
+            context if isinstance(context, str) else None,
+            json_data.get('expected') if isinstance(json_data, dict) else None,
+            json_data.get('reference') if isinstance(json_data, dict) else None,
+            json_data.get('context') if isinstance(json_data, dict) else None,
+        ]
+        for candidate in candidates:
+            if candidate:
+                expected = candidate if isinstance(candidate, str) else str(candidate)
+                break
 
         if not expected and evaluator.eval_type in ('similarity', 'relevance'):
             debug(f'Cobalt evaluator: no expected text found for {evaluator.eval_type} mode; score will be 0')

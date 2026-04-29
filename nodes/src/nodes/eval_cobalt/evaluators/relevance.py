@@ -132,10 +132,15 @@ def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, 
     keyword_score = _compute_keyword_overlap(output_tokens, expected_tokens)
     length_score = _compute_length_ratio(output, expected)
 
+    if keyword_weight < 0 or length_weight < 0:
+        raise ValueError('keyword_weight and length_weight must be >= 0')
+
+    keyword_score = max(0.0, min(1.0, keyword_score))
+    length_score = max(0.0, min(1.0, length_score))
     total_weight = keyword_weight + length_weight
     if total_weight <= 0:
         raise ValueError('keyword_weight + length_weight must be > 0')
-    score = (keyword_weight * keyword_score + length_weight * length_score) / total_weight
+    score = round((keyword_weight * keyword_score + length_weight * length_score) / total_weight, 4)
 
     passed = score >= threshold
 
@@ -148,7 +153,7 @@ def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, 
     ]
 
     return {
-        'score': round(score, 4),
+        'score': score,
         'passed': passed,
         'reasoning': '; '.join(reasoning_parts),
     }

@@ -28,6 +28,7 @@ current pipeline execution.
 """
 
 import os
+from typing import Any, Dict
 
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
@@ -48,7 +49,7 @@ class IGlobal(IGlobalBase):
             requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
             depends(requirements)
 
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            config = self._extractConfig()
             eval_type = config.get('eval_type', 'similarity')
 
             if eval_type == 'llm_judge':
@@ -87,10 +88,44 @@ class IGlobal(IGlobalBase):
 
             from .cobalt_evaluator import CobaltEvaluator
 
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            config = self._extractConfig()
             bag = self.IEndpoint.endpoint.bag
             self._evaluator = CobaltEvaluator(config, bag)
 
     def endGlobal(self):
         """Release the evaluator instance."""
         self._evaluator = None
+
+    def _extractConfig(self) -> Dict[str, Any]:
+        """Return evaluator config with service-schema prefixes normalized."""
+        current_conn_config = getattr(self.IEndpoint.endpoint, 'connConfig', self.glb.connConfig)
+        normalized_conn_config = self._normalizeConfigKeys(current_conn_config)
+        config = Config.getNodeConfig(self.glb.logicalType, normalized_conn_config)
+        return self._normalizeConfigKeys(config)
+
+    @classmethod
+    def _normalizeConfigKeys(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Map service field names onto the flat keys consumed by CobaltEvaluator."""
+        normalized = {}
+        prefixed = {}
+        for key, value in config.items():
+            normalized_key = key
+            if isinstance(key, str):
+                if key.startswith('cobalt_eval.'):
+                    normalized_key = key.removeprefix('cobalt_eval.')
+                elif key == 'llm.cloud.apikey':
+                    normalized_key = 'apikey'
+
+            if isinstance(value, dict):
+                normalized_value = cls._normalizeConfigKeys(value)
+            else:
+                normalized_value = value
+
+            if normalized_key != key:
+                prefixed[normalized_key] = normalized_value
+            else:
+                normalized[normalized_key] = normalized_value
+
+        normalized.update(prefixed)
+
+        return normalized

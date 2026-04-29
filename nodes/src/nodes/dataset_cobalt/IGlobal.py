@@ -113,24 +113,29 @@ class IGlobal(IGlobalBase):
         try:
             items = self._loader.load()
             debug(f'Cobalt Dataset Global: Loaded {len(items)} raw items')
+
+            self._dataset = self._loader.apply_transforms(items, config)
+            debug(f'Cobalt Dataset Global: {len(self._dataset)} items after transforms')
+
+            self._questions = self._loader.to_questions(self._dataset)
+            debug(f'Cobalt Dataset Global: {len(self._questions)} questions prepared')
         except FileNotFoundError as e:
-            warning(f'Cobalt Dataset Global: {str(e)}')
-            items = []
+            warning(f'Cobalt Dataset Global: {e!s}')
+            self._dataset = []
+            self._questions = []
         except ValueError as e:
-            warning(f'Cobalt Dataset Global: {str(e)}')
-            items = []
+            warning(f'Cobalt Dataset Global: {e!s}')
+            self._dataset = []
+            self._questions = []
         except ImportError as e:
-            warning(f'Cobalt Dataset Global: Failed to import cobalt library: {str(e)}')
+            warning(f'Cobalt Dataset Global: Failed to import cobalt library: {e!s}')
             warning('Cobalt Dataset Global: Ensure basalt-ai-cobalt is installed. pip install basalt-ai-cobalt')
-            items = []
-
-        # Apply transforms
-        self._dataset = self._loader.apply_transforms(items, config)
-        debug(f'Cobalt Dataset Global: {len(self._dataset)} items after transforms')
-
-        # Convert to question-compatible dicts
-        self._questions = self._loader.to_questions(self._dataset)
-        debug(f'Cobalt Dataset Global: {len(self._questions)} questions prepared')
+            self._dataset = []
+            self._questions = []
+        except Exception as e:  # noqa: BLE001 - dataset preparation should not abort pipeline init
+            warning(f'Cobalt Dataset Global: Failed to prepare dataset: {e!s}')
+            self._dataset = []
+            self._questions = []
 
     def _extractConfig(self) -> Dict[str, Any]:
         """Extract and validate node configuration.
@@ -155,7 +160,16 @@ class IGlobal(IGlobalBase):
             config = {k: v for k, v in config.items() if k != 'default'}
             config.update(nested_default)
 
-        return config
+        normalized = {}
+        prefixed = {}
+        for key, value in config.items():
+            if isinstance(key, str) and key.startswith('dataset.'):
+                prefixed[key.removeprefix('dataset.')] = value
+            else:
+                normalized[key] = value
+        normalized.update(prefixed)
+
+        return normalized
 
     def endGlobal(self):
         """Clean up resources."""

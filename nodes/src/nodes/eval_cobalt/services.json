@@ -120,12 +120,12 @@
 	//		in the shape
 	//
 	"fields": {
-		"cobalt_eval.eval_type": {
+		"eval_type": {
 			"type": "string",
 			"title": "Evaluator type",
 			"description": "The type of evaluation to perform on LLM outputs"
 		},
-		"cobalt_eval.threshold": {
+		"threshold": {
 			"type": "number",
 			"title": "Pass threshold",
 			"description": "Minimum score (0.0 - 1.0) for an evaluation to pass",
@@ -133,48 +133,71 @@
 			"maximum": 1.0,
 			"default": 0.7
 		},
-		"cobalt_eval.model": {
+		"model": {
 			"type": "string",
 			"title": "Judge model",
 			"description": "LLM model to use for judge evaluation (e.g. gpt-4, claude-3)"
 		},
-		"cobalt_eval.criteria": {
+		"criteria": {
 			"type": "string",
 			"title": "Evaluation criteria",
 			"description": "Criteria prompt for the LLM judge to evaluate against"
 		},
-		"cobalt_eval.similarity": {
+		"apikey": {
+			"type": "string",
+			"title": "API key",
+			"description": "LLM provider API key for judge evaluation",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"similarity": {
 			"object": "similarity",
-			"properties": ["cobalt_eval.threshold"]
+			"properties": ["threshold"]
 		},
-		"cobalt_eval.llm_judge": {
+		"llm_judge": {
 			"object": "llm_judge",
-			"properties": ["cobalt_eval.threshold", "cobalt_eval.model", "cobalt_eval.criteria", "llm.cloud.apikey"]
+			"properties": ["threshold", "model", "criteria", "apikey"]
 		},
-		"cobalt_eval.custom": {
+		"custom": {
 			"object": "custom",
-			"properties": ["cobalt_eval.threshold"]
+			"properties": ["threshold"]
 		},
-		"cobalt_eval.expected_format": {
+		"expected_format": {
 			"type": "string",
 			"title": "Expected format",
 			"description": "Structural format to validate the output against",
 			"default": "prose",
 			"enum": ["prose", "list", "code", "json"]
 		},
-		"cobalt_eval.relevance": {
+		"keyword_weight": {
+			"type": "number",
+			"title": "Keyword weight",
+			"description": "Weight applied to keyword-overlap relevance scoring",
+			"default": 0.7,
+			"minimum": 0.0
+		},
+		"length_weight": {
+			"type": "number",
+			"title": "Length weight",
+			"description": "Weight applied to length-ratio relevance scoring",
+			"default": 0.3,
+			"minimum": 0.0
+		},
+		"relevance": {
 			"object": "relevance",
-			"properties": ["cobalt_eval.threshold"]
+			"properties": ["threshold", "keyword_weight", "length_weight"]
 		},
-		"cobalt_eval.grounding": {
+		"grounding": {
 			"object": "grounding",
-			"properties": ["cobalt_eval.threshold"]
+			"properties": ["threshold"]
 		},
-		"cobalt_eval.format": {
+		"format": {
 			"object": "format",
-			"properties": ["cobalt_eval.threshold", "cobalt_eval.expected_format"]
+			"properties": ["threshold", "expected_format"]
 		},
-		"cobalt_eval.profile": {
+		"profile": {
 			"title": "Evaluator",
 			"description": "Cobalt evaluator profile",
 			"type": "string",
@@ -183,27 +206,27 @@
 			"conditional": [
 				{
 					"value": "similarity",
-					"properties": ["cobalt_eval.similarity"]
+					"properties": ["similarity"]
 				},
 				{
 					"value": "llm_judge",
-					"properties": ["cobalt_eval.llm_judge"]
+					"properties": ["llm_judge"]
 				},
 				{
 					"value": "custom",
-					"properties": ["cobalt_eval.custom"]
+					"properties": ["custom"]
 				},
 				{
 					"value": "relevance",
-					"properties": ["cobalt_eval.relevance"]
+					"properties": ["relevance"]
 				},
 				{
 					"value": "grounding",
-					"properties": ["cobalt_eval.grounding"]
+					"properties": ["grounding"]
 				},
 				{
 					"value": "format",
-					"properties": ["cobalt_eval.format"]
+					"properties": ["format"]
 				}
 			]
 		}
@@ -217,7 +240,7 @@
 		{
 			"section": "Pipe",
 			"title": "Cobalt Evaluator",
-			"properties": ["cobalt_eval.profile"]
+			"properties": ["profile"]
 		}
 	],
 	//
@@ -242,12 +265,12 @@
 			"expect_pass": false
 		},
 		{
-			"title": "Custom evaluator - always pass",
+			"title": "Custom evaluator - missing function fails",
 			"eval_type": "custom",
 			"threshold": 0.5,
 			"input": "Any output text",
 			"expected": "Any expected text",
-			"expect_pass": true
+			"expect_pass": false
 		}
 	]
 }

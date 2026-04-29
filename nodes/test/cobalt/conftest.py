@@ -35,6 +35,9 @@ from unittest.mock import AsyncMock, MagicMock
 _cobalt_test_dir = os.path.dirname(__file__)
 if _cobalt_test_dir not in sys.path:
     sys.path.append(_cobalt_test_dir)
+_nodes_dir = os.path.abspath(os.path.join(_cobalt_test_dir, '..', '..', 'src', 'nodes'))
+if _nodes_dir not in sys.path:
+    sys.path.append(_nodes_dir)
 
 
 @pytest.fixture

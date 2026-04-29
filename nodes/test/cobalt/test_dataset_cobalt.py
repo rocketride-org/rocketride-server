@@ -26,6 +26,7 @@
 All tests use mocks to avoid real file I/O and external dependencies.
 """
 
+import importlib.machinery
 import pathlib
 import sys
 from types import ModuleType
@@ -267,6 +268,7 @@ class MockDataset:
 
 # Patch cobalt module with our mock
 mock_cobalt = ModuleType('cobalt')
+mock_cobalt.__spec__ = importlib.machinery.ModuleSpec('cobalt', loader=None)
 mock_cobalt.Dataset = MockDataset
 sys.modules['cobalt'] = mock_cobalt
 
@@ -867,3 +869,16 @@ class TestExtractConfigMergesDefault:
         result = g._extractConfig()
         assert result['default'] == 'not-a-dict'
         assert result['source_type'] == 'file'
+
+    def test_dataset_prefix_keys_are_normalized(self):
+        """UI field names should be stripped before DatasetLoader sees config."""
+        raw_config = {
+            'dataset.source_type': 'inline',
+            'dataset.items': '[{"input": "q", "expected": "a"}]',
+            'dataset.sample_size': 0,
+        }
+        g = self._make_global(raw_config)
+        result = g._extractConfig()
+        assert result['source_type'] == 'inline'
+        assert result['items'] == '[{"input": "q", "expected": "a"}]'
+        assert result['sample_size'] == 0

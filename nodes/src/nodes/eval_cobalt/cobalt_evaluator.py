@@ -58,6 +58,8 @@ class CobaltEvaluator:
     _model: str
     _criteria: str
     _apikey: str
+    _keyword_weight: float
+    _length_weight: float
     _custom_fn: Optional[Callable] = None
 
     def __init__(self, config: Dict[str, Any], bag: Dict[str, Any], custom_fn: Optional[Callable] = None) -> None:
@@ -85,6 +87,8 @@ class CobaltEvaluator:
         self._criteria = config.get('criteria', 'Is the output correct, complete, and well-structured?')
         self._apikey = config.get('apikey', '')
         self._expected_format = config.get('expected_format', 'prose')
+        self._keyword_weight = self._parse_float(config.get('keyword_weight', 0.7), 0.7)
+        self._length_weight = self._parse_float(config.get('length_weight', 0.3), 0.3)
 
         # Resolve custom evaluation function: explicit arg > config > bag
         resolved_fn = custom_fn
@@ -227,7 +231,7 @@ class CobaltEvaluator:
         try:
             from .evaluators.relevance import evaluate_relevance as _relevance_fn
 
-            result = _relevance_fn(output, expected, threshold=threshold)
+            result = _relevance_fn(output, expected, keyword_weight=self._keyword_weight, length_weight=self._length_weight, threshold=threshold)
             return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'relevance')
         except Exception as e:
             debug(f'Relevance evaluation failed: {e}')
@@ -308,6 +312,14 @@ class CobaltEvaluator:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_float(value: Any, default: float) -> float:
+        """Parse a numeric config value, returning a default on invalid input."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def _make_result(score: float, threshold: float, reasoning: str, evaluator: str) -> Dict[str, Any]:

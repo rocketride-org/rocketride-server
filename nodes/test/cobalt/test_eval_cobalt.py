@@ -247,6 +247,11 @@ class TestCobaltEvaluatorInit:
         evaluator = CobaltEvaluator({'eval_type': 'custom'}, {'custom_fn': 'not-a-callable'})
         assert evaluator._custom_fn is None
 
+    def test_relevance_weights_from_config(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'keyword_weight': '0.2', 'length_weight': '0.8'}, {})
+        assert evaluator._keyword_weight == 0.2
+        assert evaluator._length_weight == 0.8
+
     def test_eval_type_property(self):
         evaluator = CobaltEvaluator({'eval_type': 'llm_judge'}, {})
         assert evaluator.eval_type == 'llm_judge'
@@ -585,32 +590,68 @@ class TestIInstanceWriteAnswers:
     def test_writeAnswers_strips_reserved_fields_from_json(self):
         """Ensure reserved fields (expected, context, reference) are stripped from JSON before scoring."""
         inst = self._make_iinstance()
+        inst.IGlobal._evaluator.evaluate = MagicMock(
+            return_value={
+                'score': 0.5,
+                'passed': True,
+                'reasoning': '',
+                'evaluator': 'semantic',
+            }
+        )
 
         answer = MockAnswer(expectJson=True)
-        answer.setAnswer({'output': 'Paris', 'expected': 'Paris is the capital', 'context': 'geography'})
+        answer.setAnswer({'output': 'Paris', 'expected': 'SECRET_REF', 'context': 'SECRET_CTX', 'reference': 'SECRET_REFERENCE'})
 
         inst.writeAnswers(answer)
 
-        # The evaluator should have been called; check output_text did not contain reserved fields.
-        # We verify indirectly: the eval result should exist and the answer forwarded.
-        calls = inst.instance.writeAnswers.call_args_list
-        assert len(calls) == 2
+        inst.IGlobal._evaluator.evaluate.assert_called_once()
+        output_text, expected = inst.IGlobal._evaluator.evaluate.call_args.args
+        assert expected == 'SECRET_REF'
+        for leaked in ('expected', 'context', 'reference', 'SECRET_REF', 'SECRET_CTX', 'SECRET_REFERENCE'):
+            assert leaked not in output_text
 
     def test_writeAnswers_extracts_expected_from_json(self):
         """Verify that expected text is extracted from JSON answer metadata."""
         inst = self._make_iinstance()
+        inst.IGlobal._evaluator.evaluate = MagicMock(
+            return_value={
+                'score': 1.0,
+                'passed': True,
+                'reasoning': '',
+                'evaluator': 'semantic',
+            }
+        )
 
         answer = MockAnswer(expectJson=True)
-        answer.setAnswer({'output': 'test', 'expected': 'test'})
+        answer.setAnswer({'output': 'test', 'expected': 'EXPECTED_REF'})
 
         inst.writeAnswers(answer)
 
-        calls = inst.instance.writeAnswers.call_args_list
-        eval_answer = calls[1][0][0]
-        json_data = eval_answer.getJson()
-        # With expected == 'test' extracted and output_text not containing 'expected',
-        # the similarity should be lower than if they matched perfectly
-        assert 'cobalt_score' in json_data
+        inst.IGlobal._evaluator.evaluate.assert_called_once()
+        output_text, expected = inst.IGlobal._evaluator.evaluate.call_args.args
+        assert expected == 'EXPECTED_REF'
+        assert 'EXPECTED_REF' not in output_text
+
+    def test_writeAnswers_falls_through_to_metadata_expected(self):
+        """Empty answer.expected must not block metadata expected extraction."""
+        inst = self._make_iinstance()
+        inst.IGlobal._evaluator.evaluate = MagicMock(
+            return_value={
+                'score': 1.0,
+                'passed': True,
+                'reasoning': '',
+                'evaluator': 'semantic',
+            }
+        )
+
+        answer = MockAnswer()
+        answer.expected = ''
+        answer.metadata = {'expected': 'metadata reference'}
+        answer.setAnswer('metadata reference')
+
+        inst.writeAnswers(answer)
+
+        inst.IGlobal._evaluator.evaluate.assert_called_once_with('metadata reference', 'metadata reference')
 
 
 class TestIGlobalLifecycle:
@@ -726,6 +767,12 @@ class TestRelevanceEvaluation:
         result = evaluator.evaluate_relevance('same text here', 'same text here', threshold=0.1)
         assert result['passed'] is True
 
+    def test_negative_weight_rejected(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'keyword_weight': -1.0}, {})
+        result = evaluator.evaluate_relevance('same text here', 'same text here')
+        assert result['passed'] is False
+        assert result['score'] == 0.0
+
 
 class TestGroundingEvaluation:
     """Test the grounding eval_type (sentence-level context overlap)."""
@@ -838,3 +885,57 @@ class TestExtendedEvalTypeWhitelist:
     def test_format_is_valid(self):
         evaluator = CobaltEvaluator({'eval_type': 'format'}, {})
         assert evaluator._eval_type == 'format'
+
+
+class TestEvalConfigExtraction:
+    """Test config normalization for service-schema field names."""
+
+    def _make_global(self, config):
+        from eval_cobalt.IGlobal import IGlobal
+
+        iglobal = IGlobal.__new__(IGlobal)
+        mock_endpoint = MagicMock()
+        mock_endpoint.endpoint.openMode = 'RUN'
+        mock_endpoint.endpoint.bag = {}
+        mock_endpoint.endpoint.connConfig = config
+        iglobal.IEndpoint = mock_endpoint
+        iglobal.glb = MagicMock()
+        iglobal.glb.logicalType = 'eval_cobalt'
+        iglobal.glb.connConfig = config
+        return iglobal
+
+    def test_extract_config_normalizes_prefixed_profile_and_fields(self):
+        iglobal = self._make_global(
+            {
+                'cobalt_eval.profile': 'llm_judge',
+                'llm_judge': {
+                    'cobalt_eval.threshold': 0.8,
+                    'cobalt_eval.model': 'gpt-test',
+                    'cobalt_eval.criteria': 'Judge correctness.',
+                    'llm.cloud.apikey': 'test-key',
+                },
+            }
+        )
+
+        with patch('eval_cobalt.IGlobal.Config.getNodeConfig') as mock_get_config:
+            mock_get_config.return_value = {
+                'eval_type': 'llm_judge',
+                'threshold': 0.8,
+                'model': 'gpt-test',
+                'criteria': 'Judge correctness.',
+                'apikey': 'test-key',
+            }
+            config = iglobal._extractConfig()
+
+        normalized_conn_config = mock_get_config.call_args.args[1]
+        assert normalized_conn_config['profile'] == 'llm_judge'
+        assert normalized_conn_config['llm_judge']['threshold'] == 0.8
+        assert normalized_conn_config['llm_judge']['model'] == 'gpt-test'
+        assert normalized_conn_config['llm_judge']['criteria'] == 'Judge correctness.'
+        assert normalized_conn_config['llm_judge']['apikey'] == 'test-key'
+
+        assert config['eval_type'] == 'llm_judge'
+        assert config['threshold'] == 0.8
+        assert config['model'] == 'gpt-test'
+        assert config['criteria'] == 'Judge correctness.'
+        assert config['apikey'] == 'test-key'
