@@ -70,7 +70,6 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 2. Click the RocketRide extension in your IDE
 
 3. Deploy a server - you'll be prompted on how you want to run the server. Choose the option that fits your setup:
-
    - **Local (Recommended)** - This pulls the server directly into your IDE without any additional setup.
    - **On-Premises** - Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
 
@@ -89,7 +88,6 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
 
 5. Deploy your pipelines on your own infrastructure.
-
    - **Docker** - Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
      ```bash
@@ -120,3 +118,19 @@ RocketRide is built by a growing community of contributors. Whether you've fixed
 ---
 
 <p align="center">Made with ♥ in SF &amp; EU</p>
+
+## Running Pipelines Locally
+
+Example:
+
+````bash
+python summarizer_pipeline.py
+python sentiment_pipeline.py
+
+
+```bash
+git checkout -b feature/readme-update
+git add README.md
+git commit -m "Added pipeline usage examples to README"
+git push -u origin feature/readme-update
+````
