@@ -24,7 +24,7 @@
 
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, TraceType } from './types/index.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
@@ -430,6 +430,46 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Probe a server for its capabilities without authenticating.
+	 *
+	 * Creates a temporary connection, sends an `auth` request with
+	 * `infoOnly: true`, and returns the server metadata. The server
+	 * responds without requiring credentials.
+	 *
+	 * @param uri - Server URI (e.g. `"localhost:5565"`, `"https://cloud.rocketride.ai"`)
+	 * @param timeout - Optional timeout in ms for the entire operation
+	 * @returns Server info including version and capability tags
+	 * @throws Error if the server is unreachable or does not support info probes
+	 *
+	 * @example
+	 * ```typescript
+	 * const info = await RocketRideClient.getServerInfo('localhost:5565');
+	 * if (info.capabilities.includes('saas')) {
+	 *   // Show cloud sign-in options
+	 * }
+	 * ```
+	 */
+	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
+		const client = new RocketRideClient({ uri, persist: false, auth: '' });
+		try {
+			// Open the transport without the normal auth handshake
+			await client._internalConnect_transportOnly(timeout);
+
+			// Send auth with infoOnly flag — server returns metadata without authenticating
+			const message = client.buildRequest('auth', { arguments: { infoOnly: true } });
+			const response = await client.request(message, timeout);
+
+			if (response.success === false) {
+				throw new Error(response.message || 'Server info request failed');
+			}
+
+			return (response.body ?? {}) as unknown as ServerInfoResult;
+		} finally {
+			await client.disconnect();
+		}
+	}
+
+	/**
 	 * Normalize a user-provided URI into a fully-formed WebSocket address.
 	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
 	 */
@@ -484,6 +524,18 @@ export class RocketRideClient extends DAPClient {
 			this._bindTransport(transport);
 		}
 		return super._dapConnect(timeout);
+	}
+
+	/**
+	 * Opens the transport (WebSocket) without sending the auth handshake.
+	 * Used by getServerInfo() to send a custom auth request with infoOnly.
+	 */
+	private async _internalConnect_transportOnly(timeout?: number): Promise<void> {
+		if (!this._transport) {
+			const transport = new TransportWebSocket(this._uri, this._apikey!);
+			this._bindTransport(transport);
+		}
+		await this._transport!.connect(timeout);
 	}
 
 	/**

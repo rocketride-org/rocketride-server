@@ -365,3 +365,21 @@ export interface ConnectResult {
 	 */
 	capabilities: string[];
 }
+
+/**
+ * Server metadata returned by the pre-auth info probe.
+ *
+ * Obtained via {@link RocketRideClient.getServerInfo} which sends an
+ * `auth` request with `infoOnly: true`. The server responds without
+ * requiring credentials.
+ */
+export interface ServerInfoResult {
+	/** Server engine version string. */
+	version: string;
+
+	/** Capability tags: `['oss']` for open-source, `['saas']` for cloud. */
+	capabilities: string[];
+
+	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
+	platform?: string;
+}

@@ -33,6 +33,9 @@ export interface ConnectionConfigProps {
 	simplified: boolean;
 	idPrefix: string;
 
+	// Server capabilities (from probe) — controls which modes are shown
+	serverCapabilities: string[];
+
 	// Current settings
 	connectionMode: ConnectionMode;
 	onConnectionModeChange: (mode: ConnectionMode) => void;
@@ -97,7 +100,9 @@ export interface ConnectionConfigProps {
 // =============================================================================
 
 export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
-	const { simplified, idPrefix, connectionMode, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
+	const { simplified, idPrefix, serverCapabilities, connectionMode, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
+
+	const isSaas = serverCapabilities.includes('saas');
 
 	const handleModeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onConnectionModeChange(e.target.value as ConnectionMode);
@@ -111,7 +116,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 					Connection mode
 				</label>
 				<select id={`${idPrefix}-connectionMode`} value={connectionMode} onChange={handleModeChange}>
-					<option value="cloud">RocketRide Cloud</option>
+					{isSaas && <option value="cloud">RocketRide Cloud</option>}
 					<option value="docker">Docker</option>
 					<option value="service">Service</option>
 					<option value="onprem">On-prem (your own hosted server)</option>

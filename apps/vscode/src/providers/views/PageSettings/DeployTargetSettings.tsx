@@ -32,6 +32,7 @@ interface DeployTargetSettingsProps {
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
 	onClearCredentials: () => void;
+	serverCapabilities: string[];
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
@@ -117,11 +118,11 @@ export const DeployTargetSettings: React.FC<DeployTargetSettingsProps> = (props)
 									Target
 								</label>
 								<select id="deploy-connectionMode" value={settings.deployTargetMode ?? ''} onChange={handleModeChange}>
-									<option value="local">Local</option>
-									<option value="cloud">RocketRide Cloud</option>
-									<option value="onprem">On-prem (your own hosted server)</option>
+									{props.serverCapabilities.includes('saas') && <option value="cloud">RocketRide Cloud</option>}
 									<option value="docker">Docker</option>
 									<option value="service">Service</option>
+									<option value="onprem">On-prem (your own hosted server)</option>
+									<option value="local">Local</option>
 								</select>
 								<div style={S.helpText}>Choose where to deploy pipelines for production</div>
 							</div>

@@ -93,6 +93,7 @@ export class PageWelcomeProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendCurrentSettings();
+						await this.connHandler.probeServerInfo(this.panel.webview);
 						await this.connHandler.startStatusPolling();
 						break;
 

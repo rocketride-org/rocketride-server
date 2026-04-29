@@ -61,6 +61,8 @@ class Account(AccountBase):
     Account mgmt:     Not available — all methods raise NotImplementedError.
     """
 
+    capabilities = ['oss']
+
     # =========================================================================
     # AUTH
     # =========================================================================
@@ -127,7 +129,7 @@ class Account(AccountBase):
                     ],
                 }
             ],
-            capabilities=['oss'],
+            capabilities=self.capabilities,
         )
 
     # =========================================================================

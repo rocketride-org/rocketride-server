@@ -151,6 +151,7 @@ export class PageSettingsProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.loadAllSettings(panel.webview);
+						await this.connHandler.probeServerInfo(panel.webview);
 						if (this.pendingFocus) {
 							panel.webview.postMessage({ type: 'setFocus', focus: this.pendingFocus });
 							this.pendingFocus = undefined;

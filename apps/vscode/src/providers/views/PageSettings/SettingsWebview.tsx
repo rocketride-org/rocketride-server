@@ -263,6 +263,9 @@ export const PageSettings: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
+	// Server capabilities (from probe)
+	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
+
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
@@ -324,6 +327,10 @@ export const PageSettings: React.FC = () => {
 
 				case 'setFocus' as any:
 					if ((message as any).focus) setActiveTab((message as any).focus);
+					break;
+
+				case 'serverInfo' as any:
+					setServerCapabilities((message as any).capabilities || []);
 					break;
 
 				case 'showMessage': {
@@ -560,6 +567,7 @@ export const PageSettings: React.FC = () => {
 							onSave={handleSaveSettings}
 							onClearCredentials={handleClearCredentials}
 							onTestDevelopmentConnection={handleTestDevelopmentConnection}
+							serverCapabilities={serverCapabilities}
 							developmentTestMessage={developmentTestMessage}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
@@ -610,6 +618,7 @@ export const PageSettings: React.FC = () => {
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
 							onSave={handleSaveSettings}
+							serverCapabilities={serverCapabilities}
 							teams={teams}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
@@ -685,7 +694,7 @@ export const PageSettings: React.FC = () => {
 				),
 			},
 		}),
-		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
+		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (

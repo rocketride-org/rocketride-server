@@ -41,6 +41,7 @@ export class ConnectionMessageHandler {
 	readonly engineOps: EngineOperations;
 	private pendingSudoPassword: ((pw: string) => void) | null = null;
 	private cloudAuthCleanups: Array<() => void> = [];
+	private cachedServerInfo: { version: string; capabilities: string[]; platform?: string } | null = null;
 
 	constructor(private readonly opts: ConnectionMessageHandlerOptions) {
 		this.configManager = ConfigManager.getInstance();
@@ -143,6 +144,35 @@ export class ConnectionMessageHandler {
 	 */
 	public stopStatusPolling(): void {
 		this.engineOps.stopStatusPolling();
+	}
+
+	// =========================================================================
+	// SERVER INFO PROBE
+	// =========================================================================
+
+	/**
+	 * Probe the server at ROCKETRIDE_URI for capabilities.
+	 * Caches the result so subsequent calls are instant.
+	 * Sends the result to the webview as `{ type: 'serverInfo', ... }`.
+	 */
+	public async probeServerInfo(webview: vscode.Webview): Promise<void> {
+		if (this.cachedServerInfo) {
+			webview.postMessage({ type: 'serverInfo', ...this.cachedServerInfo });
+			return;
+		}
+
+		const uri = process.env.ROCKETRIDE_URI || '';
+		if (!uri) return;
+
+		try {
+			const info = await RocketRideClient.getServerInfo(uri, 5000);
+			this.cachedServerInfo = info;
+			webview.postMessage({ type: 'serverInfo', ...info });
+		} catch (error) {
+			console.error('[ConnectionMessageHandler] Server info probe failed:', error);
+			// Fall back to showing all modes if probe fails
+			webview.postMessage({ type: 'serverInfo', capabilities: [], version: '' });
+		}
 	}
 
 	// =========================================================================

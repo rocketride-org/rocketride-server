@@ -163,6 +163,9 @@ export const PageWelcome: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
+	// Server capabilities
+	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
+
 	// Cloud auth
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
@@ -276,6 +279,10 @@ export const PageWelcome: React.FC = () => {
 					break;
 				case 'serviceNeedsSudo':
 					setSudoPromptVisible(true);
+					break;
+
+				case 'serverInfo' as string:
+					setServerCapabilities((msg as any).capabilities || []);
 					break;
 			}
 		},
@@ -418,6 +425,7 @@ export const PageWelcome: React.FC = () => {
 					<ConnectionConfig
 						simplified
 						idPrefix="welcome"
+						serverCapabilities={serverCapabilities}
 						connectionMode={settings.connectionMode}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}

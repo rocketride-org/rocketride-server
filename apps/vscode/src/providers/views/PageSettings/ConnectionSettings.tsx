@@ -28,6 +28,7 @@ interface ConnectionSettingsProps {
 	developmentTestMessage: MessageData | null;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
+	serverCapabilities: string[];
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
@@ -108,6 +109,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 					<ConnectionConfig
 						simplified={false}
 						idPrefix="dev"
+						serverCapabilities={props.serverCapabilities}
 						connectionMode={settings.connectionMode}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}
