@@ -107,7 +107,7 @@ DAPMessage = Dict[str, Any]
 # Test configuration
 TEST_CONFIG = {
     'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
-    'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
+    'auth': os.getenv('ROCKETRIDE_APIKEY') or 'MYAPIKEY',
     'timeout': 30.0,  # 30 second timeout for integration tests
 }
 

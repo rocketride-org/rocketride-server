@@ -60,7 +60,7 @@ class TestConfig:
     def __init__(self) -> None:
         """Initialize test configuration from ROCKETRIDE_* environment variables."""
         self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
-        self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
+        self.auth = os.getenv('ROCKETRIDE_APIKEY') or 'MYAPIKEY'
         self.timeout = float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0'))
 
     def as_dict(self) -> Dict[str, Any]:
