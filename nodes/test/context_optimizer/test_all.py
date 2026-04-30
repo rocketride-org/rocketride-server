@@ -14,10 +14,11 @@ Runs without a live server -- tiktoken is mocked where needed.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import sys
 import types
-from pathlib import Path
+from contextlib import contextmanager
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -27,30 +28,10 @@ import pytest
 # Stub external dependencies so the optimizer module can be imported without
 # a running RocketRide server or tiktoken installed in the test env.
 #
-# Use the real ai.common.schema package when it is available. Other node tests
-# import that package too, so replacing it globally during collection pollutes
-# the rest of the worker process.
+# These stubs are only applied inside short import contexts. Other node tests
+# import the real ai.common modules during collection, so the fakes must not
+# live in sys.modules for the whole pytest worker process.
 # ---------------------------------------------------------------------------
-
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-for _path in (_REPO_ROOT / 'packages' / 'client-python' / 'src', _REPO_ROOT / 'packages' / 'ai' / 'src'):
-    _path_str = str(_path)
-    if _path.exists() and _path_str not in sys.path:
-        sys.path.insert(0, _path_str)
-
-
-def _module_importable(module_name: str, bootstrap_modules: Dict[str, types.ModuleType] | None = None) -> bool:
-    """Return True when a module can be imported with optional temporary stubs."""
-    try:
-        if bootstrap_modules:
-            with patch.dict(sys.modules, bootstrap_modules):
-                __import__(module_name)
-        else:
-            __import__(module_name)
-        return True
-    except Exception:
-        return False
 
 
 def _build_stub_modules():
@@ -85,79 +66,85 @@ def _build_stub_modules():
     rocketlib.warning = lambda *_a, **_k: None
     stubs['rocketlib'] = rocketlib
 
-    bootstrap_modules = {'depends': mod_depends, 'rocketlib': rocketlib}
+    # ai.common package surface used by IGlobal/IInstance.
+    ai_pkg = types.ModuleType('ai')
+    ai_pkg.__path__ = []
+    ai_common = types.ModuleType('ai.common')
+    ai_common.__path__ = []
 
-    # ai.common.config
-    if not _module_importable('ai.common.config', bootstrap_modules):
-        ai_config = types.ModuleType('ai.common.config')
+    ai_config = types.ModuleType('ai.common.config')
 
-        class _Config:
-            @staticmethod
-            def getNodeConfig(*_a, **_k):
-                return {}
+    class _Config:
+        @staticmethod
+        def getNodeConfig(*_a, **_k):
+            return {}
 
-        ai_config.Config = _Config
-        stubs['ai.common.config'] = ai_config
+    ai_config.Config = _Config
 
-    # ai.common.schema -- minimal Question stub when the real package is not
-    # importable in a stripped-down local test environment.
-    if not _module_importable('ai.common.schema', bootstrap_modules):
-        ai_schema = types.ModuleType('ai.common.schema')
+    ai_schema = types.ModuleType('ai.common.schema')
 
-        class _QuestionText:
-            def __init__(self, text='', embedding_model=None, embedding=None) -> None:
-                self.text = text
-                self.embedding_model = embedding_model
-                self.embedding = embedding
+    class _QuestionText:
+        def __init__(self, text='', embedding_model=None, embedding=None) -> None:
+            self.text = text
+            self.embedding_model = embedding_model
+            self.embedding = embedding
 
-        class _QuestionHistory:
-            def __init__(self, role='', content='') -> None:
-                self.role = role
-                self.content = content
+    class _QuestionHistory:
+        def __init__(self, role='', content='') -> None:
+            self.role = role
+            self.content = content
 
-        class _Doc:
-            def __init__(self, page_content='', **kwargs) -> None:
-                self.page_content = page_content
-                self._data = kwargs
+    class _Doc:
+        def __init__(self, page_content='', **kwargs) -> None:
+            self.page_content = page_content
+            self._data = kwargs
 
-            def model_dump(self):
-                d = {'page_content': self.page_content}
-                d.update(self._data)
-                return d
+        def model_dump(self):
+            d = {'page_content': self.page_content}
+            d.update(self._data)
+            return d
 
-            def dict(self):
-                return self.model_dump()
+        def dict(self):
+            return self.model_dump()
 
-        class _Question:
-            def __init__(self, **kwargs) -> None:
-                self.role = kwargs.get('role', '')
-                self.questions = kwargs.get('questions', [])
-                self.documents = kwargs.get('documents', [])
-                self.history = kwargs.get('history', [])
-                self.context = kwargs.get('context', [])
-                self.instructions = kwargs.get('instructions', [])
-                self.examples = kwargs.get('examples', [])
-                self.goals = kwargs.get('goals', [])
-                self.type = kwargs.get('type', 'question')
-                self.filter = kwargs.get('filter')
-                self.expectJson = kwargs.get('expectJson', False)
+    class _Question:
+        def __init__(self, **kwargs) -> None:
+            self.role = kwargs.get('role', '')
+            self.questions = kwargs.get('questions', [])
+            self.documents = kwargs.get('documents', [])
+            self.history = kwargs.get('history', [])
+            self.context = kwargs.get('context', [])
+            self.instructions = kwargs.get('instructions', [])
+            self.examples = kwargs.get('examples', [])
+            self.goals = kwargs.get('goals', [])
+            self.type = kwargs.get('type', 'question')
+            self.filter = kwargs.get('filter')
+            self.expectJson = kwargs.get('expectJson', False)
 
-            def addQuestion(self, text) -> None:
-                self.questions.append(_QuestionText(text=text))
+        def addQuestion(self, text) -> None:
+            self.questions.append(_QuestionText(text=text))
 
-        ai_schema.Question = _Question
-        ai_schema.QuestionText = _QuestionText
-        ai_schema.QuestionHistory = _QuestionHistory
-        ai_schema.Doc = _Doc
-        ai_schema.Answer = MagicMock
-        ai_schema.QuestionType = MagicMock
-        ai_schema.DocFilter = MagicMock
-        stubs['ai.common.schema'] = ai_schema
+    ai_schema.Question = _Question
+    ai_schema.QuestionText = _QuestionText
+    ai_schema.QuestionHistory = _QuestionHistory
+    ai_schema.Doc = _Doc
+    ai_schema.Answer = MagicMock
+    ai_schema.QuestionType = MagicMock
+    ai_schema.DocFilter = MagicMock
+
+    ai_common.config = ai_config
+    ai_common.schema = ai_schema
+    ai_pkg.common = ai_common
+    stubs['ai'] = ai_pkg
+    stubs['ai.common'] = ai_common
+    stubs['ai.common.config'] = ai_config
+    stubs['ai.common.schema'] = ai_schema
 
     return stubs
 
 
 _STUB_MODULES = _build_stub_modules()
+_MISSING = object()
 
 # ---------------------------------------------------------------------------
 # Check for tiktoken availability.  find_spec returns None (no exception)
@@ -190,20 +177,37 @@ if not _TIKTOKEN_AVAILABLE:
     tiktoken_mod.Encoding = _MockEncoding
     _STUB_MODULES['tiktoken'] = tiktoken_mod
 
-# Apply stubs via patch.dict so they are cleaned up when the patcher is
-# stopped.  We start the patcher at module level (stubs must be visible to
-# lifecycle tests that import IGlobal/IInstance inside test methods) and
-# stop it in a module-level teardown so the fakes do not leak into
-# subsequent test files in the same pytest session.
-_patcher = patch.dict(sys.modules, _STUB_MODULES)
-_patcher.start()
 
-from nodes.context_optimizer.optimizer import ContextOptimizer
+@contextmanager
+def _temporary_stub_modules():
+    """Temporarily install only this file's external dependency stubs."""
+    original_modules = {name: sys.modules.get(name, _MISSING) for name in _STUB_MODULES}
+    sys.modules.update(_STUB_MODULES)
+    try:
+        yield
+    finally:
+        for name, original_module in original_modules.items():
+            if original_module is _MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original_module
 
 
-def teardown_module() -> None:
-    """Remove stub modules after all tests in this file have run."""
-    _patcher.stop()
+def _import_with_stubs(module_name: str):
+    """Import one context optimizer module with temporary external stubs."""
+    with _temporary_stub_modules():
+        return importlib.import_module(module_name)
+
+
+def _stubbed_question_cls():
+    """Return the Question stub used when importing IInstance."""
+    with _temporary_stub_modules():
+        from ai.common.schema import Question
+
+        return Question
+
+
+ContextOptimizer = _import_with_stubs('nodes.context_optimizer.optimizer').ContextOptimizer
 
 
 # ===========================================================================
@@ -702,7 +706,7 @@ class TestIGlobalLifecycle:
 
     def test_begin_global_config_mode(self):
         """In CONFIG mode, optimizer should not be created."""
-        from nodes.context_optimizer.IGlobal import IGlobal
+        IGlobal = _import_with_stubs('nodes.context_optimizer.IGlobal').IGlobal
 
         iglobal = IGlobal()
         # Mock the IEndpoint and glb
@@ -722,7 +726,7 @@ class TestIGlobalLifecycle:
 
     def test_end_global_cleanup(self):
         """EndGlobal should set optimizer and config to None."""
-        from nodes.context_optimizer.IGlobal import IGlobal
+        IGlobal = _import_with_stubs('nodes.context_optimizer.IGlobal').IGlobal
 
         iglobal = IGlobal()
         iglobal.optimizer = MagicMock()
@@ -738,7 +742,7 @@ class TestIInstanceLifecycle:
     """Test the IInstance class with mocked IGlobal/optimizer."""
 
     def _make_instance(self, optimizer=None):
-        from nodes.context_optimizer.IInstance import IInstance
+        IInstance = _import_with_stubs('nodes.context_optimizer.IInstance').IInstance
 
         inst = IInstance()
         iglobal = MagicMock()
@@ -750,7 +754,7 @@ class TestIInstanceLifecycle:
     def test_passthrough_when_no_optimizer(self):
         """When optimizer is None, question should pass through unchanged."""
         inst = self._make_instance(optimizer=None)
-        from ai.common.schema import Question as _Q
+        _Q = _stubbed_question_cls()
 
         q = _Q()
         q.addQuestion('Hello?')
@@ -779,7 +783,7 @@ class TestIInstanceLifecycle:
             },
         }
 
-        from ai.common.schema import Question as _Q
+        _Q = _stubbed_question_cls()
 
         q = _Q()
         q.addQuestion('Original question')
@@ -809,7 +813,7 @@ class TestIInstanceLifecycle:
         }
         inst = self._make_instance(optimizer=mock_opt)
 
-        from ai.common.schema import Question as _Q
+        _Q = _stubbed_question_cls()
 
         q = _Q(role='You are helpful.')
         q.addQuestion('What is AI?')
@@ -840,7 +844,7 @@ class TestIInstanceLifecycle:
         }
         inst = self._make_instance(optimizer=mock_opt)
 
-        from ai.common.schema import Question as _Q
+        _Q = _stubbed_question_cls()
 
         q = _Q()
         q.questions = []  # explicitly empty
