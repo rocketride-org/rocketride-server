@@ -683,7 +683,7 @@ class TestIGlobalLifecycle:
 
     def test_begin_global_config_mode(self):
         """In CONFIG mode, optimizer should not be created."""
-        from nodes.src.nodes.context_optimizer.IGlobal import IGlobal
+        from nodes.context_optimizer.IGlobal import IGlobal
 
         iglobal = IGlobal()
         # Mock the IEndpoint and glb
@@ -696,14 +696,14 @@ class TestIGlobalLifecycle:
         iglobal.IEndpoint = endpoint_mock
         iglobal.glb = MagicMock()
 
-        with patch('nodes.src.nodes.context_optimizer.IGlobal.OPEN_MODE', _OPEN_MODE):
+        with patch('nodes.context_optimizer.IGlobal.OPEN_MODE', _OPEN_MODE):
             iglobal.beginGlobal()
 
         assert iglobal.optimizer is None
 
     def test_end_global_cleanup(self):
         """EndGlobal should set optimizer and config to None."""
-        from nodes.src.nodes.context_optimizer.IGlobal import IGlobal
+        from nodes.context_optimizer.IGlobal import IGlobal
 
         iglobal = IGlobal()
         iglobal.optimizer = MagicMock()
@@ -719,7 +719,7 @@ class TestIInstanceLifecycle:
     """Test the IInstance class with mocked IGlobal/optimizer."""
 
     def _make_instance(self, optimizer=None):
-        from nodes.src.nodes.context_optimizer.IInstance import IInstance
+        from nodes.context_optimizer.IInstance import IInstance
 
         inst = IInstance()
         iglobal = MagicMock()
@@ -826,7 +826,7 @@ class TestIInstanceLifecycle:
         q = _Q()
         q.questions = []  # explicitly empty
 
-        with patch('nodes.src.nodes.context_optimizer.IInstance.debug') as mock_debug:
+        with patch('nodes.context_optimizer.IInstance.debug') as mock_debug:
             inst.writeQuestions(q)
 
         # The debug log about discarding should have been called
