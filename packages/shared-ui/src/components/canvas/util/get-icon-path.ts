@@ -110,6 +110,7 @@ import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 import githubIcon from '../../../assets/nodes/github.svg';
 import telegramIcon from '../../../assets/nodes/telegram.svg';
+import pipetoolIcon from '../../../assets/nodes/pipetool.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -202,6 +203,7 @@ const iconMap: Record<string, string> = {
 	'bland-ai': blandAiIcon,
 	github: githubIcon,
 	telegram: telegramIcon,
+	pipetool: pipetoolIcon,
 };
 
 /**

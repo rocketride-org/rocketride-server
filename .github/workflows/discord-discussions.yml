@@ -2,7 +2,7 @@ name: Discord Discussion Notification
 
 on:
   discussion:
-    types: [created, answered, unanswered, labeled, unlabeled, category_changed]
+    types: [created, edited, answered, unanswered, labeled, unlabeled, category_changed]
   discussion_comment:
     types: [created]
 
@@ -34,14 +34,14 @@ jobs:
           OWNER="${REPO%/*}"
           NAME="${REPO#*/}"
 
-          # ── Fetch discussion via GraphQL (data + last 20 comments in one call) ──
+          # ── Fetch discussion via GraphQL (fields only; marker scan is paginated below) ──
           QUERY='query($owner:String!,$name:String!,$number:Int!){
             repository(owner:$owner,name:$name){
               discussion(number:$number){
                 id title url number body
                 closed
                 locked
-                comments(last:20){ totalCount nodes{ id body author{ login } } }
+                comments{ totalCount }
                 answerChosenAt
                 answer{ url }
                 category{ name emoji isAnswerable }
@@ -144,21 +144,56 @@ jobs:
               ]
             }]}')
 
-          # ── Look up stored message ID from discussion comments ───────────
+          # ── Paginated marker search (scans every comment page until marker found) ──
+          # Uses `first:100, after:$cursor` so markers stay discoverable regardless of
+          # discussion size. `last:20` loses markers once a discussion accumulates
+          # more than 20 comments and is the root cause of duplicate Discord posts.
+          MARKER_QUERY='query($owner:String!,$name:String!,$number:Int!,$after:String){
+            repository(owner:$owner,name:$name){
+              discussion(number:$number){
+                comments(first:100, after:$after){
+                  pageInfo{ hasNextPage endCursor }
+                  nodes{ id body author{ login } }
+                }
+              }
+            }
+          }'
+
+          find_marker() {
+            local after="" page m has_next
+            while true; do
+              if [ -n "$after" ]; then
+                page=$(gh api graphql -f query="$MARKER_QUERY" \
+                  -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER" -f after="$after")
+              else
+                page=$(gh api graphql -f query="$MARKER_QUERY" \
+                  -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER")
+              fi
+
+              m=$(echo "$page" | jq -c '
+                [.data.repository.discussion.comments.nodes[]
+                  | select(.author.login == "github-actions[bot]"
+                    and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
+                ] | first // empty')
+
+              if [ -n "$m" ] && [ "$m" != "null" ]; then
+                echo "$m"
+                return 0
+              fi
+
+              has_next=$(echo "$page" | jq -r '.data.repository.discussion.comments.pageInfo.hasNextPage')
+              [ "$has_next" != "true" ] && return 0
+              after=$(echo "$page" | jq -r '.data.repository.discussion.comments.pageInfo.endCursor')
+            done
+          }
+
           DISCORD_MSG_ID=""
           MARKER_COMMENT_ID=""
-
-          while IFS= read -r line; do
-            COMMENT_AUTHOR=$(echo "$line" | jq -r '.author.login')
-            COMMENT_BODY=$(echo "$line" | jq -r '.body')
-            COMMENT_ID=$(echo "$line" | jq -r '.id')
-
-            if [ "$COMMENT_AUTHOR" = "github-actions[bot]" ] && echo "$COMMENT_BODY" | grep -qP '^<!-- discord-msg-id:[0-9]+ -->\s*$'; then
-              DISCORD_MSG_ID=$(echo "$COMMENT_BODY" | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
-              MARKER_COMMENT_ID="$COMMENT_ID"
-              break
-            fi
-          done < <(echo "$DISCUSSION" | jq -c '.comments.nodes[]')
+          MARKER=$(find_marker)
+          if [ -n "$MARKER" ] && [ "$MARKER" != "null" ]; then
+            DISCORD_MSG_ID=$(echo "$MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+            MARKER_COMMENT_ID=$(echo "$MARKER" | jq -r '.id')
+          fi
 
           WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
           WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
@@ -192,19 +227,8 @@ jobs:
               "${DISCORD_WEBHOOK_URL}?wait=true")
             NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-            # ── Race guard: re-query comments for a marker created by a concurrent run ──
-            RACE_RESULT=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){
-              repository(owner:$owner,name:$name){
-                discussion(number:$number){
-                  comments(last:20){ nodes{ id body author{ login } } }
-                }
-              }
-            }' -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER")
-
-            EXISTING_MARKER=$(echo "$RACE_RESULT" | jq -r '
-              [.data.repository.discussion.comments.nodes[]
-                | select(.author.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
-              ] | first // empty')
+            # ── Race guard: re-search for a marker created by a concurrent run ──
+            EXISTING_MARKER=$(find_marker)
 
             if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
               # Another run won the race — delete our duplicate message, use theirs

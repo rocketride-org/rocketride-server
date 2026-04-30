@@ -364,23 +364,12 @@ class EventMixin(DAPClient):
                 'apaevt_status_error'
             ])
         """
-        # Build event subscription request
-        arguments: Dict[str, Any] = {'types': event_types}
+        # Build event subscription args
+        args: Dict[str, Any] = {'types': event_types}
         if pipe_id is not None:
-            arguments['pipeId'] = pipe_id
-        request = self.build_request(
-            command='rrext_monitor',
-            arguments=arguments,
-            token=token,
-        )
+            args['pipeId'] = pipe_id
 
-        # Send to server
-        response = await self.request(request)
-
-        # Check for errors
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Event subscription failed')
-            raise RuntimeError(error_msg)
+        await self.call('rrext_monitor', token=token, **args)
 
     # =========================================================================
     # MONITOR SUBSCRIPTION MANAGEMENT
@@ -458,7 +447,7 @@ class EventMixin(DAPClient):
         merged_types = list(ref_counts.keys())
 
         if 'token' in key:
-            await self.dap_request('rrext_monitor', {'types': merged_types}, token=key['token'])
+            await self.call('rrext_monitor', token=key['token'], types=merged_types)
         else:
             args: Dict[str, Any] = {
                 'projectId': key['project_id'],
@@ -467,7 +456,7 @@ class EventMixin(DAPClient):
             }
             if 'pipe_id' in key and key['pipe_id'] is not None:
                 args['pipeId'] = key['pipe_id']
-            await self.dap_request('rrext_monitor', args)
+            await self.call('rrext_monitor', **args)
 
     async def _resubscribe_all_monitors(self) -> None:
         """

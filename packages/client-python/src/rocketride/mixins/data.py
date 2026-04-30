@@ -174,7 +174,7 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Your pipeline is not currently running.'))
+                raise RuntimeError(response.get('message') or 'Your pipeline is not currently running.')
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True

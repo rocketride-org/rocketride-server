@@ -1,40 +1,27 @@
 // =============================================================================
 // MIT License
 // Copyright (c) 2026 Aparavi Software AG
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 // =============================================================================
 
 /**
- * remote-manager.ts - Remote Backend Manager (cloud, on-prem, service, etc.)
+ * remote-manager.ts - Remote Backend Manager (cloud, docker, service, on-prem)
  *
  * Handles credential validation and client connection for remote server modes.
  * No engine process to manage:
  *
  *   connect    → validate credentials → connect client
  *   disconnect → disconnect client
+ *
+ * Cloud mode uses the CloudAuthProvider token (rr_* persistent key).
+ * Docker/Service modes use the env-derived API key (default MYAPIKEY).
+ * On-prem mode uses the user-provided API key.
  */
 
 import { RocketRideClient } from 'rocketride';
 import { BaseManager, ManagerInfo } from './base-manager';
 import { ConfigManagerInfo } from '../config';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 // =============================================================================
 // MANAGER
@@ -49,11 +36,25 @@ export class RemoteManager extends BaseManager {
 		if (!config.hostUrl) {
 			throw new Error('Host URL is required for remote connections. Configure it in Settings.');
 		}
-		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
-			throw new Error('API key is required for cloud connections. Configure it in Settings.');
+
+		// Cloud mode: use the stored cloud token (rr_* persistent key)
+		if (connectionModeUsesOAuth(config.connectionMode)) {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			const token = await cloudAuth.getToken();
+			if (!token) {
+				throw new Error('Not signed in to RocketRide Cloud. Open Settings and click Sign In.');
+			}
+			await client.connect(token, { uri: config.hostUrl });
+			return;
 		}
 
-		await client.connect({ uri: config.hostUrl, auth: config.apiKey });
+		// On-prem: user-provided API key
+		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
+			throw new Error('API key is required for on-prem connections. Configure it in Settings.');
+		}
+
+		// Docker, Service, On-prem: use config.apiKey (auto-derived or user-provided)
+		await client.connect(config.apiKey, { uri: config.hostUrl });
 	}
 
 	async disconnect(client: RocketRideClient): Promise<void> {
