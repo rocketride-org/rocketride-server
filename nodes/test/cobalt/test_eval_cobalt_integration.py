@@ -63,7 +63,8 @@ pytestmark = pytest.mark.integration
 # here — the point of these tests is to exercise the real library path.
 # ---------------------------------------------------------------------------
 
-_NODES_DIR = str(pathlib.Path(__file__).resolve().parents[2] / 'nodes' / 'src' / 'nodes')
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_NODES_DIR = str(_REPO_ROOT / 'nodes' / 'src' / 'nodes')
 
 _rocketlib = ModuleType('rocketlib')
 _rocketlib.IGlobalBase = type('IGlobalBase', (), {})
@@ -76,6 +77,8 @@ _ai_mod = ModuleType('ai')
 _ai_common = ModuleType('ai.common')
 _ai_common_config = ModuleType('ai.common.config')
 _ai_common_schema = ModuleType('ai.common.schema')
+_ai_mod.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai')]
+_ai_common.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common')]
 
 
 class _StubConfig:
@@ -85,6 +88,7 @@ class _StubConfig:
 
 
 _ai_common_config.Config = _StubConfig
+_ai_common.config = _ai_common_config
 
 
 class _StubAnswer:
@@ -105,7 +109,38 @@ class _StubAnswer:
         return self.expectJson
 
 
+class _StubQuestion:
+    def __init__(self, **kwargs):  # noqa: D107
+        self.questions = []
+        self.context = []
+        self.instructions = []
+        self.history = []
+        self.examples = []
+        self.documents = []
+        self.goals = []
+        self.metadata = {}
+
+    def addQuestion(self, text):
+        self.questions.append(text)
+
+    def addContext(self, ctx):
+        self.context.append(ctx)
+
+
+class _StubQuestionText:
+    def __init__(self, text=''):  # noqa: D107
+        self.text = text
+
+
 _ai_common_schema.Answer = _StubAnswer
+_ai_common_schema.Question = _StubQuestion
+_ai_common_schema.QuestionText = _StubQuestionText
+_ai_common_schema.QuestionType = type('QuestionType', (), {'QUESTION': 'question'})()
+_ai_common_schema.Doc = MagicMock
+_ai_common_schema.DocFilter = MagicMock
+_ai_common_schema.DocMetadata = MagicMock
+_ai_common_schema.DocGroup = MagicMock
+_ai_common.schema = _ai_common_schema
 
 _STUB_MODULES = {
     'rocketlib': _rocketlib,

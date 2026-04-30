@@ -42,7 +42,8 @@ from unittest.mock import MagicMock, patch
 # that may need the real packages.
 # ---------------------------------------------------------------------------
 
-_NODES_DIR = str(pathlib.Path(__file__).resolve().parents[2] / 'nodes' / 'src' / 'nodes')
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_NODES_DIR = str(_REPO_ROOT / 'nodes' / 'src' / 'nodes')
 
 # Build the mock module map once — entries are shared across the session
 # but only installed in sys.modules while the patch is active.
@@ -60,6 +61,8 @@ _ai_mod = ModuleType('ai')
 _ai_common = ModuleType('ai.common')
 _ai_common_config = ModuleType('ai.common.config')
 _ai_common_schema = ModuleType('ai.common.schema')
+_ai_mod.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai')]
+_ai_common.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common')]
 
 
 class MockConfig:
@@ -69,6 +72,7 @@ class MockConfig:
 
 
 _ai_common_config.Config = MockConfig
+_ai_common.config = _ai_common_config
 
 
 class MockAnswer:
@@ -115,10 +119,19 @@ class _SharedMockQuestion:
         self.context.append(ctx)
 
 
+class _SharedMockQuestionText:
+    def __init__(self, text=''):  # noqa: D107
+        self.text = text
+
+
 _ai_common_schema.Question = _SharedMockQuestion
+_ai_common_schema.QuestionText = _SharedMockQuestionText
+_ai_common_schema.QuestionType = type('QuestionType', (), {'QUESTION': 'question'})()
 _ai_common_schema.Doc = MagicMock
 _ai_common_schema.DocFilter = MagicMock
 _ai_common_schema.DocMetadata = MagicMock
+_ai_common_schema.DocGroup = MagicMock
+_ai_common.schema = _ai_common_schema
 
 _depends_mod = ModuleType('depends')
 _depends_mod.depends = MagicMock()
@@ -129,6 +142,13 @@ _depends_mod.depends = MagicMock()
 
 _rocketride_pkg = ModuleType('rocketride')
 _rocketride_pkg.Answer = MockAnswer
+_rocketride_pkg.Question = _SharedMockQuestion
+_rocketride_pkg.QuestionText = _SharedMockQuestionText
+_rocketride_pkg.QuestionType = _ai_common_schema.QuestionType
+_rocketride_pkg.Doc = MagicMock
+_rocketride_pkg.DocFilter = MagicMock
+_rocketride_pkg.DocMetadata = MagicMock
+_rocketride_pkg.DocGroup = MagicMock
 
 _MOCK_MODULES = {
     'rocketlib': _rocketlib,

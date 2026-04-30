@@ -39,7 +39,8 @@ import pytest
 # eval_cobalt, ...). Adding it to sys.path lets us `import dataset_cobalt.*`
 # directly, bypassing the top-level `nodes/__init__.py` which would otherwise
 # try to `from depends import depends` and fail outside the engine runtime.
-_NODES_DIR = str(pathlib.Path(__file__).resolve().parents[2] / 'nodes' / 'src' / 'nodes')
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_NODES_DIR = str(_REPO_ROOT / 'nodes' / 'src' / 'nodes')
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,8 @@ def _install_mocks():
     mock_ai_common = ModuleType('ai.common')
     mock_ai_common_config = ModuleType('ai.common.config')
     mock_ai_common_schema = ModuleType('ai.common.schema')
+    mock_ai.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai')]
+    mock_ai_common.__path__ = [str(_REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common')]
 
     class _MockConfig:
         @staticmethod
@@ -158,11 +161,18 @@ def _install_mocks():
         def addContext(self, ctx):
             self.context.append(ctx)
 
+    class _MockQuestionText:
+        def __init__(self, text=''):
+            self.text = text
+
     mock_ai_common_schema.Question = _MockQuestion
+    mock_ai_common_schema.QuestionText = _MockQuestionText
+    mock_ai_common_schema.QuestionType = type('QuestionType', (), {'QUESTION': 'question'})()
     mock_ai_common_schema.Answer = MagicMock
     mock_ai_common_schema.Doc = MagicMock
     mock_ai_common_schema.DocFilter = MagicMock
     mock_ai_common_schema.DocMetadata = MagicMock
+    mock_ai_common_schema.DocGroup = MagicMock
 
     sys.modules['ai'] = mock_ai
     sys.modules['ai.common'] = mock_ai_common
@@ -171,6 +181,14 @@ def _install_mocks():
 
     # Mock rocketride (used by ai.common.schema re-exports)
     mock_rocketride = ModuleType('rocketride')
+    mock_rocketride.Question = _MockQuestion
+    mock_rocketride.QuestionText = _MockQuestionText
+    mock_rocketride.QuestionType = mock_ai_common_schema.QuestionType
+    mock_rocketride.Answer = MagicMock
+    mock_rocketride.Doc = MagicMock
+    mock_rocketride.DocFilter = MagicMock
+    mock_rocketride.DocMetadata = MagicMock
+    mock_rocketride.DocGroup = MagicMock
     sys.modules['rocketride'] = mock_rocketride
 
     # Mock json5 (used by ai.common.config internally)
