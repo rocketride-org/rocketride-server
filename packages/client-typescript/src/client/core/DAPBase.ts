@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -27,19 +27,19 @@ import { TransportBase } from './TransportBase.js';
 
 /**
  * Base class for DAP (Debug Adapter Protocol) components.
- * 
+ *
  * Provides standardized logging, error handling, message building, and debugging
  * capabilities for all DAP-based components. This class handles the low-level
  * details of the protocol including message sequencing, request/response correlation,
  * and transport binding.
- * 
+ *
  * Key responsibilities:
  * - Message sequence number generation
  * - Transport layer binding and lifecycle management
  * - Debug logging and protocol tracing
  * - Error handling and exception building
  * - Request/Response message construction
- * 
+ *
  * @abstract This class is meant to be extended by specific DAP implementations
  */
 export class DAPBase {
@@ -88,22 +88,18 @@ export class DAPBase {
 
 	/**
 	 * Attempt to call a specific method, falling back to a default method.
-	 * 
+	 *
 	 * This is a utility method for dynamic method dispatch based on message commands.
 	 * It first tries to call a specific handler method, then falls back to a default
 	 * handler if the specific one doesn't exist.
-	 * 
+	 *
 	 * @param message - The DAP message to be handled
 	 * @param methodName - Name of the specific handler method to try
 	 * @param defaultName - Name of the default fallback method
 	 * @returns Tuple of [handled: boolean, result: any]
 	 * @protected
 	 */
-	protected async _callMethod(
-		message: DAPMessage,
-		methodName?: string,
-		defaultName?: string
-	): Promise<[boolean, unknown]> {
+	protected async _callMethod(message: DAPMessage, methodName?: string, defaultName?: string): Promise<[boolean, unknown]> {
 		try {
 			// Dynamic dispatch to handler methods by name
 			const self = this as unknown as Record<string, ((msg: DAPMessage) => Promise<unknown>) | undefined>;
@@ -247,7 +243,10 @@ export class DAPBase {
 		};
 
 		if (options.token !== undefined) {
-			request.token = options.token;
+			if (!options.arguments) {
+				options.arguments = {};
+			}
+			options.arguments.token = options.token;
 		}
 
 		if (options.arguments !== undefined) {

@@ -58,6 +58,10 @@ ci/cd:
   - changed-files:
       - any-glob-to-any-file: ".github/**"
 
+docker:
+  - changed-files:
+      - any-glob-to-any-file: "docker/**"
+
 builder:
   - changed-files:
       - any-glob-to-any-file: "**/scripts/**"

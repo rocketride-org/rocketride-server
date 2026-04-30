@@ -59,7 +59,13 @@ from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
 
 
 class TraceInfo(TypedDict):
-    """Stack trace information for errors."""
+    """
+    Stack trace information attached to error responses.
+
+    Attributes:
+        file (str): The source file path where the error originated.
+        lineno (int): The line number within that source file.
+    """
 
     file: str
     lineno: int
@@ -120,6 +126,12 @@ class ConnectionInfo(TypedDict):
     auth: Optional[str]  # Authentication token or API key - OPTIONAL
 
 
+# =============================================================================
+# CALLBACK TYPE ALIASES
+# These Callable type aliases are not TypedDicts; they are simple type aliases
+# used to annotate callback parameters and attributes across the SDK.
+# =============================================================================
+
 # Type aliases for callback functions
 """
 Callback function for handling real-time events from the server.
@@ -172,3 +184,77 @@ class RocketRideClientConfig(TypedDict, total=False):
     persist: bool  # Enable automatic reconnection with exponential backoff (default: False)
     request_timeout: float  # Default timeout in ms for individual requests (default: None/no timeout)
     max_retry_time: float  # Max total time in ms to keep retrying connections (default: None/forever)
+
+
+# =============================================================================
+# CONNECT RESULT — returned by connect() after successful authentication
+# =============================================================================
+
+
+class TeamInfo(TypedDict):
+    """
+    Information about a single team within an organisation.
+
+    Attributes:
+        id (str): Unique identifier for the team.
+        name (str): Human-readable display name.
+        permissions (list[str]): Permission strings granted to this team.
+    """
+
+    id: str
+    name: str
+    permissions: list[str]
+
+
+class OrgInfo(TypedDict):
+    """
+    Information about a single organisation the authenticated user belongs to.
+
+    Attributes:
+        id (str): Unique identifier for the organisation.
+        name (str): Human-readable display name.
+        permissions (list[str]): Permission strings granted at the org level.
+        teams (list[TeamInfo]): Teams within this organisation that the user is a member of.
+    """
+
+    id: str
+    name: str
+    permissions: list[str]
+    teams: list[TeamInfo]
+
+
+class ConnectResult(TypedDict, total=False):
+    """
+    Full identity payload returned by the server after a successful authentication handshake.
+
+    All fields are optional (total=False) because older server versions may omit some.
+
+    Attributes:
+        userToken (str): A durable ``rr_`` prefixed token the SDK persists for reconnection.
+        userId (str): Unique identifier of the authenticated user.
+        displayName (str): Full display name (e.g. "Jane Smith").
+        givenName (str): First / given name.
+        familyName (str): Last / family name.
+        preferredUsername (str): Preferred short username or handle.
+        email (str): Primary email address.
+        emailVerified (bool): True when the email address has been verified.
+        phoneNumber (str): Primary phone number in E.164 format.
+        phoneNumberVerified (bool): True when the phone number has been verified.
+        locale (str): BCP-47 locale tag (e.g. "en-US").
+        defaultTeam (str): ID of the team selected as the default context.
+        organizations (list[OrgInfo]): All organisations the user belongs to.
+    """
+
+    userToken: str
+    userId: str
+    displayName: str
+    givenName: str
+    familyName: str
+    preferredUsername: str
+    email: str
+    emailVerified: bool
+    phoneNumber: str
+    phoneNumberVerified: bool
+    locale: str
+    defaultTeam: str
+    organizations: list[OrgInfo]

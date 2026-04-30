@@ -1,0 +1,111 @@
+{
+  "viewport": {
+    "x": 357.46677897684583,
+    "y": 437.02902095429033,
+    "zoom": 0.8615776538016763
+  },
+  "name": "Text File To Audio",
+  "description": "Receives a text file from Dropper, parses text, converts to speech, and plays audio.",
+  "components": [
+    {
+      "id": "parse_1",
+      "provider": "parse",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": -140,
+          "y": -60
+        },
+        "measured": {
+          "width": 150,
+          "height": 136
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "dropper_1"
+        }
+      ]
+    },
+    {
+      "id": "audio_player_1",
+      "provider": "audio_player",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 430,
+          "y": -60
+        },
+        "measured": {
+          "width": 150,
+          "height": 84
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "audio",
+          "from": "audio_tts_1"
+        }
+      ]
+    },
+    {
+      "id": "dropper_1",
+      "provider": "dropper",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper"
+      },
+      "ui": {
+        "position": {
+          "x": -367.52183133054217,
+          "y": -121.33316496341175
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "audio_tts_1",
+      "provider": "audio_tts",
+      "config": {
+        "profile": "kokoro",
+        "kokoro": {
+          "kokoro_voice": "am_fenrir"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 105,
+          "y": -15
+        },
+        "measured": {
+          "width": 150,
+          "height": 76
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parse_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "d3ec9e98-4011-4074-8a4d-d280394fe22a",
+  "version": 1,
+  "docRevision": 206,
+  "source": "dropper_1"
+}

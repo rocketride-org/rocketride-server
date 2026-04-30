@@ -388,6 +388,11 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
                     // Add this component, someone is invoking it
                     if (auto ccode = addComponent(component)) return ccode;
 
+                    // Also walk downstream data-flow connections from this
+                    // control component so that sub-pipeline nodes (connected
+                    // via input lanes from this node) are included in the stack
+                    if (auto ccode = walkComponents(compId)) return ccode;
+
                     // We added it, so start over again
                     bAdded = true;
                     break;

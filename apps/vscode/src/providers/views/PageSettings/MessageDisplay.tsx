@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React, { useEffect, useRef, CSSProperties } from 'react';
-import { MessageData } from './PageSettings';
+import { MessageData } from './SettingsWebview';
 
 // ============================================================================
 // TYPES

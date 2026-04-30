@@ -226,7 +226,7 @@ def pytest_generate_tests(metafunc):
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
         #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
-        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama).
+        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
         skip_nodes = {
             'anonymize',
             'ocr',
@@ -235,6 +235,7 @@ def pytest_generate_tests(metafunc):
             'image_cleanup',
             'frame_grabber',
             'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
+            'audio_tts',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
         }
