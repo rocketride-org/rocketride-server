@@ -105,11 +105,6 @@
 					"default": "",
 					"description": "Additional arguments passed to the engine subprocess"
 				},
-				"rocketride.autoConnect": {
-					"type": "boolean",
-					"default": true,
-					"description": "Automatically connect to RocketRide server when extension activates"
-				},
 				"rocketride.welcomeDismissed": {
 					"type": "boolean",
 					"default": false,
@@ -159,11 +154,6 @@
 					"type": "string",
 					"default": "",
 					"description": "Host URL for on-prem deploy target (separate from dev connection)"
-				},
-				"rocketride.deployAutoConnect": {
-					"type": "boolean",
-					"default": false,
-					"description": "Automatically connect to the deploy target when extension starts"
 				},
 				"rocketride.deploy.local.engineVersion": {
 					"type": "string",

@@ -45,7 +45,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage, TraceType } from 'rocketride';
+import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../config';
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
@@ -127,7 +127,8 @@ export class ConnectionManager extends EventEmitter {
 				return;
 			}
 
-			// Debounce: the settings page saves each setting individually
+			// Debounce: handles direct settings.json edits or individual
+			// config changes from outside the Settings UI.
 			if (this.configChangeTimeout) {
 				clearTimeout(this.configChangeTimeout);
 			}
@@ -153,6 +154,21 @@ export class ConnectionManager extends EventEmitter {
 		await this.initialize();
 	}
 
+	/**
+	 * Called by the Settings UI after applyAllSettings() to explicitly drive
+	 * this connection into its new desired state.  Same logic as the debounced
+	 * config-change handler, but invoked deterministically after all settings
+	 * have been written.
+	 */
+	public async settingsApplied(): Promise<void> {
+		// Cancel any pending debounced handler — we're taking over
+		if (this.configChangeTimeout) {
+			clearTimeout(this.configChangeTimeout);
+			this.configChangeTimeout = undefined;
+		}
+		await this.handleConfigurationChanged();
+	}
+
 	// =========================================================================
 	// CONFIG ACCESSORS (override in subclass for deploy-specific keys)
 	// =========================================================================
@@ -163,14 +179,6 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	protected getEffectiveConnectionMode(): ConnectionMode {
 		return this.configManager.getConfig().connectionMode;
-	}
-
-	/**
-	 * Returns whether auto-connect is enabled for this manager.
-	 * DeployManager overrides to return `deployAutoConnect`.
-	 */
-	protected getEffectiveAutoConnect(): boolean {
-		return this.configManager.getConfig().autoConnect;
 	}
 
 	/**
@@ -199,7 +207,6 @@ export class ConnectionManager extends EventEmitter {
 		return {
 			...config,
 			connectionMode: this.getEffectiveConnectionMode(),
-			autoConnect: this.getEffectiveAutoConnect(),
 			hostUrl: this.getEffectiveHostUrl(),
 			apiKey: this.getEffectiveApiKey(),
 		};
@@ -230,7 +237,7 @@ export class ConnectionManager extends EventEmitter {
 			connectionMode: this.getEffectiveConnectionMode(),
 		});
 
-		if (this.getEffectiveAutoConnect() && this.connectionStatus.hasCredentials) {
+		if (this.connectionStatus.hasCredentials) {
 			await this.connect();
 		}
 	}
@@ -289,10 +296,36 @@ export class ConnectionManager extends EventEmitter {
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
 				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
 				this.clearServicesCache();
-				this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+				// Don't overwrite AUTH_FAILED — the user needs to see the sign-in prompt,
+				// not a misleading "Connecting..." spinner.
+				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
+					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+				}
 				this.emit('disconnected');
 			},
 			onConnectError: (error: Error) => {
+				// Auth rejection: stop retrying, clear stale credentials, and
+				// open the auth page so the user can fix them.
+				if (error instanceof AuthenticationException) {
+					this.logger.output(`${icons.error} Authentication failed: ${error.message}`);
+					const mode = this.connectionStatus.connectionMode;
+
+					// Only clear the cloud token — on-prem/docker/service keys
+					// live in config, not SecretStorage.
+					if (connectionModeUsesOAuth(mode)) {
+						CloudAuthProvider.getInstance().signOut();
+					}
+
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError: error.message,
+						progressMessage: undefined,
+					});
+
+					// Open the auth page with the mode so it shows the right form
+					vscode.commands.executeCommand('rocketride.page.auth.open', mode, error.message);
+					return;
+				}
 				this.logger.output(`${icons.info} Reconnect attempt failed: ${error.message}`);
 				this.updateConnectionStatus({
 					progressMessage: 'Reconnecting...',
@@ -335,10 +368,15 @@ export class ConnectionManager extends EventEmitter {
 		if (this.connectPromise) {
 			return this.connectPromise;
 		}
-		this.connectPromise = this._connect().finally(() => {
-			this.connectPromise = undefined;
+		const promise = this._connect().finally(() => {
+			// Only clear if we're still the active promise — disconnect() may
+			// have cleared it to allow a new connect() with different config.
+			if (this.connectPromise === promise) {
+				this.connectPromise = undefined;
+			}
 		});
-		return this.connectPromise;
+		this.connectPromise = promise;
+		return promise;
 	}
 
 	private async _connect(): Promise<void> {
@@ -387,6 +425,10 @@ export class ConnectionManager extends EventEmitter {
 	public async disconnect(): Promise<void> {
 		this.logger.output(`${icons.warning} Disconnected from RocketRide by request`);
 
+		// Clear in-flight connect guard so the next connect() starts fresh
+		// rather than returning a stale promise from the old mode.
+		this.connectPromise = undefined;
+
 		// Cancel any in-flight engine download
 		this.engineCts?.cancel();
 		this.engineCts?.dispose();
@@ -402,6 +444,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
+			progressMessage: undefined,
 		});
 	}
 

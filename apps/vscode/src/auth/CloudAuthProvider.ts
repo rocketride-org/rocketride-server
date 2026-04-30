@@ -23,7 +23,7 @@
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
-import { ConfigManager } from '../config';
+
 import { EventEmitter } from 'events';
 
 // =============================================================================
@@ -80,7 +80,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	async signIn(zitadelUrl: string, clientId: string): Promise<void> {
 		if (!zitadelUrl || !clientId) {
-			vscode.window.showErrorMessage('RocketRide Cloud sign-in requires RR_ZITADEL_URL and RR_ZITADEL_CLIENT_ID.');
+			vscode.window.showErrorMessage('RocketRide Cloud sign-in required.');
 			return;
 		}
 
@@ -117,9 +117,12 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		// Exchange the code for a persistent rr_* token using a temporary
 		// client connection. This is auth only — not a persistent connection.
 		try {
-			const config = ConfigManager.getInstance().getConfig();
+			// Always use the cloud URI for token exchange -- the OAuth code must
+			// be exchanged against the cloud server regardless of the current
+			// connection mode (local, docker, etc.).
+			const cloudUrl = process.env.ROCKETRIDE_URI || '';
 			const tempClient = new RocketRideClient({ persist: false });
-			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: config.hostUrl });
+			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
 
 			const token = (result as any)?.userToken || '';
 			const displayName = (result as any)?.displayName || '';

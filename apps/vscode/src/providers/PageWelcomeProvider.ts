@@ -27,24 +27,24 @@
  * Shows a branded welcome/setup page on first install. Delays engine download
  * and connection until the user explicitly configures and confirms their setup.
  *
- * The page auto-opens until the user dismisses it or completes setup. The
- * user setting 'rocketride.welcomeDismissed' persists the dismissal. Users
- * can reset it to false in Settings to re-show the welcome page.
+ * The page auto-opens until the user unchecks "Show welcome page on startup".
+ * The user setting 'rocketride.welcomeDismissed' persists this preference.
+ *
+ * Connection-related messages (cloud auth, docker/service lifecycle, engine
+ * versions, test connection) are delegated to the shared ConnectionMessageHandler.
  */
 
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
 import { getConnectionManager } from '../extension';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
-import { EngineInstaller } from '../connection/engine-installer';
+import { ConnectionMessageHandler } from './shared/connection-message-handler';
 
 const DISMISSED_KEY = 'welcomeDismissed';
 
 export class PageWelcomeProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager: ConfigManager;
-	private engineInstaller: EngineInstaller;
+	private connHandler: ConnectionMessageHandler;
 	private panel: vscode.WebviewPanel | undefined;
 
 	constructor(
@@ -52,7 +52,10 @@ export class PageWelcomeProvider {
 		private readonly extensionUri: vscode.Uri
 	) {
 		this.configManager = ConfigManager.getInstance();
-		this.engineInstaller = new EngineInstaller(extensionUri.fsPath);
+		this.connHandler = new ConnectionMessageHandler({
+			extensionFsPath: extensionUri.fsPath,
+			getActiveWebviews: () => (this.panel ? [this.panel.webview] : []),
+		});
 		this.registerCommands();
 	}
 
@@ -85,26 +88,21 @@ export class PageWelcomeProvider {
 		this.panel.webview.html = this.getHtmlForWebview(this.panel.webview);
 
 		const messageDisposable = this.panel.webview.onDidReceiveMessage(async (message) => {
+			if (!this.panel) return;
 			try {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendCurrentSettings();
+						await this.connHandler.probeServerInfo(this.panel.webview);
+						await this.connHandler.startStatusPolling();
 						break;
 
 					case 'saveAndConnect':
 						await this.saveAndConnect(message.settings);
 						break;
 
-					case 'dismiss':
-						await this.dismiss();
-						break;
-
-					case 'testConnection':
-						await this.testConnection(message.settings);
-						break;
-
 					case 'openSettings':
-						await this.dismiss();
+						this.panel?.dispose();
 						vscode.commands.executeCommand('rocketride.page.settings.open');
 						break;
 
@@ -114,19 +112,40 @@ export class PageWelcomeProvider {
 						}
 						break;
 
-					case 'fetchEngineVersions':
-						await this.fetchEngineVersions();
+					case 'setShowOnStartup':
+						await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, !message.show, vscode.ConfigurationTarget.Global);
 						break;
+
+					default: {
+						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)
+						const handled = await this.connHandler.handleMessage(message, this.panel.webview);
+						if (handled) break;
+
+						console.warn('[PageWelcomeProvider] Unhandled message type:', message.type);
+						break;
+					}
 				}
 			} catch (error) {
 				console.error('[PageWelcomeProvider] Message handling error:', error);
-				this.showMessage('error', `Error: ${error}`);
+				const msgType = message.type as string;
+				if (msgType.startsWith('docker')) {
+					this.panel?.webview.postMessage({ type: 'dockerError', message: `${error}` });
+				} else if (msgType.startsWith('service')) {
+					this.panel?.webview.postMessage({ type: 'serviceError', message: `${error}` });
+				} else {
+					this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Error: ${error}` });
+				}
 			}
 		});
 
 		this.disposables.push(messageDisposable);
 
+		const panelWebview = this.panel.webview;
+		const cleanupCloudAuth = this.connHandler.registerCloudAuthListener(panelWebview);
+
 		this.panel.onDidDispose(() => {
+			cleanupCloudAuth();
+			this.connHandler.stopStatusPolling();
 			this.panel = undefined;
 			const index = this.disposables.indexOf(messageDisposable);
 			if (index !== -1) {
@@ -163,14 +182,17 @@ export class PageWelcomeProvider {
 				hostUrl: workspaceConfig.get('hostUrl', 'http://localhost:5565'),
 				apiKey,
 				hasApiKey: this.configManager.hasApiKey(),
-				autoConnect: workspaceConfig.get('autoConnect', true),
 				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
 				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
+				localEngineArgs: workspaceConfig.get('engineArgs', ''),
+				localDebugOutput: workspaceConfig.get('local.debugOutput', false),
+				showOnStartup: !this.isDismissed(),
+				developmentTeamId: workspaceConfig.get('developmentTeamId', ''),
 			},
 		});
 	}
 
-	/** Save settings, start connection, dismiss the welcome page */
+	/** Save settings, start connection, close the welcome page */
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
 			const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
@@ -181,14 +203,20 @@ export class PageWelcomeProvider {
 			if (settings.hostUrl !== undefined) {
 				await workspaceConfig.update('hostUrl', settings.hostUrl, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.autoConnect !== undefined) {
-				await workspaceConfig.update('autoConnect', settings.autoConnect, vscode.ConfigurationTarget.Global);
-			}
 			if (settings.localEngineVersion !== undefined) {
 				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
 			}
+			if (settings.localEngineArgs !== undefined) {
+				await workspaceConfig.update('engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.localDebugOutput !== undefined) {
+				await workspaceConfig.update('local.debugOutput', settings.localDebugOutput, vscode.ConfigurationTarget.Global);
+			}
 			if (settings.autoAgentIntegration !== undefined) {
 				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.developmentTeamId !== undefined) {
+				await workspaceConfig.update('developmentTeamId', settings.developmentTeamId, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save API key to secure storage
@@ -200,9 +228,6 @@ export class PageWelcomeProvider {
 				}
 			}
 
-			// Mark dismissed
-			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
-
 			// Close panel
 			this.panel?.dispose();
 
@@ -213,126 +238,8 @@ export class PageWelcomeProvider {
 			});
 		} catch (error) {
 			console.error('[PageWelcomeProvider] Failed to save settings:', error);
-			this.showMessage('error', `Failed to save settings: ${error}`);
+			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save settings: ${error}` });
 		}
-	}
-
-	/** Dismiss without configuring */
-	private async dismiss(): Promise<void> {
-		await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
-		this.panel?.dispose();
-	}
-
-	/** Test connection with provided form settings */
-	private async testConnection(formSettings: Record<string, unknown>): Promise<void> {
-		let testClient: RocketRideClient | undefined;
-
-		try {
-			this.showMessage('info', 'Testing connection...');
-
-			const connectionMode = (formSettings.connectionMode as string) || 'cloud';
-			let hostUrl = (formSettings.hostUrl as string)?.trim() || '';
-			if (connectionMode === 'cloud' && !hostUrl) hostUrl = 'https://cloud.rocketride.ai';
-			if (connectionMode === 'local' && !hostUrl) hostUrl = 'http://localhost:5565';
-
-			// Normalize bare hostnames into parseable URLs (protocol, default port)
-			hostUrl = RocketRideClient.normalizeUri(hostUrl);
-
-			let parsedUrl: URL;
-			try {
-				parsedUrl = new URL(hostUrl);
-			} catch {
-				this.showMessage('error', 'Invalid URL format. Please enter a valid URL or port.');
-				return;
-			}
-
-			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : parsedUrl.protocol === 'https:' ? 443 : 80;
-			if (port < 1 || port > 65535) {
-				this.showMessage('error', `Invalid port number: ${port}. Port must be between 1 and 65535.`);
-				return;
-			}
-
-			const needsApiKey = connectionModeRequiresApiKey(connectionMode);
-			let apiKey = 'MYAPIKEY';
-			if (needsApiKey) {
-				apiKey = typeof formSettings.apiKey === 'string' ? formSettings.apiKey.trim() : '';
-				if (!apiKey) {
-					const config = this.configManager.getConfig();
-					apiKey = config.apiKey;
-				}
-				if (!apiKey) {
-					this.showMessage('error', 'API key is required. Please enter your API key first.');
-					return;
-				}
-			}
-
-			testClient = new RocketRideClient({
-				auth: apiKey,
-				uri: hostUrl,
-				module: 'CONN-TST',
-				requestTimeout: 5000,
-			});
-
-			try {
-				await testClient.connect(undefined, { timeout: 8000 });
-			} catch (connectError) {
-				if (testClient) await testClient.disconnect();
-				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);
-				if (errorMessage.includes('ECONNREFUSED')) {
-					this.showMessage('error', `Connection refused. Server is not running at ${parsedUrl.host}.`);
-				} else if (errorMessage.includes('ENOTFOUND')) {
-					this.showMessage('error', `Server not found at ${parsedUrl.hostname}. Please check the URL.`);
-				} else if (errorMessage.includes('timeout')) {
-					this.showMessage('error', `Connection timed out. Server at ${parsedUrl.host} is not responding.`);
-				} else {
-					this.showMessage('error', `Failed to connect: ${errorMessage}`);
-				}
-				return;
-			}
-
-			try {
-				await testClient.ping();
-			} catch (pingError) {
-				await testClient.disconnect();
-				const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
-				this.showMessage('error', `Server connected but failed to respond: ${errorMessage}`);
-				return;
-			}
-
-			await testClient.disconnect();
-			this.showMessage('success', `Connection successful! ${parsedUrl.host} is responding correctly.`);
-		} catch (error) {
-			if (testClient)
-				testClient.disconnect().catch(() => {
-					/* ignore */
-				});
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.showMessage('error', `Connection test failed: ${errorMessage}`);
-		}
-	}
-
-	private async fetchEngineVersions(): Promise<void> {
-		if (!this.panel) return;
-
-		try {
-			let githubToken: string | undefined;
-			try {
-				const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
-				githubToken = session?.accessToken;
-			} catch {
-				/* ignore */
-			}
-
-			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
-			this.panel.webview.postMessage({ type: 'engineVersionsLoaded', versions });
-		} catch (error) {
-			console.error('[PageWelcomeProvider] Failed to fetch engine versions:', error);
-			this.panel.webview.postMessage({ type: 'engineVersionsLoaded', versions: [] });
-		}
-	}
-
-	private showMessage(level: string, message: string): void {
-		this.panel?.webview.postMessage({ type: 'showMessage', level, message });
 	}
 
 	private getHtmlForWebview(webview: vscode.Webview): string {
@@ -358,7 +265,7 @@ export class PageWelcomeProvider {
 				<div style="padding: 20px; color: #f44336;">
 					<h3>Error Loading Welcome View</h3>
 					<p><strong>Error:</strong> ${error}</p>
-					<p>Run <code>npm run build:webview</code> to build the webview.</p>
+					<p>Run <code>pnpm run build</code> to build the webview.</p>
 					<p>Expected: <code>${htmlPath.fsPath}</code></p>
 				</div>
 			</body>
@@ -376,6 +283,7 @@ export class PageWelcomeProvider {
 	}
 
 	public dispose(): void {
+		this.connHandler.dispose();
 		this.panel?.dispose();
 		this.disposables.forEach((d) => d.dispose());
 		this.disposables = [];

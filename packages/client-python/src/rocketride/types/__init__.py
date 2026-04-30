@@ -72,6 +72,7 @@ from .client import (
     TeamInfo,
     OrgInfo,
     ConnectResult,
+    ServerInfoResult,
 )
 
 # Pipeline types: the structures that describe a pipeline's topology — its
@@ -183,6 +184,7 @@ __all__ = [
     'TeamInfo',
     'OrgInfo',
     'ConnectResult',
+    'ServerInfoResult',
     # Pipeline types
     'PipelineInputConnection',
     'PipelineControlConnection',

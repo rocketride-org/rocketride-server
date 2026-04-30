@@ -83,22 +83,22 @@ class BillingApi:
         body = await self._client.call('rrext_account_billing', subcommand='list', orgId=org_id)
         return body.get('subscriptions', [])
 
-    async def get_product_prices(self, product_id: str) -> list[StripePlan]:
+    async def get_product_prices(self, app_id: str) -> list[StripePlan]:
         """
-        Fetch the active subscription plans (prices) for a Stripe product.
+        Fetch the active subscription plans (prices) for an app.
 
         Plans are returned sorted month-first, year-second, formatted for
-        display in the checkout plan picker. The server calls
-        ``stripe.Price.list()`` so pricing changes in the Stripe dashboard
-        are reflected immediately.
+        display in the checkout plan picker. The server resolves the app's
+        Stripe product internally and calls ``stripe.Price.list()`` so pricing
+        changes in the Stripe dashboard are reflected immediately.
 
         Args:
-            product_id: Stripe prod_* identifier from AppManifestEntry.stripeProductId.
+            app_id: App identifier (e.g. "rocketride.pipeBuilder").
 
         Returns:
             Array of StripePlan objects ready for display.
         """
-        body = await self._client.call('rrext_account_billing', subcommand='prices', productId=product_id)
+        body = await self._client.call('rrext_account_billing', subcommand='prices', appId=app_id)
         return body.get('plans', [])
 
     async def create_checkout_session(

@@ -42,7 +42,7 @@ export class RemoteManager extends BaseManager {
 			const cloudAuth = CloudAuthProvider.getInstance();
 			const token = await cloudAuth.getToken();
 			if (!token) {
-				throw new Error('Not signed in to RocketRide Cloud. Open Settings and click Sign In.');
+				throw new Error('Please sign in to RocketRide Cloud to connect.');
 			}
 			await client.connect(token, { uri: config.hostUrl });
 			return;

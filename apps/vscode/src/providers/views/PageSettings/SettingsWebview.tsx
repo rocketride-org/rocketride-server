@@ -33,6 +33,7 @@ import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
+import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
@@ -47,7 +48,6 @@ export interface SettingsData {
 	connectionMode: 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 	hasApiKey: boolean;
 	apiKey: string;
-	autoConnect: boolean;
 	defaultPipelinePath: string;
 	localEngineVersion: string;
 	localEngineArgs: string;
@@ -60,8 +60,6 @@ export interface SettingsData {
 	deployHostUrl: string;
 	/** Separate API key for deploy target (on-prem deploy) */
 	deployApiKey: string;
-	/** Auto-connect to deploy target on startup */
-	deployAutoConnect: boolean;
 	envVars?: Record<string, string>;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
@@ -242,7 +240,6 @@ export const PageSettings: React.FC = () => {
 		connectionMode: 'local',
 		hasApiKey: false,
 		apiKey: '', // Initialize empty - will be loaded from secure storage
-		autoConnect: true,
 		defaultPipelinePath: 'pipelines', // Initialize with default value
 		localEngineVersion: 'latest',
 		localEngineArgs: '',
@@ -252,7 +249,6 @@ export const PageSettings: React.FC = () => {
 		deployTargetTeamId: '',
 		deployHostUrl: '',
 		deployApiKey: '',
-		deployAutoConnect: false,
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
@@ -267,10 +263,32 @@ export const PageSettings: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
+	// Server capabilities (from probe)
+	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
+
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+
+	// Docker state
+	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
+	const [dockerProgress, setDockerProgress] = useState<string | null>(null);
+	const [dockerError, setDockerError] = useState<string | null>(null);
+	const [dockerBusy, setDockerBusy] = useState(false);
+	const [dockerAction, setDockerAction] = useState<'install' | 'update' | 'remove' | 'start' | 'stop' | null>(null);
+	const [dockerTags, setDockerTags] = useState<string[]>([]);
+	const [dockerSelectedVersion, setDockerSelectedVersion] = useState('latest');
+
+	// Service state
+	const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({ state: 'not-installed', version: null, publishedAt: null, installPath: null });
+	const [serviceProgress, setServiceProgress] = useState<string | null>(null);
+	const [serviceError, setServiceError] = useState<string | null>(null);
+	const [serviceBusy, setServiceBusy] = useState(false);
+	const [serviceAction, setServiceAction] = useState<'install' | 'update' | 'remove' | 'start' | 'stop' | null>(null);
+	const [serviceSelectedVersion, setServiceSelectedVersion] = useState('latest');
+	const [sudoPromptVisible, setSudoPromptVisible] = useState(false);
+	const [sudoPasswordInput, setSudoPasswordInput] = useState('');
 
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
@@ -311,6 +329,10 @@ export const PageSettings: React.FC = () => {
 					if ((message as any).focus) setActiveTab((message as any).focus);
 					break;
 
+				case 'serverInfo' as any:
+					setServerCapabilities((message as any).capabilities || []);
+					break;
+
 				case 'showMessage': {
 					const msg = { level: message.level, message: message.message };
 					const clearAfter = message.level === 'success' ? 5000 : undefined;
@@ -323,6 +345,58 @@ export const PageSettings: React.FC = () => {
 					}
 					break;
 				}
+
+				// Docker messages
+				case 'dockerStatus' as any:
+					setDockerStatus((message as any).status);
+					if (!dockerBusy) setDockerProgress(null);
+					break;
+				case 'dockerProgress' as any:
+					setDockerProgress((message as any).message);
+					setDockerError(null);
+					break;
+				case 'dockerComplete' as any:
+					setDockerBusy(false);
+					setDockerAction(null);
+					setDockerProgress(null);
+					break;
+				case 'dockerError' as any:
+					setDockerError((message as any).message);
+					setDockerBusy(false);
+					setDockerAction(null);
+					setDockerProgress(null);
+					break;
+				case 'dockerVersionsLoaded' as any:
+					setDockerTags((message as any).tags || []);
+					break;
+
+				// Service messages
+				case 'serviceStatus' as any:
+					setServiceStatus((message as any).status);
+					if (!serviceBusy) setServiceProgress(null);
+					break;
+				case 'serviceProgress' as any:
+					setServiceProgress((message as any).message);
+					setServiceError(null);
+					break;
+				case 'serviceComplete' as any:
+					setServiceBusy(false);
+					setServiceAction(null);
+					setServiceProgress(null);
+					setSudoPromptVisible(false);
+					setSudoPasswordInput('');
+					break;
+				case 'serviceError' as any:
+					setServiceError((message as any).message);
+					setServiceBusy(false);
+					setServiceAction(null);
+					setServiceProgress(null);
+					setSudoPromptVisible(false);
+					setSudoPasswordInput('');
+					break;
+				case 'serviceNeedsSudo' as any:
+					setSudoPromptVisible(true);
+					break;
 			}
 		},
 	});
@@ -368,8 +442,57 @@ export const PageSettings: React.FC = () => {
 			if ((newSettings.connectionMode === 'cloud' && prev.connectionMode !== 'cloud') || (newSettings.deployTargetMode === 'cloud' && prev.deployTargetMode !== 'cloud')) {
 				sendMessage({ type: 'fetchTeams' });
 			}
+			// If switching to docker or service, fetch versions
+			const switchingToDockerOrService = (newSettings.connectionMode === 'docker' || newSettings.connectionMode === 'service') && prev.connectionMode !== newSettings.connectionMode;
+			const deploySwitchingToDockerOrService = (newSettings.deployTargetMode === 'docker' || newSettings.deployTargetMode === 'service') && prev.deployTargetMode !== newSettings.deployTargetMode;
+			if (switchingToDockerOrService || deploySwitchingToDockerOrService) {
+				sendMessage({ type: 'fetchVersions' } as any);
+			}
 			return { ...prev, ...newSettings };
 		});
+	};
+
+	// ========================================================================
+	// DOCKER / SERVICE VERSION OPTIONS
+	// ========================================================================
+
+	const dockerVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...dockerTags.map((t) => ({ value: t, label: t }))];
+
+	const serviceVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...engineVersions.map((v) => ({ value: v.tag_name, label: v.tag_name.replace(/^server-/, '') }))];
+
+	// ========================================================================
+	// DOCKER / SERVICE ACTION HANDLERS
+	// ========================================================================
+
+	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
+		setDockerBusy(true);
+		setDockerAction(actionType);
+		setDockerError(null);
+		const msgType = `docker${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
+		const payload: Record<string, unknown> = { type: msgType };
+		if (actionType === 'install' || actionType === 'update') {
+			payload.version = dockerSelectedVersion;
+		}
+		sendMessage(payload as any);
+	};
+
+	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
+		setServiceBusy(true);
+		setServiceAction(actionType);
+		setServiceError(null);
+		const msgType = `service${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
+		const payload: Record<string, unknown> = { type: msgType };
+		if (actionType === 'install' || actionType === 'update') {
+			payload.version = serviceSelectedVersion;
+		}
+		sendMessage(payload as any);
+	};
+
+	const handleSudoSubmit = (): void => {
+		const password = sudoPasswordInput;
+		setSudoPasswordInput('');
+		setSudoPromptVisible(false);
+		sendMessage({ type: 'sudoPassword', password } as any);
 	};
 
 	/**
@@ -438,7 +561,52 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} teams={teams} />
+						<ConnectionSettings
+							settings={settings}
+							onSettingsChange={handleSettingsChange}
+							onSave={handleSaveSettings}
+							onClearCredentials={handleClearCredentials}
+							onTestDevelopmentConnection={handleTestDevelopmentConnection}
+							serverCapabilities={serverCapabilities}
+							developmentTestMessage={developmentTestMessage}
+							engineVersions={engineVersions}
+							engineVersionsLoading={engineVersionsLoading}
+							cloudSignedIn={cloudSignedIn}
+							cloudUserName={cloudUserName}
+							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
+							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
+							teams={teams}
+							dockerStatus={dockerStatus}
+							dockerProgress={dockerProgress}
+							dockerError={dockerError}
+							dockerBusy={dockerBusy}
+							dockerAction={dockerAction}
+							dockerVersions={dockerVersionOptions}
+							dockerSelectedVersion={dockerSelectedVersion}
+							onDockerVersionChange={setDockerSelectedVersion}
+							onDockerInstall={makeDockerHandler('install')}
+							onDockerUpdate={makeDockerHandler('update')}
+							onDockerRemove={makeDockerHandler('remove')}
+							onDockerStart={makeDockerHandler('start')}
+							onDockerStop={makeDockerHandler('stop')}
+							serviceStatus={serviceStatus}
+							serviceProgress={serviceProgress}
+							serviceError={serviceError}
+							serviceBusy={serviceBusy}
+							serviceAction={serviceAction}
+							serviceVersions={serviceVersionOptions}
+							serviceSelectedVersion={serviceSelectedVersion}
+							onServiceVersionChange={setServiceSelectedVersion}
+							onServiceInstall={makeServiceHandler('install')}
+							onServiceUpdate={makeServiceHandler('update')}
+							onServiceRemove={makeServiceHandler('remove')}
+							onServiceStart={makeServiceHandler('start')}
+							onServiceStop={makeServiceHandler('stop')}
+							sudoPromptVisible={sudoPromptVisible}
+							sudoPasswordInput={sudoPasswordInput}
+							onSudoPasswordChange={setSudoPasswordInput}
+							onSudoSubmit={handleSudoSubmit}
+						/>
 					</div>
 				),
 			},
@@ -446,7 +614,50 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DeployTargetSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} teams={teams} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} onClearCredentials={handleClearCredentials} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)} onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)} />
+						<DeployTargetSettings
+							settings={settings}
+							onSettingsChange={handleSettingsChange}
+							onSave={handleSaveSettings}
+							serverCapabilities={serverCapabilities}
+							teams={teams}
+							engineVersions={engineVersions}
+							engineVersionsLoading={engineVersionsLoading}
+							onClearCredentials={handleClearCredentials}
+							cloudSignedIn={cloudSignedIn}
+							cloudUserName={cloudUserName}
+							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
+							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
+							dockerStatus={dockerStatus}
+							dockerProgress={dockerProgress}
+							dockerError={dockerError}
+							dockerBusy={dockerBusy}
+							dockerAction={dockerAction}
+							dockerVersions={dockerVersionOptions}
+							dockerSelectedVersion={dockerSelectedVersion}
+							onDockerVersionChange={setDockerSelectedVersion}
+							onDockerInstall={makeDockerHandler('install')}
+							onDockerUpdate={makeDockerHandler('update')}
+							onDockerRemove={makeDockerHandler('remove')}
+							onDockerStart={makeDockerHandler('start')}
+							onDockerStop={makeDockerHandler('stop')}
+							serviceStatus={serviceStatus}
+							serviceProgress={serviceProgress}
+							serviceError={serviceError}
+							serviceBusy={serviceBusy}
+							serviceAction={serviceAction}
+							serviceVersions={serviceVersionOptions}
+							serviceSelectedVersion={serviceSelectedVersion}
+							onServiceVersionChange={setServiceSelectedVersion}
+							onServiceInstall={makeServiceHandler('install')}
+							onServiceUpdate={makeServiceHandler('update')}
+							onServiceRemove={makeServiceHandler('remove')}
+							onServiceStart={makeServiceHandler('start')}
+							onServiceStop={makeServiceHandler('stop')}
+							sudoPromptVisible={sudoPromptVisible}
+							sudoPasswordInput={sudoPasswordInput}
+							onSudoPasswordChange={setSudoPasswordInput}
+							onSudoSubmit={handleSudoSubmit}
+						/>
 					</div>
 				),
 			},
@@ -483,7 +694,7 @@ export const PageSettings: React.FC = () => {
 				),
 			},
 		}),
-		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, cloudSignedIn, cloudUserName, teams]
+		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (

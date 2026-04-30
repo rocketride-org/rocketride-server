@@ -4,42 +4,40 @@
 // =============================================================================
 
 /**
- * OnPremModeFields — shared config fields for "On-prem" connection mode.
+ * OnPremPanel — target panel for On-prem connection mode.
  *
- * Renders: host URL, API key with show/hide toggle, auto-connect, optional
- * test-connection button, debug output checkbox.
- * Used by both ConnectionSettings (dev) and DeployTargetSettings (deploy).
+ * Renders: host URL, API key with show/hide toggle, optional test-connection
+ * button, debug output checkbox.
+ * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
 import React, { useState } from 'react';
-import { MessageData, settingsStyles as S } from '../PageSettings/SettingsWebview';
-import { MessageDisplay } from '../PageSettings/MessageDisplay';
+import { MessageData, settingsStyles as S } from '../../PageSettings/SettingsWebview';
+import { MessageDisplay } from '../../PageSettings/MessageDisplay';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface OnPremModeFieldsProps {
+export interface OnPremPanelProps {
 	hostUrl: string;
 	onHostUrlChange: (url: string) => void;
 	apiKey: string;
 	onApiKeyChange: (key: string) => void;
 	onClearApiKey?: () => void;
-	autoConnect: boolean;
-	onAutoConnectChange: (checked: boolean) => void;
 	debugOutput: boolean;
 	onDebugOutputChange: (checked: boolean) => void;
 	onTestConnection?: () => void;
 	testMessage?: MessageData | null;
-	/** HTML id prefix to avoid duplicate ids when mounted in multiple panels. */
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, autoConnect, onAutoConnectChange, debugOutput, onDebugOutputChange, onTestConnection, testMessage, idPrefix }) => {
+export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, debugOutput, onDebugOutputChange, onTestConnection, testMessage, idPrefix }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 	const id = (name: string) => `${idPrefix}-${name}`;
@@ -111,20 +109,6 @@ export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onH
 					</label>
 				</div>
 				<div style={S.helpText}>Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
-			</div>
-
-			{/* Auto-connect */}
-			<div style={S.formGroup}>
-				<label htmlFor={id('autoConnect')} style={S.label}>
-					Auto-connect on startup
-				</label>
-				<div>
-					<input type="checkbox" id={id('autoConnect')} checked={autoConnect} onChange={(e) => onAutoConnectChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-					<label htmlFor={id('autoConnect')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-						Automatically connect when extension starts
-					</label>
-				</div>
-				<div style={S.helpText}>Enable to connect automatically on startup</div>
 			</div>
 
 			{/* Test connection */}

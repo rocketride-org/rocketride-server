@@ -41,12 +41,13 @@ import { PageSidebarProvider } from './providers/PageSidebarProvider';
 import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageMonitorProvider } from './providers/PageMonitorProvider';
-import { PageDeployProvider } from './providers/PageDeployProvider';
+// PageDeployProvider removed — Docker/Service operations now live in Settings panels
 import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { PageAccountProvider } from './providers/PageAccountProvider';
 import { PageBillingProvider } from './providers/PageBillingProvider';
+import { PageAuthProvider } from './providers/PageAuthProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
@@ -60,7 +61,7 @@ let pageSidebar: PageSidebarProvider | undefined;
 let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let _pageMonitor: PageMonitorProvider | undefined;
-let pageDeploy: PageDeployProvider | undefined;
+// pageDeploy removed — functionality moved to Settings panels
 let pageStatus: PageStatusProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -181,11 +182,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				_pageMonitor = new PageMonitorProvider(context);
-				pageDeploy = new PageDeployProvider(context);
+				// pageDeploy removed — register redirect command so sidebar "Deploy" opens Settings
+				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 				new PageAccountProvider(context);
 				new PageBillingProvider(context);
+				new PageAuthProvider(context, context.extensionUri);
 
 				// Register unified project editor (canvas + status + trace)
 				pageProject = new PageProjectProvider(context);
@@ -450,16 +453,6 @@ export async function deactivate(): Promise<void> {
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
 				console.error('[ROCKETRIDE] Error disposing monitor page:', error);
-			}
-		}
-	}
-
-	if (pageDeploy) {
-		try {
-			pageDeploy.dispose();
-		} catch (error: unknown) {
-			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing deploy page:', error);
 			}
 		}
 	}

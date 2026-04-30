@@ -1,25 +1,26 @@
-import { defineConfig, loadEnv } from '@rsbuild/core';
+import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 import path from 'path';
 
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+
 export default defineConfig(({ command }) => {
 	const isDev = command === 'dev';
-	const { parsed } = loadEnv({ prefixes: ['ROCKETRIDE_'] });
+	const fullEnv = getenv();
+	const parsed = Object.fromEntries(Object.entries(fullEnv).filter(([k]) => k.startsWith('ROCKETRIDE_')));
 
-	if (isDev && !process.env.ROCKETRIDE_APIKEY) {
-		throw new Error('ROCKETRIDE_APIKEY environment variable is required to start the dev server');
+	requireKeys(parsed, ['ROCKETRIDE_URI'], 'chat-ui');
+	if (isDev) {
+		requireKeys(parsed, ['ROCKETRIDE_APIKEY'], 'chat-ui');
 	}
 
 	return {
 		server: {
 			port: 3002,
-			base: '/chat/'
+			base: '/chat/',
 		},
-		plugins: [
-			pluginReact(),
-			pluginTypeCheck()
-		],
+		plugins: [pluginReact(), pluginTypeCheck()],
 
 		html: {
 			template: './src/index.html',
@@ -28,44 +29,46 @@ export default defineConfig(({ command }) => {
 			meta: {
 				description: 'RocketRide AI Assistant - Intelligent chatbot',
 				'theme-color': '#FF8C42',
-				viewport: 'width=device-width, initial-scale=1.0'
-			}
+				viewport: 'width=device-width, initial-scale=1.0',
+			},
 		},
 
 		source: {
 			entry: {
-				index: './src/index.tsx'
+				index: './src/index.tsx',
 			},
 			define: {
-				...(isDev ? {
-					'process.env.CONFIG': JSON.stringify({
-						...parsed,
-						devMode: true
-					})
-				} : {
-					'process.env.CONFIG': JSON.stringify({
-						...parsed,
-						devMode: false
-					})
-				})
-			}
+				...(isDev
+					? {
+							'process.env.CONFIG': JSON.stringify({
+								...parsed,
+								devMode: true,
+							}),
+						}
+					: {
+							'process.env.CONFIG': JSON.stringify({
+								...parsed,
+								devMode: false,
+							}),
+						}),
+			},
 		},
 
 		dev: {
 			writeToDisk: true,
-			assetPrefix: '/chat/'
+			assetPrefix: '/chat/',
 		},
 
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'chat-ui')
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'chat-ui'),
 			},
 			assetPrefix: '/chat/',
 			cleanDistPath: true,
 			sourceMap: {
 				js: isDev ? 'source-map' : false,
-				css: isDev
-			}
-		}
+				css: isDev,
+			},
+		},
 	};
 });

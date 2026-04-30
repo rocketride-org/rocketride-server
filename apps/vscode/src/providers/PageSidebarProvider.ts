@@ -27,7 +27,8 @@ import { ConnectionManager } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
-import { GenericEvent } from '../shared/types';
+import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
+import { isSubscribed } from '../shared/util/subscriptionGate';
 import { getPageProjectProvider } from '../extension';
 
 // =============================================================================
@@ -143,7 +144,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'cloudSignIn': {
 						const auth = CloudAuthProvider.getInstance();
-						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
 						break;
 					}
 				}
@@ -374,15 +375,15 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
 
-		// Resolve user identity: dev client → deploy client → CloudAuth fallback
+		// Resolve user identity from whichever connection is cloud-connected.
+		// Dev takes priority; local/docker/service connections don't have real user identity.
 		const devAccount = this.connectionManager.getClient()?.getAccountInfo();
 		const deployAccount = this.deployManager.getClient()?.getAccountInfo();
-		const account = (devAccount?.displayName ? devAccount : null) ?? (deployAccount?.displayName ? deployAccount : null);
+		const account = (config.connectionMode === 'cloud' ? devAccount : null) ?? (config.deployTargetMode === 'cloud' ? deployAccount : null);
 
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudSignedIn = await cloudAuth.isSignedIn();
 
-		// Use connected client identity, fall back to CloudAuth name (no email)
 		const userName = account?.displayName || (cloudSignedIn ? await cloudAuth.getUserName() : undefined) || undefined;
 		const userEmail = account?.email || undefined;
 
@@ -408,6 +409,8 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 				cloudSignedIn,
 				userName: userName || undefined,
 				userEmail: userEmail || undefined,
+				// Subscription
+				isSubscribed: isSubscribed(this.connectionManager.getClient(), PIPE_BUILDER_APP_ID),
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],

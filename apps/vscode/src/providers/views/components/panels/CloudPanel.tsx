@@ -4,20 +4,23 @@
 // =============================================================================
 
 /**
- * CloudModeFields — shared config fields for "Cloud" connection mode.
+ * CloudPanel — target panel for Cloud connection mode.
  *
- * Renders: sign-in/out status, team selector, auto-connect checkbox.
- * Used by both ConnectionSettings (dev) and DeployTargetSettings (deploy).
+ * Renders: sign-in/out status, team selector.
+ * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
 import React from 'react';
-import { settingsStyles as S } from '../PageSettings/SettingsWebview';
+import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
+import cloudLogoLight from '../../../../../rocketride-light-icon.png';
+import { settingsStyles as S } from '../../PageSettings/SettingsWebview';
+import { useTheme } from '../../hooks/useTheme';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface CloudModeFieldsProps {
+export interface CloudPanelProps {
 	cloudSignedIn: boolean;
 	cloudUserName: string;
 	onCloudSignIn: () => void;
@@ -25,22 +28,24 @@ export interface CloudModeFieldsProps {
 	teams: Array<{ id: string; name: string }>;
 	selectedTeamId: string;
 	onTeamChange: (teamId: string) => void;
-	autoConnect: boolean;
-	onAutoConnectChange: (checked: boolean) => void;
-	/** HTML id prefix to avoid duplicate ids when mounted in multiple panels. */
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const CloudModeFields: React.FC<CloudModeFieldsProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, autoConnect, onAutoConnectChange, idPrefix }) => {
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
+	const theme = useTheme();
 
 	return (
 		<>
-			<div style={S.modeConfigDesc}>Sign in with your RocketRide account to connect to the cloud.</div>
+			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+				<img src={theme === 'dark' ? cloudLogoLight : cloudLogoDark} alt="RocketRide Cloud" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<div style={S.modeConfigDesc}>Sign in with your RocketRide account to connect to the cloud.</div>
+			</div>
 
 			{/* Sign-in status */}
 			{cloudSignedIn ? (
@@ -89,19 +94,6 @@ export const CloudModeFields: React.FC<CloudModeFieldsProps> = ({ cloudSignedIn,
 					<div style={S.helpText}>Which team's engine to connect to</div>
 				</div>
 			)}
-
-			{/* Auto-connect */}
-			<div style={S.formGroup}>
-				<label htmlFor={id('autoConnect')} style={S.label}>
-					Auto-connect on startup
-				</label>
-				<div>
-					<input type="checkbox" id={id('autoConnect')} checked={autoConnect} onChange={(e) => onAutoConnectChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-					<label htmlFor={id('autoConnect')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-						Automatically connect when extension starts
-					</label>
-				</div>
-			</div>
 		</>
 	);
 };

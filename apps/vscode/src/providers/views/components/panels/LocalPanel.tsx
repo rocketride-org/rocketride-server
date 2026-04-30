@@ -4,20 +4,20 @@
 // =============================================================================
 
 /**
- * LocalModeFields — shared config fields for "Local" connection mode.
+ * LocalPanel — target panel for Local connection mode.
  *
  * Renders: server version dropdown, debug output checkbox, server arguments input.
- * Used by both ConnectionSettings (dev) and DeployTargetSettings (deploy).
+ * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
 import React from 'react';
-import { settingsStyles as S, EngineVersionItem } from '../PageSettings/SettingsWebview';
+import { settingsStyles as S, EngineVersionItem } from '../../PageSettings/SettingsWebview';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface LocalModeFieldsProps {
+export interface LocalPanelProps {
 	engineVersion: string;
 	onVersionChange: (version: string) => void;
 	engineVersions: EngineVersionItem[];
@@ -26,8 +26,8 @@ export interface LocalModeFieldsProps {
 	onDebugOutputChange: (checked: boolean) => void;
 	engineArgs: string;
 	onEngineArgsChange: (args: string) => void;
-	/** HTML id prefix to avoid duplicate ids when mounted in multiple panels. */
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
@@ -40,7 +40,7 @@ const displayVersion = (tagName: string): string => tagName.replace(/^server-/, 
 // COMPONENT
 // =============================================================================
 
-export const LocalModeFields: React.FC<LocalModeFieldsProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, debugOutput, onDebugOutputChange, engineArgs, onEngineArgsChange, idPrefix }) => {
+export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, debugOutput, onDebugOutputChange, engineArgs, onEngineArgsChange, idPrefix }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 
 	return (

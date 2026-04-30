@@ -97,6 +97,9 @@
 	/** Widget list-item hover background. */
 	--rr-bg-widget-hover: rgba(0, 0, 0, 0.04);
 
+	/** Toolbar icon-button hover background. */
+	--rr-bg-toolbar-hover: rgba(0, 0, 0, 0.08);
+
 	/** Widget drop-shadow — soft edge for panels and overlays. */
 	--rr-shadow-widget: rgba(0, 0, 0, 0.16);
 

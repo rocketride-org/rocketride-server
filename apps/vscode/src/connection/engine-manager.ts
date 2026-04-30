@@ -168,6 +168,7 @@ export class EngineManager extends EventEmitter {
 	public async stop(): Promise<void> {
 		this.emit('status', 'Stopping server...');
 		await this.stopProcess();
+		this.emit('status', 'Server stopped');
 	}
 
 	/**

@@ -54,6 +54,7 @@
 	--rr-fg-widget: var(--vscode-sideBar-foreground, var(--vscode-foreground, #1a1a1a));
 	--rr-bg-widget-header: var(--vscode-sideBarSectionHeader-background, rgba(0, 0, 0, 0.08));
 	--rr-bg-widget-hover: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
+	--rr-bg-toolbar-hover: var(--vscode-toolbar-hoverBackground, rgba(0, 0, 0, 0.08));
 	--rr-shadow-widget: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.16));
 	--rr-font-family-widget: var(--vscode-font-family, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
 	--rr-font-size-widget: var(--vscode-font-size, 13px);
