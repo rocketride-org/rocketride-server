@@ -281,15 +281,14 @@ export class RocketRideClient extends DAPClient {
 	private _persist: boolean = false;
 	private _reconnectTimeout?: ReturnType<typeof setTimeout>;
 	private _manualDisconnect: boolean = false;
+	/** Set when auth is rejected; prevents onDisconnected from scheduling reconnect. */
+	private _authRejected: boolean = false;
 	private _maxRetryTime?: number;
 	private _retryStartTime?: number;
 	private _currentReconnectDelay: number = 500;
 
 	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
 	private _didNotifyConnected: boolean = false;
-
-	/** Stored ConnectResult from the last successful connect(). */
-	private _connectResult?: ConnectResult;
 
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
@@ -518,7 +517,7 @@ export class RocketRideClient extends DAPClient {
 	 * calls DAPClient.connect (transport connect + auth handshake + onConnected).
 	 * Returns the auth response body (ConnectResult) on success.
 	 */
-	private async _internalConnect(timeout?: number): Promise<Record<string, unknown>> {
+	private async _internalConnect(timeout?: number): Promise<ConnectResult> {
 		if (!this._transport) {
 			const transport = new TransportWebSocket(this._uri, this._apikey!);
 			this._bindTransport(transport);
@@ -555,8 +554,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	private async _attemptConnection(timeout?: number): Promise<ConnectResult | undefined> {
 		try {
-			const body = await this._internalConnect(timeout);
-			this._connectResult = body as unknown as ConnectResult;
+			await this._internalConnect(timeout);
 			// In persist mode, keep userToken for automatic reconnect
 			if (this._connectResult?.userToken) {
 				this._apikey = this._connectResult.userToken;
@@ -570,6 +568,7 @@ export class RocketRideClient extends DAPClient {
 			await this.onConnectError(err);
 
 			if (error instanceof AuthenticationException) {
+				this._authRejected = true;
 				return undefined;
 			}
 
@@ -654,6 +653,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		this._manualDisconnect = false;
+		this._authRejected = false;
 		this._currentReconnectDelay = 500;
 		this._retryStartTime = undefined;
 
@@ -662,21 +662,18 @@ export class RocketRideClient extends DAPClient {
 			await this._internalDisconnect();
 		}
 
-		let result: ConnectResult | undefined;
 		if (this._persist) {
 			this._clearReconnectTimeout();
-			result = await this._attemptConnection(options?.timeout);
+			await this._attemptConnection(options?.timeout);
 		} else {
-			const body = await this._internalConnect(options?.timeout);
-			result = body as unknown as ConnectResult;
-			this._connectResult = result;
-			// Store userToken for reconnect in persist mode
-			if (result?.userToken) {
-				this._apikey = result.userToken;
+			await this._internalConnect(options?.timeout);
+			// Store userToken for reconnect
+			if (this._connectResult?.userToken) {
+				this._apikey = this._connectResult.userToken;
 			}
 		}
 
-		return result ?? ({} as ConnectResult);
+		return this._connectResult ?? ({} as ConnectResult);
 	}
 
 	/**
@@ -1525,8 +1522,9 @@ export class RocketRideClient extends DAPClient {
 			await super.onDisconnected(reason, hasError);
 		}
 
-		// Schedule reconnection if persist is enabled and not a manual disconnect
-		if (this._persist && !this._manualDisconnect) {
+		// Schedule reconnection if persist is enabled, not a manual disconnect,
+		// and not an auth rejection (retrying with the same bad key is pointless)
+		if (this._persist && !this._manualDisconnect && !this._authRejected) {
 			this._scheduleReconnect();
 		}
 	}

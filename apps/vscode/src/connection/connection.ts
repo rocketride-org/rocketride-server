@@ -45,7 +45,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage, TraceType } from 'rocketride';
+import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../config';
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
@@ -296,10 +296,36 @@ export class ConnectionManager extends EventEmitter {
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
 				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
 				this.clearServicesCache();
-				this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+				// Don't overwrite AUTH_FAILED — the user needs to see the sign-in prompt,
+				// not a misleading "Connecting..." spinner.
+				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
+					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+				}
 				this.emit('disconnected');
 			},
 			onConnectError: (error: Error) => {
+				// Auth rejection: stop retrying, clear stale credentials, and
+				// open the auth page so the user can fix them.
+				if (error instanceof AuthenticationException) {
+					this.logger.output(`${icons.error} Authentication failed: ${error.message}`);
+					const mode = this.connectionStatus.connectionMode;
+
+					// Only clear the cloud token — on-prem/docker/service keys
+					// live in config, not SecretStorage.
+					if (connectionModeUsesOAuth(mode)) {
+						CloudAuthProvider.getInstance().signOut();
+					}
+
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError: error.message,
+						progressMessage: undefined,
+					});
+
+					// Open the auth page with the mode so it shows the right form
+					vscode.commands.executeCommand('rocketride.page.auth.open', mode, error.message);
+					return;
+				}
 				this.logger.output(`${icons.info} Reconnect attempt failed: ${error.message}`);
 				this.updateConnectionStatus({
 					progressMessage: 'Reconnecting...',

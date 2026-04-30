@@ -16,13 +16,14 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { TaskStatus, GenericEvent, ConnectionState } from '../shared/types';
+import { TaskStatus, GenericEvent, ConnectionState, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
 import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
+import { isSubscribed } from '../shared/util/subscriptionGate';
 
 // =============================================================================
 // CONSTANTS
@@ -85,6 +86,10 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		const eventListener = this.connectionManager.on('event', (event) => {
 			try {
 				this.handleEvent(event);
+				// Forward subscription status changes from account updates
+				if (event.event === 'apaext_account') {
+					this.broadcastSubscriptionStatus();
+				}
 			} catch (error) {
 				this.logger.error(`Handling event: ${error}`);
 			}
@@ -156,10 +161,28 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	}
 
 	private broadcastConnectionState(isConnected: boolean): void {
+		const client = this.connectionManager.getClient();
+		const subscribed = isSubscribed(client, PIPE_BUILDER_APP_ID);
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
-				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected }).then(undefined, (err: unknown) => {
+				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected, isSubscribed: subscribed }).then(undefined, (err: unknown) => {
 					this.logger.error(`Failed to post connectionState to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	/**
+	 * Broadcasts updated subscription status to all open editor webviews.
+	 * Called when an apaext_account event arrives (subscription change).
+	 */
+	private broadcastSubscriptionStatus(): void {
+		const client = this.connectionManager.getClient();
+		const subscribed = isSubscribed(client, PIPE_BUILDER_APP_ID);
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview.postMessage({ type: 'checkout:subscriptionUpdate', isSubscribed: subscribed }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post subscriptionUpdate to webview: ${err}`);
 				});
 			}
 		}
@@ -288,6 +311,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 					const layout = layouts[document.uri.toString()] ?? {};
 					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
 					const cached = this.connectionManager.getCachedServices();
+					const client = this.connectionManager.getClient();
 
 					// Send everything in one message
 					webview.postMessage({
@@ -297,6 +321,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 						prefs: storedPrefs,
 						services: cached.services,
 						isConnected: this.connectionManager.isConnected(),
+						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
 					});
@@ -350,7 +375,17 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
+					console.log(`[PageProjectProvider] pipelineAction: action=${action} source=${source}`);
 					if (action === 'run' || action === 'restart') {
+						// Gate: check subscription before running
+						const runClient = this.connectionManager.getClient();
+						const sub = isSubscribed(runClient, PIPE_BUILDER_APP_ID);
+						console.log(`[PageProjectProvider] isSubscribed=${sub} client=${!!runClient}`);
+						if (!sub) {
+							console.log('[PageProjectProvider] sending checkout:required');
+							webview.postMessage({ type: 'checkout:required' });
+							break;
+						}
 						const uriKey = document.uri.toString();
 						this.savesForRun.add(uriKey);
 						try {
@@ -403,6 +438,53 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 						this.context.workspaceState.update(PREFS_KEY, data.prefs).then(undefined, (err: unknown) => {
 							this.logger.error(`Failed to persist prefs: ${err}`);
 						});
+					}
+					break;
+				}
+
+				// Checkout flow — bridge billing SDK calls for the CheckoutModal
+				case 'checkout:fetchPlans': {
+					try {
+						const billingClient = this.connectionManager.getClient();
+						if (!billingClient) throw new Error('Not connected');
+						const plans = await billingClient.billing.getProductPrices(PIPE_BUILDER_APP_ID);
+						webview.postMessage({ type: 'checkout:plansResult', plans, error: null });
+					} catch (err: unknown) {
+						const msg = err instanceof Error ? err.message : String(err);
+						webview.postMessage({ type: 'checkout:plansResult', plans: [], error: msg });
+					}
+					break;
+				}
+
+				case 'checkout:createSession': {
+					try {
+						const billingClient = this.connectionManager.getClient();
+						if (!billingClient) throw new Error('Not connected');
+						const orgId = billingClient.getAccountInfo()?.organizations?.[0]?.id;
+						if (!orgId) throw new Error('No organisation found');
+						const result = await billingClient.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, data.priceId as string);
+						webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
+					} catch (err: unknown) {
+						const msg = err instanceof Error ? err.message : String(err);
+						webview.postMessage({ type: 'checkout:sessionResult', clientSecret: '', subscriptionId: '', error: msg });
+					}
+					break;
+				}
+
+				case 'checkout:confirmPending': {
+					try {
+						const billingClient = this.connectionManager.getClient();
+						if (!billingClient) throw new Error('Not connected');
+						await (billingClient as any).dapRequest('rrext_account_billing', {
+							subcommand: 'confirm_pending',
+							appId: PIPE_BUILDER_APP_ID,
+							subscriptionId: data.subscriptionId,
+							priceId: data.priceId,
+						});
+						webview.postMessage({ type: 'checkout:confirmResult', error: null });
+					} catch (err: unknown) {
+						// Non-fatal — the webhook will still update the DB
+						webview.postMessage({ type: 'checkout:confirmResult', error: null });
 					}
 					break;
 				}
@@ -737,6 +819,11 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
 			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
+
+			// Inject CSP meta tag allowing Stripe Elements (js.stripe.com for scripts/frames,
+			// api.stripe.com for network calls). Required for the in-editor checkout flow.
+			const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' ${webview.cspSource} https://js.stripe.com; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource} data:; frame-src https://js.stripe.com; connect-src ${webview.cspSource} https://api.stripe.com; img-src ${webview.cspSource} data:;">`;
+			htmlContent = htmlContent.replace('<head>', `<head>\n\t${cspMeta}`);
 
 			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
 				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;

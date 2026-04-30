@@ -93,7 +93,6 @@ class ConnectionMixin(DAPClient):
         self._manual_disconnect = False  # True only after user calls disconnect(); stops on_disconnected from scheduling reconnect
         self._reconnect_task: Optional[asyncio.Task] = None  # task that sleeps then calls _attempt_connection
         self._did_notify_connected = False  # True after we called on_connected; gates whether we invoke user on_disconnected
-        self._connect_result: Optional[ConnectResult] = None  # stored on successful connect
 
     async def on_connected(self, connection_info: Optional[str] = None) -> None:
         """Handle connection established event."""
@@ -148,15 +147,13 @@ class ConnectionMixin(DAPClient):
         Returns ConnectResult on success, None on failure.
         """
         try:
-            body = await self._internal_connect(timeout)
-            connect_result: ConnectResult = body  # type: ignore[assignment]
-            self._connect_result = connect_result
+            await self._internal_connect(timeout)
             # Persist mode: store userToken so reconnects use the durable rr_ key
-            if connect_result.get('userToken'):
-                self._apikey = connect_result['userToken']
+            if self._connect_result and self._connect_result.get('userToken'):
+                self._apikey = self._connect_result['userToken']
             self._reconnect_task = None
             self._debug_message('Connection successful')
-            return connect_result
+            return self._connect_result
         except AuthenticationException as e:
             self._debug_message(f'Connection failed (auth): {e}')
             await self.on_connect_error(e)
@@ -237,20 +234,18 @@ class ConnectionMixin(DAPClient):
         if self.is_connected():
             await self._internal_disconnect()
 
-        result: Optional[ConnectResult] = None
         if self._persist:
             if self._reconnect_task and not self._reconnect_task.done():
                 self._reconnect_task.cancel()
                 self._reconnect_task = None
-            result = await self._attempt_connection(timeout)
+            await self._attempt_connection(timeout)
         else:
-            body = await self._internal_connect(timeout)
-            result = body  # type: ignore[assignment]
-            self._connect_result = result
-            if result and result.get('userToken'):
-                self._apikey = result['userToken']
+            await self._internal_connect(timeout)
+            # Store userToken for reconnect
+            if self._connect_result and self._connect_result.get('userToken'):
+                self._apikey = self._connect_result['userToken']
 
-        return result or {}  # type: ignore[return-value]
+        return self._connect_result or {}  # type: ignore[return-value]
 
     def get_account_info(self) -> Optional[ConnectResult]:
         """

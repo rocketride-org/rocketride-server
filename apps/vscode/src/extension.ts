@@ -47,6 +47,7 @@ import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { PageAccountProvider } from './providers/PageAccountProvider';
 import { PageBillingProvider } from './providers/PageBillingProvider';
+import { PageAuthProvider } from './providers/PageAuthProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
@@ -187,6 +188,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 				new PageAccountProvider(context);
 				new PageBillingProvider(context);
+				new PageAuthProvider(context, context.extensionUri);
 
 				// Register unified project editor (canvas + status + trace)
 				pageProject = new PageProjectProvider(context);

@@ -27,6 +27,8 @@
 		"@rjsf/utils": "~5.20.1",
 		"@rjsf/validator-ajv8": "~5.20.1",
 		"@xyflow/react": "~12.3.4",
+		"@stripe/react-stripe-js": "^3.1.0",
+		"@stripe/stripe-js": "^5.5.0",
 		"rocketride": "workspace:*",
 		"clsx": "~2.1.1",
 		"d3": "~7.9.0",

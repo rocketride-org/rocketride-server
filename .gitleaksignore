@@ -1,0 +1,2 @@
+# Stripe publishable key (pk_test_*) is a public client-side key, not a secret.
+.config:generic-api-key:58

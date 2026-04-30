@@ -112,6 +112,9 @@ const SidebarViewWebview: React.FC = () => {
 	const [devProgressMessage, setDevProgressMessage] = useState<string | undefined>();
 	const [teams, setTeams] = useState<TeamDTO[]>([]);
 
+	// ── Subscription state ─────────────────────────────────────────────────
+	const [subscribed, setSubscribed] = useState(true);
+
 	// ── Deploy connection state ─────────────────────────────────────────────
 	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
 	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
@@ -252,6 +255,8 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
 					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					setDeployProgressMessage(msg.data.deployProgressMessage);
+					// Subscription status
+					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
 					break;
 
 				case 'entriesUpdate':
@@ -381,6 +386,8 @@ const SidebarViewWebview: React.FC = () => {
 				return 'Starting engine...';
 			case 'stopping-engine':
 				return 'Stopping engine...';
+			case 'auth-failed':
+				return 'Sign-in required';
 			default:
 				return 'Disconnected';
 		}
@@ -440,7 +447,7 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;

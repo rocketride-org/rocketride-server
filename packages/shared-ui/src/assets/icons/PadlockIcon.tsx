@@ -21,26 +21,23 @@
 // SOFTWARE.
 // =============================================================================
 
-import VectorSquareSolidIcon from './VectorSquareSolidIcon';
-import PdfIcon from './PdfIcon';
-import WordIcon from './WordIcon';
-import AudioIcon from './AudioIcon';
-import CodeIcon from './CodeIcon';
-import CompressedIcon from './CompressedIcon';
-import VideoIcon from './VideoIcon';
-import PowerpointIcon from './PowerpointIcon';
-import ImageIcon from './ImageIcon';
-import GenericFileIcon from './GenericFileIcon';
-import ExcelIcon from './ExcelIcon';
-import EmailIcon from './EmailIcon';
-import ConfigIcon from './ConfigIcon';
-import OutlookIcon from './OutlookIcon';
-import SparklingIcon from './SparklingIcon';
-import PadlockIcon from './PadlockIcon';
+import { FunctionComponent } from 'react';
+import { IIconProps } from './types';
 
 /**
- * Barrel export for all custom SVG icon components used throughout the shared-ui library.
- * These icons represent various file types, UI actions, and visual indicators,
- * providing a centralized import point for consumers of the icon set.
+ * Two-tone filled padlock icon. Yellow body with dark shackle and keyhole.
+ * Used to indicate a subscription-locked feature.
+ *
+ * @param props - Standard icon props for controlling size.
  */
-export { VectorSquareSolidIcon, WordIcon, VideoIcon, PowerpointIcon, PdfIcon, ImageIcon, GenericFileIcon, ExcelIcon, EmailIcon, ConfigIcon, CompressedIcon, CodeIcon, AudioIcon, OutlookIcon, SparklingIcon, PadlockIcon };
+const PadlockIcon: FunctionComponent<IIconProps> = ({ size }) => {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width={size ?? 24} height={size ?? 24} viewBox="0 0 93.63 122.88">
+			<path fill="#fbd734" fillRule="evenodd" d="M6,47.51H87.64a6,6,0,0,1,6,6v63.38a6,6,0,0,1-6,6H6a6,6,0,0,1-6-6V53.5a6,6,0,0,1,6-6Z" />
+			<path fill="#36464e" fillRule="evenodd" d="M41.89,89.26l-6.47,16.95H58.21L52.21,89a11.79,11.79,0,1,0-10.32.24Z" />
+			<path fill="#36464e" fillRule="evenodd" d="M83.57,47.51H72.22V38.09a27.32,27.32,0,0,0-7.54-19,24.4,24.4,0,0,0-35.73,0,27.32,27.32,0,0,0-7.54,19v9.42H10.06V38.09A38.73,38.73,0,0,1,20.78,11.28a35.69,35.69,0,0,1,52.07,0A38.67,38.67,0,0,1,83.57,38.09v9.42Z" />
+		</svg>
+	);
+};
+
+export default PadlockIcon;

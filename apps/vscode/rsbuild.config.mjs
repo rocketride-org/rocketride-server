@@ -26,13 +26,24 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const env = getenv();
+requireKeys(env, ['RR_STRIPE_PUBLISHABLE_KEY'], 'vscode:build-webview');
 
 export default defineConfig({
 	plugins: [pluginReact()],
 
 	source: {
+		// Inject public build-time config values into webview bundles.
+		// SECURITY: never add server-side secrets here — only publishable keys.
+		define: {
+			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
+		},
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
@@ -45,6 +56,7 @@ export default defineConfig({
 			'page-status': './src/providers/views/PageStatus/index.tsx',
 			'page-account': './src/providers/views/PageAccount/index.tsx',
 			'page-billing': './src/providers/views/PageBilling/index.tsx',
+			'page-auth': './src/providers/views/PageAuth/index.tsx',
 		},
 	},
 

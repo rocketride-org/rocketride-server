@@ -23,7 +23,7 @@
  */
 
 import { DAPBase } from './DAPBase.js';
-import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
+import { DAPMessage, RocketRideClientConfig, ConnectResult } from '../types/index.js';
 import { TransportBase } from './TransportBase.js';
 import { AuthenticationException } from '../exceptions/index.js';
 import { SDK_VERSION } from '../constants.js';
@@ -83,6 +83,9 @@ export class DAPClient extends DAPBase {
 	 * Sent alongside `_clientDisplayName` during authentication.
 	 */
 	protected _clientDisplayVersion?: string;
+
+	/** Auth response body from the last successful _dapConnect. Set before onConnected fires. */
+	protected _connectResult?: ConnectResult;
 
 	/**
 	 * Creates a DAPClient instance and configures request-timeout and client
@@ -328,7 +331,7 @@ export class DAPClient extends DAPBase {
 	 * @throws AuthenticationException if the server rejects the credentials
 	 * @throws Error if the transport is not configured or the connection times out
 	 */
-	async _dapConnect(timeout?: number): Promise<Record<string, unknown>> {
+	async _dapConnect(timeout?: number): Promise<ConnectResult> {
 		// A transport must be bound before this method is called
 		if (!this._transport) {
 			throw new Error('Transport not configured');
@@ -376,6 +379,10 @@ export class DAPClient extends DAPBase {
 			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
 		}
 
+		// Set _connectResult before onConnected so getAccountInfo() is
+		// available inside user callbacks (e.g. sidebar 'connected' listener).
+		this._connectResult = resp.body as unknown as ConnectResult;
+
 		// Auth passed — now notify the rest of the stack that we are connected.
 		// We defer this call until after auth because the transport fires its own
 		// "connected" signal on socket open, but the logical connection (auth confirmed)
@@ -383,8 +390,7 @@ export class DAPClient extends DAPBase {
 		const connectionInfo = this._transport.getConnectionInfo();
 		await this.onConnected(connectionInfo);
 
-		// Return the body of the auth response (contains ConnectResult: user info, orgs, etc.)
-		return resp.body ?? {};
+		return this._connectResult;
 	}
 
 	/**

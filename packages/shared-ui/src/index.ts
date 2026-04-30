@@ -74,6 +74,10 @@ export { BillingView } from './modules/billing';
 export type { IBillingViewProps } from './modules/billing';
 export { CreditsPanel } from './modules/billing';
 
+// --- Checkout module (subscription checkout flow) ----------------------------
+export { CheckoutModal } from './modules/checkout';
+export type { CheckoutModalProps, CheckoutPlan } from './modules/checkout';
+
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';
 export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';

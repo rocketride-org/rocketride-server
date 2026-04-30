@@ -348,7 +348,7 @@ function dirStatus(dirPath: string, entries: ProjectEntry[], activeTasks: Map<st
 // COMPONENT
 // =============================================================================
 
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -694,7 +694,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, entries, 
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
 									{warnCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {warnCount}</span>}
 									<span style={S.spacer} />
-									{hoveredRow === srcRowKey && isConnected && file.projectId && (
+									{hoveredRow === srcRowKey && isConnected && isSubscribed && file.projectId && (
 										<button
 											style={S.actionBtn(srcRunning ? 'var(--rr-color-error)' : 'var(--rr-color-success)')}
 											title={srcRunning ? 'Stop' : 'Run'}

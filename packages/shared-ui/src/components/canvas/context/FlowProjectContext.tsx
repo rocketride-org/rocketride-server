@@ -145,6 +145,9 @@ export interface IFlowProjectContext {
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
 
+	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
+	isSubscribed?: boolean;
+
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
 
@@ -203,6 +206,7 @@ export interface IFlowProjectProviderProps {
 	onOpenStatus?: (source: string) => void;
 	serverHost?: string;
 	isConnected?: boolean;
+	isSubscribed?: boolean;
 	initialViewport?: { x: number; y: number; zoom: number };
 	/** Whether the document has unsaved changes. Controls the save button's active state. */
 	isDirty?: boolean;
@@ -223,7 +227,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, isDirty, isNew, onSave }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -274,6 +278,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		onOpenStatus,
 		serverHost,
 		isConnected,
+		isSubscribed,
 		initialViewport,
 		isDirty,
 		isNew,
