@@ -19,7 +19,7 @@
         },
         "measured": {
           "width": 150,
-          "height": 94
+          "height": 66
         },
         "nodeType": "default",
         "formDataValid": true
@@ -50,7 +50,7 @@
         },
         "measured": {
           "width": 150,
-          "height": 117
+          "height": 86
         },
         "nodeType": "default",
         "formDataValid": true
@@ -69,7 +69,7 @@
       "config": {
         "profile": "custom",
         "custom": {
-          "model": "gemini-1.5-flash",
+          "model": "gemini-3.1-flash-lite-preview",
           "modelTotalTokens": 1000000,
           "outputTokens": 8192,
           "apikey": "${ROCKETRIDE_GEMINI_KEY}"
@@ -83,7 +83,7 @@
         },
         "measured": {
           "width": 150,
-          "height": 88
+          "height": 66
         },
         "nodeType": "default",
         "formDataValid": true
@@ -116,7 +116,7 @@
         },
         "measured": {
           "width": 150,
-          "height": 58
+          "height": 37
         },
         "nodeType": "default",
         "formDataValid": true

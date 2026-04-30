@@ -18,6 +18,7 @@ GitError         — raised on any git operation failure
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tempfile
 from contextlib import contextmanager
@@ -142,6 +143,13 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
+
+
+def _scrub_exc(exc: Exception) -> str:
+    """Scrub potential credentials from a libgit2 error message."""
+    # Redacts 'https://user:pass@host' to 'https://<redacted>@host'
+    # The [^/]+@ pattern matches up to the last @ before a path separator.
+    return re.sub(r'https?://[^/]+@', 'https://<redacted>@', str(exc))
 
 
 def _sig(repo: pygit2.Repository, name: str = '', email: str = '') -> pygit2.Signature:
@@ -312,7 +320,7 @@ class GitRepo:
                     kwargs['callbacks'] = cb
                 repo = pygit2.clone_repository(url, path, **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'Clone failed: {exc}') from exc
+                raise GitError(f'Clone failed: {_scrub_exc(exc)}') from exc
 
         self._repo = repo
         self._repo_path = path
@@ -536,17 +544,11 @@ class GitRepo:
         repo = self._require_repo()
         workdir = Path(repo.workdir).resolve()
         full = (workdir / path).resolve()
-        try:
-            full.relative_to(workdir)
-        except ValueError:
-            raise GitError(f'Path {path!r} escapes the repository working directory') from None
+        if not full.is_relative_to(workdir):
+            raise GitError(f'Path {path!r} escapes the repository working directory')
         # Prevent writes to .git directory
-        git_dir = workdir / '.git'
-        try:
-            full.relative_to(git_dir)
+        if full.is_relative_to(workdir / '.git'):
             raise GitError(f'Path {path!r} is inside the .git directory')
-        except ValueError:
-            pass
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding='utf-8')
         return {'path': path, 'size': len(content.encode('utf-8')), 'status': 'written'}
@@ -563,10 +565,11 @@ class GitRepo:
         staged = []
         for p in paths:
             full = (workdir / p).resolve()
-            try:
-                full.relative_to(workdir)
-            except ValueError:
-                raise GitError(f'Path {p!r} escapes the repository working directory') from None
+            if not full.is_relative_to(workdir):
+                raise GitError(f'Path {p!r} escapes the repository working directory')
+            # Prevent staging files inside .git directory
+            if full.is_relative_to(workdir / '.git'):
+                raise GitError(f'Path {p!r} is inside the .git directory')
             if not full.exists():
                 # Deleted file — remove from index
                 try:
@@ -616,7 +619,7 @@ class GitRepo:
             try:
                 oid = repo.stash(sig, msg)
             except pygit2.GitError as exc:
-                raise GitError(f'stash push failed: {exc}') from exc
+                raise GitError(f'stash push failed: {_scrub_exc(exc)}') from exc
             return {'status': 'stashed', 'sha': str(oid)[:8], 'message': msg}
 
         if op == 'list':
@@ -635,14 +638,14 @@ class GitRepo:
             try:
                 repo.stash_pop(index)
             except pygit2.GitError as exc:
-                raise GitError(f'stash pop failed: {exc}') from exc
+                raise GitError(f'stash pop failed: {_scrub_exc(exc)}') from exc
             return {'status': 'popped', 'index': index}
 
         if op == 'drop':
             try:
                 repo.stash_drop(index)
             except pygit2.GitError as exc:
-                raise GitError(f'stash drop failed: {exc}') from exc
+                raise GitError(f'stash drop failed: {_scrub_exc(exc)}') from exc
             return {'status': 'dropped', 'index': index}
 
         raise GitError(f'Unknown stash op {op!r}. Use push, pop, list, or drop.')
@@ -793,7 +796,7 @@ class GitRepo:
             try:
                 stats = rem.fetch(refspecs or None, **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'fetch failed: {exc}') from exc
+                raise GitError(f'fetch failed: {_scrub_exc(exc)}') from exc
         return {
             'remote': remote,
             'received_objects': stats.received_objects,
@@ -859,7 +862,7 @@ class GitRepo:
             try:
                 rem.push([refspec], **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'push failed: {exc}') from exc
+                raise GitError(f'push failed: {_scrub_exc(exc)}') from exc
 
         return {'remote': remote, 'branch': target, 'status': 'pushed'}
 
@@ -876,8 +879,6 @@ class GitRepo:
     ) -> List[Dict[str, Any]]:
         """Search tracked files for a pattern."""
         repo = self._require_repo()
-        import re
-
         flags = re.IGNORECASE if ignore_case else 0
         try:
             rx = re.compile(pattern, flags)
@@ -960,6 +961,12 @@ def _commit_touches_path(
     )
 
 
+# Matches the header line of a per-file section in a unified diff.
+# Group 1 captures the b-side path, which handles filenames with spaces
+# better than splitting on whitespace.
+_DIFF_HEADER_RE = re.compile(r'^diff --git a/.+ b/(.+)$')
+
+
 def _filter_diff_by_path(patch: str, path: str) -> Dict[str, Any]:
     """Filter a unified diff by path and recalculate stats. Returns filtered patch and counts."""
     lines = patch.splitlines(keepends=True)
@@ -971,11 +978,9 @@ def _filter_diff_by_path(patch: str, path: str) -> Dict[str, Any]:
 
     for line in lines:
         if line.startswith('diff --git'):
-            # Extract paths from "diff --git a/foo b/foo"
-            parts = line.split()
-            if len(parts) >= 4:
-                # parts[2] is "a/..." and parts[3] is "b/..."
-                file_path = parts[3][2:] if parts[3].startswith('b/') else parts[3]
+            m = _DIFF_HEADER_RE.match(line.rstrip())
+            if m:
+                file_path = m.group(1)
                 # Match exact path or path/ prefix
                 include = file_path == path or file_path.startswith(path + '/')
                 if include:

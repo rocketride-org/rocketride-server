@@ -94,7 +94,7 @@ _TOOLS: List[Dict[str, Any]] = [
             'required': [],
             'properties': {
                 'ref_a': {'type': 'string', 'description': 'First ref (branch, tag, SHA). Omit for working-tree diff.'},
-                'ref_b': {'type': 'string', 'description': 'Second ref. Required when comparing two specific commits.'},
+                'ref_b': {'type': 'string', 'description': 'Second ref. Only valid when ref_a is also set; omit for single-ref or working-tree diff.'},
                 'path': {'type': 'string', 'description': 'Limit diff output to this file or directory.'},
                 'staged': {'type': 'boolean', 'description': 'If true, diff the staged index against HEAD.'},
             },
@@ -324,6 +324,7 @@ class IInstance(IInstanceBase):
         v = a.get(key, default)
         if isinstance(v, bool):
             return v
+        # JSON null deserialises to None — treat it the same as an absent key.
         if v is None:
             return default
         raise ValueError(f'{key} must be a boolean')

@@ -17,9 +17,11 @@ that directory is deleted on ``endGlobal``.
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
@@ -73,11 +75,21 @@ class IGlobal(IGlobalBase):
                 git.clone(url=repo_path, path=tmp)
             except Exception as exc:
                 shutil.rmtree(tmp, ignore_errors=True)
-                # Redact credentials from the URL before including in error message
-                from urllib.parse import urlparse, urlunparse
+                # Redact credentials from the URL before including in error message.
                 parsed = urlparse(repo_path)
-                redacted = urlunparse((parsed.scheme, parsed.hostname or parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
-                raise ValueError(f'tool_git: failed to clone {redacted!r}: {exc}') from exc
+                if not parsed.scheme and repo_path.startswith('git@'):
+                    # git@host:org/repo SSH shorthand — no safe way to partially redact
+                    redacted = '<ssh-url>'
+                else:
+                    # Build netloc as hostname[:port] — drops any userinfo
+                    safe_host = parsed.hostname or ''
+                    if parsed.port:
+                        safe_host = f'{safe_host}:{parsed.port}'
+                    redacted = urlunparse((parsed.scheme, safe_host, parsed.path, '', '', ''))
+                # libgit2 sometimes echoes the raw URL (with credentials) in its
+                # error text — scrub any credentials from it.
+                clean_exc = re.sub(r'https?://[^/]+@', 'https://<redacted>@', str(exc))
+                raise ValueError(f'tool_git: failed to clone {redacted!r}: {clean_exc}') from exc
             self._tmp_dir = tmp
 
         elif repo_path:
