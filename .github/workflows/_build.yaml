@@ -131,7 +131,9 @@ jobs:
         # The secret value itself doesn't matter — it just has to match
         # between server and client in this single CI run.
         env:
-          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
+          # For forked PRs, repository secrets are not available. Use a stable
+          # fallback so the test server and client share the same key.
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY != '' && secrets.ROCKETRIDE_APIKEY || 'MYAPIKEY' }}
         run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Perform CodeQL Analysis

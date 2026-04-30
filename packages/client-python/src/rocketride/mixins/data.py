@@ -57,7 +57,7 @@ import asyncio
 import mimetypes
 from pathlib import Path
 from typing import Dict, Any, List, Union, Tuple, Optional
-from ..core import DAPClient
+from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
 
@@ -150,7 +150,8 @@ class DataMixin(DAPClient):
                 self: The opened pipe instance for method chaining
 
             Raises:
-                RuntimeError: If pipe is already opened or if opening fails
+                RuntimeError: If the pipe is already opened.
+                PipeException: If the server rejects the open request.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/plain")
@@ -174,7 +175,17 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message') or 'Your pipeline is not currently running.')
+                msg = response.get('message') or 'Failed to open a data pipe.'
+                msg = (
+                    f"{msg}\n\n"
+                    "Common causes:\n"
+                    "- Pipeline isn't running (wrong token or task terminated)\n"
+                    "- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n"
+                    "- MIME type doesn't match the source lane (try `mimetype=\"text/plain\"`)\n"
+                )
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True
@@ -197,7 +208,8 @@ class DataMixin(DAPClient):
                 buffer: Data to send (must be bytes, not string)
 
             Raises:
-                RuntimeError: If pipe not opened or write fails
+                RuntimeError: If the pipe is not opened.
+                PipeException: If the server reports a write failure.
                 ValueError: If buffer is not bytes
 
             Example:
@@ -224,7 +236,10 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Failed to write to pipe'))
+                msg = response.get('message') or 'Failed to write to a data pipe.'
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
         async def close(self) -> PIPELINE_RESULT:
             """
@@ -235,6 +250,9 @@ class DataMixin(DAPClient):
 
             Returns:
                 Dict: Results from processing the data you sent
+
+            Raises:
+                PipeException: If the server reports a failure while finalizing the pipe.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/csv")
@@ -259,7 +277,10 @@ class DataMixin(DAPClient):
                 response = await self._client.request(request)
 
                 if self._client.did_fail(response):
-                    raise RuntimeError(response.get('message', 'Failed to close pipe'))
+                    msg = response.get('message') or 'Failed to close a data pipe.'
+                    response = dict(response)
+                    response['message'] = msg
+                    raise PipeException(response)
 
                 return response.get('body', {})
 
@@ -356,7 +377,7 @@ class DataMixin(DAPClient):
 
         Raises:
             ValueError: If data is not string or bytes
-            RuntimeError: If sending fails
+            PipeException: If the server rejects the underlying pipe open/write/close.
 
         Example:
             # Send text data

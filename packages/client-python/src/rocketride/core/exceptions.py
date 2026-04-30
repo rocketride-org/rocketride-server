@@ -159,12 +159,17 @@ class AuthenticationException(ConnectionException):
     pass
 
 
-class PipeException(RocketRideException):
+class PipeException(RocketRideException, RuntimeError):
     """
     Exception raised for data pipe operations.
 
     Raised when there are problems with data pipes used for sending
     data to pipelines, uploading files, or streaming operations.
+
+    Note:
+        Also inherits from :class:`RuntimeError` for backward compatibility with
+        callers that previously caught ``RuntimeError`` from
+        ``client.send()`` / ``client.pipe()`` / pipe ``open()``/``write()``/``close()``.
 
     Common scenarios:
     - Failed to open data pipe
