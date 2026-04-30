@@ -14,18 +14,6 @@
 	"lanes": {
 		"image": ["text"]
 	},
-	"input": [
-		{
-			"lane": "image",
-			"description": "Image to analyze for accessibility description (JPEG, PNG, WebP)",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Structured accessibility description with hazards, spatial layout, text, and navigation info"
-				}
-			]
-		}
-	],
 	"preconfig": {
 		"default": "gemini-2.5-flash",
 		"profiles": {

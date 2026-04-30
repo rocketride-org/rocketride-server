@@ -45,33 +45,6 @@
 	"lanes": {
 		"tags": ["text", "table", "image", "video", "audio"]
 	},
-	"input": [
-		{
-			"lane": "tags",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Parses and outputs text."
-				},
-				{
-					"lane": "table",
-					"description": "Parses and outputs tables."
-				},
-				{
-					"lane": "audio",
-					"description": "Parses and outputs audio streams."
-				},
-				{
-					"lane": "video",
-					"description": "Parses and outputs video streams."
-				},
-				{
-					"lane": "image",
-					"description": "Parses and outputs images."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

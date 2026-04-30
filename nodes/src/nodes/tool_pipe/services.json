@@ -13,12 +13,6 @@
 	"lanes": {
 		"_source": ["text", "questions", "documents", "table", "answers"]
 	},
-	"input": [
-		{
-			"lane": "_source",
-			"output": [{ "lane": "text" }, { "lane": "questions" }, { "lane": "documents" }, { "lane": "table" }, { "lane": "answers" }]
-		}
-	],
 	"preconfig": {
 		"default": "default",
 		"profiles": {

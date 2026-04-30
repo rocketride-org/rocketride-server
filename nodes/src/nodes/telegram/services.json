@@ -66,33 +66,6 @@
 	"lanes": {
 		"_source": ["text", "image", "audio", "video", "tags"]
 	},
-	"input": [
-		{
-			"lane": "_source",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Text messages from Telegram users."
-				},
-				{
-					"lane": "image",
-					"description": "Photos sent by Telegram users (JPEG)."
-				},
-				{
-					"lane": "audio",
-					"description": "Audio files and voice messages sent by Telegram users."
-				},
-				{
-					"lane": "video",
-					"description": "Video clips sent by Telegram users."
-				},
-				{
-					"lane": "tags",
-					"description": "Documents (PDF, Word, etc.) sent by Telegram users. Connect to a Parser node."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver itself

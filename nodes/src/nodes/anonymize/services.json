@@ -63,19 +63,6 @@
 	"lanes": {
 		"text": ["text"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": "Text with sensitive information",
-			"min": 1,
-			"output": [
-				{
-					"lane": "text",
-					"description": "Anonymized text"
-				}
-			]
-		}
-	],
 	//
 	//	Test configuration for automated node testing
 	//

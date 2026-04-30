@@ -70,28 +70,6 @@
 		"image": ["text"],
 		"documents": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "image",
-			"description": "Image to analyze with a local Ollama vision model",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Text analysis of the image content"
-				}
-			]
-		},
-		{
-			"lane": "documents",
-			"description": "Image documents to analyze with a local Ollama vision model",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver

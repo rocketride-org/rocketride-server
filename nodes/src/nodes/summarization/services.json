@@ -79,19 +79,6 @@
 	"lanes": {
 		"text": ["text", "documents"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"output": [
-				{
-					"lane": "text"
-				},
-				{
-					"lane": "documents"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

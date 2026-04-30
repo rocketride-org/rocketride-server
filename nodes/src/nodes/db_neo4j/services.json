@@ -74,26 +74,6 @@
 		// "answers": [],
 		"questions": ["table", "text", "answers"]
 	},
-	"input": [
-		// {
-		// 	"lane": "answers",
-		// 	"output": []
-		// },
-		{
-			"lane": "questions",
-			"output": [
-				{
-					"lane": "table"
-				},
-				{
-					"lane": "text"
-				},
-				{
-					"lane": "answers"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver

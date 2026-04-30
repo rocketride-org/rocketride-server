@@ -68,17 +68,6 @@
 	"lanes": {
 		"_source": ["questions"]
 	},
-	"input": [
-		{
-			"lane": "_source",
-			"output": [
-				{
-					"lane": "questions",
-					"description": "Produces questions to be answered by the pipeline."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

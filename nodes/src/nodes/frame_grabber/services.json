@@ -64,26 +64,6 @@
 	"lanes": {
 		"video": ["image", "table", "documents"]
 	},
-	"input": [
-		{
-			"lane": "video",
-			"description": "Video to process.",
-			"output": [
-				{
-					"lane": "image",
-					"description": "Selected frames of the video."
-				},
-				{
-					"lane": "table",
-					"description": "Start times of selected frames of the video."
-				},
-				{
-					"lane": "documents",
-					"description": "Selected frames of the video as image documents with frame number and timestamp metadata."
-				}
-			]
-		}
-	],
 	//
 	//
 	//	Optional:
