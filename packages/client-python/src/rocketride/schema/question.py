@@ -85,6 +85,7 @@ class Answer(BaseModel):
 
     answer: Optional[Union[str, dict, list]] = None
     expectJson: bool = False
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description='Metadata carried from the originating question or pipeline context.')
 
     @field_validator('answer', mode='before')
     @classmethod
@@ -350,6 +351,7 @@ class Question(BaseModel):
         context: Additional context information
         documents: Specific documents to reference
         questions: List of questions to ask
+        metadata: Pipeline metadata carried alongside the question.
     """
 
     type: QuestionType = Field(QuestionType.QUESTION, description='Type of question - question uses basic Q&A, semantic uses AI understanding, keyword uses text matching.')
@@ -363,6 +365,7 @@ class Question(BaseModel):
     goals: Optional[List[str]] = Field(default_factory=list, description='High-level objectives the AI should work towards (rendered as ### Goal before the prompt).')
     documents: Optional[List[Doc]] = Field(default_factory=list, description='Specific documents to reference when answering.')
     questions: Optional[List[QuestionText]] = Field(default_factory=list, description='List of questions to ask (usually just one).')
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description='Pipeline metadata that should not be rendered into the LLM prompt.')
 
     def addInstruction(self, title: str, instruction: str):
         """
@@ -522,25 +525,26 @@ class Question(BaseModel):
 
         # JSON formatting
         if self.expectJson:
-            all_instructions.append(QuestionInstruction(
-                subtitle='JSON Response Format',
-                instructions=(
-                    '- Respond **only** with a fenced, valid JSON structure.\r\n'
-                    '- Properly escape all quotes within content strings.\r\n'
-                    '- No additional text, comments, or explanations.\r\n'
-                    '- Ensure your answer is strictly valid JSON format.\r\n'
-                    '- Double check the JSON response to ensure it is valid.\r\n'
-                    '- Enclose the json with ```json and ``` tags.'
-                ),
-            ))
-            if has_previous_json_failed:
-                all_instructions.append(QuestionInstruction(
-                    subtitle='CRITICAL',
+            all_instructions.append(
+                QuestionInstruction(
+                    subtitle='JSON Response Format',
                     instructions=(
-                        '- Your previous response returned invalid JSON.\r\n'
-                        '- Examine your JSON and ensure it is complete and follows the JSON standards.'
+                        '- Respond **only** with a fenced, valid JSON structure.\r\n'
+                        '- Properly escape all quotes within content strings.\r\n'
+                        '- No additional text, comments, or explanations.\r\n'
+                        '- Ensure your answer is strictly valid JSON format.\r\n'
+                        '- Double check the JSON response to ensure it is valid.\r\n'
+                        '- Enclose the json with ```json and ``` tags.'
                     ),
-                ))
+                )
+            )
+            if has_previous_json_failed:
+                all_instructions.append(
+                    QuestionInstruction(
+                        subtitle='CRITICAL',
+                        instructions=('- Your previous response returned invalid JSON.\r\n- Examine your JSON and ensure it is complete and follows the JSON standards.'),
+                    )
+                )
 
         # User-provided instructions
         all_instructions.extend(self.instructions)

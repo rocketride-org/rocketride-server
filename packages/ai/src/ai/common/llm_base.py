@@ -16,6 +16,13 @@ class LLMBase(IInstanceBase):
 
     def writeQuestions(self, question: Question):
         answer = self._question(question)
+        metadata = getattr(question, 'metadata', None)
+        if isinstance(metadata, dict):
+            existing = getattr(answer, 'metadata', None)
+            if isinstance(existing, dict):
+                existing.update(metadata)
+            else:
+                answer.metadata = dict(metadata)
         self.instance.writeAnswers(answer)
 
     @invoke_function

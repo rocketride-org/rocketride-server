@@ -150,6 +150,7 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'requires_server: mark test as requiring a running server')
     config.addinivalue_line('markers', 'node(name): mark test as testing a specific node')
     config.addinivalue_line('markers', 'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)')
+    config.addinivalue_line('markers', 'cobalt: mark tests as exercising Cobalt-backed evaluation paths')
 
 
 # =============================================================================
