@@ -1,27 +1,27 @@
 {
   "title": "ML Sklearn Prediction",
-  "protocol": "ml_sklearn://",
-  "classType": ["machine_learning"],
+  "protocol": "preprocessor_code://",
+  "classType": ["preprocessor"],
   "capabilities": [],
   "register": "filter",
   "node": "python",
   "path": "nodes.ml_sklearn",
-  "prefix": "ML",
+  "prefix": "Preprocessor",
   "description": [
-    "A machine learning node that performs prediction using a trained sklearn model.",
-    "It accepts numerical input and returns predicted output."
+    "A machine learning node that performs prediction using a trained sklearn model."
   ],
   "icon": "python.svg",
   "documentation": "https://docs.rocketride.org",
   "lanes": {
-    "input": ["data"]
+    "input": ["text"],
+    "output": ["text"]
   },
   "input": [
     {
       "lane": "input",
       "output": [
         {
-          "lane": "data"
+          "lane": "text"
         }
       ]
     }
