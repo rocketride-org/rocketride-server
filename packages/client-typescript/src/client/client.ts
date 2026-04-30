@@ -1038,7 +1038,9 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getTaskStatus(token: string): Promise<TASK_STATUS> {
 		try {
-			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, { token });
+			// Task status should return quickly; bound the wait so callers/tests can't hang forever
+			// if the engine stops responding mid-request (especially important in CI).
+			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, { token, timeout: 15000 });
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
