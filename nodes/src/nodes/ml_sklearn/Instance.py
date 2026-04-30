@@ -1,11 +1,14 @@
 class Instance:
+    '''ML Sklearn Instance Node'''
+
     def __init__(self, IGlobal):
         self.IGlobal = IGlobal
 
     def process(self, text):
         try:
-            if self.IGlobal.preprocessor:
-                return self.IGlobal.preprocessor.process(text)
+            preprocessor = self.IGlobal.preprocessor
+            if preprocessor:
+                return preprocessor.process(text)
         except Exception:
             pass
 
