@@ -90,18 +90,30 @@ class IInstance(IInstanceBase):
         expected = ''
         metadata = getattr(answer, 'metadata', None)
         context = getattr(answer, 'context', None)
-        candidates = [
-            getattr(answer, 'expected', None),
-            metadata.get('expected') if isinstance(metadata, dict) else None,
-            metadata.get('reference') if isinstance(metadata, dict) else None,
-            metadata.get('context') if isinstance(metadata, dict) else None,
-            context if isinstance(context, str) else None,
-            json_data.get('expected') if isinstance(json_data, dict) else None,
-            json_data.get('reference') if isinstance(json_data, dict) else None,
-            json_data.get('context') if isinstance(json_data, dict) else None,
-        ]
+        if evaluator.eval_type == 'grounding':
+            candidates = [
+                metadata.get('context') if isinstance(metadata, dict) else None,
+                context if isinstance(context, str) else None,
+                json_data.get('context') if isinstance(json_data, dict) else None,
+                metadata.get('reference') if isinstance(metadata, dict) else None,
+                json_data.get('reference') if isinstance(json_data, dict) else None,
+                getattr(answer, 'expected', None),
+                metadata.get('expected') if isinstance(metadata, dict) else None,
+                json_data.get('expected') if isinstance(json_data, dict) else None,
+            ]
+        else:
+            candidates = [
+                getattr(answer, 'expected', None),
+                metadata.get('expected') if isinstance(metadata, dict) else None,
+                metadata.get('reference') if isinstance(metadata, dict) else None,
+                metadata.get('context') if isinstance(metadata, dict) else None,
+                context if isinstance(context, str) else None,
+                json_data.get('expected') if isinstance(json_data, dict) else None,
+                json_data.get('reference') if isinstance(json_data, dict) else None,
+                json_data.get('context') if isinstance(json_data, dict) else None,
+            ]
         for candidate in candidates:
-            if candidate:
+            if candidate is not None and candidate != '':
                 expected = candidate if isinstance(candidate, str) else str(candidate)
                 break
 

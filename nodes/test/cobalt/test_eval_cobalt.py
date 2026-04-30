@@ -653,6 +653,50 @@ class TestIInstanceWriteAnswers:
 
         inst.IGlobal._evaluator.evaluate.assert_called_once_with('metadata reference', 'metadata reference')
 
+    def test_writeAnswers_preserves_falsy_expected_value(self):
+        """Falsy but explicit expected values are valid references."""
+        inst = self._make_iinstance()
+        inst.IGlobal._evaluator.evaluate = MagicMock(
+            return_value={
+                'score': 1.0,
+                'passed': True,
+                'reasoning': '',
+                'evaluator': 'semantic',
+            }
+        )
+
+        answer = MockAnswer()
+        answer.expected = 0
+        answer.setAnswer('0')
+
+        inst.writeAnswers(answer)
+
+        inst.IGlobal._evaluator.evaluate.assert_called_once_with('0', '0')
+
+    def test_writeAnswers_grounding_prefers_context_over_expected(self):
+        """Grounding mode should score against evidence context, not gold answer."""
+        inst = self._make_iinstance()
+        inst.IGlobal._evaluator._eval_type = 'grounding'
+        inst.IGlobal._evaluator.evaluate = MagicMock(
+            return_value={
+                'score': 1.0,
+                'passed': True,
+                'reasoning': '',
+                'evaluator': 'grounding',
+            }
+        )
+
+        answer = MockAnswer()
+        answer.metadata = {
+            'expected': 'gold answer',
+            'context': 'source evidence context',
+        }
+        answer.setAnswer('grounded response')
+
+        inst.writeAnswers(answer)
+
+        inst.IGlobal._evaluator.evaluate.assert_called_once_with('grounded response', 'source evidence context')
+
 
 class TestIGlobalLifecycle:
     """Test IGlobal beginGlobal/endGlobal lifecycle."""
@@ -747,9 +791,21 @@ class TestRelevanceEvaluation:
         assert result['passed'] is False
         assert result['evaluator'] == 'relevance'
 
+    def test_whitespace_only_output_is_empty(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_relevance('   \n\t', 'some expected content')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
     def test_both_empty(self):
         evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.5}, {})
         result = evaluator.evaluate_relevance('', '')
+        assert result['score'] == 1.0
+        assert result['passed'] is True
+
+    def test_whitespace_only_both_empty_passes(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_relevance('   ', '\n\t')
         assert result['score'] == 1.0
         assert result['passed'] is True
 

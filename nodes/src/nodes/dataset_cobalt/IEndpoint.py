@@ -168,7 +168,8 @@ class IEndpoint(IEndpointBase):
                 return {}
 
     def _entry_from_item(self, index: int, item: Dict[str, Any]) -> Dict[str, Any]:
-        text = item.get('text', '') or f'Cobalt dataset item {index}'
+        raw_text = item.get('text', '')
+        text = str(raw_text) if raw_text is not None and raw_text != '' else f'Cobalt dataset item {index}'
 
         return {
             'url': f'dataset_cobalt://{index}/{uuid.uuid4()}',

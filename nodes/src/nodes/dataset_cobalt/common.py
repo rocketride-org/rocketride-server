@@ -29,9 +29,12 @@ from ai.common.schema import Question
 def question_from_item(item: Dict[str, Any]) -> Question:
     question = Question()
 
-    text = item.get('text', '')
-    if text:
-        question.addQuestion(text)
+    if 'text' in item:
+        text = item['text']
+    else:
+        text = ''
+    if text is not None and text != '':
+        question.addQuestion(str(text))
 
     metadata = item.get('metadata', {})
     if metadata:

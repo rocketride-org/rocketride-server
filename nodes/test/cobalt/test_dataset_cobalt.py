@@ -603,6 +603,21 @@ class TestIInstanceEmitsQuestions:
         inst.writeQuestions(template)
         assert inst.instance.writeQuestions.call_count == 0
 
+    def test_explicit_falsy_text_replaces_template_prompt(self):
+        questions = [
+            {'text': 0, 'metadata': {'expected': 'zero', 'dataset_id': '1', 'cobalt_source': True}},
+        ]
+        inst = self._make_instance(questions)
+        emitted = []
+        inst.instance.writeQuestions.side_effect = lambda q: emitted.append(q)
+
+        template = sys.modules['ai.common.schema'].Question()
+        template.addQuestion('template prompt')
+        inst.writeQuestions(template)
+
+        assert len(emitted) == 1
+        assert emitted[0].questions == ['0']
+
 
 class TestDeepCopyPreventsMutation:
     """Test deep copy prevents mutation between emitted items."""
@@ -745,6 +760,19 @@ class TestIEndpointSource:
         emitted = inst.instance.sendQuestions.call_args.args[0]
         assert emitted.questions == ['q']
         assert emitted.metadata['expected'] == 'a'
+
+    def test_render_object_preserves_falsy_text(self):
+        inst = IInstance()
+        inst.instance = MagicMock()
+        entry = MagicMock()
+        entry.objectTags = {'text': 0, 'metadata': {'expected': 'zero'}}
+
+        with pytest.raises(Exception, match='No default to prevent'):
+            inst.renderObject(entry)
+
+        emitted = inst.instance.sendQuestions.call_args.args[0]
+        assert emitted.questions == ['0']
+        assert emitted.metadata['expected'] == 'zero'
 
 
 # ===========================================================================

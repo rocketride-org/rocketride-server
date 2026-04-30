@@ -64,12 +64,15 @@ class IInstance(IInstanceBase):
             # Set the question text from the dataset item, replacing any
             # prompt carried by the incoming template so emitted items
             # contain only the dataset's prompt.
-            text = item.get('text', '')
-            if text:
+            if 'text' in item:
+                text = item['text']
+            else:
+                text = ''
+            if text is not None and text != '':
                 if hasattr(q, 'questions'):
                     with contextlib.suppress(ValueError, AttributeError):
                         q.questions = []
-                q.addQuestion(text)
+                q.addQuestion(str(text))
 
             # Attach metadata to the question without injecting expected
             # answers into the prompt context (which the LLM would see).

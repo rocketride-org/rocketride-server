@@ -120,6 +120,9 @@ def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, 
     Returns:
         A dict with keys: score (float 0-1), passed (bool), reasoning (str).
     """
+    output = output.strip()
+    expected = expected.strip()
+
     if not output and not expected:
         return {'score': 1.0, 'passed': True, 'reasoning': 'Both output and expected are empty.'}
 
