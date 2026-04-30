@@ -67,14 +67,19 @@ def _make_args(path, **overrides):
 
 
 def _isolate_env() -> dict:
-    """Build an env dict with no agent-detection signals so detection is purely
+    """Build an env dict with no agent-detection signals.
+
+    Strips CURSOR_TRACE_ID, CLAUDECODE, etc. so detection is purely
     project-marker-driven during tests.
     """
     return {k: v for k, v in os.environ.items() if k not in {'CURSOR_TRACE_ID', 'CLAUDECODE', 'CLAUDE_CODE', 'TERM_PROGRAM', 'HOME', 'USERPROFILE'}}
 
 
 class InitCommandTests(unittest.TestCase):
+    """End-to-end tests for InitCommand against a temp workspace."""
+
     def setUp(self) -> None:
+        """Create a temp workspace and isolate the environment from the host."""
         self._tmp = tempfile.TemporaryDirectory()
         self.workspace = Path(self._tmp.name)
         # Force HOME/USERPROFILE to a tmp location so home-dir detection
@@ -88,6 +93,7 @@ class InitCommandTests(unittest.TestCase):
         self._env_patcher.start()
 
     def tearDown(self) -> None:
+        """Restore the environment and remove temp directories."""
         self._env_patcher.stop()
         self._fake_home.cleanup()
         self._tmp.cleanup()
@@ -97,6 +103,7 @@ class InitCommandTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_creates_docs_directory_with_all_seven_files(self) -> None:
+        """All seven canonical doc files land under .rocketride/docs/."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True))
         rc = _run(cmd.execute(None))
         self.assertEqual(rc, 0)
@@ -108,6 +115,7 @@ class InitCommandTests(unittest.TestCase):
                 self.assertTrue((docs_dir / name).is_file(), f'missing: {name}')
 
     def test_appends_gitignore_entry(self) -> None:
+        """Init appends `.rocketride/` to a missing or partial .gitignore."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True))
         _run(cmd.execute(None))
 
@@ -115,6 +123,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertIn('.rocketride/', gitignore.splitlines())
 
     def test_gitignore_entry_is_not_duplicated(self) -> None:
+        """Init does not add a second `.rocketride/` line if one already exists."""
         gitignore_path = self.workspace / '.gitignore'
         gitignore_path.write_text('node_modules/\n.rocketride/\n', encoding='utf-8')
 
@@ -129,6 +138,7 @@ class InitCommandTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_no_agents_flag_skips_stub_writes(self) -> None:
+        """`--no-agents` writes docs but no agent stub files."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True))
         _run(cmd.execute(None))
 
@@ -138,6 +148,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertFalse((self.workspace / '.cursor').exists())
 
     def test_no_detection_falls_back_to_universal_agent_files(self) -> None:
+        """When no IDE/agent is detected, install CLAUDE.md and AGENTS.md fallbacks."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace))
         _run(cmd.execute(None))
 
@@ -145,6 +156,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertTrue((self.workspace / 'AGENTS.md').is_file())
 
     def test_explicit_agent_flag_installs_only_that_stub(self) -> None:
+        """`--agent cursor` installs only Cursor; fallback files are skipped."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, agent=['cursor']))
         _run(cmd.execute(None))
 
@@ -154,6 +166,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertFalse((self.workspace / 'AGENTS.md').exists())
 
     def test_agent_all_installs_every_stub(self) -> None:
+        """`--agent all` installs stubs for every supported agent."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, agent=['all']))
         _run(cmd.execute(None))
 
@@ -169,6 +182,7 @@ class InitCommandTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_second_run_is_a_noop_when_nothing_changed(self) -> None:
+        """Re-running init produces byte-identical files (idempotent)."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, agent=['all']))
         _run(cmd.execute(None))
 
@@ -183,6 +197,7 @@ class InitCommandTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), content, f'changed: {path}')
 
     def test_force_overwrites_modified_doc_files(self) -> None:
+        """`--force` replaces locally edited doc files with the canonical version."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True))
         _run(cmd.execute(None))
 
@@ -195,6 +210,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertNotEqual(readme.read_text(encoding='utf-8'), 'LOCAL EDIT\n')
 
     def test_no_overwrite_preserves_modified_doc_files(self) -> None:
+        """`--no-overwrite` leaves locally edited doc files untouched."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True))
         _run(cmd.execute(None))
 
@@ -207,6 +223,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertEqual(readme.read_text(encoding='utf-8'), 'LOCAL EDIT\n')
 
     def test_force_and_no_overwrite_together_are_rejected(self) -> None:
+        """Passing both `--force` and `--no-overwrite` exits with a non-zero status."""
         cmd = InitCommand(cli=None, args=_make_args(self.workspace, no_agents=True, force=True, no_overwrite=True))
         rc = _run(cmd.execute(None))
         self.assertEqual(rc, 1)
@@ -216,6 +233,7 @@ class InitCommandTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_existing_claude_md_user_content_is_preserved_around_markers(self) -> None:
+        """Pre-existing CLAUDE.md content survives the merge unchanged."""
         existing = 'My existing instructions.\nKeep this.\n'
         (self.workspace / 'CLAUDE.md').write_text(existing, encoding='utf-8')
 
@@ -229,6 +247,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertIn(_MARKER_END, result)
 
     def test_rerun_only_replaces_marked_section(self) -> None:
+        """Re-running init only rewrites the marker block; user edits outside it remain."""
         path = self.workspace / 'CLAUDE.md'
         path.write_text('User content above.\n', encoding='utf-8')
 
@@ -248,7 +267,10 @@ class InitCommandTests(unittest.TestCase):
 
 
 class DetectAgentsTests(unittest.TestCase):
+    """Unit tests for the `_detect_agents` heuristic."""
+
     def setUp(self) -> None:
+        """Create an empty project root and isolate HOME/USERPROFILE."""
         self._tmp = tempfile.TemporaryDirectory()
         self._fake_home = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -260,32 +282,41 @@ class DetectAgentsTests(unittest.TestCase):
         self._env_patcher.start()
 
     def tearDown(self) -> None:
+        """Restore the environment and remove temp directories."""
         self._env_patcher.stop()
         self._fake_home.cleanup()
         self._tmp.cleanup()
 
     def test_empty_project_detects_nothing(self) -> None:
+        """A bare directory with no markers yields no detected agents."""
         self.assertEqual(_detect_agents(self.root), ())
 
     def test_cursor_dir_detects_cursor(self) -> None:
+        """A `.cursor/` directory in the project is detected as Cursor."""
         (self.root / '.cursor').mkdir()
         self.assertIn('cursor', _detect_agents(self.root))
 
     def test_existing_claude_md_detects_claude_md(self) -> None:
+        """An existing CLAUDE.md file is detected as the claude-md agent."""
         (self.root / 'CLAUDE.md').write_text('x', encoding='utf-8')
         self.assertIn('claude-md', _detect_agents(self.root))
 
     def test_claudecode_env_var_detects_claude_code(self) -> None:
+        """The CLAUDECODE env var causes Claude Code to be detected."""
         with patch.dict(os.environ, {'CLAUDECODE': '1'}, clear=False):
             self.assertIn('claude-code', _detect_agents(self.root))
 
 
 class MergeMarkedContentTests(unittest.TestCase):
+    """Unit tests for the `_merge_marked_content` marker-block merge helper."""
+
     def test_empty_existing_returns_stub_verbatim(self) -> None:
+        """Merging into empty content returns the stub unchanged."""
         stub = f'{_MARKER_BEGIN}\nX\n{_MARKER_END}\n'
         self.assertEqual(_merge_marked_content('', stub), stub)
 
     def test_replaces_marked_block_in_existing(self) -> None:
+        """Existing marker block is replaced; surrounding user content is kept."""
         existing = f'before\n{_MARKER_BEGIN}\nOLD\n{_MARKER_END}\nafter\n'
         stub = f'{_MARKER_BEGIN}\nNEW\n{_MARKER_END}\n'
         merged = _merge_marked_content(existing, stub)
@@ -295,6 +326,7 @@ class MergeMarkedContentTests(unittest.TestCase):
         self.assertNotIn('OLD', merged)
 
     def test_appends_when_no_markers_present(self) -> None:
+        """If existing content has no markers, the stub is appended."""
         existing = 'plain user content\n'
         stub = f'{_MARKER_BEGIN}\nX\n{_MARKER_END}\n'
         merged = _merge_marked_content(existing, stub)

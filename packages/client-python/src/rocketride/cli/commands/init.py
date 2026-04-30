@@ -95,6 +95,7 @@ class InitCommand(BaseCommand):
         super().__init__(cli, args)
 
     async def execute(self, client: 'RocketRideClient') -> int:
+        """Scaffold the .rocketride workspace and any agent stub files."""
         target_root = Path(self.args.path).resolve() if self.args.path else Path.cwd()
 
         if not target_root.exists():
@@ -117,6 +118,17 @@ class InitCommand(BaseCommand):
             return 1
 
         agents = self._select_agents(target_root)
+
+        # Fail-fast: every required template must exist before we touch the
+        # target directory. Otherwise a broken install/checkout could produce a
+        # half-scaffolded workspace.
+        missing = _missing_templates(templates, agents)
+        if missing:
+            print('Error: required RocketRide templates are missing:')
+            for rel in missing:
+                print(f'  - {rel}')
+            print('Reinstall the rocketride package, or check that docs/agents/ and docs/stubs/ are present in your checkout.')
+            return 1
 
         print(f'Initializing RocketRide workspace in {target_root}')
 
@@ -176,10 +188,6 @@ class InitCommand(BaseCommand):
 
         for name in _DOC_FILES:
             src = source_dir / name
-            if not src.is_file():
-                print(f'  ! skipped {name}: missing from templates')
-                continue
-
             dest = target_dir / name
             new_content = src.read_bytes()
 
@@ -201,10 +209,7 @@ class InitCommand(BaseCommand):
     # ------------------------------------------------------------------
 
     def _install_stub(self, *, stub_path: Path, target_path: Path, target_root: Path, agent: str) -> None:
-        if not stub_path.is_file():
-            print(f'  ! skipped {agent}: stub template missing ({stub_path.name})')
-            return
-
+        """Merge the stub template into target_path using the marker protocol."""
         stub_content = stub_path.read_text(encoding='utf-8')
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -254,8 +259,27 @@ class _Aborted(RuntimeError):
     pass
 
 
+def _missing_templates(templates, agents: tuple[str, ...]) -> list[str]:
+    """Return relative paths of any required template files absent from the install.
+
+    Checks every doc in `_DOC_FILES` plus the stub source for each requested
+    agent. The returned list is empty when the install is complete.
+    """
+    missing: list[str] = []
+    docs_dir = templates / 'docs'
+    for name in _DOC_FILES:
+        if not (docs_dir / name).is_file():
+            missing.append(f'docs/{name}')
+    stubs_dir = templates / 'stubs'
+    for agent in agents:
+        stub_name = _AGENTS[agent][0]
+        if not (stubs_dir / stub_name).is_file():
+            missing.append(f'stubs/{stub_name}')
+    return missing
+
+
 def _normalized(b: bytes) -> bytes:
-    """Strip CR so \\r\\n vs \\n doesn't trigger a false rewrite."""
+    r"""Strip CR so \r\n vs \n doesn't trigger a false rewrite."""
     return b.replace(b'\r\n', b'\n')
 
 
@@ -332,7 +356,8 @@ def _detect_agents(project_root: Path) -> tuple[str, ...]:
         found.add('copilot')
 
     # Home-directory installs.
-    home = Path(os.environ.get('USERPROFILE') or os.environ.get('HOME') or '')
+    home_raw = os.environ.get('USERPROFILE') or os.environ.get('HOME')
+    home = Path(home_raw) if home_raw else None
     if home and (home / '.claude').is_dir():
         found.add('claude-code')
     if home and (home / '.cursor').is_dir():

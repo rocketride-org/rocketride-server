@@ -31,7 +31,9 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState } = require('../../../scripts/lib');
+const crypto = require('crypto');
+const fsp = require('fs').promises;
+const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, fingerprint, saveSourceHash, getState, setState } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
@@ -105,14 +107,32 @@ function makeWheelSourceAction() {
 // State key for source fingerprint
 const SRC_HASH_KEY = 'client-python.srcHash';
 
+// Inputs that affect wheel contents — keep in sync with the wheel-build steps.
+// SRC_DIR is the package source; AGENT_DOCS_SRC + AGENT_STUBS_SRC are bundled
+// into the wheel as `cli/templates/` package data; README_SRC is copied to
+// BUILD_DIR/README.md before `python -m build` runs.
+async function computeWheelInputsHash() {
+	const dirHashes = await Promise.all([fingerprint(SRC_DIR), fingerprint(AGENT_DOCS_SRC), fingerprint(AGENT_STUBS_SRC)]);
+	let readmeStat = '';
+	try {
+		const s = await fsp.stat(README_SRC);
+		readmeStat = `${s.size}:${s.mtimeMs}`;
+	} catch {
+		readmeStat = 'missing';
+	}
+	const combined = [...dirHashes.map((h) => h ?? 'missing'), readmeStat].join('|');
+	return crypto.createHash('md5').update(combined).digest('hex');
+}
+
 function makeWheelBuildAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
+			// Check if any wheel input (src, agent docs/stubs, README) changed
+			const hash = await computeWheelInputsHash();
+			const savedHash = await getState(SRC_HASH_KEY);
 			const outputExists = await exists(DIST_DIR);
 
-			if (!changed && outputExists) {
+			if (hash === savedHash && outputExists) {
 				task.output = 'No changes detected';
 				return;
 			}
