@@ -73,7 +73,11 @@ class IGlobal(IGlobalBase):
                 git.clone(url=repo_path, path=tmp)
             except Exception as exc:
                 shutil.rmtree(tmp, ignore_errors=True)
-                raise ValueError(f'tool_git: failed to clone {repo_path!r}: {exc}') from exc
+                # Redact credentials from the URL before including in error message
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(repo_path)
+                redacted = urlunparse((parsed.scheme, parsed.hostname or parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+                raise ValueError(f'tool_git: failed to clone {redacted!r}: {exc}') from exc
             self._tmp_dir = tmp
 
         elif repo_path:

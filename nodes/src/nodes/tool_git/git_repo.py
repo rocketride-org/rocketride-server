@@ -465,7 +465,8 @@ class GitRepo:
 
         patch = d.patch or ''
         if path:
-            patch = _filter_diff_by_path(patch, path)
+            filtered = _filter_diff_by_path(patch, path)
+            return filtered
 
         return {
             'patch': patch,
@@ -539,6 +540,13 @@ class GitRepo:
             full.relative_to(workdir)
         except ValueError:
             raise GitError(f'Path {path!r} escapes the repository working directory') from None
+        # Prevent writes to .git directory
+        git_dir = workdir / '.git'
+        try:
+            full.relative_to(git_dir)
+            raise GitError(f'Path {path!r} is inside the .git directory')
+        except ValueError:
+            pass
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding='utf-8')
         return {'path': path, 'size': len(content.encode('utf-8')), 'status': 'written'}
@@ -550,10 +558,15 @@ class GitRepo:
     def stage(self, paths: List[str]) -> Dict[str, Any]:
         """Stage files (add to index)."""
         repo = self._require_repo()
+        workdir = Path(repo.workdir).resolve()
         repo.index.read()
         staged = []
         for p in paths:
-            full = Path(repo.workdir) / p
+            full = (workdir / p).resolve()
+            try:
+                full.relative_to(workdir)
+            except ValueError:
+                raise GitError(f'Path {p!r} escapes the repository working directory') from None
             if not full.exists():
                 # Deleted file — remove from index
                 try:
@@ -947,17 +960,43 @@ def _commit_touches_path(
     )
 
 
-def _filter_diff_by_path(patch: str, path: str) -> str:
-    """Keep only hunks that touch *path* from a unified diff string."""
+def _filter_diff_by_path(patch: str, path: str) -> Dict[str, Any]:
+    """Filter a unified diff by path and recalculate stats. Returns filtered patch and counts."""
     lines = patch.splitlines(keepends=True)
     result: List[str] = []
     include = False
+    files_changed = 0
+    insertions = 0
+    deletions = 0
+
     for line in lines:
         if line.startswith('diff --git'):
-            include = path in line
+            # Extract paths from "diff --git a/foo b/foo"
+            parts = line.split()
+            if len(parts) >= 4:
+                # parts[2] is "a/..." and parts[3] is "b/..."
+                file_path = parts[3][2:] if parts[3].startswith('b/') else parts[3]
+                # Match exact path or path/ prefix
+                include = file_path == path or file_path.startswith(path + '/')
+                if include:
+                    files_changed += 1
+            else:
+                include = False
+
         if include:
             result.append(line)
-    return ''.join(result)
+            # Count additions and deletions in hunks
+            if line.startswith('+') and not line.startswith('+++'):
+                insertions += 1
+            elif line.startswith('-') and not line.startswith('---'):
+                deletions += 1
+
+    return {
+        'patch': ''.join(result),
+        'files_changed': files_changed,
+        'insertions': insertions,
+        'deletions': deletions,
+    }
 
 
 def _grep_tree(

@@ -406,9 +406,13 @@ class IInstance(IInstanceBase):
         if name == 'git.show':
             return git.show(ref=a['ref'])
         if name == 'git.diff':
+            ref_a = a.get('ref_a') or None
+            ref_b = a.get('ref_b') or None
+            if ref_b and not ref_a:
+                raise ValueError('ref_b requires ref_a to be set')
             return git.diff(
-                ref_a=a.get('ref_a') or None,
-                ref_b=a.get('ref_b') or None,
+                ref_a=ref_a,
+                ref_b=ref_b,
                 path=a.get('path') or None,
                 staged=self._bool_arg(a, 'staged', False),
             )
