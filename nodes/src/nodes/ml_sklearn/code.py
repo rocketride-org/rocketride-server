@@ -2,6 +2,8 @@ import pickle
 import os
 
 class PreProcessor:
+    '''ML Sklearn Prediction Node'''
+
     def __init__(self, *args, **kwargs):
         model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
         try:
@@ -12,16 +14,13 @@ class PreProcessor:
 
     def process(self, text):
         try:
-            # keep pipeline safe
-            if not self.model:
+            if not self.model or text is None:
                 return text
 
-            # convert input
-            value = float(text)
+            value = float(str(text).strip())
 
             prediction = self.model.predict([[value]])
 
-            # IMPORTANT: return same type (string)
             return str(prediction[0])
 
         except Exception:
