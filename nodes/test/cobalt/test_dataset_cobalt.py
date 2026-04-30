@@ -27,6 +27,7 @@ All tests use mocks to avoid real file I/O and external dependencies.
 """
 
 import importlib.machinery
+import os
 import pathlib
 import sys
 from types import ModuleType
@@ -41,6 +42,19 @@ import pytest
 # try to `from depends import depends` and fail outside the engine runtime.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _NODES_DIR = str(_REPO_ROOT / 'nodes' / 'src' / 'nodes')
+
+
+def _abs_test_path(*parts: str) -> str:
+    """Build a platform-native absolute path for path-validation tests."""
+    return os.path.join(os.path.abspath(os.sep), *parts)
+
+
+_DATA_DIR = _abs_test_path('data')
+_SAFE_WORKDIR = _abs_test_path('safe', 'workdir')
+_SAFE_WORKDIR_EVIL = _abs_test_path('safe', 'workdir_evil')
+_TMP_EVIL = _abs_test_path('tmp', 'evil')
+_ETC_SECRETS = _abs_test_path('etc', 'secrets.json')
+_ETC_PASSWD = _abs_test_path('etc', 'passwd')
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +84,7 @@ def _install_mocks():
     mock_englib.Entry = MagicMock
     mock_englib.Filters = MagicMock
     mock_englib.IFilterInstance = MagicMock
+    mock_englib.debug = lambda *a, **kw: None
     sys.modules['engLib'] = mock_englib
 
     # Mock rocketlib
@@ -334,20 +349,21 @@ class TestLoadFromJsonFile:
     """Test loading from JSON file (mocked)."""
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     @patch('os.path.isfile', return_value=True)
     def test_load_json_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
-        loader = _make_loader(file_path='/data/test.json')
-        items = loader.load_from_file('/data/test.json')
+        path = os.path.join(_DATA_DIR, 'test.json')
+        loader = _make_loader(file_path=path)
+        items = loader.load_from_file(path)
         assert len(items) == 2
         assert items[0]['input'] == 'json-q1'
         assert items[1]['expected'] == 'json-a2'
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     @patch('os.path.isfile', return_value=True)
     def test_load_json_via_load_method(self, mock_isfile, mock_cwd, mock_realpath):
-        loader = _make_loader(source_type='file', file_path='/data/test.json')
+        loader = _make_loader(source_type='file', file_path=os.path.join(_DATA_DIR, 'test.json'))
         items = loader.load()
         assert len(items) == 2
 
@@ -356,11 +372,12 @@ class TestLoadFromCsvFile:
     """Test loading from CSV file (mocked)."""
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     @patch('os.path.isfile', return_value=True)
     def test_load_csv_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
-        loader = _make_loader(file_path='/data/test.csv')
-        items = loader.load_from_file('/data/test.csv')
+        path = os.path.join(_DATA_DIR, 'test.csv')
+        loader = _make_loader(file_path=path)
+        items = loader.load_from_file(path)
         assert len(items) == 3
         assert items[0]['input'] == 'csv-q1'
 
@@ -369,11 +386,12 @@ class TestLoadFromJsonlFile:
     """Test loading from JSONL file (mocked)."""
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     @patch('os.path.isfile', return_value=True)
     def test_load_jsonl_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
-        loader = _make_loader(file_path='/data/test.jsonl')
-        items = loader.load_from_file('/data/test.jsonl')
+        path = os.path.join(_DATA_DIR, 'test.jsonl')
+        loader = _make_loader(file_path=path)
+        items = loader.load_from_file(path)
         assert len(items) == 2
         assert items[0]['input'] == 'jsonl-q1'
 
@@ -536,47 +554,52 @@ class TestPathValidation:
 
     @patch('os.path.isfile', return_value=False)
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     def test_missing_file_raises(self, mock_cwd, mock_realpath, mock_isfile):
-        loader = _make_loader(file_path='/data/nonexistent.json')
+        path = os.path.join(_DATA_DIR, 'nonexistent.json')
+        loader = _make_loader(file_path=path)
         with pytest.raises(FileNotFoundError, match='not found'):
-            loader.load_from_file('/data/nonexistent.json')
+            loader.load_from_file(path)
 
     def test_path_traversal_raises(self):
-        loader = _make_loader(file_path='/data/../../../etc/passwd')
+        path = os.path.join(_DATA_DIR, '..', '..', '..', 'etc', 'passwd')
+        loader = _make_loader(file_path=path)
         with pytest.raises(ValueError, match='traversal'):
-            loader.load_from_file('/data/../../../etc/passwd')
+            loader.load_from_file(path)
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/safe/workdir')
+    @patch('os.getcwd', return_value=_SAFE_WORKDIR)
     def test_absolute_path_outside_workdir_raises(self, mock_cwd, mock_realpath):
-        loader = _make_loader(file_path='/etc/secrets.json')
+        loader = _make_loader(file_path=_ETC_SECRETS)
         with pytest.raises(ValueError, match='outside the working directory'):
-            loader.load_from_file('/etc/secrets.json')
+            loader.load_from_file(_ETC_SECRETS)
 
-    @patch('os.path.realpath', side_effect=lambda p: '/safe/workdir_evil/test.json' if 'evil' in p else p)
-    @patch('os.getcwd', return_value='/safe/workdir')
+    @patch('os.path.realpath', side_effect=lambda p: os.path.join(_SAFE_WORKDIR_EVIL, 'test.json') if 'evil' in p else p)
+    @patch('os.getcwd', return_value=_SAFE_WORKDIR)
     def test_sibling_prefix_attack_raises(self, mock_cwd, mock_realpath):
         """Sibling prefix like /safe/workdir_evil/ must not pass startswith check."""
-        loader = _make_loader(file_path='/safe/workdir_evil/test.json')
+        path = os.path.join(_SAFE_WORKDIR_EVIL, 'test.json')
+        loader = _make_loader(file_path=path)
         with pytest.raises(ValueError, match='outside the working directory'):
-            loader.load_from_file('/safe/workdir_evil/test.json')
+            loader.load_from_file(path)
 
-    @patch('os.path.realpath', side_effect=lambda p: '/tmp/evil/data.json' if 'symlink' in p else p)
-    @patch('os.getcwd', return_value='/safe/workdir')
+    @patch('os.path.realpath', side_effect=lambda p: os.path.join(_TMP_EVIL, 'data.json') if 'symlink' in p else p)
+    @patch('os.getcwd', return_value=_SAFE_WORKDIR)
     def test_symlink_resolved_outside_workdir_raises(self, mock_cwd, mock_realpath):
         """Symlink resolving outside cwd must be rejected."""
-        loader = _make_loader(file_path='/safe/workdir/symlink_data.json')
+        path = os.path.join(_SAFE_WORKDIR, 'symlink_data.json')
+        loader = _make_loader(file_path=path)
         with pytest.raises(ValueError, match='outside the working directory'):
-            loader.load_from_file('/safe/workdir/symlink_data.json')
+            loader.load_from_file(path)
 
     @patch('os.path.isfile', return_value=True)
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     def test_unsupported_extension_raises(self, mock_cwd, mock_realpath, mock_isfile):
-        loader = _make_loader(file_path='/data/test.xml')
+        path = os.path.join(_DATA_DIR, 'test.xml')
+        loader = _make_loader(file_path=path)
         with pytest.raises(ValueError, match='Unsupported'):
-            loader.load_from_file('/data/test.xml')
+            loader.load_from_file(path)
 
 
 # ===========================================================================
@@ -813,10 +836,10 @@ class TestIGlobalLifecycle:
         return g
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.getcwd', return_value=_DATA_DIR)
     @patch('os.path.isfile', return_value=True)
     def test_begin_and_end_global(self, mock_isfile, mock_cwd, mock_realpath):
-        config = {'source_type': 'file', 'file_path': '/data/test.json', 'sample_size': 0}
+        config = {'source_type': 'file', 'file_path': os.path.join(_DATA_DIR, 'test.json'), 'sample_size': 0}
         g = self._make_global(config)
 
         g.beginGlobal()
@@ -840,10 +863,10 @@ class TestIGlobalLifecycle:
         assert g._questions[0]['text'] == 'inline-q1'
 
     @patch('os.path.realpath', side_effect=lambda p: p)
-    @patch('os.getcwd', return_value='/missing')
+    @patch('os.getcwd', return_value=_abs_test_path('missing'))
     @patch('os.path.isfile', return_value=False)
     def test_begin_global_missing_file_graceful(self, mock_isfile, mock_cwd, mock_realpath):
-        config = {'source_type': 'file', 'file_path': '/missing/data.json', 'sample_size': 0}
+        config = {'source_type': 'file', 'file_path': os.path.join(_abs_test_path('missing'), 'data.json'), 'sample_size': 0}
         g = self._make_global(config)
 
         # Should not raise; warns internally and sets empty dataset
@@ -969,23 +992,24 @@ class TestValidatePathHelper:
         from dataset_cobalt.dataset_loader import _validate_path
 
         with patch('os.path.realpath', side_effect=lambda p: p):
-            with patch('os.getcwd', return_value='/safe/workdir'):
+            with patch('os.getcwd', return_value=_SAFE_WORKDIR):
                 with pytest.raises(ValueError, match='outside'):
-                    _validate_path('/safe/workdir_evil/test.json')
+                    _validate_path(os.path.join(_SAFE_WORKDIR_EVIL, 'test.json'))
 
     def test_validate_path_accepts_valid_child(self):
         from dataset_cobalt.dataset_loader import _validate_path
 
         with patch('os.path.realpath', side_effect=lambda p: p):
-            with patch('os.getcwd', return_value='/safe/workdir'):
-                result = _validate_path('/safe/workdir/data/test.json')
-                assert result == '/safe/workdir/data/test.json'
+            with patch('os.getcwd', return_value=_SAFE_WORKDIR):
+                path = os.path.join(_SAFE_WORKDIR, 'data', 'test.json')
+                result = _validate_path(path)
+                assert result == path
 
     def test_validate_path_rejects_dotdot(self):
         from dataset_cobalt.dataset_loader import _validate_path
 
         with pytest.raises(ValueError, match='traversal'):
-            _validate_path('/data/../../../etc/passwd')
+            _validate_path(os.path.join(_DATA_DIR, '..', '..', '..', 'etc', 'passwd'))
 
 
 class TestExtractConfigMergesDefault:
