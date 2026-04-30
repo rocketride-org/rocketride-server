@@ -13,20 +13,19 @@ Covers the CodeRabbit review follow-ups:
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import logging
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 if str(NODES_SRC) not in sys.path:
     sys.path.insert(0, str(NODES_SRC))
-
-# Load memory_store.py directly to avoid triggering
-# memory_persistent/__init__.py, which imports IGlobal / rocketlib at
-# package import time (rocketlib is only available inside the engine).
-import importlib.util  # noqa: E402
 
 _ms_path = NODES_SRC / 'memory_persistent' / 'memory_store.py'
 _ms_spec = importlib.util.spec_from_file_location('memory_persistent_memory_store_under_test', str(_ms_path))
@@ -75,9 +74,11 @@ def test_inmemory_increment_returns_new_value_like_redis_incrby():
     backend = InMemoryBackend()
     backend.create_session('session-returns')
     result_a = backend.increment('session-returns', 'c', 5)
-    assert result_a['ok'] and result_a['value'] == 5
+    assert result_a['ok'] is True
+    assert result_a['value'] == 5
     result_b = backend.increment('session-returns', 'c', 3)
-    assert result_b['ok'] and result_b['value'] == 8
+    assert result_b['ok'] is True
+    assert result_b['value'] == 8
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +102,8 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
 
     # Still within TTL window — key must be retrievable
     got = backend.get('session-ttl', 'late_key')
-    assert got['ok'] and got['value'] == 'late_value'
+    assert got['ok'] is True
+    assert got['value'] == 'late_value'
 
     # Wait past the original session TTL
     time.sleep(0.5)
@@ -109,6 +111,18 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
     # Key must have expired with the session, not outlasted it
     got_after = backend.get('session-ttl', 'late_key')
     assert got_after['ok'] is False, 'Late-added key should inherit remaining session TTL and be purged when the session expires; got stragglers instead.'
+
+
+def test_inmemory_create_prunes_expired_session_before_duplicate_check():
+    """An expired session ID can be recreated without waiting for list_sessions."""
+    backend = InMemoryBackend()
+    backend.create_session('reusable', ttl_seconds=1)
+    backend._metadata['reusable']['expires_at'] = time.time() - 1
+
+    result = backend.create_session('reusable')
+
+    assert result['ok'] is True
+    assert backend.resume_session('reusable')['ok'] is True
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +311,41 @@ def test_redis_put_rejects_when_session_meta_expired():
     assert 'expired' in result.get('error', '')
 
 
+def test_redis_read_paths_reject_when_session_meta_expired():
+    """Redis read paths must not return data from a logically expired session."""
+    backend = _make_redis_backend_with_fake()
+    client = backend._client  # type: ignore[attr-defined]
+
+    operations = {
+        'stale-get': lambda sid: backend.get(sid, 'k'),
+        'stale-list': backend.list_keys,
+        'stale-clear': lambda sid: backend.clear(sid, 'k'),
+        'stale-history': backend.get_history,
+    }
+    for session_id, operation in operations.items():
+        backend.create_session(session_id, ttl_seconds=10.0)
+        backend.put(session_id, 'k', 'v')
+        client.delete(backend._meta_key(session_id))
+        result = operation(session_id)
+        assert result['ok'] is False
+        assert 'expired' in result.get('error', '')
+
+
+def test_redis_replace_history_does_not_recreate_expired_session():
+    """replace_history must not create an orphan history key after expiry."""
+    backend = _make_redis_backend_with_fake()
+    client = backend._client  # type: ignore[attr-defined]
+
+    backend.create_session('sess-expired-history', ttl_seconds=10.0)
+    backend.put('sess-expired-history', 'k', 'v')
+    client.delete(backend._meta_key('sess-expired-history'))
+    client.delete(backend._history_key('sess-expired-history'))
+
+    backend.replace_history('sess-expired-history', [{'op': 'summary'}])
+
+    assert client.exists(backend._history_key('sess-expired-history')) == 0
+
+
 def test_redis_incrby_aligns_ttl_and_returns_new_value():
     """INCRBY path must preserve TTL alignment and return post-increment value."""
     backend = _make_redis_backend_with_fake()
@@ -306,9 +355,11 @@ def test_redis_incrby_aligns_ttl_and_returns_new_value():
     client._ttl_ms[backend._meta_key('sess-c')] = 2000
 
     first = backend.increment('sess-c', 'counter', amount=1)
-    assert first['ok'] and first['value'] == 1
+    assert first['ok'] is True
+    assert first['value'] == 1
     second = backend.increment('sess-c', 'counter', amount=4)
-    assert second['ok'] and second['value'] == 5
+    assert second['ok'] is True
+    assert second['value'] == 5
 
     data_ttl = client.pttl(backend._data_key('sess-c', 'counter'))
     assert data_ttl == 2000, f'Counter TTL must track session remaining TTL, got {data_ttl}'
@@ -328,12 +379,13 @@ def test_redis_backend_close_calls_client_close():
     assert client.close_called is True, 'RedisBackend.close() must explicitly release the connection.'
 
 
-def test_redis_backend_close_swallows_errors():
-    """close() should not propagate errors (teardown must be idempotent)."""
+def test_redis_backend_close_logs_errors(caplog):
+    """close() should not propagate errors, but it should log them."""
     backend = _make_redis_backend_with_fake()
     backend._client.close = MagicMock(side_effect=RuntimeError('boom'))  # type: ignore[attr-defined]
-    # Must not raise
-    backend.close()
+    with caplog.at_level(logging.DEBUG):
+        backend.close()
+    assert 'RedisBackend.close failed: boom' in caplog.text
 
 
 def test_store_facade_exposes_backend_close():
@@ -392,11 +444,8 @@ def test_iglobal_endglobal_clears_state_even_if_close_raises():
         g.store = mock_store
         g.config = {'some': 'config'}
 
-        try:
+        with contextlib.suppress(RuntimeError):
             g.endGlobal()
-        except RuntimeError:
-            # Error may propagate; that's fine. Focus: state must be cleared.
-            pass
 
         assert g.store is None, 'endGlobal must null store in finally block'
         assert g.config is None, 'endGlobal must null config in finally block'
@@ -408,13 +457,58 @@ def test_iglobal_endglobal_clears_state_even_if_close_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_iglobal_module_uses_os_path_join_for_requirements():
-    """Regression: requirements.txt path must be built with os.path.join, not
-    hardcoded '/' separators, for cross-platform consistency on Windows.
-    """
-    iglobal_path = NODES_SRC / 'memory_persistent' / 'IGlobal.py'
-    src = iglobal_path.read_text(encoding='utf-8')
-    assert 'os.path.join' in src, 'IGlobal must use os.path.join for path construction'
-    # Guard against regressing to hardcoded separators in the requirements path
-    assert "'/requirements.txt'" not in src
-    assert '"/requirements.txt"' not in src
+def test_iglobal_begin_global_passes_portable_requirements_path():
+    """Regression: requirements.txt path should be computed as a filesystem path."""
+    fake_rocketlib = MagicMock()
+
+    class _FakeBase:
+        pass
+
+    fake_rocketlib.IGlobalBase = _FakeBase
+    fake_rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='CONFIG')
+
+    fake_config_module = types.ModuleType('ai.common.config')
+    fake_config_module.Config = MagicMock()
+    fake_config_module.Config.getNodeConfig.return_value = {
+        'backend': 'memory',
+        'max_history': 100,
+        'auto_summarize': True,
+        'session_ttl_hours': 0,
+    }
+
+    fake_depends_module = types.ModuleType('depends')
+    fake_depends_module.depends = MagicMock(return_value=None)
+
+    fake_package = types.ModuleType('memory_persistent')
+    fake_package.__path__ = [str(NODES_SRC / 'memory_persistent')]
+
+    with patch.dict(
+        sys.modules,
+        {
+            'rocketlib': fake_rocketlib,
+            'ai': types.ModuleType('ai'),
+            'ai.common': types.ModuleType('ai.common'),
+            'ai.common.config': fake_config_module,
+            'depends': fake_depends_module,
+            'memory_persistent': fake_package,
+            'memory_persistent.memory_store': _memory_store,
+        },
+    ):
+        iglobal_path = NODES_SRC / 'memory_persistent' / 'IGlobal.py'
+        spec = importlib.util.spec_from_file_location('memory_persistent.IGlobal', str(iglobal_path))
+        iglobal_mod = importlib.util.module_from_spec(spec)
+        sys.modules['memory_persistent.IGlobal'] = iglobal_mod
+        spec.loader.exec_module(iglobal_mod)  # type: ignore[union-attr]
+
+        g = iglobal_mod.IGlobal()
+        g.IEndpoint = MagicMock()
+        g.IEndpoint.endpoint.openMode = 'RUN'
+        g.glb = MagicMock()
+        g.glb.logicalType = 'memory_persistent'
+        g.glb.connConfig = {}
+
+        g.beginGlobal()
+
+        expected_requirements = str(NODES_SRC / 'memory_persistent' / 'requirements.txt')
+        fake_depends_module.depends.assert_called_once_with(expected_requirements)
+        g.endGlobal()

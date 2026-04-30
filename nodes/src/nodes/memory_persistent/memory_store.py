@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
+import math
 import re
 import threading
 import time
@@ -27,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 _SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,128}$')
 _KEY_RE = re.compile(r'^[a-zA-Z0-9_\-\.]{1,256}$')
+_LOGGER = logging.getLogger(__name__)
 
 
 def _validate_session_id(session_id: str) -> None:
@@ -90,12 +93,17 @@ class MemoryBackend(ABC):
         """Replace all history entries for a session with the given list."""
 
     def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
-        """Atomically increment a numeric value. Default uses get+put; backends may override."""
+        """Increment a numeric value using a default non-atomic get/put sequence.
+
+        Backends that need concurrency safety must override this method with a
+        lock-protected or native-atomic implementation.
+        """
         result = self.get(session_id, key)
         current = result.get('value', 0) if result.get('ok') else 0
         new_value = current + amount
         return self.put(session_id, key, new_value)
 
+    @abstractmethod
     def close(self) -> None:
         """Release any resources held by the backend. No-op by default."""
 
@@ -133,9 +141,15 @@ class InMemoryBackend(MemoryBackend):
             return True
         return False
 
+    def _prune_expired_sessions(self) -> None:
+        """Remove all expired sessions. Must be called while holding ``_lock``."""
+        for sid in list(self._metadata):
+            self._expire_if_needed(sid)
+
     def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
+            self._prune_expired_sessions()
             if session_id in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} already exists'}
             if len(self._sessions) >= _MAX_INMEMORY_SESSIONS:
@@ -155,24 +169,13 @@ class InMemoryBackend(MemoryBackend):
         with self._lock:
             if session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            meta = self._metadata[session_id]
-            if meta.get('expires_at') and time.time() > meta['expires_at']:
-                # Session expired — clean it up
-                self._sessions.pop(session_id, None)
-                self._history.pop(session_id, None)
-                self._metadata.pop(session_id, None)
+            if self._expire_if_needed(session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} has expired'}
             return {'ok': True, 'session_id': session_id, 'key_count': len(self._sessions[session_id])}
 
     def list_sessions(self) -> List[str]:
         with self._lock:
-            # Prune expired sessions
-            now = time.time()
-            expired = [sid for sid, meta in self._metadata.items() if meta.get('expires_at') and now > meta['expires_at']]
-            for sid in expired:
-                self._sessions.pop(sid, None)
-                self._history.pop(sid, None)
-                self._metadata.pop(sid, None)
+            self._prune_expired_sessions()
             return sorted(self._sessions.keys())
 
     def delete_session(self, session_id: str) -> Dict[str, Any]:
@@ -274,9 +277,14 @@ class InMemoryBackend(MemoryBackend):
             return {'ok': True, 'session_id': session_id, 'key': key, 'value': new_value}
 
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
+        _validate_session_id(session_id)
         with self._lock:
-            if session_id in self._history:
+            if not self._expire_if_needed(session_id) and session_id in self._history:
                 self._history[session_id] = copy.deepcopy(entries)
+
+    def close(self) -> None:
+        """No-op for in-memory storage."""
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -323,11 +331,21 @@ class RedisBackend(MemoryBackend):
     def _meta_key(self, session_id: str) -> str:
         return f'{_REDIS_PREFIX}:{session_id}:__meta__'
 
+    def _require_live_session(self, session_id: str) -> tuple[Optional[Dict[str, Any]], Optional[int]]:
+        """Return an error and TTL for a missing or expired session."""
+        if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            return {'ok': False, 'error': f'Session {session_id!r} not found'}, None
+        remaining_ms = self._client.pttl(self._meta_key(session_id))
+        if remaining_ms == -2:
+            self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+            return {'ok': False, 'error': f'Session {session_id!r} has expired'}, None
+        return None, remaining_ms
+
     def _set_ttl(self, session_id: str, ttl_seconds: Optional[float]) -> None:
         """Apply TTL to all keys belonging to a session."""
         if ttl_seconds is None or ttl_seconds <= 0:
             return
-        ttl_ms = max(1, int(round(ttl_seconds * 1000)))
+        ttl_ms = max(1, math.ceil(ttl_seconds * 1000))
         keys_to_expire = [
             self._keys_key(session_id),
             self._history_key(session_id),
@@ -350,7 +368,11 @@ class RedisBackend(MemoryBackend):
         _validate_session_id(session_id)
         with self._lock:
             if self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} already exists'}
+                remaining_ms = self._client.pttl(self._meta_key(session_id))
+                if remaining_ms == -2:
+                    self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                else:
+                    return {'ok': False, 'error': f'Session {session_id!r} already exists'}
             now = time.time()
             pipe = self._client.pipeline()
             pipe.sadd(_REDIS_SESSIONS_KEY, session_id)
@@ -451,8 +473,9 @@ class RedisBackend(MemoryBackend):
         _validate_session_id(session_id)
         _validate_key(key)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            err, _ = self._require_live_session(session_id)
+            if err is not None:
+                return err
             raw = self._client.get(self._data_key(session_id, key))
             if raw is None:
                 return {'ok': False, 'session_id': session_id, 'key': key, 'value': None}
@@ -461,8 +484,9 @@ class RedisBackend(MemoryBackend):
     def list_keys(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            err, _ = self._require_live_session(session_id)
+            if err is not None:
+                return err
             members = self._client.smembers(self._keys_key(session_id))
             return {'ok': True, 'session_id': session_id, 'keys': sorted(members)}
 
@@ -471,8 +495,9 @@ class RedisBackend(MemoryBackend):
         if key is not None:
             _validate_key(key)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            err, remaining_ms = self._require_live_session(session_id)
+            if err is not None:
+                return err
             if key:
                 existed = self._client.exists(self._data_key(session_id, key))
                 pipe = self._client.pipeline()
@@ -488,6 +513,8 @@ class RedisBackend(MemoryBackend):
                         }
                     ),
                 )
+                if remaining_ms and remaining_ms > 0:
+                    pipe.pexpire(self._history_key(session_id), remaining_ms)
                 pipe.execute()
                 cleared = [key] if existed else []
             else:
@@ -508,14 +535,17 @@ class RedisBackend(MemoryBackend):
                         }
                     ),
                 )
+                if remaining_ms and remaining_ms > 0:
+                    pipe.pexpire(self._history_key(session_id), remaining_ms)
                 pipe.execute()
             return {'ok': True, 'session_id': session_id, 'cleared': cleared}
 
     def get_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            err, _ = self._require_live_session(session_id)
+            if err is not None:
+                return err
             # Get the last N entries
             raw_entries = self._client.lrange(self._history_key(session_id), -limit, -1) if limit > 0 else self._client.lrange(self._history_key(session_id), 0, -1)
             entries = [json.loads(e) for e in raw_entries]
@@ -547,24 +577,27 @@ class RedisBackend(MemoryBackend):
             return {'ok': True, 'session_id': session_id, 'key': key, 'value': new_value}
 
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
+        _validate_session_id(session_id)
         with self._lock:
+            err, remaining_ms = self._require_live_session(session_id)
+            if err is not None:
+                return
             history_key = self._history_key(session_id)
             pipe = self._client.pipeline()
             pipe.delete(history_key)
             if entries:
                 pipe.rpush(history_key, *[json.dumps(e) for e in entries])
-            pipe.execute()
             # Preserve TTL alignment with session metadata
-            remaining_ms = self._client.pttl(self._meta_key(session_id))
             if remaining_ms and remaining_ms > 0:
-                self._client.pexpire(history_key, remaining_ms)
+                pipe.pexpire(history_key, remaining_ms)
+            pipe.execute()
 
     def close(self) -> None:
         """Close the Redis connection explicitly."""
         try:
             self._client.close()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - teardown must not fail if Redis close raises.
+            _LOGGER.debug('RedisBackend.close failed: %s', exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

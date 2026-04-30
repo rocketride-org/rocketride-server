@@ -605,7 +605,7 @@ class TestThreadSafety:
                     result = backend.put('s1', f'{key_prefix}{i}', i)
                     if not result['ok']:
                         errors.append(f'put failed: {result}')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - thread worker reports failures through errors.
                 errors.append(str(e))
 
         threads = [
@@ -651,7 +651,7 @@ class TestThreadSafety:
                     result = backend.get('s1', 'shared')
                     if not result['ok']:
                         errors.append(f'get failed: {result}')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - thread worker reports failures through errors.
                 errors.append(str(e))
 
         def writer(count: int):
@@ -660,7 +660,7 @@ class TestThreadSafety:
                     result = backend.put('s1', 'shared', i)
                     if not result['ok']:
                         errors.append(f'put failed: {result}')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - thread worker reports failures through errors.
                 errors.append(str(e))
 
         threads = [
@@ -811,7 +811,7 @@ def _build_engine_mock_entries() -> dict:
 def engine_mocks(monkeypatch):
     """Install engine mocks into sys.modules for the duration of the test.
 
-    Yields the mock entries dict so tests can inspect individual mocks.
+    Returns the mock entries dict so tests can inspect individual mocks.
     Cleanup is automatic via monkeypatch.
     """
     entries = _build_engine_mock_entries()
@@ -821,7 +821,7 @@ def engine_mocks(monkeypatch):
     for key in list(sys.modules.keys()):
         if key.startswith('rocketlib'):
             monkeypatch.delitem(sys.modules, key, raising=False)
-    yield entries
+    return entries
 
 
 def _import_iglobal():
