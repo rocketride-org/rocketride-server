@@ -5,7 +5,6 @@ class PreProcessor:
     '''ML Sklearn Prediction Node'''
 
     def __init__(self, *args, **kwargs):
-        '''Load trained sklearn model'''
         model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
         with open(model_path, 'rb') as f:
             self.model = pickle.load(f)
