@@ -93,7 +93,7 @@
 		"git.safeMode": {
 			"type": "boolean",
 			"title": "Safe Mode",
-			"description": "Block destructive operations: force-push and force branch deletion. Normal branch deletion is always allowed. Recommended for agent use.",
+			"description": "Block destructive operations: force-push and force branch deletion. Normal branch deletion is allowed only when the branch is fully merged into HEAD; deleting an unmerged branch requires force=true (which is blocked in safe mode). Recommended for agent use.",
 			"default": true,
 			"enum": [
 				[true, "Yes — block destructive ops"],

@@ -287,8 +287,12 @@ class GitRepo:
 
     def clone(self, url: str, path: str, branch: Optional[str] = None) -> Dict[str, Any]:
         """Clone *url* into *path*."""
-        if Path(path).exists() and any(Path(path).iterdir()):
-            raise GitError(f'Destination {path!r} exists and is not empty')
+        dest = Path(path)
+        if dest.exists():
+            if dest.is_file():
+                raise GitError(f'Destination {path!r} exists as a file')
+            if dest.is_dir() and any(dest.iterdir()):
+                raise GitError(f'Destination {path!r} exists and is not empty')
         with self._callbacks() as cb:
             try:
                 kwargs: Dict[str, Any] = {}
@@ -350,7 +354,7 @@ class GitRepo:
             'staged': staged,
             'unstaged': unstaged,
             'untracked': untracked,
-            'clean': not staged and not unstaged,
+            'clean': not staged and not unstaged and not untracked,
         }
 
     def log(
@@ -927,7 +931,10 @@ def _commit_touches_path(
             return False
     parent = commit.parents[0]
     diff = repo.diff(parent.tree, commit.tree)
-    return any(_path_matches(d.delta.new_file.path, path) for d in diff)
+    return any(
+        _path_matches(d.delta.new_file.path, path) or _path_matches(d.delta.old_file.path, path)
+        for d in diff
+    )
 
 
 def _filter_diff_by_path(patch: str, path: str) -> str:
