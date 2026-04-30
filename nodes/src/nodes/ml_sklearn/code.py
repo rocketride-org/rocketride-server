@@ -2,31 +2,27 @@ import pickle
 import os
 
 class PreProcessor:
-    '''ML Sklearn Prediction Node'''
-
     def __init__(self, *args, **kwargs):
         model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
-        with open(model_path, 'rb') as f:
-            self.model = pickle.load(f)
-
-    def run(self, input_data):
         try:
-            if not isinstance(input_data, dict):
-                return {'error': 'Input must be a dictionary'}
+            with open(model_path, 'rb') as f:
+                self.model = pickle.load(f)
+        except Exception:
+            self.model = None
 
-            price = input_data.get('price')
+    def process(self, text):
+        try:
+            # keep pipeline safe
+            if not self.model:
+                return text
 
-            if price is None:
-                return {'error': "Missing 'price'"}
+            # convert input
+            value = float(text)
 
-            try:
-                price = float(price)
-            except (ValueError, TypeError):
-                return {'error': 'Price must be a number'}
+            prediction = self.model.predict([[value]])
 
-            prediction = self.model.predict([[price]])
+            # IMPORTANT: return same type (string)
+            return str(prediction[0])
 
-            return {'prediction': float(prediction[0])}
-
-        except Exception as e:
-            return {'error': str(e)}
+        except Exception:
+            return text
