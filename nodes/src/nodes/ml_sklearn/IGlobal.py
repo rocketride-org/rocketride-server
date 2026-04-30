@@ -8,7 +8,10 @@ class IGlobal:
 
     def beginGlobal(self):
         self.glb = self.IEndpoint.endpoint.glb
-        self.preprocessor = PreProcessor()
+        try:
+            self.preprocessor = PreProcessor()
+        except Exception:
+            self.preprocessor = None
 
     def endGlobal(self):
         self.preprocessor = None
