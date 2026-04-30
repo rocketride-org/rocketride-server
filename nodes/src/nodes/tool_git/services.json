@@ -1,0 +1,120 @@
+{
+	"title": "Git",
+	"protocol": "tool_git://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_git",
+	"prefix": "git",
+	"icon": "git.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": [
+		"Executes Git operations without requiring a host git binary.",
+		"Uses libgit2 (via pygit2) for a self-contained, environment-independent implementation.",
+		"Supports clone, commit, push/pull, branching, diff, log, blame, and code search.",
+		"Credentials are stored securely via RocketRide's secrets system."
+	],
+	"tile": ["Git: ${parameters.git.repoPath || 'not configured'}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Git",
+				"repoPath": "",
+				"authType": "none",
+				"username": "",
+				"token": "",
+				"sshKey": "",
+				"sshPassphrase": "",
+				"safeMode": true
+			}
+		}
+	},
+	"fields": {
+		"git.repoPath": {
+			"type": "string",
+			"title": "Repository Path",
+			"description": "Local path to an existing repository, or a remote URL (https://, git@, ssh://). A remote URL is cloned into a temporary directory at pipeline start and cleaned up on exit. Leave blank to let the agent call git.clone or git.init at runtime.",
+			"default": ""
+		},
+		"git.authType": {
+			"type": "string",
+			"title": "Authentication Type",
+			"description": "How to authenticate with remote repositories.",
+			"default": "none",
+			"enum": [
+				["none", "None (public repos / no remote ops)"],
+				["token", "Token / HTTPS (username + token)"],
+				["ssh", "SSH key"]
+			]
+		},
+		"git.username": {
+			"type": "string",
+			"title": "Username",
+			"description": "Git username for token-based HTTPS authentication.",
+			"default": "",
+			"optional": true
+		},
+		"git.token": {
+			"type": "string",
+			"title": "Token / Password",
+			"description": "Personal access token or password for HTTPS authentication. Leave empty when using SSH.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"git.sshKey": {
+			"type": "string",
+			"title": "SSH Private Key",
+			"description": "PEM-encoded SSH private key content (starts with -----BEGIN ...). Used when Auth Type is SSH.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"git.sshPassphrase": {
+			"type": "string",
+			"title": "SSH Key Passphrase",
+			"description": "Passphrase for the SSH private key, if encrypted. Leave empty for unencrypted keys.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"git.safeMode": {
+			"type": "boolean",
+			"title": "Safe Mode",
+			"description": "Block destructive operations: force-push and force branch deletion. Normal branch deletion is always allowed. Recommended for agent use.",
+			"default": true,
+			"enum": [
+				[true, "Yes — block destructive ops"],
+				[false, "No — allow all operations"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Git",
+			"properties": [
+				"type",
+				"git.repoPath",
+				"git.authType",
+				"git.username",
+				"git.token",
+				"git.sshKey",
+				"git.sshPassphrase",
+				"git.safeMode"
+			]
+		}
+	]
+}
