@@ -22,12 +22,12 @@
 # =============================================================================
 
 from .IGlobal import IGlobal
-from ai.common.llm_base import LLMBase
+from nodes.llm_base import IInstanceGenericLLM
 from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
 
 
-class IInstance(LLMBase):
+class IInstance(IInstanceGenericLLM):
     """Instance handler for the Ollama Vision node."""
 
     IGlobal: IGlobal

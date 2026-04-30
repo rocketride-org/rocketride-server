@@ -21,8 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from nodes.llm_base import IInstanceGenericLLM
+from .IInstance import IInstanceGenericLLM
 
 
-class IInstance(IInstanceGenericLLM):
-    pass
+__all__ = ['IInstanceGenericLLM']

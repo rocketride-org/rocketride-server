@@ -1,7 +1,5 @@
-# Copyright (c) 2026 Aparavi Software AG
-
-from ai.common.llm_base import LLMBase
+from nodes.llm_base import IInstanceGenericLLM
 
 
-class IInstance(LLMBase):
+class IInstance(IInstanceGenericLLM):
     pass
