@@ -131,15 +131,26 @@ async function computeWheelInputsHash() {
 	return crypto.createHash('md5').update(combined).digest('hex');
 }
 
+// True only if DIST_DIR contains at least one wheel or sdist artifact;
+// guards against an empty/half-built dist dir from a previously failed build.
+async function hasWheelArtifacts() {
+	try {
+		const entries = await fsp.readdir(DIST_DIR);
+		return entries.some((name) => name.endsWith('.whl') || name.endsWith('.tar.gz'));
+	} catch {
+		return false;
+	}
+}
+
 function makeWheelBuildAction() {
 	return {
 		run: async (ctx, task) => {
 			// Check if any wheel input (src, agent docs/stubs, README) changed
 			const hash = await computeWheelInputsHash();
 			const savedHash = await getState(SRC_HASH_KEY);
-			const outputExists = await exists(DIST_DIR);
+			const artifactsExist = await hasWheelArtifacts();
 
-			if (hash === savedHash && outputExists) {
+			if (hash === savedHash && artifactsExist) {
 				task.output = 'No changes detected';
 				return;
 			}
