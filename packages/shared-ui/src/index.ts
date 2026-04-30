@@ -78,6 +78,13 @@ export { CreditsPanel } from './modules/billing';
 export { CheckoutModal } from './modules/checkout';
 export type { CheckoutModalProps, CheckoutPlan } from './modules/checkout';
 
+// --- Chat module (conversational chat surface) --------------------------------
+export { ChatView } from './modules/chat';
+export type { IChatViewProps, ChatMessage, ChatViewProps, UseChatMessagesOptions, TextResult } from './modules/chat';
+export { MessageList, MessageBubble, ChatInputField, MarkdownRenderer, ChartRenderer, TypingIndicator } from './modules/chat';
+export { useChatMessages } from './modules/chat';
+export type { UseChatMessagesReturn } from './modules/chat';
+
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';
 export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
