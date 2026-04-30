@@ -34,6 +34,7 @@ class IGlobal(IGlobalBase):
     _tmp_dir: str | None = None  # set when we auto-cloned into a temp directory
 
     def beginGlobal(self) -> None:
+        """Initialise the GitRepo instance; clone remote URL or open local path if configured."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -93,6 +94,7 @@ class IGlobal(IGlobalBase):
         self.repo = git
 
     def validateConfig(self) -> None:
+        """Emit warnings for missing credentials or a non-existent local repoPath."""
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             auth_type = str(cfg.get('authType') or 'none').strip().lower()
@@ -111,6 +113,7 @@ class IGlobal(IGlobalBase):
             warning(str(exc))
 
     def endGlobal(self) -> None:
+        """Release the repo reference and delete any auto-cloned temp directory."""
         self.repo = None
         if self._tmp_dir:
             shutil.rmtree(self._tmp_dir, ignore_errors=True)
@@ -123,6 +126,7 @@ def _is_url(value: str) -> bool:
 
 
 def _parse_bool(raw: object, default: bool = True) -> bool:
+    """Coerce a config value to bool; return *default* for unrecognised strings."""
     if isinstance(raw, bool):
         return raw
     if isinstance(raw, str):

@@ -310,13 +310,40 @@ _TOOL_MAP: Dict[str, Dict[str, Any]] = {t['name']: t for t in _TOOLS}
 
 
 class IInstance(IInstanceBase):
+    """RocketRide tool node that exposes git operations to an AI agent via pygit2."""
+
     IGlobal: IGlobal
+
+    # ------------------------------------------------------------------
+    # Argument helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _bool_arg(a: Dict[str, Any], key: str, default: bool = False) -> bool:
+        """Extract a boolean arg; raise ValueError if the value is not a bool."""
+        v = a.get(key, default)
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return default
+        raise ValueError(f'{key} must be a boolean')
+
+    @staticmethod
+    def _int_arg_in_range(a: Dict[str, Any], key: str, default: int, lo: int, hi: int) -> int:
+        """Extract an integer arg clamped to [lo, hi]; raise ValueError if out of range or wrong type."""
+        v = a.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f'{key} must be an integer between {lo} and {hi}')
+        if not lo <= v <= hi:
+            raise ValueError(f'{key} must be between {lo} and {hi}')
+        return v
 
     # ------------------------------------------------------------------
     # Engine entry point
     # ------------------------------------------------------------------
 
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        """Dispatch tool.query and tool.invoke operations from the pipeline engine."""
         op = getattr(param, 'op', None)
 
         if op == 'tool.query':
@@ -346,6 +373,7 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _dispatch(self, tool_name: str, args: Dict[str, Any]) -> str:
+        """Validate the tool name, call _call(), and return a JSON-encoded result string."""
         if tool_name not in _TOOL_MAP:
             return json.dumps({'error': f'Unknown tool {tool_name!r}'})
         git = self.IGlobal.repo
@@ -359,6 +387,7 @@ class IInstance(IInstanceBase):
             return json.dumps({'error': f'Missing required parameter: {exc}'})
 
     def _call(self, git: Any, name: str, a: Dict[str, Any]) -> Any:  # noqa: ANN401
+        """Map a tool name and validated args dict to the corresponding GitRepo method call."""
         if name == 'git.clone':
             return git.clone(url=a['url'], path=a['path'], branch=a.get('branch') or None)
         if name == 'git.init':
@@ -367,7 +396,7 @@ class IInstance(IInstanceBase):
             return git.status()
         if name == 'git.log':
             return git.log(
-                max_count=int(a.get('max_count') or 20),
+                max_count=self._int_arg_in_range(a, 'max_count', 20, 1, 200),
                 branch=a.get('branch') or None,
                 path=a.get('path') or None,
                 author=a.get('author') or None,
@@ -381,7 +410,7 @@ class IInstance(IInstanceBase):
                 ref_a=a.get('ref_a') or None,
                 ref_b=a.get('ref_b') or None,
                 path=a.get('path') or None,
-                staged=bool(a.get('staged', False)),
+                staged=self._bool_arg(a, 'staged', False),
             )
         if name == 'git.blame':
             return git.blame(path=a['path'], ref=a.get('ref') or None)
@@ -390,9 +419,13 @@ class IInstance(IInstanceBase):
         if name == 'git.write_file':
             return git.write_file(path=a['path'], content=a['content'])
         if name == 'git.stage':
-            paths: List[str] = a.get('paths') or []
-            if not paths:
-                raise ValueError('paths must be a non-empty list')
+            paths = a.get('paths')
+            if (
+                not isinstance(paths, list)
+                or not paths
+                or any(not isinstance(p, str) or not p for p in paths)
+            ):
+                raise ValueError('paths must be a non-empty list of non-empty strings')
             return git.stage(paths=paths)
         if name == 'git.commit':
             return git.commit(
@@ -404,15 +437,15 @@ class IInstance(IInstanceBase):
             return git.stash(op=a.get('op') or 'push', message=a.get('message') or '', index=a.get('index', 0))
         if name == 'git.branch_list':
             return git.branch_list(
-                remote=bool(a.get('remote', False)),
-                all_branches=bool(a.get('all_branches', False)),
+                remote=self._bool_arg(a, 'remote', False),
+                all_branches=self._bool_arg(a, 'all_branches', False),
             )
         if name == 'git.branch_create':
             return git.branch_create(name=a['name'], from_ref=a.get('from_ref') or None)
         if name == 'git.checkout':
             return git.checkout(branch=a['branch'])
         if name == 'git.branch_delete':
-            return git.branch_delete(name=a['name'], force=bool(a.get('force', False)))
+            return git.branch_delete(name=a['name'], force=self._bool_arg(a, 'force', False))
         if name == 'git.merge':
             return git.merge(branch=a['branch'])
         if name == 'git.fetch':
@@ -423,15 +456,15 @@ class IInstance(IInstanceBase):
             return git.push(
                 remote=a.get('remote') or 'origin',
                 branch=a.get('branch') or None,
-                force=bool(a.get('force', False)),
+                force=self._bool_arg(a, 'force', False),
             )
         if name == 'git.grep':
             return git.grep(
                 pattern=a['pattern'],
                 ref=a.get('ref') or None,
                 path=a.get('path') or None,
-                ignore_case=bool(a.get('ignore_case', False)),
+                ignore_case=self._bool_arg(a, 'ignore_case', False),
             )
         if name == 'git.ls_files':
-            return git.ls_files(path=a.get('path') or None, untracked=bool(a.get('untracked', False)))
+            return git.ls_files(path=a.get('path') or None, untracked=self._bool_arg(a, 'untracked', False))
         raise ValueError(f'Unhandled tool {name!r}')

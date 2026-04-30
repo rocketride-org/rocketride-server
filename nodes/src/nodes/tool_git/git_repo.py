@@ -37,6 +37,7 @@ import pygit2
 
 
 def _c(name: str, fallback: int) -> int:
+    """Return pygit2 constant by name, using fallback if the attribute is absent."""
     return getattr(pygit2, name, fallback)
 
 
@@ -76,6 +77,7 @@ class _TokenCallbacks(pygit2.RemoteCallbacks):
     """HTTPS token / username+password credentials."""
 
     def __init__(self, username: str, token: str) -> None:
+        """Store HTTPS credentials."""
         super().__init__()
         self._username = username or 'git'
         self._token = token
@@ -86,6 +88,7 @@ class _TokenCallbacks(pygit2.RemoteCallbacks):
         username_from_url: Optional[str],
         allowed_types: int,
     ) -> pygit2.credentials.UserPass:
+        """Return a UserPass credential object for libgit2."""
         return pygit2.UserPass(self._username, self._token)
 
 
@@ -93,6 +96,7 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
     """SSH key credentials — key content written to a temp file."""
 
     def __init__(self, key_content: str, passphrase: str) -> None:
+        """Store SSH key material; temp file is created lazily in credentials()."""
         super().__init__()
         self._key_content = key_content
         self._passphrase = passphrase
@@ -104,6 +108,7 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
         username_from_url: Optional[str],
         allowed_types: int,
     ) -> pygit2.credentials.Keypair:
+        """Write the SSH key to a temp file on first call and return a Keypair."""
         # Write the private key to a temp file so libgit2 can read it.
         # The file is cleaned up in close().
         if self._tmp_path is None:
@@ -125,6 +130,7 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
         )
 
     def close(self) -> None:
+        """Delete the temporary key file if it was created."""
         if self._tmp_path is not None:
             try:
                 os.unlink(self._tmp_path)
@@ -167,6 +173,7 @@ def _commit_to_dict(commit: pygit2.Commit) -> Dict[str, Any]:
 
 
 def _entry_to_dict(entry: pygit2.IndexEntry) -> Dict[str, str]:
+    """Serialise a pygit2 IndexEntry to a plain dict."""
     return {'path': entry.path, 'id': str(entry.id)}
 
 
@@ -241,6 +248,7 @@ class GitRepo:
 
     @staticmethod
     def _open(path: str) -> pygit2.Repository:
+        """Open an existing repository at *path*, raising GitError if not found."""
         try:
             return pygit2.Repository(path)
         except pygit2.GitError as exc:
@@ -261,11 +269,13 @@ class GitRepo:
                 cb.close()
 
     def _require_repo(self) -> pygit2.Repository:
+        """Return the active repository or raise GitError if none is loaded."""
         if self._repo is None:
             raise GitError('No repository loaded. Set repoPath in config or call git.clone first.')
         return self._repo
 
     def _safe_guard(self, operation: str) -> None:
+        """Raise GitError if safe_mode is enabled, blocking the named operation."""
         if self.safe_mode:
             raise GitError(f'{operation!r} is blocked in safe mode. Set safeMode=false in node config to allow it.')
 
