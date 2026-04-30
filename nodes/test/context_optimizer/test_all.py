@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -26,9 +27,30 @@ import pytest
 # Stub external dependencies so the optimizer module can be imported without
 # a running RocketRide server or tiktoken installed in the test env.
 #
-# Stubs are applied via patch.dict(sys.modules, ...) so they do not leak
-# into other test files in the same pytest session.
+# Use the real ai.common.schema package when it is available. Other node tests
+# import that package too, so replacing it globally during collection pollutes
+# the rest of the worker process.
 # ---------------------------------------------------------------------------
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+for _path in (_REPO_ROOT / 'packages' / 'client-python' / 'src', _REPO_ROOT / 'packages' / 'ai' / 'src'):
+    _path_str = str(_path)
+    if _path.exists() and _path_str not in sys.path:
+        sys.path.insert(0, _path_str)
+
+
+def _module_importable(module_name: str, bootstrap_modules: Dict[str, types.ModuleType] | None = None) -> bool:
+    """Return True when a module can be imported with optional temporary stubs."""
+    try:
+        if bootstrap_modules:
+            with patch.dict(sys.modules, bootstrap_modules):
+                __import__(module_name)
+        else:
+            __import__(module_name)
+        return True
+    except Exception:
+        return False
 
 
 def _build_stub_modules():
@@ -63,77 +85,74 @@ def _build_stub_modules():
     rocketlib.warning = lambda *_a, **_k: None
     stubs['rocketlib'] = rocketlib
 
+    bootstrap_modules = {'depends': mod_depends, 'rocketlib': rocketlib}
+
     # ai.common.config
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    stubs['ai'] = ai_pkg
+    if not _module_importable('ai.common.config', bootstrap_modules):
+        ai_config = types.ModuleType('ai.common.config')
 
-    ai_common = types.ModuleType('ai.common')
-    ai_common.__path__ = []
-    stubs['ai.common'] = ai_common
+        class _Config:
+            @staticmethod
+            def getNodeConfig(*_a, **_k):
+                return {}
 
-    ai_config = types.ModuleType('ai.common.config')
+        ai_config.Config = _Config
+        stubs['ai.common.config'] = ai_config
 
-    class _Config:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {}
+    # ai.common.schema -- minimal Question stub when the real package is not
+    # importable in a stripped-down local test environment.
+    if not _module_importable('ai.common.schema', bootstrap_modules):
+        ai_schema = types.ModuleType('ai.common.schema')
 
-    ai_config.Config = _Config
-    stubs['ai.common.config'] = ai_config
+        class _QuestionText:
+            def __init__(self, text='', embedding_model=None, embedding=None) -> None:
+                self.text = text
+                self.embedding_model = embedding_model
+                self.embedding = embedding
 
-    # ai.common.schema -- minimal Question stub
-    ai_schema = types.ModuleType('ai.common.schema')
+        class _QuestionHistory:
+            def __init__(self, role='', content='') -> None:
+                self.role = role
+                self.content = content
 
-    class _QuestionText:
-        def __init__(self, text='', embedding_model=None, embedding=None) -> None:
-            self.text = text
-            self.embedding_model = embedding_model
-            self.embedding = embedding
+        class _Doc:
+            def __init__(self, page_content='', **kwargs) -> None:
+                self.page_content = page_content
+                self._data = kwargs
 
-    class _QuestionHistory:
-        def __init__(self, role='', content='') -> None:
-            self.role = role
-            self.content = content
+            def model_dump(self):
+                d = {'page_content': self.page_content}
+                d.update(self._data)
+                return d
 
-    class _Doc:
-        def __init__(self, page_content='', **kwargs) -> None:
-            self.page_content = page_content
-            self._data = kwargs
+            def dict(self):
+                return self.model_dump()
 
-        def model_dump(self):
-            d = {'page_content': self.page_content}
-            d.update(self._data)
-            return d
+        class _Question:
+            def __init__(self, **kwargs) -> None:
+                self.role = kwargs.get('role', '')
+                self.questions = kwargs.get('questions', [])
+                self.documents = kwargs.get('documents', [])
+                self.history = kwargs.get('history', [])
+                self.context = kwargs.get('context', [])
+                self.instructions = kwargs.get('instructions', [])
+                self.examples = kwargs.get('examples', [])
+                self.goals = kwargs.get('goals', [])
+                self.type = kwargs.get('type', 'question')
+                self.filter = kwargs.get('filter')
+                self.expectJson = kwargs.get('expectJson', False)
 
-        def dict(self):
-            return self.model_dump()
+            def addQuestion(self, text) -> None:
+                self.questions.append(_QuestionText(text=text))
 
-    class _Question:
-        def __init__(self, **kwargs) -> None:
-            self.role = kwargs.get('role', '')
-            self.questions = kwargs.get('questions', [])
-            self.documents = kwargs.get('documents', [])
-            self.history = kwargs.get('history', [])
-            self.context = kwargs.get('context', [])
-            self.instructions = kwargs.get('instructions', [])
-            self.examples = kwargs.get('examples', [])
-            self.goals = kwargs.get('goals', [])
-            self.type = kwargs.get('type', 'question')
-            self.filter = kwargs.get('filter')
-            self.expectJson = kwargs.get('expectJson', False)
-
-        def addQuestion(self, text) -> None:
-            self.questions.append(_QuestionText(text=text))
-
-    ai_schema.Question = _Question
-    ai_schema.QuestionText = _QuestionText
-    ai_schema.QuestionHistory = _QuestionHistory
-    ai_schema.Doc = _Doc
-    ai_schema.Answer = MagicMock
-    ai_schema.QuestionType = MagicMock
-    ai_schema.DocFilter = MagicMock
-    stubs['ai.common.schema'] = ai_schema
+        ai_schema.Question = _Question
+        ai_schema.QuestionText = _QuestionText
+        ai_schema.QuestionHistory = _QuestionHistory
+        ai_schema.Doc = _Doc
+        ai_schema.Answer = MagicMock
+        ai_schema.QuestionType = MagicMock
+        ai_schema.DocFilter = MagicMock
+        stubs['ai.common.schema'] = ai_schema
 
     return stubs
 
