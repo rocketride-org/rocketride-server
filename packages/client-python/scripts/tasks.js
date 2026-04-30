@@ -110,17 +110,24 @@ const SRC_HASH_KEY = 'client-python.srcHash';
 // Inputs that affect wheel contents — keep in sync with the wheel-build steps.
 // SRC_DIR is the package source; AGENT_DOCS_SRC + AGENT_STUBS_SRC are bundled
 // into the wheel as `cli/templates/` package data; README_SRC is copied to
-// BUILD_DIR/README.md before `python -m build` runs.
+// BUILD_DIR/README.md before `python -m build` runs; pyproject.toml + LICENSE
+// are top-level packaging metadata copied via wheel-source's syncDir(PACKAGE_DIR).
+const WHEEL_INPUT_DIRS = [SRC_DIR, AGENT_DOCS_SRC, AGENT_STUBS_SRC];
+const WHEEL_INPUT_FILES = [README_SRC, path.join(PACKAGE_DIR, 'pyproject.toml'), path.join(PACKAGE_DIR, 'LICENSE')];
+
 async function computeWheelInputsHash() {
-	const dirHashes = await Promise.all([fingerprint(SRC_DIR), fingerprint(AGENT_DOCS_SRC), fingerprint(AGENT_STUBS_SRC)]);
-	let readmeStat = '';
-	try {
-		const s = await fsp.stat(README_SRC);
-		readmeStat = `${s.size}:${s.mtimeMs}`;
-	} catch {
-		readmeStat = 'missing';
-	}
-	const combined = [...dirHashes.map((h) => h ?? 'missing'), readmeStat].join('|');
+	const dirHashes = await Promise.all(WHEEL_INPUT_DIRS.map((d) => fingerprint(d)));
+	const fileStats = await Promise.all(
+		WHEEL_INPUT_FILES.map(async (f) => {
+			try {
+				const s = await fsp.stat(f);
+				return `${path.basename(f)}:${s.size}:${s.mtimeMs}`;
+			} catch {
+				return `${path.basename(f)}:missing`;
+			}
+		})
+	);
+	const combined = [...dirHashes.map((h) => h ?? 'missing'), ...fileStats].join('|');
 	return crypto.createHash('md5').update(combined).digest('hex');
 }
 
