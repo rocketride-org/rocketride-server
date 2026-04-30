@@ -124,8 +124,8 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 							onSettingsChange={onSettingsChange}
 							cloudSignedIn={props.cloudSignedIn ?? false}
 							cloudUserName={props.cloudUserName ?? ''}
-							onCloudSignIn={props.onCloudSignIn!}
-							onCloudSignOut={props.onCloudSignOut!}
+							onCloudSignIn={props.onCloudSignIn ?? (() => {})}
+							onCloudSignOut={props.onCloudSignOut ?? (() => {})}
 							onProbeCloudServer={props.onProbeCloudServer}
 							onFetchTeams={props.onFetchTeams}
 							isSaas={props.isSaas}
