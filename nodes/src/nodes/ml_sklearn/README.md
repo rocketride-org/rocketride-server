@@ -1,20 +1,19 @@
 # ML Sklearn Prediction Node
 
-This node performs predictions using a trained sklearn model.
+This node performs predictions using a trained scikit-learn model.
 
 ## Input
-- price (number)
+
+- text (number as string)
 
 ## Output
-- prediction (number)
+
+- text (predicted value as string)
 
 ## Example
+
 Input:
-{
-  "price": 250
-}
+250
 
 Output:
-{
-  "prediction": 3.5
-}
+3.5
