@@ -124,6 +124,11 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false
+        # Integration tests boot a local server and connect test clients. The
+        # value itself does not matter; it just has to match between server and
+        # clients, and fork PRs cannot read repository secrets.
+        env:
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY || 'MYAPIKEY' }}
         run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Perform CodeQL Analysis
