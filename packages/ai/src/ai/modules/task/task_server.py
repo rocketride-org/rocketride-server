@@ -1315,6 +1315,9 @@ class TaskServer(DAPBase):
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 await control.task.stop_task()
+                # Free the slot so a subsequent use() with the same token
+                # does not race against a phantom registry entry.
+                self._task_control.pop(token, None)
                 self.debug_message(f'Task "{control.id}" stopped on request')
 
         except Exception as e:
