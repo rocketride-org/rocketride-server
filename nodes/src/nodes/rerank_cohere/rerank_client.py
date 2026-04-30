@@ -33,8 +33,8 @@ from cohere.errors import BadRequestError, UnauthorizedError, TooManyRequestsErr
 # ---------------------------------------------------------------------------
 # Custom exception hierarchy for circuit breaker compatibility.
 # The class names contain 'RateLimit', 'Authentication', etc. so that
-# PR #4's _is_retryable heuristic (which inspects type(exc).__name__)
-# can correctly classify them.
+# retry/circuit-breaker heuristics that inspect type(exc).__name__ can
+# correctly classify them.
 # ---------------------------------------------------------------------------
 
 
