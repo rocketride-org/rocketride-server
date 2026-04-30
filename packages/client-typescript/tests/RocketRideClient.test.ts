@@ -150,35 +150,31 @@ describe('RocketRideClient Integration Tests', () => {
 			TEST_CONFIG.timeout
 		);
 
-		it(
-			'should get pipeline status',
-			async () => {
-				const result = await client.use({
-					pipeline: getEchoPipeline(),
-					token: PIPELINE_TOKEN,
-				});
+		it('should get pipeline status', async () => {
+			const result = await client.use({
+				pipeline: getEchoPipeline(),
+				token: PIPELINE_TOKEN,
+			});
 
-				// Retry a few times in case server is busy (tests may run in parallel)
-				const maxAttempts = 5;
-				const delayMs = 2000;
-				let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
-				for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-					try {
-						status = await client.getTaskStatus(result.token);
-						break;
-					} catch (e) {
-						if (attempt === maxAttempts) throw e;
-						await new Promise((r) => setTimeout(r, delayMs));
-					}
+			// Retry a few times in case server is busy (tests may run in parallel)
+			const maxAttempts = 5;
+			const delayMs = 2000;
+			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
+			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+				try {
+					status = await client.getTaskStatus(result.token);
+					break;
+				} catch (e) {
+					if (attempt === maxAttempts) throw e;
+					await new Promise((r) => setTimeout(r, delayMs));
 				}
+			}
 
-				expect(status).toHaveProperty('state');
-				expect(Object.values(TASK_STATE)).toContain(status!.state);
+			expect(status).toHaveProperty('state');
+			expect(Object.values(TASK_STATE)).toContain(status!.state);
 
-				await client.terminate(result.token);
-			},
-			TEST_CONFIG.timeout
-		);
+			await client.terminate(result.token);
+		}, TEST_CONFIG.timeout);
 
 		it(
 			'should terminate a pipeline',
