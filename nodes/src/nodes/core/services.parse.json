@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"data"
-	],
+	"classType": ["data"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -31,36 +29,21 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A document parsing component that extracts rich content from a wide variety ",
-		"of document types. It automatically identifies and processes embedded content, ",
-		"producing structured outputs including plain text, tables, images, audio, and ",
-		"video. This enables comprehensive analysis of complex documents and media files ",
-		"by making their contents accessible for downstream processing in the pipeline."
-	],
+	"description": ["A document parsing component that extracts rich content from a wide variety ", "of document types. It automatically identifies and processes embedded content, ", "producing structured outputs including plain text, tables, images, audio, and ", "video. This enables comprehensive analysis of complex documents and media files ", "by making their contents accessible for downstream processing in the pipeline."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "parse.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oFb44c",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"tags": [
-			"text",
-			"table",
-			"image",
-			"video",
-			"audio"
-		]
+		"tags": ["text", "table", "image", "video", "audio"]
 	},
 	"input": [
 		{
@@ -97,7 +80,7 @@
 	"preconfig": {},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

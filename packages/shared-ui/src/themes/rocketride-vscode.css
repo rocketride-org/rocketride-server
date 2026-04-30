@@ -5,14 +5,14 @@
  * variables so the UI automatically matches the user's editor theme
  * (light, dark, high contrast, etc.).
  *
- * This file is loaded IN ADDITION TO rocketride-web.css when the
+ * This file is loaded IN ADDITION TO rocketride-default.css when the
  * component is running inside a VS Code webview. The web defaults
  * act as fallbacks if a VS Code variable is not defined.
  *
  * VS Code injects --vscode-* variables into the webview DOM
  * automatically — no host-side changes are needed.
  *
- * See rocketride-web.css for the naming convention and full token docs.
+ * See rocketride-default.css for the naming convention and full token docs.
  */
 
 :root {
@@ -26,47 +26,46 @@
 	/* Palette mode                                                        */
 	/* ================================================================== */
 
-	/* --rr-palette-mode and --rr-icon-filter are NOT overridden here
-	   because they depend on the active VS Code theme (light vs dark).
-	   getMuiTheme() computes them at runtime from --rr-bg-default. */
+	/* --rr-palette-mode is computed at runtime by getMuiTheme(). */
 
 	/* ================================================================== */
 	/* Backgrounds                                                         */
 	/* ================================================================== */
 
 	--rr-bg-default: var(--vscode-editor-background, #ffffff);
-	--rr-bg-paper: var(--vscode-editor-background);
-	--rr-bg-surface-alt: var(--vscode-editor-background);
+	--rr-bg-paper: var(--vscode-editor-background, #ffffff);
+	--rr-bg-surface: var(--vscode-editor-background);
+	--rr-bg-surface-alt: var(--vscode-editor-background, #fafafa);
 
 	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
 
-	--rr-fg-titleBar-active: var(--vscode-titleBar-activeForeground);
-	--rr-fg-titleBar-inactive: var(--vscode-titleBar-inactiveForeground);
-	--rr-bg-titleBar-active: var(--vscode-titleBar-activeBackground);
-	--rr-bg-titleBar-inactive: var(--vscode-titleBar-inactiveBackground);
+	--rr-fg-titleBar-active: var(--vscode-titleBar-activeForeground, #1a1a1a);
+	--rr-fg-titleBar-inactive: var(--vscode-titleBar-inactiveForeground, #666666);
+	--rr-bg-titleBar-active: var(--vscode-titleBar-activeBackground, #e8e8e8);
+	--rr-bg-titleBar-inactive: var(--vscode-titleBar-inactiveBackground, #f0f0f0);
 
 	/* ================================================================== */
 	/* Widget                                                              */
 	/* ================================================================== */
 
-	--rr-bg-widget: var(--vscode-sideBar-background);
-	--rr-fg-widget: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--rr-bg-widget: var(--vscode-sideBar-background, #f3f3f3);
+	--rr-fg-widget: var(--vscode-sideBar-foreground, var(--vscode-foreground, #1a1a1a));
 	--rr-bg-widget-header: var(--vscode-sideBarSectionHeader-background, rgba(0, 0, 0, 0.08));
 	--rr-bg-widget-hover: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
 	--rr-shadow-widget: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.16));
-	--rr-font-family-widget: var(--vscode-font-family);
+	--rr-font-family-widget: var(--vscode-font-family, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
 	--rr-font-size-widget: var(--vscode-font-size, 13px);
 
 	/* ================================================================== */
 	/* Text                                                                */
 	/* ================================================================== */
 
-	--rr-text-primary: var(--vscode-foreground);
-	--rr-text-secondary: var(--vscode-descriptionForeground);
-	--rr-text-disabled: var(--vscode-disabledForeground);
-	--rr-text-link: var(--vscode-textLink-foreground);
+	--rr-text-primary: var(--vscode-foreground, #1a1a1a);
+	--rr-text-secondary: var(--vscode-descriptionForeground, #666666);
+	--rr-text-disabled: var(--vscode-disabledForeground, #838383);
+	--rr-text-link: var(--vscode-textLink-foreground, #1976d2);
 	--rr-text-caption: var(--vscode-descriptionForeground, #7d7d7d);
 
 	/* ================================================================== */
@@ -94,15 +93,15 @@
 	/* Accent                                                              */
 	/* ================================================================== */
 
-	--rr-accent: var(--vscode-button-background);
-	--rr-accent-faded: var(--vscode-button-background);
+	--rr-accent: var(--vscode-button-background, #f7901f);
+	--rr-accent-faded: color-mix(in srgb, var(--vscode-button-background, #f7901f) 50%, transparent);
 
 	/* ================================================================== */
 	/* Buttons                                                             */
 	/* ================================================================== */
 
-	--rr-bg-button: var(--vscode-button-background);
-	--rr-fg-button: var(--vscode-button-foreground);
+	--rr-bg-button: var(--vscode-button-background, #f7901f);
+	--rr-fg-button: var(--vscode-button-foreground, #ffffff);
 
 	--rr-btn-sm-height: 16px;
 	--rr-btn-sm-padding: 0 6px;
@@ -113,7 +112,7 @@
 	/* Inputs                                                              */
 	/* ================================================================== */
 
-	--rr-bg-input: var(--vscode-input-background, #3c3c3c);
+	--rr-bg-input: var(--vscode-input-background, #ffffff);
 
 	/* ================================================================== */
 	/* Lists                                                               */
@@ -141,7 +140,7 @@
 	/* Grey ramp                                                           */
 	/* ================================================================== */
 
-	--rr-grey-200: var(--vscode-input-background, #3c3c3c);
+	--rr-grey-200: var(--vscode-input-background, #d9d9d9);
 	--rr-grey-400: var(--vscode-input-border, #858585);
 	--rr-grey-500: var(--vscode-descriptionForeground, #8e8e8e);
 
@@ -149,7 +148,7 @@
 	/* Typography                                                          */
 	/* ================================================================== */
 
-	--rr-font-family: var(--vscode-font-family);
+	--rr-font-family: var(--vscode-font-family, Roboto, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif);
 	--rr-font-size: var(--vscode-font-size, 0.75rem);
 	--rr-font-size-sm: 0.6rem;
 	--rr-font-size-xs: 0.5rem;
@@ -166,4 +165,42 @@
 
 	--rr-font-weight-h5: 700;
 	--rr-font-weight-button: 400;
+
+	/* ================================================================== */
+	/* Chart / Lane Colours                                                */
+	/* ================================================================== */
+
+	--rr-chart-blue: #4263eb;
+	--rr-chart-green: #2b8a3e;
+	--rr-chart-yellow: #e67700;
+	--rr-chart-purple: #7048e8;
+	--rr-chart-orange: #e67a2e;
+	--rr-chart-red: #c92a2a;
+
+	/* ================================================================== */
+	/* Annotations                                                         */
+	/* ================================================================== */
+
+	--rr-annotation-bg-default: var(--vscode-editorWidget-background, #fff9c4);
+}
+
+/* ======================================================================
+ * Dark / High-Contrast theme overrides
+ *
+ * VS Code sets data-vscode-theme-kind on <body> to one of:
+ *   vscode-light | vscode-dark | vscode-high-contrast | vscode-high-contrast-light
+ *
+ * We use this to set --icon-filter in pure CSS — no JS required.
+ * This is the most reliable approach because it works even before
+ * getMuiTheme() runs and survives theme switches without a re-render.
+ * ====================================================================== */
+
+body[data-vscode-theme-kind='vscode-dark'],
+body[data-vscode-theme-kind='vscode-high-contrast'] {
+	--icon-filter: brightness(0) invert(1);
+}
+
+body[data-vscode-theme-kind='vscode-light'],
+body[data-vscode-theme-kind='vscode-high-contrast-light'] {
+	--icon-filter: none;
 }

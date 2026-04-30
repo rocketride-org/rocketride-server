@@ -3,6 +3,11 @@ name: Docker
 on:
   workflow_call:
     inputs:
+      ref:
+        description: Git ref to check out (branch, tag, or sha). Empty uses the default.
+        required: false
+        type: string
+        default: ''
       server_version:
         required: true
         type: string
@@ -21,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Download server artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,15 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to DeepSeek’s large language models for advanced ",
-		"natural language processing. It enables capabilities like text generation, ",
-		"summarization, and code understanding. Optimized for technical domains, DeepSeek ",
-		"offers strong performance in handling programming-related queries, structured ",
-		"data, and domain-specific tasks. The component is suitable for integrating ",
-		"intelligent reasoning and content generation into pipelines where accuracy and ",
-		"domain adaptation are key."
-	],
+	"description": ["A component that connects to DeepSeek’s large language models for advanced ", "natural language processing. It enables capabilities like text generation, ", "summarization, and code understanding. Optimized for technical domains, DeepSeek ", "offers strong performance in handling programming-related queries, structured ", "data, and domain-specific tasks. The component is suitable for integrating ", "intelligent reasoning and content generation into pipelines where accuracy and ", "domain adaptation are key."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -73,28 +61,21 @@
 	//              profile (model name)
 	//
 	"icon": "deepseek.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oQN2DK",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_deepseek.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_deepseek.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -175,7 +156,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -187,132 +168,90 @@
 		},
 		"deepseek.cloud-reasoner": {
 			"object": "cloud-reasoner",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"deepseek.cloud-chat": {
 			"object": "cloud-chat",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"deepseek.deepseek-r1-1_5b": {
 			"object": "deepseek-r1-1_5b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-7b": {
 			"object": "deepseek-r1-7b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-8b": {
 			"object": "deepseek-r1-8b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-14b": {
 			"object": "deepseek-r1-14b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-32b": {
 			"object": "deepseek-r1-32b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-70b": {
 			"object": "deepseek-r1-70b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-r1-671b": {
 			"object": "deepseek-r1-671b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.deepseek-v3": {
 			"object": "deepseek-v3",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"deepseek.profile": {
 			"title": "Model",
 			"description": "Deepseek LLM model",
 			"type": "string",
 			"default": "cloud-reasoner",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "cloud-reasoner",
-					"properties": [
-						"deepseek.cloud-reasoner"
-					]
+					"properties": ["deepseek.cloud-reasoner"]
 				},
 				{
 					"value": "cloud-chat",
-					"properties": [
-						"deepseek.cloud-chat"
-					]
+					"properties": ["deepseek.cloud-chat"]
 				},
 				{
 					"value": "deepseek-r1-1_5b",
-					"properties": [
-						"deepseek.deepseek-r1-1_5b"
-					]
+					"properties": ["deepseek.deepseek-r1-1_5b"]
 				},
 				{
 					"value": "deepseek-r1-7b",
-					"properties": [
-						"deepseek.deepseek-r1-7b"
-					]
+					"properties": ["deepseek.deepseek-r1-7b"]
 				},
 				{
 					"value": "deepseek-r1-8b",
-					"properties": [
-						"deepseek.deepseek-r1-8b"
-					]
+					"properties": ["deepseek.deepseek-r1-8b"]
 				},
 				{
 					"value": "deepseek-r1-14b",
-					"properties": [
-						"deepseek.deepseek-r1-14b"
-					]
+					"properties": ["deepseek.deepseek-r1-14b"]
 				},
 				{
 					"value": "deepseek-r1-32b",
-					"properties": [
-						"deepseek.deepseek-r1-32b"
-					]
+					"properties": ["deepseek.deepseek-r1-32b"]
 				},
 				{
 					"value": "deepseek-r1-70b",
-					"properties": [
-						"deepseek.deepseek-r1-70b"
-					]
+					"properties": ["deepseek.deepseek-r1-70b"]
 				},
 				{
 					"value": "deepseek-r1-671b",
-					"properties": [
-						"deepseek.deepseek-r1-671b"
-					]
+					"properties": ["deepseek.deepseek-r1-671b"]
 				},
 				{
 					"value": "deepseek-v3",
-					"properties": [
-						"deepseek.deepseek-v3"
-					]
+					"properties": ["deepseek.deepseek-v3"]
 				}
 			]
 		}
@@ -326,9 +265,7 @@
 		{
 			"section": "Pipe",
 			"title": "Deepseek",
-			"properties": [
-				"deepseek.profile"
-			]
+			"properties": ["deepseek.profile"]
 		}
 	],
 	"test": {

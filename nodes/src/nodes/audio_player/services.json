@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"audio"
-	],
+	"classType": ["audio"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"nosaas"
-	],
+	"capabilities": ["nosaas"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -52,22 +48,14 @@
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
-	"description": [
-		"The Audio Player component plays audio through the system’s default audio",
-		"output device, including the audio track from video content. It supports",
-		"a variety of common audio formats and delivers clear, consistent playback",
-		"for speech, music, or sound effects."
-	],
+	"description": ["The Audio Player component plays audio through the system’s default audio", "output device, including the audio track from video content. It supports", "a variety of common audio formats and delivers clear, consistent playback", "for speech, music, or sound effects."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "audio-player.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4lMXevQ",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -106,7 +94,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

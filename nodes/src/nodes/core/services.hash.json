@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"data"
-	],
+	"classType": ["data"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -31,33 +29,21 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that generates a unique fingerprint (hash) of a ",
-		"document's content. It computes a deterministic hash based on the raw or ",
-		"normalized text, enabling efficient deduplication, content tracking, and ",
-		"identity verification. This component ensures that identical content, ",
-		"regardless of metadata, produces the same fingerprint for reliable comparison",
-		"and indexing."
-	],
+	"description": ["A processing component that generates a unique fingerprint (hash) of a ", "document's content. It computes a deterministic hash based on the raw or ", "normalized text, enabling efficient deduplication, content tracking, and ", "identity verification. This component ensures that identical content, ", "regardless of metadata, produces the same fingerprint for reliable comparison", "and indexing."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "hash.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/492AwfL",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"tags": [
-			"tags"
-		]
+		"tags": ["tags"]
 	},
 	"input": [
 		{
@@ -78,7 +64,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

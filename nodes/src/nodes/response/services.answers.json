@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"infrastructure"
-	],
+	"classType": ["infrastructure"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,24 +47,18 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that returns processed answers back to the requesting client. It handles the ",
-		"response phase of the HTTP request-response cycle by returning the results as a JSON ",
-		"object. This component ensures that data is transmitted efficiently and clearly to ",
-		"the client, providing a standardized format for the response.",
-		"</br></br><a href=\"https://docs.rocketride.com/components-data-toolchain-for-ai-documentation/other/http-results/\">HTTP Results</a>"
-	],
+	"description": ["A component that returns processed answers back to the requesting client. It handles the ", "response phase of the HTTP request-response cycle by returning the results as a JSON ", "object. This component ensures that data is transmitted efficiently and clearly to ", "the client, providing a standardized format for the response."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "util-infrastructure.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-	],
+	"tile": [],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -97,12 +89,12 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
 	"fields": {
-		"laneName":{
+		"laneName": {
 			"type": "string",
 			"title": "Identifier key within result",
 			"minLength": 1,
@@ -119,9 +111,7 @@
 		{
 			"section": "Pipe",
 			"title": "Return Answers",
-			"properties": [
-				"laneName"
-			]
+			"properties": ["laneName"]
 		}
 	]
 }

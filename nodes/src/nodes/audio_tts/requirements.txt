@@ -1,0 +1,5 @@
+numpy
+# Kokoro-82M: official inference package (not transformers AutoModel)
+kokoro>=0.9.4
+soundfile>=0.12.0
+# en_core_web_sm is installed dynamically via spacy_en_model.ensure_spacy_en_model()

@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -54,32 +52,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to the Pinecone vector database for storing and retrieving ",
-		"high-dimensional embeddings. It enables efficient similarity search, indexing, and ",
-		"management of vectorized data, such as text or image embeddings. Configurable with ",
-		"API credentials, index settings, and metadata filtering, the component supports fast ",
-		"and scalable operations across large embedding datasets. Ideal for semantic search, ",
-		"recommendation systems, and retrieval-augmented generation workflows."
-	],
+	"description": ["A component that connects to the Pinecone vector database for storing and retrieving ", "high-dimensional embeddings. It enables efficient similarity search, indexing, and ", "management of vectorized data, such as text or image embeddings. Configurable with ", "API credentials, index settings, and metadata filtering, the component supports fast ", "and scalable operations across large embedding datasets. Ideal for semantic search, ", "recommendation systems, and retrieval-augmented generation workflows."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "pinecone.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4hH28Jw",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Mode: ${parameters.pinecone.profile}",
-		"Collection: ${parameters.pinecone.${profile}.collection}"
-	],
+	"tile": ["Mode: ${parameters.pinecone.profile}", "Collection: ${parameters.pinecone.${profile}.collection}"],
 	//
 	// Optional:
 	//      As a pipe component, define what this pipe component takes
@@ -135,8 +120,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThanOrEqual": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -146,10 +131,7 @@
 	"input": [
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors."
-			],
+			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
 			"output": []
 		},
 		{
@@ -158,26 +140,17 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -210,12 +183,12 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
 	"fields": {
-		"pinecone.collection":{
+		"pinecone.collection": {
 			"type": "string",
 			"title": "Collection",
 			"description": "Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens",
@@ -223,40 +196,26 @@
 		},
 		"pinecone.pod-based": {
 			"object": "pod-based",
-			"properties": [
-				"vector.apikey",
-				"vector.score",
-				"pinecone.collection"
-			]
+			"properties": ["vector.apikey", "vector.score", "pinecone.collection"]
 		},
 		"pinecone.serverless-dense": {
 			"object": "serverless-dense",
-			"properties": [
-				"vector.apikey",
-				"vector.score",
-				"pinecone.collection"
-			]
+			"properties": ["vector.apikey", "vector.score", "pinecone.collection"]
 		},
 		"pinecone.profile": {
 			"title": "Type of Pinecone Connection",
 			"description": "Connect to...",
 			"type": "string",
 			"default": "pod-based",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "pod-based",
-					"properties": [
-						"pinecone.pod-based"
-					]
+					"properties": ["pinecone.pod-based"]
 				},
 				{
 					"value": "serverless-dense",
-					"properties": [
-						"pinecone.serverless-dense"
-					]
+					"properties": ["pinecone.serverless-dense"]
 				}
 			]
 		},
@@ -267,31 +226,20 @@
 		},
 		"pinecone.pinecone": {
 			"object": "pinecone",
-			"properties": [
-				"pinecone.profile"
-			]
+			"properties": ["pinecone.profile"]
 		},
 		"pinecone.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"pinecone.provider",
-				"pinecone.pinecone"
-			]
+			"properties": ["pinecone.provider", "pinecone.pinecone"]
 		},
 		"pinecone.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"pinecone.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "pinecone.store", "all.embedding"]
 		},
 		"pinecone.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"pinecone.target.autopipe"
-			]
+			"properties": ["pinecone.target.autopipe"]
 		}
 	},
 	//
@@ -303,18 +251,12 @@
 		{
 			"section": "Pipe",
 			"title": "Pinecone Vector Store",
-			"properties": [
-				"pinecone.profile"
-			]
+			"properties": ["pinecone.profile"]
 		},
 		{
 			"section": "Transform",
 			"title": "Pinecone",
-			"properties": [
-				"type",
-				"pinecone.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "pinecone.target.parameters", "target.mode"]
 		}
 	]
 }

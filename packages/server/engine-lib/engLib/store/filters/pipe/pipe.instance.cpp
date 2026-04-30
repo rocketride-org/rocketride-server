@@ -48,15 +48,18 @@ Error IFilterInstance::open(Entry &entry) noexcept {
 
     // Update our monitor
     if (::engine::config::monitor()->isAppMonitor()) {
-        // Get the name of the entry
-        auto name = entry.url().fileName();
+        auto traceLevel = this->endpoint->config.pipelineTraceLevel;
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+            // Get the name of the entry
+            auto name = entry.url().fileName();
 
-        // Format it
-        StackText msg;
-        _tsbo(msg, {Format::HEX, {}, '*'}, "BEGIN", this->pipeId,
-              this->endpoint->getPipeCount(), name, "{}");
+            // Format it
+            StackText msg;
+            _tsbo(msg, {Format::HEX, {}, '*'}, "BEGIN", this->pipeId,
+                  this->endpoint->getPipeCount(), name, "{}");
 
-        ::engine::config::monitor()->other("DBG", msg);
+            ::engine::config::monitor()->other("DBG", msg);
+        }
     }
 
     if (m_openMode == OPEN_MODE::PIPELINE) {
@@ -104,12 +107,20 @@ Error IFilterInstance::close() noexcept {
 
     // Update our monitor
     if (::engine::config::monitor()->isAppMonitor()) {
-        // Format it
-        StackText msg;
-        _tsbo(msg, {Format::HEX, {}, '*'}, "END", this->pipeId,
-              this->endpoint->getPipeCount(), name, "{}");
+        auto traceLevel = this->endpoint->config.pipelineTraceLevel;
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+            // Serialize response at SUMMARY level, fall back to empty object
+            auto responseStr = (traceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY && object->response)
+                ? object->response().stringify(false)
+                : std::string("{}");
 
-        ::engine::config::monitor()->other("DBG", msg);
+            // Format it
+            StackText msg;
+            _tsbo(msg, {Format::HEX, {}, '*'}, "END", this->pipeId,
+                  this->endpoint->getPipeCount(), name, responseStr.c_str());
+
+            ::engine::config::monitor()->other("DBG", msg);
+        }
     }
 
     return ccode;

@@ -1,0 +1,7 @@
+# Plugin OpenAI-compatible API
+openai
+langchain-openai
+
+# LangChain deps
+langchain-core
+langchain

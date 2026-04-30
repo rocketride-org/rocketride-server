@@ -45,7 +45,7 @@ Test Configuration:
     Tests use environment variables for configuration:
     - ROCKETRIDE_URI: Server URI (defaults to http://localhost:5565)
     - ROCKETRIDE_APIKEY: Authentication key (defaults to 'MYAPIKEY')
-    - Various LLM API keys for chat tests (ROCKETRIDE_APIKEY_OPENAI, etc.)
+    - Various LLM API keys for chat tests (ROCKETRIDE_OPENAI_KEY, etc.)
 
 Running Tests:
     pytest tests/RocketRideClient_test.py -v          # Verbose output
@@ -77,15 +77,15 @@ load_dotenv(PROJECT_ROOT / '.env')
 # Skip chat tests when no LLM API key is available
 # fmt: off
 HAS_LLM_KEY = bool(
-    os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
-    or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
-    or os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
-    or os.environ.get('ROCKETRIDE_HOST_OLLAMA')
+    os.environ.get('ROCKETRIDE_OPENAI_KEY')
+    or os.environ.get('ROCKETRIDE_ANTHROPIC_KEY')
+    or os.environ.get('ROCKETRIDE_GEMINI_KEY')
+    or os.environ.get('ROCKETRIDE_OLLAMA_HOST')
 )
 # fmt: on
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
-    reason='Skipped: no LLM API key set (need ROCKETRIDE_APIKEY_OPENAI, ROCKETRIDE_APIKEY_ANTHROPIC, ROCKETRIDE_APIKEY_GEMINI, or ROCKETRIDE_HOST_OLLAMA)',
+    reason='Skipped: no LLM API key set (need ROCKETRIDE_OPENAI_KEY, ROCKETRIDE_ANTHROPIC_KEY, ROCKETRIDE_GEMINI_KEY, or ROCKETRIDE_OLLAMA_HOST)',
 )
 
 # Import from rocketride
@@ -247,7 +247,7 @@ class TestServicesOperations:
 class TestPipelineOperations:
     """Test pipeline lifecycle operations."""
 
-    PIPELINE_TOKEN = 'PY-PIPELINE-OPS'
+    PIPELINE_TOKEN = 'PY-PL'
 
     @pytest.mark.asyncio
     async def test_should_start_a_pipeline(self):
@@ -308,7 +308,7 @@ class TestPipelineOperations:
 class TestDataOperations:
     """Test data sending and processing operations."""
 
-    DATA_TOKEN = 'PY-DATA-OPS'
+    DATA_TOKEN = 'PY-DA'
 
     @pytest.mark.asyncio
     async def test_should_send_text_data_no_mime_type(self):
@@ -620,7 +620,7 @@ class TestDataOperations:
 class TestChatOperations:
     """Test chat functionality."""
 
-    CHAT_TOKEN = 'PY-CHAT-OPS'
+    CHAT_TOKEN = 'PY-CH'
 
     @pytest.mark.asyncio
     async def test_should_send_simple_chat_question(self):
@@ -916,7 +916,7 @@ class TestConnectionEvents:
 class TestEventHandling:
     """Test event subscription and handling."""
 
-    EVENT_TOKEN = 'PY-EVENT-OPS'
+    EVENT_TOKEN = 'PY-EV'
 
     @pytest.mark.asyncio
     async def test_should_subscribe_to_events_and_receive_them(self):
@@ -1452,7 +1452,7 @@ class TestValidationOperations:
 class TestErrorHandling:
     """Test error handling scenarios."""
 
-    ERROR_TOKEN = 'PY-ERROR-OPS'
+    ERROR_TOKEN = 'PY-ER'
 
     @pytest.mark.asyncio
     async def test_should_handle_invalid_pipeline_configuration(self):
@@ -1500,7 +1500,7 @@ class TestErrorHandling:
 class TestEndToEndWorkflow:
     """Test complete end-to-end workflows."""
 
-    E2E_TOKEN = 'PY-E2E-WORKFLOW'
+    E2E_TOKEN = 'PY-E2'
 
     @pytest.mark.asyncio
     async def test_should_complete_full_data_processing_workflow(self):
@@ -1884,7 +1884,7 @@ Line 3: random data {random.random()}"""
 class TestConcurrentPipelineOperations:
     """Test concurrent pipeline operations."""
 
-    CONCURRENT_TOKEN = 'PY-CONCURRENT-OPS'
+    CONCURRENT_TOKEN = 'PY-CC'
     PIPELINE_COUNT = 16  # Full 16 pipeline testing
 
     @pytest.mark.asyncio
@@ -1996,7 +1996,7 @@ class TestConcurrentPipelineOperations:
             await client.connect()
 
             # Create a single pipeline
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-single')
+            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-1p')
             pipeline_tokens = [result['token']]
 
             SEND_COUNT = 10
@@ -2051,7 +2051,7 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-single')
+            await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-1p')
             if client.is_connected():
                 await client.disconnect()
 
@@ -2065,9 +2065,13 @@ class TestConcurrentPipelineOperations:
             PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
+            # Clean up any leftover pipelines from previous runs
+            for i in range(PIPELINE_COUNT):
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
+
             # Create pipelines concurrently
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-mixed-{index}')
+                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-m{index}')
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(PIPELINE_COUNT)]
@@ -2138,7 +2142,7 @@ class TestConcurrentPipelineOperations:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
             for i in range(4):  # PIPELINE_COUNT
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-mixed-{i}')
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
 
             if client.is_connected():
                 await client.disconnect()
@@ -2153,8 +2157,12 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
+            # Clean up any leftover pipelines from previous runs
+            for i in range(SUBPROCESS_COUNT):
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-s{i}')
+
             # Create 4 independent subprocesses concurrently
-            sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
+            sub_tokens = [f'{self.CONCURRENT_TOKEN}-s{i}' for i in range(SUBPROCESS_COUNT)]
             # fmt: off
             await asyncio.gather(*[
                 client.use(pipeline=get_echo_pipeline(), token=token)
@@ -2190,6 +2198,103 @@ class TestConcurrentPipelineOperations:
                 except Exception as e:
                     print(f'Warning: failed to terminate pipeline token={token}: {e}')
             await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_handle_two_independent_clients_sending_concurrently_to_the_same_task(self):
+        """
+        Two-client variant of the concurrent-sends test, designed to exercise
+        eaas's outbound _data_client multiplexing.
+
+        When two independent RocketRideClient instances share a backend task
+        (via use_existing), eaas proxies their requests over a single connection
+        to the subprocess (data_server.DataConn). Each inbound client has its
+        own DAP seq counter, so they independently issue overlapping seqs
+        (e.g. both reach seq=4 within milliseconds). If eaas's _send_data
+        forwarded the inbound dict verbatim, those colliding seqs would clobber
+        the outbound _data_client._pending_requests map and one of the responses
+        would be silently dropped, hanging the originating client forever.
+
+        The fix builds a fresh outbound DAP packet via dap_request() so the
+        eaas->subprocess hop allocates its own unique seq from
+        _data_client._next_seq(), and rebuilds the inbound response envelope so
+        the original client still sees its own seq in request_seq.
+
+        Note: the single-client concurrent tests above do NOT exercise this
+        path because one client has one monotonic seq counter -- it never
+        collides with itself. Two independent clients fanning into one task are
+        the necessary precondition.
+        """
+        SHARED_TOKEN = f'{self.CONCURRENT_TOKEN}-cs'
+        SENDS_PER_CLIENT = 12
+
+        # Two independent clients.  Each has its own DAP connection, its own
+        # seq counter, and its own _pending_requests map.
+        client_a = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        client_b = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client_a.connect()
+            await client_b.connect()
+
+            # Both clients use the SAME task via use_existing so the second
+            # client.use() attaches to the existing task instead of starting a
+            # fresh one.  This is what makes both clients fan into ONE shared
+            # eaas->subprocess _data_client.
+            res_a = await client_a.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
+            res_b = await client_b.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
+            assert res_b['token'] == res_a['token']
+
+            # Generate distinct payloads per client so we can verify no cross-routing.
+            data_a = [{'index': i, 'text': f'clientA-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-A-{i}'} for i in range(SENDS_PER_CLIENT)]
+            data_b = [{'index': i, 'text': f'clientB-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-B-{i}'} for i in range(SENDS_PER_CLIENT)]
+
+            async def send_a(d):
+                await asyncio.sleep(random.random() * 0.05)
+                response = await client_a.send(res_a['token'], d['text'], {}, 'text/plain')
+                return {'client': 'A', 'index': d['index'], 'original_text': d['text'], 'response': response}
+
+            async def send_b(d):
+                await asyncio.sleep(random.random() * 0.05)
+                response = await client_b.send(res_b['token'], d['text'], {}, 'text/plain')
+                return {'client': 'B', 'index': d['index'], 'original_text': d['text'], 'response': response}
+
+            # Fire both clients' sends concurrently.  Pre-fix this would hang
+            # on whichever pipe lost the seq collision race.
+            sends_a = [send_a(d) for d in data_a]
+            sends_b = [send_b(d) for d in data_b]
+            all_results = await asyncio.gather(*sends_a, *sends_b)
+
+            # Every send must have completed (no hangs).
+            assert len(all_results) == SENDS_PER_CLIENT * 2
+
+            # Each response must contain its own original text AND the right
+            # client tag (proves no cross-routing between clients).
+            for r in all_results:
+                assert r['response'] is not None
+                response_text = r['response']['text'][0]
+                assert r['original_text'] in response_text
+                assert f'client{r["client"]}-send-{r["index"]}' in response_text
+
+            # No two responses share the same text -- final guard against
+            # cross-contamination.
+            unique_texts = set(r['response']['text'][0] for r in all_results)
+            assert len(unique_texts) == SENDS_PER_CLIENT * 2
+
+            print('Two-client cross-task concurrent test completed:')
+            print(f'- 2 independent clients × {SENDS_PER_CLIENT} concurrent sends each')
+            print(f'- {len(all_results)} responses received and verified')
+            print(f'- All responses unique: {len(unique_texts) == SENDS_PER_CLIENT * 2}')
+        finally:
+            # Clean up the shared task via whichever client is still alive.
+            for c in (client_a, client_b):
+                if c.is_connected():
+                    try:
+                        await c.terminate(SHARED_TOKEN)
+                    except Exception:
+                        pass
+                    try:
+                        await c.disconnect()
+                    except Exception:
+                        pass
 
 
 async def is_server_available() -> bool:
@@ -2238,6 +2343,154 @@ Integration tests may fail. Please ensure:
 def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> None:
     """Verify websocket URI normalization preserves secure and non-secure schemes."""
     assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
+
+
+# ============================================================================
+# File Store Operations
+# ============================================================================
+
+
+class TestFileStoreOperations:
+    """Test handle-based file store operations against a live server."""
+
+    def _unique_path(self, name: str = 'test') -> str:
+        return f'.test-store/py-{name}-{"".join(random.choices(string.ascii_lowercase, k=8))}'
+
+    @pytest.mark.asyncio
+    async def test_handle_write_and_read(self):
+        """Write via handle, read back via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('hw')
+
+            info = await client.fs_open(path, 'w')
+            written = await client.fs_write(info['handle'], b'hello world')
+            assert written == 11
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            assert info['size'] == 11
+            data = await client.fs_read(info['handle'], offset=0)
+            assert data == b'hello world'
+            await client.fs_close(info['handle'], 'r')
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_multiple_write_chunks(self):
+        """Write multiple chunks then read back."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('chunks')
+
+            info = await client.fs_open(path, 'w')
+            for i in range(5):
+                await client.fs_write(info['handle'], f'chunk-{i}-'.encode())
+            await client.fs_close(info['handle'], 'w')
+
+            content = await client.fs_read_string(path)
+            assert content == 'chunk-0-chunk-1-chunk-2-chunk-3-chunk-4-'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_read_in_chunks(self):
+        """Read a file in multiple chunks via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('rc')
+            data = b'X' * 1000
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], data)
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            chunks = []
+            offset = 0
+            while True:
+                chunk = await client.fs_read(info['handle'], offset=offset, length=300)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                offset += len(chunk)
+            await client.fs_close(info['handle'], 'r')
+
+            assert b''.join(chunks) == data
+            assert len(chunks) == 4  # 300 + 300 + 300 + 100
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_string_roundtrip(self):
+        """fs_write_string / fs_read_string round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('str')
+
+            await client.fs_write_string(path, 'Hello \u2603 \U0001f680')
+            result = await client.fs_read_string(path)
+            assert result == 'Hello \u2603 \U0001f680'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_json_roundtrip(self):
+        """fs_write_json / fs_read_json round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('json')
+            obj = {'name': 'Test', 'values': [1, 2, 3], 'nested': {'ok': True}}
+
+            await client.fs_write_json(path, obj)
+            result = await client.fs_read_json(path)
+            assert result == obj
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_stat_and_delete(self):
+        """Write a file, stat it, delete it, stat again."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('stat')
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], b'data')
+            await client.fs_close(info['handle'], 'w')
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is True
+            assert result['type'] == 'file'
+
+            await client.fs_delete(path)
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is False
+        finally:
+            if client.is_connected():
+                await client.disconnect()
 
 
 # Pytest configuration

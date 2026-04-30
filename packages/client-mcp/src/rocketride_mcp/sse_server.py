@@ -110,6 +110,7 @@ def create_app() -> Starlette:
     mcp = create_mcp_server()
 
     async def health(_request: Request) -> JSONResponse:
+        """Return server health status and engine reachability."""
         status: dict = {'status': 'ok', 'server': 'rocketride-mcp'}
         try:
             client = _get_client()

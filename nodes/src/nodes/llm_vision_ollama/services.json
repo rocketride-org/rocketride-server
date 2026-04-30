@@ -53,11 +53,8 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "ollama.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/3JFO3zk",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of

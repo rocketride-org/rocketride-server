@@ -269,7 +269,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
-    ///		under the ServicePython level
+    ///		under the DebugOut level
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(monitorStatus, [](py::args args) {
         // Create a single concatenated string from all arguments
@@ -304,7 +304,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
-    ///		under the ServicePython level
+    ///		under the DebugOut level
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(monitorMetrics, [](py::dict metrics) {
         // Call the MONITOR macro with the combined string
@@ -409,10 +409,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
-    ///		under the ServicePython level
+    ///		under the DebugOut level
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(debug, [](py::args &args) {
-        Lvl logLevel = Lvl::ServicePython;
+        Lvl logLevel = Lvl::DebugOut;
         py::size_t i = 0;
 
         // Check if the first param is a log level
@@ -440,7 +440,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
-    ///		under the ServicePython level
+    ///		under the DebugOut level
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(
         getServiceDefinition, [](py::str &logicalType) -> py::object {
@@ -465,7 +465,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
-    ///		under the ServicePython level
+    ///		under the DebugOut level
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(getServiceDefinitions, []() -> py::object {
         // Get the service type
@@ -1172,7 +1172,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     py::enum_<Lvl>(engLib, "Lvl")
         .PYENUM(Python, Lvl::Python)
         .PYENUM(Remoting, Lvl::Remoting)
-        .PYENUM(ServicePython, Lvl::ServicePython)
         .PYENUM(DebugOut, Lvl::DebugOut)
         .PYENUM(DebugProtocol, Lvl::DebugProtocol);
 
@@ -1299,6 +1298,8 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_PROP_READONLY_STATIC(REMOTING,
                                      url::UrlConfig::PROTOCOL_CAPS::REMOTING)
         .PYBIND_PROP_READONLY_STATIC(GPU, url::UrlConfig::PROTOCOL_CAPS::GPU)
+        .PYBIND_PROP_READONLY_STATIC(DEPRECATED, url::UrlConfig::PROTOCOL_CAPS::DEPRECATED)
+        .PYBIND_PROP_READONLY_STATIC(EXPERIMENTAL, url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL)
 
         .PYBIND_FUNCTION_STATIC(
             getProtocolCaps, [](const std::string &protocol) -> uint32_t {

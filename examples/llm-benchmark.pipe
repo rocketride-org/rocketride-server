@@ -1,0 +1,93 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 300 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_rocketride_1",
+			"provider": "agent_rocketride",
+			"config": { "instructions": ["You are a helpful assistant. Answer the user's question clearly and concisely."], "max_waves": 5, "parameters": {} },
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 140 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_crewai_1",
+			"provider": "agent_crewai",
+			"config": { "instructions": ["You are a helpful assistant. Answer the user's question clearly and concisely."], "parameters": {} },
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 300 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_langchain_1",
+			"provider": "agent_langchain",
+			"config": { "instructions": ["You are a helpful assistant. Answer the user's question clearly and concisely."], "parameters": {} },
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 460 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-4o",
+				"openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 170, "y": 620 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude",
+				"claude": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_crewai_1" }
+			],
+			"ui": { "position": { "x": 240, "y": 620 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_gemini_1",
+			"provider": "llm_gemini",
+			"config": {
+				"profile": "gemini",
+				"gemini": { "apikey": "${ROCKETRIDE_GEMINI_KEY}" },
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_langchain_1" }
+			],
+			"ui": { "position": { "x": 310, "y": 620 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "memory_internal_1",
+			"provider": "memory_internal",
+			"config": { "type": "memory_internal" },
+			"control": [
+				{ "classType": "memory", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 100, "y": 620 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": { "laneName": "answers" },
+			"input": [
+				{ "lane": "answers", "from": "agent_rocketride_1" },
+				{ "lane": "answers", "from": "agent_crewai_1" },
+				{ "lane": "answers", "from": "agent_langchain_1" }
+			],
+			"ui": { "position": { "x": 460, "y": 300 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "daa7c4fe-7604-47a8-bdf3-6f592cc619d4",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

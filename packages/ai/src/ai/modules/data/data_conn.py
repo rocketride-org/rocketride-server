@@ -530,7 +530,6 @@ class DataConn(DAPConn):
         This resets the activity timer to prevent the pipe from being
         considered a zombie for another 60 seconds.
         """
-
         # Resolve conn_pipe in the async scope so we can set in_use before dispatching
         pipe_id = args.get('pipe_id', None)
         if pipe_id is None:

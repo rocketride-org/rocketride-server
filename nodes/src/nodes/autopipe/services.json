@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"other"
-	],
+	"classType": ["other"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,23 +47,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"This component combines document parsing, text preprocessing, and embedding generation in a single node.",
-		"It provides an end-to-end solution for converting raw documents into vector representations",
-		"suitable for semantic search and analysis."
-	],
+	"description": ["This component combines document parsing, text preprocessing, and embedding generation in a single node.", "It provides an end-to-end solution for converting raw documents into vector representations", "suitable for semantic search and analysis."],
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4lRLZCs",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
-	"lanes": {
-	},
+	"lanes": {},
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
@@ -114,7 +101,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -128,19 +115,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Autopipe",
-			"properties": [
-				"remote",
-				"all.embedding",
-				"all.store"
-			]
+			"properties": ["remote", "all.embedding", "all.store"]
 		},
 		{
 			"section": "Transform",
 			"title": "RocketRide Autopipe",
-			"properties": [
-				"remote",
-				"all.embedding"
-			]
+			"properties": ["remote", "all.embedding"]
 		}
 	]
 }

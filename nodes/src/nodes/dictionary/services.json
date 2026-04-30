@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"text"
-	],
+	"classType": ["text"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,24 +47,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that analyzes documents to extract a dictionary of ",
-		"key terms and phrases. It identifies domain-specific vocabulary, recurring ",
-		"expressions, and relevant terminology, building a structured list for downstream ",
-		"enrichment or reference. Useful for creating glossaries, supporting classification, ",
-		"or enhancing search relevance, the component helps surface important language patterns ",
-		"from unstructured content."
-	],
+	"description": ["A processing component that analyzes documents to extract a dictionary of ", "key terms and phrases. It identifies domain-specific vocabulary, recurring ", "expressions, and relevant terminology, building a structured list for downstream ", "enrichment or reference. Useful for creating glossaries, supporting classification, ", "or enhancing search relevance, the component helps surface important language patterns ", "from unstructured content."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "dictionary.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/49xdBJx",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -79,9 +67,7 @@
 		}
 	},
 	"lanes": {
-		"text": [
-			"documents"
-		]
+		"text": ["documents"]
 	},
 	"input": [
 		{
@@ -96,7 +82,7 @@
 	],
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

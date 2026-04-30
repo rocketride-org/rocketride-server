@@ -31,6 +31,7 @@ Usage:
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
 import sys as _sys
+
 if _sys.path and (_sys.path[0].endswith('ai') or _sys.path[0].endswith('ai\\') or _sys.path[0].endswith('ai/')):
     _sys.path.pop(0)
 
@@ -39,6 +40,7 @@ import asyncio
 from typing import Any, Dict
 
 from ai.web import WebServer
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for EAAS server."""
@@ -96,9 +98,17 @@ Examples:
 
     # Logging
     parser.add_argument(
-        '--verbose', '-v',
+        '--verbose',
+        '-v',
         action='store_true',
         help='Enable verbose/debug logging',
+    )
+
+    # SaaS mode — load the SaaS account implementation instead of OSS
+    parser.add_argument(
+        '--saas',
+        action='store_true',
+        help='Enable SaaS account implementation (requires extension overlay)',
     )
 
     return parser
@@ -145,12 +155,19 @@ async def run(config: Dict[str, Any] = None) -> None:
     server.use('task_http')
     server.use('profiler')
 
+    # Uniform entry point — OSS is a no-op; SaaS registers all HTTP routes
+    # (Zitadel callback, Stripe webhook, Stripe Connect, Marketplace) and
+    # initialises the database schema before the server starts accepting connections.
+    from ai.account import account
+
+    await account.init_account(server)
+
     # Start the FastAPI server loop
     await server.serve()
 
 
 def main():
-    """Main entry point."""
+    """Run the EaaS server."""
     try:
         asyncio.run(run())
     except (KeyboardInterrupt, SystemExit):

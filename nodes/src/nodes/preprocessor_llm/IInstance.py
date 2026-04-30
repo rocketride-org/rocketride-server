@@ -385,13 +385,7 @@ class IInstance(IInstanceBase):
         question = self._buildChunkQuestion(text)
 
         # Trigger the question, returning IAnswer
-        result = self.instance.invoke(
-            'llm',
-            IInvokeLLM(
-                op='ask',  #
-                question=question,
-            ),
-        )
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         return result.getJson()
 
@@ -443,9 +437,9 @@ class IInstance(IInstanceBase):
         # can do it here instead
         if not self._init:
             # Load the fixed stuff
-            self._maxContextTokens = self.instance.invoke('llm', IInvokeLLM(op='getContextLength'))
-            self._maxOutputTokens = self.instance.invoke('llm', IInvokeLLM(op='getOutputLength'))
-            self._tokenCounter = self.instance.invoke('llm', IInvokeLLM(op='getTokenCounter'))
+            self._maxContextTokens = self.instance.invoke(IInvokeLLM.GetContextLength())
+            self._maxOutputTokens = self.instance.invoke(IInvokeLLM.GetOutputLength())
+            self._tokenCounter = self.instance.invoke(IInvokeLLM.GetTokenCounter())
 
             # Get an empty prompt and obtain # of tokens in it
             chunkQuestion = self._buildChunkQuestion()

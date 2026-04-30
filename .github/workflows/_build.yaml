@@ -3,6 +3,11 @@ name: Build
 on:
   workflow_call:
     inputs:
+      ref:
+        description: Git ref to check out (branch, tag, or sha). Empty uses the default.
+        required: false
+        type: string
+        default: ''
       full_version:
         description: Full build version (e.g. 1.2.3.456)
         required: true
@@ -72,11 +77,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ inputs.ref }}
           submodules: recursive
       - name: Set up pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
         with:
-          version: 10
+          version: 10.33.0
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
       - name: Set up vcpkg nuget / Linux/macOS
@@ -118,6 +124,14 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false
+        # Integration tests boot a local server on :5565 and connect a test
+        # client. Both sides need the same shared secret to authenticate;
+        # without ROCKETRIDE_APIKEY the server raises AuthenticationException
+        # and the client tests fail with "No authentication configured".
+        # The secret value itself doesn't matter — it just has to match
+        # between server and client in this single CI run.
+        env:
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
         run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Perform CodeQL Analysis

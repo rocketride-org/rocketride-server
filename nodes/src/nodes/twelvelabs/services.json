@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"video"
-	],
+	"classType": ["video"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -49,23 +47,20 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"Sends a video to TwelveLabs along with instructions and returns the generated text response."
-	],
+	"description": ["Sends a video to TwelveLabs along with instructions and returns the generated text response."],
 	//
 	// Optional:
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "twelvelabs.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"video": [
-			"text"
-		]
+		"video": ["text"]
 	},
 	"input": [
 		{
@@ -117,27 +112,17 @@
 		},
 		"twelvelabs.default": {
 			"object": "default",
-			"properties": [
-				"twelvelabs.apikey",
-				"twelvelabs.instructions"
-			]
+			"properties": ["twelvelabs.apikey", "twelvelabs.instructions"]
 		},
 		"twelvelabs.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"twelvelabs.default"
-					]
+					"properties": ["twelvelabs.default"]
 				}
 			]
 		}
@@ -151,9 +136,7 @@
 		{
 			"section": "Pipe",
 			"title": "TwelveLabs",
-			"properties": [
-				"twelvelabs.profile"
-			]
+			"properties": ["twelvelabs.profile"]
 		}
 	]
 }

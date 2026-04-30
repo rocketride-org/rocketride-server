@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 MonitorCommands: DAP Event Monitoring and Subscription System.
 
@@ -30,9 +52,11 @@ with different event subscription levels. It acts as an event distribution
 hub that respects access permissions and client preferences.
 """
 
+import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
+
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -84,9 +108,22 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def forward_event(
+    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+        """Send a server-level event if this connection is subscribed via the '*' wildcard."""
+        if '*' not in self._monitors:
+            return
+        if not (event_type & self._monitors['*']):
+            return
+        # Tenant scoping: if the event carries an apikey, only deliver to matching accounts.
+        # Compare userToken directly (per-user key, no team suffix).
+        if apikey is not None and hasattr(self, '_account_info') and self._account_info:
+            if self._account_info.userToken != apikey:
+                return
+        await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
+
+    async def send_task_event(
         self,
-        type: EVENT_TYPE,
+        event_type: EVENT_TYPE,
         token: str,
         event: Dict[str, Any] = None,
     ) -> None:
@@ -111,17 +148,28 @@ class MonitorCommands(DAPConn):
         """
 
         async def _send_event(pref: EVENT_TYPE) -> None:
+            """
+            Conditionally forward a single event to this connection.
+
+            Checks whether the event_type bits are set in the caller's subscription
+            preference (pref). If so, extracts the event name and body from the outer
+            event dict and sends it over the DAP transport using the task's short id.
+
+            Args:
+                pref (EVENT_TYPE): The merged subscription bitmask for this connection.
+                    The event is only forwarded when (event_type & pref) is non-zero.
+            """
             # If this is not being listened for, skip the forwarding
-            if not (type & pref):
+            if not (event_type & pref):
                 return
 
             # Extract event details for DAP-compliant forwarding
-            event_type = event.get('event', 'unknown')
+            evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
             # Send the event to the subscribed client using DAP protocol
             await self.send_event(
-                event_type,
+                evt_name,
                 id=control.id,
                 body=body,
             )
@@ -131,41 +179,45 @@ class MonitorCommands(DAPConn):
 
         # Verify we are allowed to receive events for this task - for SSE events, it requires data
         # access, for all others, it's monitor access
-        if type == EVENT_TYPE.SSE:
+        if event_type == EVENT_TYPE.SSE:
             self.verify_permission('task.data')
         else:
             self.verify_permission('task.monitor')
 
-        # Verify that this notification is going to the correct apikey
-        if control.apikey != self._account_info.apikey:
+        # Verify this notification goes to the correct user (cross-team safe)
+        if control.userId != self._account_info.userId:
             return
 
         # Build the base project-scoped key
         project_key = f'p.{control.project_id}.{control.source}'
+
+        # Gather all matching subscription keys and merge their preferences
+        # so each subscriber receives the event at most once.
+        merged_preference = EVENT_TYPE(0)
 
         # Pipe-scoped check (most specific) — SSE events embed pipe_id in body
         pipe_id = (event or {}).get('body', {}).get('pipe_id')
         if pipe_id is not None:
             pipe_key = f'{project_key}.{pipe_id}'
             if pipe_key in self._monitors:
-                subscriber_preference = self._monitors[pipe_key]
-                await _send_event(subscriber_preference)
+                merged_preference |= self._monitors[pipe_key]
 
         # Project-scoped check (exact source match)
         if project_key in self._monitors:
-            subscriber_preference = self._monitors[project_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_key]
 
         # Project-wildcard check (all sources within a project: p.{projectId}.*)
         project_wildcard_key = f'p.{control.project_id}.*'
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
-            subscriber_preference = self._monitors[project_wildcard_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_wildcard_key]
 
         # Global wildcard check (all tasks)
         if '*' in self._monitors:
-            subscriber_preference = self._monitors['*']
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors['*']
+
+        # Send once with the merged preference
+        if merged_preference:
+            await _send_event(merged_preference)
 
         return
 
@@ -177,6 +229,32 @@ class MonitorCommands(DAPConn):
         project_id: str = None,
         source: str = None,
     ) -> None:
+        """
+        Send immediate catch-up events for newly enabled subscription bits.
+
+        When a client subscribes to new event types (i.e. bits that were not
+        previously set), this method sends the current state for those types
+        so the client does not have to wait for the next natural event. This
+        keeps clients in sync with the task even if they connect mid-run.
+
+        Currently handled catch-up types:
+        - SUMMARY: If the task is running, sends its current status snapshot.
+          If the task is not running, sends an empty TASK_STATE.NONE status
+          so the client can display a "not running" indicator.
+        - TASK: Sends the list of all currently active tasks owned by this user,
+          so the client knows which tasks are already in-progress.
+
+        Args:
+            control (TASK_CONTROL | None): The task control for the subscription,
+                or None if the task is not currently running.
+            prev (EVENT_TYPE): The bitmask of event types that were subscribed
+                before this call (used to compute which bits are newly set).
+            curr (EVENT_TYPE): The new bitmask of event types after the update.
+            project_id (str, optional): Project identifier used to build an empty
+                status payload when control is None.
+            source (str, optional): Source component identifier used alongside
+                project_id when control is None.
+        """
         # Figure out what was just turned on
         new = curr & ~prev  # Bits that are in curr but NOT in prev
 
@@ -209,28 +287,27 @@ class MonitorCommands(DAPConn):
         # If we just turned on task
         if new & EVENT_TYPE.TASK:
             try:
-                # Get our api key
-                apikey = self._account_info.apikey
+                # Get current user id for cross-team task visibility
+                caller_user_id = self._account_info.userId
 
-                # Loop through all the active tasks and, for matching apikeys,
-                # send an event that they are running
+                # Loop through all the active tasks owned by this user
                 tasks: List[Dict[str, Any]] = []
                 for token, target in self._server._task_control.items():
                     # If this is not ours, skip it
-                    if target.apikey != apikey:
+                    if target.userId != caller_user_id:
                         continue
 
-                    # Get the task state
-                    state = target.task.get_status().state
+                    # Get the task status once
+                    status = target.task.get_status()
 
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)
                     # Exclude: NONE(0), COMPLETED(5), CANCELLED(6)
-                    if state in [TASK_STATE.STARTING.value, TASK_STATE.INITIALIZING.value, TASK_STATE.RUNNING.value, TASK_STATE.STOPPING.value]:
-                        # Now, append it
+                    if status.state in [TASK_STATE.STARTING.value, TASK_STATE.INITIALIZING.value, TASK_STATE.RUNNING.value, TASK_STATE.STOPPING.value]:
                         tasks.append(
                             {
                                 'id': target.id,
+                                'name': status.name,
                                 'projectId': target.project_id,
                                 'source': target.source,
                             }
@@ -298,6 +375,10 @@ class MonitorCommands(DAPConn):
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
 
+            # Verify the caller owns this task (cross-team safe)
+            if control.userId != self._account_info.userId:
+                raise PermissionError('Access denied: task belongs to a different account')
+
             # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
             event_key = f'p.{control.project_id}.{control.source}'
             event_id = control.id
@@ -310,12 +391,15 @@ class MonitorCommands(DAPConn):
 
             # If is ok if the task doesn't exist at this point in time...
             try:
-                # Get the task
-                control = self._server.get_task_control_by_project(project_id, source)
+                # Get the task (ownership check inside)
+                control = self._server.get_task_control_by_project(project_id, source, self._account_info, require='task.monitor')
 
                 # The task is running, we can fill it in
                 event_id = control.id
                 filter_name = control.id
+
+            except PermissionError:
+                raise
 
             except Exception:
                 event_id = None
@@ -335,6 +419,23 @@ class MonitorCommands(DAPConn):
                 # Unsubscribe: remove from monitor registry
                 self._monitors.pop(event_key, None)
                 self.debug_message(f'Removed monitoring for "{filter_name}"')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'unsubscribed',
+                        },
+                    },
+                    apikey=self._account_info.userToken,
+                )
             else:
                 # Get the current type so we know what to update
                 prev = self._monitors.get(event_key, EVENT_TYPE.NONE)
@@ -342,6 +443,23 @@ class MonitorCommands(DAPConn):
                 # Subscribe or update: add/modify registry entry
                 self._monitors[event_key] = type
                 self.debug_message(f'Set "{filter_name}" monitoring to {type}')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'subscribed',
+                        },
+                    },
+                    apikey=self._account_info.userToken,
+                )
 
                 # Send updates for what was missed (or empty state if task not running)
                 await self._send_updates(control, prev, type, project_id=project_id, source=source)
@@ -384,7 +502,21 @@ class MonitorCommands(DAPConn):
         """
 
         def strings_to_bitmask(event_strings: List[str]) -> int:
-            """Convert array of event type strings to bitmask."""
+            """
+            Convert an array of event type name strings into a combined integer bitmask.
+
+            Each string is matched case-insensitively against the EVENT_TYPE enum.
+            Unrecognised strings are silently ignored (with a console warning) so that
+            clients sending unknown type names do not cause a hard failure.
+
+            Args:
+                event_strings (List[str]): List of EVENT_TYPE member names, e.g.
+                    ['SUMMARY', 'TASK', 'SSE'].
+
+            Returns:
+                int: OR-combination of the matching EVENT_TYPE values.
+                    Returns 0 if the list is empty or all names are unrecognised.
+            """
             bitmask = 0
             for event_str in event_strings:
                 try:
@@ -409,14 +541,17 @@ class MonitorCommands(DAPConn):
         # Determine the desired event subscription level
         types = args.get('types', None)
 
-        # Handle both integer bitmask and string array formats
-        if types and isinstance(types, list):
-            # Client sent array of strings - convert to bitmask
+        # Handle string array, integer bitmask, and legacy listenType formats
+        if isinstance(types, list):
             bitmask_value = strings_to_bitmask(types)
-
+        elif isinstance(types, int):
+            bitmask_value = types
+        elif isinstance(types, str) and types.isdigit():
+            bitmask_value = int(types)
         else:
-            # Fallback to no events
-            bitmask_value = 0
+            # Fallback to legacy listenType or no events
+            listen_type = args.get('listenType', 0)
+            bitmask_value = int(listen_type) if isinstance(listen_type, (int, float)) else 0
 
         # Create EVENT_TYPE enum from the bitmask
         event_type = EVENT_TYPE(bitmask_value)

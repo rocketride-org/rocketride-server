@@ -63,7 +63,7 @@ public:
         auto str = data.stringify(false);
         Monitor::dependencyDownload(data);
 
-        LOGL(Lvl::ServicePython, _location, _ts("DependencyDownload: ", str));
+        LOGL(Lvl::DebugOut, _location, _ts("DependencyDownload: ", str));
     }
 
     //-----------------------------------------------------------------

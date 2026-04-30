@@ -29,7 +29,7 @@ import { TaskStatus } from './taskStatus';
 //=====================================================================================
 /**
  * Status update event message from the debug server.
- * 
+ *
  * Sent by the debug server to notify the client of changes in pipeline
  * execution status, component states, or other runtime information.
  * These events are used to update the debugging UI in real-time.
@@ -73,6 +73,10 @@ export interface EventFlowUpdate extends DebugProtocol.Event {
 			result?: string;
 			error?: string;
 		};
+		/** Project identifier — used by event routing to match events to editors. */
+		project_id: string;
+		/** Source node ID (e.g. "chat_1") — identifies which pipeline source generated this event. */
+		source: string;
 	};
 }
 

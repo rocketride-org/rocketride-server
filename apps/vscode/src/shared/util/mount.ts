@@ -23,6 +23,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 
 // ============================================================================
 // GLOBAL REACT SETUP
@@ -30,7 +31,7 @@ import ReactDOM from 'react-dom';
 
 /**
  * Global React Availability
- * 
+ *
  * Makes React and ReactDOM available globally for development contexts
  * and debugging. This ensures compatibility with various development
  * environments and testing scenarios.
@@ -44,53 +45,49 @@ import ReactDOM from 'react-dom';
 
 /**
  * Universal component mounting utility for VS Code webviews
- * 
+ *
  * Provides a standardized way to mount React components in VS Code webview
  * environments with proper error handling, DOM ready detection, and
  * TypeScript support for props.
- * 
+ *
  * Features:
  * - Type-safe props support with generics
  * - DOM ready state detection and handling
  * - Comprehensive error handling and logging
  * - Consistent mounting behavior across components
  * - Development-friendly debugging output
- * 
+ *
  * @param component - React component class or function component to mount
  * @param componentName - Human-readable name for logging and debugging
  * @param props - Optional props object to pass to the component
- * 
+ *
  * @template T - TypeScript generic for component props type inference
- * 
+ *
  * @example
  * ```typescript
  * // Mount component without props
  * mountComponent(SidebarStatus, 'SidebarStatus');
- * 
+ *
  * // Mount component with props
  * interface MyProps {
  *   title: string;
  *   count: number;
  * }
- * 
+ *
  * mountComponent<MyProps>(
  *   MyComponent,
- *   'MyComponent', 
+ *   'MyComponent',
  *   { title: 'Hello', count: 42 }
  * );
  * ```
  */
-export function mountComponent<T = {}>(
-	component: React.ComponentType<T>,
-	componentName: string = 'Component',
-	props?: T
-) {
+export function mountComponent<T = {}>(component: React.ComponentType<T>, componentName: string = 'Component', props?: T) {
 	/**
 	 * Internal Mount Function
-	 * 
+	 *
 	 * Handles the actual component mounting process with proper error
 	 * handling and logging. This function is called once the DOM is ready.
-	 * 
+	 *
 	 * Process:
 	 * 1. Locate the root DOM element
 	 * 2. Render component using React 17 API
@@ -102,8 +99,8 @@ export function mountComponent<T = {}>(
 
 		if (rootElement) {
 			try {
-				// Use React 17 API for rendering
-				ReactDOM.render(React.createElement(component as React.ComponentType<Record<string, unknown>>, props), rootElement);
+				// Use React 18 createRoot API
+				createRoot(rootElement).render(React.createElement(component as React.ComponentType<Record<string, unknown>>, props));
 			} catch (error) {
 				console.error(`Error mounting ${componentName}:`, error);
 			}
@@ -118,11 +115,11 @@ export function mountComponent<T = {}>(
 
 	/**
 	 * Smart DOM Ready Detection
-	 * 
+	 *
 	 * Handles different DOM ready states to ensure reliable component mounting:
 	 * - If DOM is still loading: Wait for DOMContentLoaded event
 	 * - If DOM is ready: Mount immediately with small delay for initialization
-	 * 
+	 *
 	 * The small timeout ensures that any VS Code webview initialization
 	 * has completed before attempting to mount the component.
 	 */

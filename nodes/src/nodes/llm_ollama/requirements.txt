@@ -1,16 +1,5 @@
 # Plugin Ollama core
 langchain-openai
-transformers
-tokenizers
-
-# Transformers deps
-accelerate
-huggingface-hub
-pyyaml
-filelock
-regex
-tqdm
-safetensors
 
 # LangChain deps
 langchain-core
