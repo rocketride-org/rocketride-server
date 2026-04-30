@@ -31,6 +31,7 @@ Usage:
 """
 
 import sys
+import os
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
@@ -539,6 +540,16 @@ class TestIGlobal:
                 iglobal.beginGlobal()
 
         assert iglobal._reranker is not None
+
+    def test_mock_mode_skips_dependency_install(self):
+        """ROCKETRIDE_MOCK provides the Cohere mock, so no pip install is needed."""
+        iglobal = self._make_iglobal(open_mode='TARGET')
+        _mock_depends.depends.reset_mock()
+
+        with patch.dict(os.environ, {'ROCKETRIDE_MOCK': 'nodes/test/mocks'}):
+            iglobal._ensure_dependencies()
+
+        _mock_depends.depends.assert_not_called()
 
     def test_begin_global_invalid_config_warns_without_raising(self):
         """Invalid runtime config leaves reranker unset and logs a warning."""

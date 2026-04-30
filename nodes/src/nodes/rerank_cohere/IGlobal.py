@@ -32,6 +32,16 @@ import os
 class IGlobal(IGlobalBase):
     _reranker = None
 
+    def _ensure_dependencies(self):
+        """Install the real SDK unless the test runner has injected mocks."""
+        if os.environ.get('ROCKETRIDE_MOCK'):
+            return
+
+        from depends import depends
+
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)
+
     def validateConfig(self):
         """
         Validate the configuration for the Cohere Rerank node.
@@ -41,11 +51,7 @@ class IGlobal(IGlobalBase):
         otherwise surface a misleading error to the user.
         """
         try:
-            # Load dependencies
-            from depends import depends
-
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+            self._ensure_dependencies()
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -71,11 +77,7 @@ class IGlobal(IGlobalBase):
             # we don't actually need to load the driver for that
             pass
         else:
-            # Ensure cohere dependency is installed before importing rerank_client
-            from depends import depends
-
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+            self._ensure_dependencies()
 
             # Import the rerank client
             from .rerank_client import RerankClient
