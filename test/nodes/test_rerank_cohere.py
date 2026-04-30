@@ -420,6 +420,73 @@ class TestRerankClient:
             with patch('rerank_cohere.rerank_client.CohereClient'):
                 RerankClient('rerank_cohere', config, {})
 
+    def test_whitespace_api_key_raises(self):
+        """RerankClient raises ValueError when apikey is only whitespace."""
+        config = {
+            'model': 'rerank-v3.5',
+            'top_n': 3,
+            'min_score': 0.0,
+            'apikey': '   ',
+        }
+        with pytest.raises(ValueError, match='Cohere API key is required'):
+            with patch('rerank_cohere.rerank_client.CohereClient'):
+                RerankClient('rerank_cohere', config, {})
+
+    def test_api_key_is_stripped_before_client_creation(self):
+        """RerankClient strips API key whitespace before creating the Cohere client."""
+        config = {
+            'model': 'rerank-v3.5',
+            'top_n': 3,
+            'min_score': 0.0,
+            'apikey': ' test-api-key ',
+        }
+        with patch('rerank_cohere.rerank_client.CohereClient') as mock_client_cls:
+            RerankClient('rerank_cohere', config, {})
+
+        mock_client_cls.assert_called_once_with(api_key='test-api-key')
+
+    def test_invalid_top_n_type_raises(self):
+        """RerankClient raises ValueError when top_n is not an integer."""
+        config = {
+            'model': 'rerank-v3.5',
+            'top_n': 2.5,
+            'min_score': 0.0,
+            'apikey': 'test-api-key',
+        }
+        with pytest.raises(ValueError, match='top_n must be an integer >= 1'):
+            with patch('rerank_cohere.rerank_client.CohereClient'):
+                RerankClient('rerank_cohere', config, {})
+
+    def test_invalid_min_score_type_raises(self):
+        """RerankClient raises ValueError when min_score is not numeric."""
+        config = {
+            'model': 'rerank-v3.5',
+            'top_n': 3,
+            'min_score': 'high',
+            'apikey': 'test-api-key',
+        }
+        with pytest.raises(ValueError, match='min_score must be a number'):
+            with patch('rerank_cohere.rerank_client.CohereClient'):
+                RerankClient('rerank_cohere', config, {})
+
+    def test_rerank_invalid_top_n_override_raises(self):
+        """rerank() rejects invalid top_n override values before calling Cohere."""
+        client = self._make_client()
+
+        with pytest.raises(ValueError, match='top_n must be an integer >= 1'):
+            client.rerank(query='q', documents=['d'], top_n=0)
+
+        client._client.rerank.assert_not_called()
+
+    def test_rerank_with_threshold_invalid_min_score_override_raises(self):
+        """rerank_with_threshold() rejects invalid min_score override values."""
+        client = self._make_client()
+
+        with pytest.raises(ValueError, match='min_score must be a number'):
+            client.rerank_with_threshold(query='q', documents=['d'], min_score=1.5)
+
+        client._client.rerank.assert_not_called()
+
 
 # ===========================================================================
 # IGlobal Tests
@@ -472,6 +539,23 @@ class TestIGlobal:
                 iglobal.beginGlobal()
 
         assert iglobal._reranker is not None
+
+    def test_begin_global_invalid_config_warns_without_raising(self):
+        """Invalid runtime config leaves reranker unset and logs a warning."""
+        iglobal = self._make_iglobal(open_mode='TARGET')
+        _mock_rocketlib.warning.reset_mock()
+
+        with patch.object(_iglobal_module, 'Config') as mock_config_cls:
+            mock_config_cls.getNodeConfig.return_value = {
+                'model': 'rerank-v3.5',
+                'top_n': 5,
+                'min_score': 0.0,
+                'apikey': '',
+            }
+            iglobal.beginGlobal()
+
+        assert iglobal._reranker is None
+        _mock_rocketlib.warning.assert_called_once()
 
     def test_end_global_clears_reranker(self):
         """EndGlobal sets _reranker to None."""

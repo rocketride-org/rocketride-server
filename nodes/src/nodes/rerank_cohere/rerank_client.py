@@ -87,21 +87,22 @@ class RerankClient:
         """
         self._logicalType = logicalType
         self._model = config.get('model', 'rerank-v3.5')
-        if not self._model or not self._model.strip():
+        if not isinstance(self._model, str) or not self._model.strip():
             raise ValueError('Cohere model name is required')
+        self._model = self._model.strip()
         self._top_n = config.get('top_n', 5)
         self._min_score = config.get('min_score', 0.0)
 
-        if self._top_n < 1:
-            raise ValueError(f'top_n must be >= 1, got {self._top_n}')
-        if not (0.0 <= self._min_score <= 1.0):
-            raise ValueError(f'min_score must be between 0.0 and 1.0, got {self._min_score}')
+        if not isinstance(self._top_n, int) or self._top_n < 1:
+            raise ValueError(f'top_n must be an integer >= 1, got {self._top_n}')
+        if not isinstance(self._min_score, (int, float)) or not (0.0 <= self._min_score <= 1.0):
+            raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {self._min_score}')
 
         apikey = config.get('apikey', '')
-        if not apikey:
+        if not isinstance(apikey, str) or not apikey.strip():
             raise ValueError('Cohere API key is required')
 
-        self._client = CohereClient(api_key=apikey)
+        self._client = CohereClient(api_key=apikey.strip())
 
     def rerank(self, query: str, documents: List[str], top_n: Optional[int] = None, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -150,17 +151,14 @@ class RerankClient:
         except Exception as e:
             raise RerankServerError(f'Unexpected Cohere error: {e}') from e
 
-        results = []
-        for result in response.results:
-            results.append(
-                {
-                    'index': result.index,
-                    'relevance_score': result.relevance_score,
-                    'document': documents[result.index],
-                }
-            )
-
-        return results
+        return [
+            {
+                'index': result.index,
+                'relevance_score': result.relevance_score,
+                'document': documents[result.index],
+            }
+            for result in response.results
+        ]
 
     def rerank_with_threshold(self, query: str, documents: List[str], top_n: Optional[int] = None, min_score: Optional[float] = None, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -178,8 +176,8 @@ class RerankClient:
         """
         effective_min_score = min_score if min_score is not None else self._min_score
 
-        if not (0.0 <= effective_min_score <= 1.0):
-            raise ValueError(f'min_score must be between 0.0 and 1.0, got {effective_min_score}')
+        if not isinstance(effective_min_score, (int, float)) or not (0.0 <= effective_min_score <= 1.0):
+            raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {effective_min_score}')
 
         results = self.rerank(query=query, documents=documents, top_n=top_n, model=model)
 

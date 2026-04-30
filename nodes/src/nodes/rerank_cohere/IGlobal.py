@@ -85,7 +85,11 @@ class IGlobal(IGlobalBase):
 
             # Get the passed configuration
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            self._reranker = RerankClient(self.glb.logicalType, config, bag)
+            try:
+                self._reranker = RerankClient(self.glb.logicalType, config, bag)
+            except ValueError as e:
+                warning(f'Cohere Rerank configuration error for {self.glb.logicalType}: {e}')
+                self._reranker = None
 
     def endGlobal(self):
         self._reranker = None
