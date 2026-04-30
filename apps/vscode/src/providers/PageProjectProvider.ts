@@ -639,7 +639,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				pipeline: project,
 				source: project.source,
 				pipelineTraceLevel: 'full',
-				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name,
 			});
 		} catch (error: unknown) {

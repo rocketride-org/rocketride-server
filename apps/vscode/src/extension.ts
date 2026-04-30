@@ -95,6 +95,58 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 	} catch {
 		// Directory doesn't exist or couldn't be removed — nothing to do
 	}
+
+	// Migration 3: Flat settings keys → grouped development.* / deployment.* keys
+	if (!context.globalState.get('settingsMigrationV2Done')) {
+		const keyMap: Array<[string, string]> = [
+			// Development
+			['connectionMode', 'development.connectionMode'],
+			['hostUrl', 'development.hostUrl'],
+			['developmentTeamId', 'development.teamId'],
+			['local.engineVersion', 'development.local.engineVersion'],
+			['local.debugOutput', 'development.local.debugOutput'],
+			['engineArgs', 'development.local.engineArgs'],
+			// Deployment
+			['deployTargetMode', 'deployment.connectionMode'],
+			['deployHostUrl', 'deployment.hostUrl'],
+			['deployTargetTeamId', 'deployment.teamId'],
+			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
+			['deploy.local.debugOutput', 'deployment.local.debugOutput'],
+			['deployEngineArgs', 'deployment.local.engineArgs'],
+		];
+
+		for (const [oldKey, newKey] of keyMap) {
+			const inspected = config.inspect<unknown>(oldKey);
+			if (inspected?.globalValue !== undefined) {
+				await config.update(newKey, inspected.globalValue, vscode.ConfigurationTarget.Global);
+				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Global);
+			}
+			if (inspected?.workspaceValue !== undefined) {
+				await config.update(newKey, inspected.workspaceValue, vscode.ConfigurationTarget.Workspace);
+				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Workspace);
+			}
+		}
+
+		// Migrate secret storage keys
+		const secretMap: Array<[string, string]> = [
+			['rocketride.apiKey', 'rocketride.development.apiKey'],
+			['rocketride.deployApiKey', 'rocketride.deployment.apiKey'],
+		];
+		for (const [oldSecret, newSecret] of secretMap) {
+			try {
+				const value = await context.secrets.get(oldSecret);
+				if (value) {
+					await context.secrets.store(newSecret, value);
+					await context.secrets.delete(oldSecret);
+				}
+			} catch {
+				// Ignore — secret may not exist
+			}
+		}
+
+		await context.globalState.update('settingsMigrationV2Done', true);
+		logger.output(`${icons.success} Migrated settings to development/deployment groups`);
+	}
 }
 
 /**

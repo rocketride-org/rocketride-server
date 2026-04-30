@@ -14,10 +14,8 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
-import { ConfigManager } from '../../config';
 import { getConnectionManager } from '../../extension';
 import { EngineInstaller } from '../../connection/engine-installer';
-import { connectionModeRequiresApiKey } from '../../shared/util/connectionModeAuth';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { DeployManager } from '../../connection/deploy-manager';
 import { EngineOperations, EngineOperationsCallbacks } from '../../deploy/engine-operations';
@@ -36,7 +34,6 @@ export interface ConnectionMessageHandlerOptions {
 // =============================================================================
 
 export class ConnectionMessageHandler {
-	private readonly configManager: ConfigManager;
 	private readonly engineInstaller: EngineInstaller;
 	readonly engineOps: EngineOperations;
 	private pendingSudoPassword: ((pw: string) => void) | null = null;
@@ -44,7 +41,6 @@ export class ConnectionMessageHandler {
 	private cachedServerInfo: { version: string; capabilities: string[]; platform?: string } | null = null;
 
 	constructor(private readonly opts: ConnectionMessageHandlerOptions) {
-		this.configManager = ConfigManager.getInstance();
 		this.engineInstaller = new EngineInstaller(opts.extensionFsPath);
 
 		const callbacks: EngineOperationsCallbacks = {
@@ -96,7 +92,12 @@ export class ConnectionMessageHandler {
 				return true;
 
 			case 'testConnection':
-				await this.testConnection(message.settings as Record<string, unknown>, webview);
+				await this.testConnection(message.hostUrl as string, message.apiKey as string, webview);
+				return true;
+
+			case 'probeServerInfo':
+				this.cachedServerInfo = null; // force re-probe
+				await this.probeServerInfo(webview);
 				return true;
 
 			case 'sudoPassword':
@@ -184,7 +185,7 @@ export class ConnectionMessageHandler {
 		const signedIn = await cloudAuth.isSignedIn();
 		const userName = await cloudAuth.getUserName();
 		webview.postMessage({ type: 'cloud:status', signedIn, userName });
-		await this.fetchCloudTeams(webview);
+		// Teams are fetched by CloudPanel after it confirms the server is SaaS
 	}
 
 	public async fetchCloudTeams(webview: vscode.Webview): Promise<void> {
@@ -261,16 +262,17 @@ export class ConnectionMessageHandler {
 	// TEST CONNECTION
 	// =========================================================================
 
-	public async testConnection(formSettings: Record<string, unknown>, webview: vscode.Webview, messageContext?: 'development'): Promise<void> {
+	public async testConnection(hostUrl: string, apiKey: string, webview: vscode.Webview, messageContext?: 'development'): Promise<void> {
 		let testClient: RocketRideClient | undefined;
 
 		try {
 			this.showMessage(webview, 'info', 'Testing connection...', messageContext);
 
-			const connectionMode = (formSettings.connectionMode as string) || 'cloud';
-			let hostUrl = (formSettings.hostUrl as string)?.trim() || '';
-			if (connectionMode === 'cloud' && !hostUrl) hostUrl = process.env.ROCKETRIDE_URI || '';
-			if (connectionMode === 'local' && !hostUrl) hostUrl = 'http://localhost:5565';
+			hostUrl = (hostUrl || '').trim();
+			if (!hostUrl) {
+				this.showMessage(webview, 'error', 'Host URL is required.', messageContext);
+				return;
+			}
 
 			hostUrl = RocketRideClient.normalizeUri(hostUrl);
 
@@ -288,19 +290,7 @@ export class ConnectionMessageHandler {
 				return;
 			}
 
-			const needsApiKey = connectionModeRequiresApiKey(connectionMode);
-			let apiKey = 'MYAPIKEY';
-			if (needsApiKey) {
-				apiKey = typeof formSettings.apiKey === 'string' ? formSettings.apiKey.trim() : '';
-				if (!apiKey) {
-					const config = this.configManager.getConfig();
-					apiKey = config.apiKey;
-				}
-				if (!apiKey) {
-					this.showMessage(webview, 'error', 'API key is required. Please enter your API key first.', messageContext);
-					return;
-				}
-			}
+			apiKey = (apiKey || '').trim() || 'MYAPIKEY';
 
 			testClient = new RocketRideClient({ auth: apiKey, uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
 

@@ -47,6 +47,7 @@ export class PageAuthProvider {
 	private configManager: ConfigManager;
 	private connHandler: ConnectionMessageHandler;
 	private panel: vscode.WebviewPanel | undefined;
+	private pendingGroup: string | undefined;
 	private pendingConnectionMode: string | undefined;
 	private pendingErrorMessage: string | undefined;
 
@@ -67,7 +68,8 @@ export class PageAuthProvider {
 	// =========================================================================
 
 	private registerCommands(): void {
-		const cmd = vscode.commands.registerCommand('rocketride.page.auth.open', async (connectionMode?: string, errorMessage?: string) => {
+		const cmd = vscode.commands.registerCommand('rocketride.page.auth.open', async (group?: string, connectionMode?: string, errorMessage?: string) => {
+			this.pendingGroup = group || 'development';
 			this.pendingConnectionMode = connectionMode;
 			this.pendingErrorMessage = errorMessage;
 			await this.show();
@@ -171,23 +173,17 @@ export class PageAuthProvider {
 		if (!this.panel) return;
 
 		const config = this.configManager.getConfig();
-		const connectionMode = this.pendingConnectionMode || config.connectionMode;
-
-		let apiKey = '';
-		if (this.configManager.hasApiKey()) {
-			try {
-				apiKey = config.apiKey || '';
-			} catch {
-				/* ignore */
-			}
-		}
+		const group = (this.pendingGroup || 'development') as 'development' | 'deployment';
+		const groupConfig = config[group];
+		const connectionMode = this.pendingConnectionMode || groupConfig.connectionMode;
 
 		this.panel.webview.postMessage({
 			type: 'init',
+			group,
 			connectionMode,
 			errorMessage: this.pendingErrorMessage || 'Authentication failed',
-			hostUrl: config.hostUrl,
-			apiKey,
+			hostUrl: groupConfig.hostUrl,
+			apiKey: groupConfig.apiKey || '',
 		});
 
 		// Also send cloud auth status so CloudPanel knows the state
@@ -204,28 +200,35 @@ export class PageAuthProvider {
 	 */
 	private async saveAndConnect(message: Record<string, unknown>): Promise<void> {
 		try {
+			const group = (message.group as 'development' | 'deployment') || (this.pendingGroup as 'development' | 'deployment') || 'development';
+
 			// Persist API key if provided (on-prem, docker, service)
 			if (typeof message.apiKey === 'string') {
 				if (message.apiKey.trim() !== '') {
-					await this.configManager.setApiKey(message.apiKey.trim());
+					await this.configManager.setApiKey(group, message.apiKey.trim());
 				} else {
-					await this.configManager.deleteApiKey();
+					await this.configManager.deleteApiKey(group);
 				}
 			}
 
 			// Persist host URL if provided (on-prem)
 			if (typeof message.hostUrl === 'string') {
-				const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
-				await workspaceConfig.update('hostUrl', message.hostUrl, vscode.ConfigurationTarget.Global);
+				await this.configManager.updateHostUrl(group, message.hostUrl);
 			}
 
 			// Close the panel before reconnecting
 			this.panel?.dispose();
 
-			// Trigger reconnect with updated credentials
-			const connectionManager = getConnectionManager();
-			if (connectionManager) {
-				await connectionManager.settingsApplied();
+			// Trigger reconnect for the correct connection
+			if (group === 'deployment') {
+				const { DeployManager } = require('../connection/deploy-manager');
+				const deployManager = DeployManager.getDeployInstance();
+				await deployManager.settingsApplied();
+			} else {
+				const connectionManager = getConnectionManager();
+				if (connectionManager) {
+					await connectionManager.settingsApplied();
+				}
 			}
 		} catch (error) {
 			console.error('[PageAuthProvider] Failed to save credentials:', error);

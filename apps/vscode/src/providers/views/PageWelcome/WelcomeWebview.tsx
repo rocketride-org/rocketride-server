@@ -27,7 +27,7 @@ import { useTheme } from '../hooks/useTheme';
 import { commonStyles } from 'shared/themes/styles';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import { MessageDisplay } from '../PageSettings/MessageDisplay';
-import type { SettingsData, EngineVersionItem, MessageData } from '../PageSettings/SettingsWebview';
+import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../PageSettings/SettingsWebview';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 import 'shared/themes/rocketride-default.css';
@@ -117,22 +117,26 @@ const styles = {
 // =============================================================================
 
 const DEFAULT_SETTINGS: SettingsData = {
-	connectionMode: 'local',
-	hostUrl: 'http://localhost:5565',
-	apiKey: '',
-	hasApiKey: false,
-	autoAgentIntegration: true,
-	localEngineVersion: 'latest',
-	localEngineArgs: '',
-	localDebugOutput: false,
+	development: {
+		connectionMode: 'local',
+		hostUrl: 'http://localhost:5565',
+		apiKey: '',
+		hasApiKey: false,
+		teamId: '',
+		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+	},
+	deployment: {
+		connectionMode: null,
+		hostUrl: '',
+		hasApiKey: false,
+		apiKey: '',
+		teamId: '',
+		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+	},
 	defaultPipelinePath: 'pipelines',
 	pipelineRestartBehavior: 'prompt',
-	developmentTeamId: '',
-	deployTargetMode: null,
-	deployTargetTeamId: '',
-	deployHostUrl: '',
-	deployApiKey: '',
 	envVars: {},
+	autoAgentIntegration: true,
 	integrationCopilot: false,
 	integrationClaudeCode: false,
 	integrationCursor: false,
@@ -165,6 +169,7 @@ export const PageWelcome: React.FC = () => {
 
 	// Server capabilities
 	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
+	const [isSaasProbed, setIsSaasProbed] = useState<boolean | undefined>(undefined);
 
 	// Cloud auth
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
@@ -201,7 +206,7 @@ export const PageWelcome: React.FC = () => {
 					setShowOnStartup(msg.settings.showOnStartup);
 					if (msg.logoDarkUri) setLogoDarkUri(msg.logoDarkUri);
 					if (msg.logoLightUri) setLogoLightUri(msg.logoLightUri);
-					if (msg.settings.connectionMode === 'local') {
+					if (msg.settings.development.connectionMode === 'local') {
 						setEngineVersionsLoading(true);
 						sendMessage({ type: 'fetchEngineVersions' });
 					}
@@ -281,9 +286,12 @@ export const PageWelcome: React.FC = () => {
 					setSudoPromptVisible(true);
 					break;
 
-				case 'serverInfo' as string:
-					setServerCapabilities((msg as any).capabilities || []);
+				case 'serverInfo' as string: {
+					const caps = (msg as any).capabilities || [];
+					setServerCapabilities(caps);
+					setIsSaasProbed(caps.includes('saas'));
 					break;
+				}
 			}
 		},
 	});
@@ -292,36 +300,71 @@ export const PageWelcome: React.FC = () => {
 	// HANDLERS
 	// =========================================================================
 
-	const handleSettingsChange = (partial: Partial<SettingsData>) => {
+	const handleSettingsChange = (changes: Partial<SettingsData>) => {
 		setSettings((prev) => {
-			if (partial.connectionMode === 'local' && prev.connectionMode !== 'local') {
+			const next = { ...prev };
+
+			// Deep-merge development group
+			if (changes.development) {
+				next.development = { ...prev.development, ...changes.development };
+				if (changes.development.local) {
+					next.development.local = { ...prev.development.local, ...changes.development.local };
+				}
+			}
+
+			// Deep-merge deployment group
+			if (changes.deployment) {
+				next.deployment = { ...prev.deployment, ...changes.deployment };
+				if (changes.deployment.local) {
+					next.deployment.local = { ...prev.deployment.local, ...changes.deployment.local };
+				}
+			}
+
+			// Top-level fields
+			const { development, deployment, ...topLevel } = changes;
+			Object.assign(next, topLevel);
+
+			// Side effects for mode switching
+			const devMode = changes.development?.connectionMode;
+			if (devMode === 'local' && prev.development.connectionMode !== 'local') {
 				setEngineVersionsLoading(true);
 				sendMessage({ type: 'fetchEngineVersions' });
 			}
-			if (partial.connectionMode === 'cloud' && prev.connectionMode !== 'cloud') {
+			if (devMode === 'cloud' && prev.development.connectionMode !== 'cloud') {
 				sendMessage({ type: 'cloud:getStatus' });
-				sendMessage({ type: 'fetchTeams' });
+				// Teams are fetched by CloudPanel after it confirms the server is SaaS
 			}
-			return { ...prev, ...partial };
+
+			return next;
 		});
 	};
 
-	const handleConnectionModeChange = (mode: SettingsData['connectionMode']) => {
-		const updates: Partial<SettingsData> = { connectionMode: mode };
+	const handleConnectionModeChange = (mode: ConnectionMode) => {
+		const groupUpdates: Partial<SettingsData['development']> = { connectionMode: mode };
 		if (mode === 'onprem') {
-			if (!settings.hostUrl || settings.hostUrl.includes('cloud.rocketride') || settings.hostUrl.startsWith('http://localhost')) {
-				updates.hostUrl = '';
+			const hostUrl = settings.development.hostUrl;
+			if (!hostUrl || hostUrl.includes('cloud.rocketride') || hostUrl.startsWith('http://localhost')) {
+				groupUpdates.hostUrl = '';
 			}
 		}
-		handleSettingsChange(updates);
+		handleSettingsChange({ development: groupUpdates } as Partial<SettingsData>);
 	};
 
 	const handleSaveAndConnect = () => {
 		sendMessage({ type: 'saveAndConnect', settings });
 	};
 
-	const handleTestConnection = () => {
-		sendMessage({ type: 'testConnection', settings });
+	const handleProbeCloudServer = () => {
+		setIsSaasProbed(undefined);
+		sendMessage({ type: 'probeServerInfo' } as any);
+	};
+
+	const handleFetchTeams = () => {
+		sendMessage({ type: 'fetchTeams' } as any);
+	};
+
+	const handleTestConnection = (hostUrl: string, apiKey: string) => {
+		sendMessage({ type: 'testConnection', hostUrl, apiKey } as any);
 	};
 
 	const handleShowOnStartupChange = (checked: boolean) => {
@@ -425,8 +468,8 @@ export const PageWelcome: React.FC = () => {
 					<ConnectionConfig
 						simplified
 						idPrefix="welcome"
+						group="development"
 						serverCapabilities={serverCapabilities}
-						connectionMode={settings.connectionMode}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}
 						onSettingsChange={handleSettingsChange}
@@ -434,9 +477,15 @@ export const PageWelcome: React.FC = () => {
 						cloudUserName={cloudUserName}
 						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' })}
 						onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
+						onProbeCloudServer={handleProbeCloudServer}
+						onFetchTeams={handleFetchTeams}
+						isSaas={isSaasProbed}
 						teams={teams}
 						onClearCredentials={() => {
-							setSettings((prev) => ({ ...prev, apiKey: '', hasApiKey: false }));
+							setSettings((prev) => ({
+								...prev,
+								development: { ...prev.development, apiKey: '', hasApiKey: false },
+							}));
 						}}
 						onTestConnection={handleTestConnection}
 						testMessage={message}
@@ -484,7 +533,7 @@ export const PageWelcome: React.FC = () => {
 					<div style={{ ...commonStyles.textMuted, marginTop: 4, lineHeight: 1.4, marginBottom: 20 }}>Automatically install RocketRide documentation for detected coding agents (Copilot, Claude Code, Cursor, Windsurf)</div>
 
 					{/* Message area (for non-onprem modes — onprem shows inline via testMessage) */}
-					{settings.connectionMode !== 'onprem' && <MessageDisplay message={message} />}
+					{settings.development.connectionMode !== 'onprem' && <MessageDisplay message={message} />}
 
 					{/* Action buttons */}
 					<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

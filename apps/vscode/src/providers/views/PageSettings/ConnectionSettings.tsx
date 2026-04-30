@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { MessageData, SettingsData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
+import { MessageData, SettingsData, ConnectionMode, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
@@ -24,8 +24,8 @@ interface ConnectionSettingsProps {
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
 	onClearCredentials: () => void;
-	onTestDevelopmentConnection: () => void;
-	developmentTestMessage: MessageData | null;
+	onTestConnection: (hostUrl: string, apiKey: string) => void;
+	testMessage: MessageData | null;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
 	serverCapabilities: string[];
@@ -33,6 +33,9 @@ interface ConnectionSettingsProps {
 	cloudUserName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
+	onProbeCloudServer?: () => void;
+	onFetchTeams?: () => void;
+	isSaas?: boolean;
 	teams?: Array<{ id: string; name: string }>;
 	// Docker panel props
 	dockerStatus: DockerStatus;
@@ -75,19 +78,20 @@ interface ConnectionSettingsProps {
 export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => {
 	const { settings, onSettingsChange, onSave } = props;
 
-	const handleConnectionModeChange = (mode: SettingsData['connectionMode']) => {
-		const updates: Partial<SettingsData> = { connectionMode: mode };
+	const handleConnectionModeChange = (mode: ConnectionMode) => {
+		const groupUpdates: Partial<SettingsData['development']> = { connectionMode: mode };
 
 		if (mode === 'onprem') {
-			if (!settings.hostUrl || settings.hostUrl.includes('cloud.rocketride') || settings.hostUrl.startsWith('http://localhost')) {
-				updates.hostUrl = '';
+			const hostUrl = settings.development.hostUrl;
+			if (!hostUrl || hostUrl.includes('cloud.rocketride') || hostUrl.startsWith('http://localhost')) {
+				groupUpdates.hostUrl = '';
 			}
 		}
 
-		onSettingsChange(updates);
+		onSettingsChange({ development: groupUpdates } as Partial<SettingsData>);
 	};
 
-	const showAccountWarning = settings.connectionMode === 'onprem' && !settings.apiKey.trim();
+	const showAccountWarning = settings.development.connectionMode === 'onprem' && !settings.development.apiKey.trim();
 
 	return (
 		<div
@@ -104,13 +108,13 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 		>
 			<SettingsCardHeader title="Development Mode" onSave={onSave} />
 			<div style={S.cardBody}>
-				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and On-prem modes require authentication.</div>
+				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and Direct Connect modes require authentication.</div>
 				<div style={S.formGrid}>
 					<ConnectionConfig
 						simplified={false}
 						idPrefix="dev"
+						group="development"
 						serverCapabilities={props.serverCapabilities}
-						connectionMode={settings.connectionMode}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}
 						onSettingsChange={onSettingsChange}
@@ -118,10 +122,13 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 						cloudUserName={props.cloudUserName ?? ''}
 						onCloudSignIn={props.onCloudSignIn!}
 						onCloudSignOut={props.onCloudSignOut!}
+						onProbeCloudServer={props.onProbeCloudServer}
+						onFetchTeams={props.onFetchTeams}
+						isSaas={props.isSaas}
 						teams={props.teams ?? []}
 						onClearCredentials={props.onClearCredentials}
-						onTestConnection={props.onTestDevelopmentConnection}
-						testMessage={props.developmentTestMessage}
+						onTestConnection={props.onTestConnection}
+						testMessage={props.testMessage}
 						engineVersions={props.engineVersions}
 						engineVersionsLoading={props.engineVersionsLoading}
 						dockerStatus={props.dockerStatus}

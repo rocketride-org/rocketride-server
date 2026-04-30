@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import dockerIcon from '../../../../../docker.svg';
+import dockerIcon from '../../../../assets/docker.svg';
 import { DockerStatus, VersionOption, displayVersion, stateLabels, IMAGE_BASE, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
 
 // =============================================================================

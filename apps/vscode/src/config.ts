@@ -31,61 +31,63 @@ import { RocketRideClient } from 'rocketride';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
-export interface ConfigManagerInfo {
-	/** Connection mode: cloud (RocketRide.ai), onprem (your server), or local (localhost port) */
-	connectionMode: ConnectionMode;
+/** Which settings group a connection reads from. */
+export type ConnectionGroup = 'development' | 'deployment';
 
-	/** API key for authentication (retrieved from secure storage) */
+/** Symmetric per-group connection config. Both groups have identical shape. */
+export interface ConnectionGroupConfig {
+	/** Connection mode (null only valid for deployment = shared with dev) */
+	connectionMode: ConnectionMode | null;
+
+	/** Server host URL */
+	hostUrl: string;
+
+	/** API key for authentication (from secure storage) */
 	apiKey: string;
 
-	/** overall url  */
-	hostUrl: string;
+	/** Cloud team ID */
+	teamId: string;
+
+	/** Local engine configuration */
+	local: {
+		/** Engine version: 'latest', 'prerelease', or a specific tag */
+		engineVersion: string;
+		/** Enable full debug output (--trace=debugOut) */
+		debugOutput: boolean;
+		/** Additional engine arguments (passed to engine subprocess) */
+		engineArgs: string;
+	};
+}
+
+/** Top-level cached config with nested per-group settings. */
+export interface ConfigManagerInfo {
+	/** Development connection settings */
+	development: ConnectionGroupConfig;
+
+	/** Deployment connection settings (connectionMode=null means shared with dev) */
+	deployment: ConnectionGroupConfig;
 
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
 
-	/** Additional engine arguments as a single string (passed to engine subprocess) */
-	engineArgs: string;
-
-	/** Local configuration */
-	local: {
-		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
-		engineVersion: string;
-		/** Enable full debug output (--trace=debugOut) */
-		debugOutput: boolean;
-	};
-
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 
-	/** Cloud team ID for development mode (which team's engine to connect to) */
-	developmentTeamId: string;
-
-	/** Deploy target mode (null = not configured / same as development) */
-	deployTargetMode: ConnectionMode | null;
-
-	/** Cloud team ID for deploy target */
-	deployTargetTeamId: string;
-
-	/** Separate host URL for deploy target (on-prem deploy) */
-	deployHostUrl: string;
-
-	/** Separate API key for deploy target (on-prem deploy) — from secure storage */
-	deployApiKey: string;
-
-	/** Deploy local engine configuration */
-	deployLocal: {
-		/** Engine version for local deploy target */
-		engineVersion: string;
-		/** Enable debug output for local deploy engine */
-		debugOutput: boolean;
-	};
-
-	/** Additional engine arguments for deploy engine */
-	deployEngineArgs: string;
-
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
+}
+
+/** Per-group settings sent from the Settings UI on save. */
+export interface ConnectionGroupSnapshot {
+	connectionMode: ConnectionMode | null;
+	hostUrl: string;
+	apiKey: string;
+	teamId: string;
+	local: {
+		engineVersion: string;
+		debugOutput: boolean;
+		engineArgs: string;
+	};
 }
 
 /**
@@ -94,19 +96,10 @@ export interface ConfigManagerInfo {
  * fields atomically and refreshes its cache once.
  */
 export interface SettingsSnapshot {
-	connectionMode: ConnectionMode;
-	hostUrl: string;
-	apiKey: string;
+	development: ConnectionGroupSnapshot;
+	deployment: ConnectionGroupSnapshot;
 	defaultPipelinePath: string;
-	localEngineVersion: string;
-	localEngineArgs: string;
-	localDebugOutput: boolean;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
-	developmentTeamId: string;
-	deployTargetMode: ConnectionMode | null;
-	deployTargetTeamId: string;
-	deployHostUrl: string;
-	deployApiKey: string;
 	envVars?: Record<string, string>;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
@@ -123,7 +116,6 @@ export interface SettingsSnapshot {
 export class ConfigManager {
 	private static instance: ConfigManager;
 	private readonly configSection = 'rocketride';
-	private readonly API_KEY_SECRET_KEY = 'rocketride.apiKey';
 
 	private context?: vscode.ExtensionContext;
 	private isDisposing: boolean = false;
@@ -135,28 +127,21 @@ export class ConfigManager {
 	private envChangeEmitter = new vscode.EventEmitter<Record<string, string>>();
 	public readonly onEnvVarsChanged = this.envChangeEmitter.event;
 
+	/** Default per-group config. */
+	private static readonly DEFAULT_GROUP: ConnectionGroupConfig = {
+		connectionMode: 'local',
+		hostUrl: '',
+		apiKey: '',
+		teamId: '',
+		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+	};
+
 	// Cached configuration
 	private config: ConfigManagerInfo = {
-		connectionMode: 'local',
-		apiKey: '',
-		hostUrl: 'http://localhost:5565',
+		development: { ...ConfigManager.DEFAULT_GROUP, connectionMode: 'local' },
+		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
 		defaultPipelinePath: '',
-		engineArgs: '',
-		local: {
-			engineVersion: 'latest',
-			debugOutput: false,
-		},
 		pipelineRestartBehavior: 'prompt',
-		developmentTeamId: '',
-		deployTargetMode: null,
-		deployTargetTeamId: '',
-		deployHostUrl: '',
-		deployApiKey: '',
-		deployLocal: {
-			engineVersion: 'latest',
-			debugOutput: false,
-		},
-		deployEngineArgs: '',
 		env: {},
 	};
 
@@ -192,8 +177,8 @@ export class ConfigManager {
 				if (event.affectsConfiguration(this.configSection)) {
 					await this.refreshConfig();
 
-					// If hostUrl changed, sync to .env
-					if (event.affectsConfiguration(`${this.configSection}.hostUrl`)) {
+					// If dev hostUrl changed, sync to .env
+					if (event.affectsConfiguration(`${this.configSection}.development.hostUrl`)) {
 						await this.syncSettingsToEnv();
 					}
 				}
@@ -204,10 +189,13 @@ export class ConfigManager {
 		this.disposables.push(
 			context.secrets.onDidChange(async (event) => {
 				if (this.isBatchApplying) return;
-				if (event.key === this.API_KEY_SECRET_KEY) {
+				if (event.key === 'rocketride.development.apiKey') {
 					await this.refreshConfig();
 					// API key changed, sync to .env
 					await this.syncSettingsToEnv();
+				}
+				if (event.key === 'rocketride.deployment.apiKey') {
+					await this.refreshConfig();
 				}
 			})
 		);
@@ -224,58 +212,61 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Refreshes the cached configuration from all sources
+	 * Refreshes a single group's config from VS Code settings + secure storage.
+	 * Applies identical fallback logic for both groups:
+	 *   - docker/service → localhost + env API key
+	 *   - cloud → ROCKETRIDE_URI fallback
+	 */
+	private async refreshGroupConfig(group: ConnectionGroup): Promise<ConnectionGroupConfig> {
+		const gc = vscode.workspace.getConfiguration(`${this.configSection}.${group}`);
+		const defaultMode = group === 'development' ? 'local' : null;
+		const connectionMode = gc.get<ConnectionMode | null>('connectionMode', defaultMode);
+		let hostUrl = gc.get<string>('hostUrl', '');
+		let apiKey = await this.getApiKeyFromStorage(group);
+		const env = this.config?.env || {};
+
+		// Docker/Service: fixed URL and API key from env
+		if (connectionMode === 'docker' || connectionMode === 'service') {
+			hostUrl = 'http://localhost:5565';
+			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+		}
+
+		// Cloud: fall back to ROCKETRIDE_URI when hostUrl is not set
+		if (connectionMode === 'cloud' && !hostUrl) {
+			hostUrl = process.env.ROCKETRIDE_URI || 'http://localhost:5565';
+		}
+
+		return {
+			connectionMode,
+			hostUrl,
+			apiKey,
+			teamId: gc.get<string>('teamId', ''),
+			local: {
+				engineVersion: gc.get<string>('local.engineVersion', 'latest'),
+				debugOutput: gc.get<boolean>('local.debugOutput', false),
+				engineArgs: gc.get<string>('local.engineArgs', ''),
+			},
+		};
+	}
+
+	/**
+	 * Refreshes the cached configuration from all sources.
 	 */
 	private async refreshConfig(): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		const connectionMode = config.get('connectionMode', 'local') as ConnectionMode;
-		let hostUrl = config.get('hostUrl', 'http://localhost:5565');
-
-		// Get API key from secure storage
-		let apiKey = await this.getApiKeyFromStorage();
-
 		// Ensure env is loaded (preserve existing env if already loaded)
 		const existingEnv = this.config?.env || {};
 		if (Object.keys(existingEnv).length === 0) {
 			await this.loadEnvFile();
 		}
 
-		const env = this.config?.env || {};
-
-		// Docker/Service modes: fixed URL and API key from env
-		if (connectionMode === 'docker' || connectionMode === 'service') {
-			hostUrl = 'http://localhost:5565';
-			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
-		}
-
-		// Cloud mode: fall back to ROCKETRIDE_URI when hostUrl is not set.
-		// Cloud changes the auth method (OAuth), not the server endpoint.
-		if (connectionMode === 'cloud' && !hostUrl) {
-			hostUrl = process.env.ROCKETRIDE_URI || 'http://localhost:5565';
-		}
+		const config = vscode.workspace.getConfiguration(this.configSection);
 
 		this.config = {
-			connectionMode,
-			apiKey: apiKey,
-			hostUrl: hostUrl,
+			development: await this.refreshGroupConfig('development'),
+			deployment: await this.refreshGroupConfig('deployment'),
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
-			engineArgs: config.get('engineArgs', ''),
-			local: {
-				engineVersion: config.get('local.engineVersion', 'latest'),
-				debugOutput: config.get('local.debugOutput', false),
-			},
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			developmentTeamId: config.get('developmentTeamId', ''),
-			deployTargetMode: config.get<ConnectionMode | null>('deployTargetMode', null),
-			deployTargetTeamId: config.get('deployTargetTeamId', ''),
-			deployHostUrl: config.get('deployHostUrl', ''),
-			deployApiKey: await this.getDeployApiKeyFromStorage(),
-			deployLocal: {
-				engineVersion: config.get('deploy.local.engineVersion', 'latest'),
-				debugOutput: config.get('deploy.local.debugOutput', false),
-			},
-			deployEngineArgs: config.get('deployEngineArgs', ''),
-			env,
+			env: this.config?.env || {},
 		};
 	}
 
@@ -419,28 +410,20 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Gets the API key from secure storage (internal async method)
+	 * Gets the API key from secure storage for the given group.
 	 */
-	private async getApiKeyFromStorage(): Promise<string> {
-		// Don't access storage during disposal
-		if (this.isDisposing) {
-			return '';
-		}
-
+	private async getApiKeyFromStorage(group: ConnectionGroup): Promise<string> {
+		if (this.isDisposing) return '';
 		if (!this.context) {
 			console.warn('ConfigManager not initialized with context - cannot access secure storage');
 			return '';
 		}
-
 		try {
-			const apiKey = await this.context.secrets.get(this.API_KEY_SECRET_KEY);
-			return apiKey || '';
+			const key = `rocketride.${group}.apiKey`;
+			return (await this.context.secrets.get(key)) || '';
 		} catch (error: unknown) {
-			// Silently ignore cancellation errors during shutdown
-			if (error instanceof Error && error.name === 'Canceled') {
-				return '';
-			}
-			console.error('Failed to retrieve API key from secure storage:', error);
+			if (error instanceof Error && error.name === 'Canceled') return '';
+			console.error(`Failed to retrieve ${group} API key from secure storage:`, error);
 			return '';
 		}
 	}
@@ -449,19 +432,22 @@ export class ConfigManager {
 	 * Gets the current RocketRide configuration (SYNC)
 	 */
 	public getConfig(): ConfigManagerInfo {
-		// Return a copy to prevent external modifications
+		// Return a deep copy to prevent external modifications
 		return {
-			...this.config,
-			local: { ...this.config.local },
+			development: { ...this.config.development, local: { ...this.config.development.local } },
+			deployment: { ...this.config.deployment, local: { ...this.config.deployment.local } },
+			defaultPipelinePath: this.config.defaultPipelinePath,
+			pipelineRestartBehavior: this.config.pipelineRestartBehavior,
 			env: { ...this.config.env },
 		};
 	}
 
 	/**
-	 * Gets the API key (SYNC - from cache)
+	 * Gets the development API key (SYNC - from cache).
+	 * Used for .env sync and backward-compatible accessors.
 	 */
 	public getApiKey(): string {
-		return this.config.apiKey;
+		return this.config.development.apiKey;
 	}
 
 	/**
@@ -475,17 +461,17 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Checks if API key is stored (SYNC)
+	 * Checks if development API key is stored (SYNC)
 	 */
 	public hasApiKey(): boolean {
 		return this.getApiKey().length > 0;
 	}
 
 	/**
-	 * Gets the WebSocket URL based on current configuration (SYNC)
+	 * Gets the WebSocket URL based on development connection config (SYNC)
 	 */
 	public getWebSocketUrl(): string {
-		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
+		const url = new URL(RocketRideClient.normalizeUri(this.config.development.hostUrl));
 		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 		const wsPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -493,10 +479,10 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Gets the HTTP/HTTPS URL based on current configuration (SYNC)
+	 * Gets the HTTP/HTTPS URL based on development connection config (SYNC)
 	 */
 	public getHttpUrl(): string {
-		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
+		const url = new URL(RocketRideClient.normalizeUri(this.config.development.hostUrl));
 		const httpProtocol = url.protocol;
 		const httpPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -504,17 +490,18 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Returns the effective engine args as an array, injecting --trace=debugOut
-	 * if debug output is enabled and the user hasn't specified their own --trace.
+	 * Returns the engine args as an array for the given group, injecting
+	 * --trace=debugOut if debug output is enabled and the user hasn't
+	 * specified their own --trace.
 	 *
 	 * Note: engineArgs is passed as a single string intentionally. The backend
 	 * engine splits all arguments according to shell parsing rules (handling
 	 * quoted paths, escaped spaces, etc.). Naive whitespace splitting here
 	 * would break arguments like --path='C:\Program Files\RocketRide'.
 	 */
-	public getEffectiveEngineArgs(): string[] {
-		const config = this.getConfig();
-		const rawArgs = config.engineArgs;
+	public getEngineArgs(group: ConnectionGroup = 'development'): string[] {
+		const gc = this.getConfig()[group];
+		const rawArgs = gc.local.engineArgs;
 		const argsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
 		const hasTrace = argsStr.includes('--trace=');
 
@@ -522,153 +509,105 @@ export class ConfigManager {
 		if (argsStr.trim()) {
 			result.push(argsStr.trim());
 		}
-		if (config.local.debugOutput && !hasTrace) {
+		if (gc.local.debugOutput && !hasTrace) {
 			result.push('--trace=debugOut');
 		}
 		return result;
 	}
 
 	/**
-	 * Gets the API host URL for dynamic parameter replacement (SYNC)
+	 * Gets the development API host URL for .env sync and dynamic parameter
+	 * replacement (SYNC).
 	 */
 	public getApiHost(): string {
-		const config = this.getConfig();
+		const dev = this.config.development;
 		// On-prem always uses the user-provided hostUrl.
 		// All other modes fall back to ROCKETRIDE_URI when hostUrl is empty.
-		return config.hostUrl || (config.connectionMode === 'onprem' ? '' : process.env.ROCKETRIDE_URI || 'http://localhost:5565');
+		return dev.hostUrl || (dev.connectionMode === 'onprem' ? '' : process.env.ROCKETRIDE_URI || 'http://localhost:5565');
 	}
 
 	/**
-	 * Validates the current configuration (SYNC)
+	 * Validates a group's configuration (SYNC).
 	 * @returns Array of validation error messages, empty if valid
 	 */
-	public validateConfig(): string[] {
-		const config = this.getConfig();
+	public validateGroupConfig(group: ConnectionGroup = 'development'): string[] {
+		const gc = this.getConfig()[group];
 		const errors: string[] = [];
+		const label = group === 'development' ? 'Development' : 'Deployment';
 
-		if (config.connectionMode === 'cloud') {
-			if (!config.hostUrl) {
-				errors.push('Cloud URL is required when using cloud mode');
+		if (gc.connectionMode === 'cloud') {
+			if (!gc.hostUrl) {
+				errors.push(`${label}: Cloud URL is required when using cloud mode`);
 			} else {
 				try {
-					new URL(RocketRideClient.normalizeUri(config.hostUrl));
+					new URL(RocketRideClient.normalizeUri(gc.hostUrl));
 				} catch {
-					errors.push('Cloud URL must be a valid URL (e.g., https://cloud.rocketride.ai)');
+					errors.push(`${label}: Cloud URL must be a valid URL (e.g., https://cloud.rocketride.ai)`);
 				}
 			}
-			if (!config.apiKey) {
-				errors.push('API key is required when using cloud mode');
-			}
-		} else if (config.connectionMode === 'onprem') {
-			if (!config.hostUrl) {
-				errors.push('Host URL is required when using on-prem mode');
+		} else if (gc.connectionMode === 'onprem') {
+			if (!gc.hostUrl) {
+				errors.push(`${label}: Host URL is required when using on-prem mode`);
 			} else {
 				try {
-					new URL(RocketRideClient.normalizeUri(config.hostUrl));
+					new URL(RocketRideClient.normalizeUri(gc.hostUrl));
 				} catch {
-					errors.push('Host URL must be a valid URL');
+					errors.push(`${label}: Host URL must be a valid URL`);
 				}
 			}
-		} else {
-			// local — port is dynamically assigned, no validation needed
 		}
+		// local/docker/service — no validation needed
 
 		return errors;
 	}
 
 	/**
-	 * Stores the API key in secure storage (ASYNC - updates both cache and storage)
+	 * Stores the API key in secure storage for the given group.
 	 */
-	public async setApiKey(apiKey: string): Promise<void> {
-		// Don't access storage during disposal
-		if (this.isDisposing) {
-			return;
-		}
-
+	public async setApiKey(group: ConnectionGroup, apiKey: string): Promise<void> {
+		if (this.isDisposing) return;
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context - cannot access secure storage');
 		}
 
+		const key = `rocketride.${group}.apiKey`;
 		try {
 			if (apiKey.trim()) {
-				await this.context.secrets.store(this.API_KEY_SECRET_KEY, apiKey.trim());
+				await this.context.secrets.store(key, apiKey.trim());
 			} else {
-				await this.context.secrets.delete(this.API_KEY_SECRET_KEY);
+				await this.context.secrets.delete(key);
 			}
-
 			// Update cache immediately
 			if (this.config) {
-				this.config.apiKey = apiKey.trim();
+				this.config[group].apiKey = apiKey.trim();
 			}
 		} catch (error: unknown) {
-			// Silently ignore cancellation errors during shutdown
-			if (error instanceof Error && error.name === 'Canceled') {
-				return;
-			}
-			console.error('Failed to store API key in secure storage:', error);
-			throw new Error('Failed to store API key securely');
+			if (error instanceof Error && error.name === 'Canceled') return;
+			console.error(`Failed to store ${group} API key in secure storage:`, error);
+			throw new Error(`Failed to store ${group} API key securely`);
 		}
 	}
 
 	/**
-	 * Deletes the API key from secure storage (ASYNC - updates both cache and storage)
+	 * Deletes the API key from secure storage for the given group.
 	 */
-	public async deleteApiKey(): Promise<void> {
-		// Don't access storage during disposal
-		if (this.isDisposing) {
-			return;
-		}
-
+	public async deleteApiKey(group: ConnectionGroup): Promise<void> {
+		if (this.isDisposing) return;
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context');
 		}
 
+		const key = `rocketride.${group}.apiKey`;
 		try {
-			await this.context.secrets.delete(this.API_KEY_SECRET_KEY);
-
-			// Update cache immediately
+			await this.context.secrets.delete(key);
 			if (this.config) {
-				this.config.apiKey = '';
+				this.config[group].apiKey = '';
 			}
 		} catch (error: unknown) {
-			// Silently ignore cancellation errors during shutdown
-			if (error instanceof Error && error.name === 'Canceled') {
-				return;
-			}
-			console.error('Failed to delete API key from secure storage:', error);
-			throw new Error('Failed to delete API key');
+			if (error instanceof Error && error.name === 'Canceled') return;
+			console.error(`Failed to delete ${group} API key from secure storage:`, error);
+			throw new Error(`Failed to delete ${group} API key`);
 		}
-	}
-
-	// =========================================================================
-	// DEPLOY API KEY (separate secure storage key)
-	// =========================================================================
-
-	private readonly DEPLOY_API_KEY_SECRET_KEY = 'rocketride.deployApiKey';
-
-	/**
-	 * Gets the deploy API key from secure storage.
-	 */
-	private async getDeployApiKeyFromStorage(): Promise<string> {
-		if (this.isDisposing || !this.context) return '';
-		try {
-			return (await this.context.secrets.get(this.DEPLOY_API_KEY_SECRET_KEY)) || '';
-		} catch {
-			return '';
-		}
-	}
-
-	/**
-	 * Stores the deploy API key in secure storage.
-	 */
-	public async setDeployApiKey(apiKey: string): Promise<void> {
-		if (!this.context) throw new Error('ConfigManager not initialized with context');
-		if (apiKey.trim()) {
-			await this.context.secrets.store(this.DEPLOY_API_KEY_SECRET_KEY, apiKey.trim());
-		} else {
-			await this.context.secrets.delete(this.DEPLOY_API_KEY_SECRET_KEY);
-		}
-		if (this.config) this.config.deployApiKey = apiKey.trim();
 	}
 
 	// =========================================================================
@@ -696,20 +635,27 @@ export class ConfigManager {
 		try {
 			const wc = vscode.workspace.getConfiguration(this.configSection);
 
-			// --- VS Code workspace settings ---
-			await wc.update('connectionMode', s.connectionMode, vscode.ConfigurationTarget.Global);
-			await wc.update('hostUrl', s.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			await wc.update('local.engineVersion', s.localEngineVersion, vscode.ConfigurationTarget.Global);
-			await wc.update('local.debugOutput', s.localDebugOutput, vscode.ConfigurationTarget.Global);
-			await wc.update('engineArgs', s.localEngineArgs, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
-			await wc.update('developmentTeamId', s.developmentTeamId, vscode.ConfigurationTarget.Global);
-			await wc.update('deployTargetMode', s.deployTargetMode, vscode.ConfigurationTarget.Global);
-			await wc.update('deployTargetTeamId', s.deployTargetTeamId, vscode.ConfigurationTarget.Global);
-			await wc.update('deployHostUrl', s.deployHostUrl, vscode.ConfigurationTarget.Global);
+			// --- Development group ---
+			await wc.update('development.connectionMode', s.development.connectionMode, vscode.ConfigurationTarget.Global);
+			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('development.teamId', s.development.teamId, vscode.ConfigurationTarget.Global);
+			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
+			await wc.update('development.local.debugOutput', s.development.local.debugOutput, vscode.ConfigurationTarget.Global);
+			await wc.update('development.local.engineArgs', s.development.local.engineArgs, vscode.ConfigurationTarget.Global);
 
-			// Integration settings
+			// --- Deployment group ---
+			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.teamId', s.deployment.teamId, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.local.debugOutput', s.deployment.local.debugOutput, vscode.ConfigurationTarget.Global);
+			await wc.update('deployment.local.engineArgs', s.deployment.local.engineArgs, vscode.ConfigurationTarget.Global);
+
+			// --- Global settings ---
+			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
+			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+
+			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
 			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
 			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
@@ -718,18 +664,9 @@ export class ConfigManager {
 			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
 			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
 
-			// --- Secure storage (API keys) ---
-			if (s.apiKey.trim()) {
-				await this.context.secrets.store(this.API_KEY_SECRET_KEY, s.apiKey.trim());
-			} else {
-				await this.context.secrets.delete(this.API_KEY_SECRET_KEY);
-			}
-
-			if (s.deployApiKey.trim()) {
-				await this.context.secrets.store(this.DEPLOY_API_KEY_SECRET_KEY, s.deployApiKey.trim());
-			} else {
-				await this.context.secrets.delete(this.DEPLOY_API_KEY_SECRET_KEY);
-			}
+			// --- Secure storage (per-group API keys) ---
+			await this.setApiKey('development', s.development.apiKey);
+			await this.setApiKey('deployment', s.deployment.apiKey);
 
 			// --- .env file ---
 			if (s.envVars !== undefined) {
@@ -747,14 +684,6 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Updates the deploy host URL in settings.
-	 */
-	public async updateDeployHostUrl(hostUrl: string): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('deployHostUrl', hostUrl, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
 	 * Opens the RocketRide configuration settings page
 	 */
 	public async openSettings(): Promise<void> {
@@ -762,63 +691,35 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Updates the host URL in settings (ASYNC - updates both cache and storage)
+	 * Updates the host URL for a group (ASYNC).
 	 */
-	public async updateHostUrl(hostUrl: string): Promise<void> {
+	public async updateHostUrl(group: ConnectionGroup, hostUrl: string): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('hostUrl', hostUrl, vscode.ConfigurationTarget.Global);
-
-		// Cache will be updated via onDidChangeConfiguration listener
+		await config.update(`${group}.hostUrl`, hostUrl, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
-	 * Updates the connection mode in settings (ASYNC - updates both cache and storage)
+	 * Updates the connection mode for a group (ASYNC).
 	 */
-	public async updateConnectionMode(connectionMode: ConnectionMode): Promise<void> {
+	public async updateConnectionMode(group: ConnectionGroup, connectionMode: ConnectionMode | null): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('connectionMode', connectionMode, vscode.ConfigurationTarget.Global);
-
-		// Cache will be updated via onDidChangeConfiguration listener
+		await config.update(`${group}.connectionMode`, connectionMode, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
-	 * Sets the development team ID in cache only (runtime, not persisted).
+	 * Sets the team ID in cache only for a group (runtime, not persisted).
 	 * Use when the sidebar changes the team at runtime.
 	 */
-	public setDevelopmentTeamId(teamId: string): void {
-		this.config.developmentTeamId = teamId;
+	public setTeamId(group: ConnectionGroup, teamId: string): void {
+		this.config[group].teamId = teamId;
 	}
 
 	/**
-	 * Sets the deploy target team ID in cache only (runtime, not persisted).
-	 * Use when the sidebar changes the team at runtime.
+	 * Updates the team ID for a group (ASYNC - updates both cache and storage).
 	 */
-	public setDeployTargetTeamId(teamId: string): void {
-		this.config.deployTargetTeamId = teamId;
-	}
-
-	/**
-	 * Updates the development team ID (ASYNC - updates both cache and storage)
-	 */
-	public async updateDevelopmentTeamId(teamId: string): Promise<void> {
+	public async updateTeamId(group: ConnectionGroup, teamId: string): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('developmentTeamId', teamId, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
-	 * Updates the deploy target mode (ASYNC - updates both cache and storage)
-	 */
-	public async updateDeployTargetMode(mode: ConnectionMode | null): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('deployTargetMode', mode, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
-	 * Updates the deploy target team ID (ASYNC - updates both cache and storage)
-	 */
-	public async updateDeployTargetTeamId(teamId: string): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update('deployTargetTeamId', teamId, vscode.ConfigurationTarget.Global);
+		await config.update(`${group}.teamId`, teamId, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
@@ -1034,9 +935,8 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Updates ROCKETRIDE_URI and/or ROCKETRIDE_APIKEY in .env file when settings change
-	 * Preserves all other environment variables
-	 * Called when hostUrl or apiKey settings are updated
+	 * Syncs ROCKETRIDE_URI and ROCKETRIDE_APIKEY in .env from the development
+	 * connection settings.  Preserves all other environment variables.
 	 */
 	private async syncSettingsToEnv(): Promise<void> {
 		try {
@@ -1046,7 +946,7 @@ export class ConfigManager {
 			}
 
 			const uri = this.getApiHost();
-			const apiKey = this.getApiKey();
+			const apiKey = this.config.development.apiKey;
 
 			const updates: Record<string, string> = {};
 

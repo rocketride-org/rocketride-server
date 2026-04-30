@@ -93,7 +93,7 @@ export class PageWelcomeProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendCurrentSettings();
-						await this.connHandler.probeServerInfo(this.panel.webview);
+						// Server probe is triggered by CloudPanel when cloud mode is selected
 						await this.connHandler.startStatusPolling();
 						break;
 
@@ -164,7 +164,7 @@ export class PageWelcomeProvider {
 		let apiKey = '';
 		if (this.configManager.hasApiKey()) {
 			try {
-				apiKey = config.apiKey || '';
+				apiKey = config.development.apiKey || '';
 			} catch {
 				/* ignore */
 			}
@@ -173,21 +173,46 @@ export class PageWelcomeProvider {
 		const logoDarkUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-dark-icon.png'));
 		const logoLightUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-light-icon.png'));
 
+		// Send nested structure matching the webview SettingsData type
 		this.panel.webview.postMessage({
 			type: 'settingsLoaded',
 			logoDarkUri: logoDarkUri.toString(),
 			logoLightUri: logoLightUri.toString(),
 			settings: {
-				connectionMode: workspaceConfig.get('connectionMode', 'local'),
-				hostUrl: workspaceConfig.get('hostUrl', 'http://localhost:5565'),
-				apiKey,
-				hasApiKey: this.configManager.hasApiKey(),
+				development: {
+					connectionMode: config.development.connectionMode,
+					hostUrl: config.development.hostUrl,
+					apiKey,
+					hasApiKey: this.configManager.hasApiKey(),
+					teamId: config.development.teamId,
+					local: {
+						engineVersion: config.development.local.engineVersion,
+						debugOutput: config.development.local.debugOutput,
+						engineArgs: config.development.local.engineArgs,
+					},
+				},
+				deployment: {
+					connectionMode: config.deployment.connectionMode,
+					hostUrl: config.deployment.hostUrl,
+					hasApiKey: !!config.deployment.apiKey,
+					apiKey: config.deployment.apiKey || '',
+					teamId: config.deployment.teamId,
+					local: {
+						engineVersion: config.deployment.local.engineVersion,
+						debugOutput: config.deployment.local.debugOutput,
+						engineArgs: config.deployment.local.engineArgs,
+					},
+				},
+				defaultPipelinePath: config.defaultPipelinePath,
+				pipelineRestartBehavior: config.pipelineRestartBehavior,
 				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
-				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
-				localEngineArgs: workspaceConfig.get('engineArgs', ''),
-				localDebugOutput: workspaceConfig.get('local.debugOutput', false),
+				integrationCopilot: workspaceConfig.get('integrations.copilot', false),
+				integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
+				integrationCursor: workspaceConfig.get('integrations.cursor', false),
+				integrationWindsurf: workspaceConfig.get('integrations.windsurf', false),
+				integrationClaudeMd: workspaceConfig.get('integrations.claudeMd', false),
+				integrationAgentsMd: workspaceConfig.get('integrations.agentsMd', false),
 				showOnStartup: !this.isDismissed(),
-				developmentTeamId: workspaceConfig.get('developmentTeamId', ''),
 			},
 		});
 	}
@@ -196,35 +221,40 @@ export class PageWelcomeProvider {
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
 			const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
+			const dev = settings.development as Record<string, unknown> | undefined;
 
-			if (settings.connectionMode !== undefined) {
-				await workspaceConfig.update('connectionMode', settings.connectionMode, vscode.ConfigurationTarget.Global);
+			if (dev?.connectionMode !== undefined) {
+				await workspaceConfig.update('development.connectionMode', dev.connectionMode, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.hostUrl !== undefined) {
-				await workspaceConfig.update('hostUrl', settings.hostUrl, vscode.ConfigurationTarget.Global);
+			if (dev?.hostUrl !== undefined) {
+				await workspaceConfig.update('development.hostUrl', dev.hostUrl, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.localEngineVersion !== undefined) {
-				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
+			if (dev?.teamId !== undefined) {
+				await workspaceConfig.update('development.teamId', dev.teamId, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.localEngineArgs !== undefined) {
-				await workspaceConfig.update('engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
+
+			const devLocal = dev?.local as Record<string, unknown> | undefined;
+			if (devLocal?.engineVersion !== undefined) {
+				await workspaceConfig.update('development.local.engineVersion', devLocal.engineVersion, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.localDebugOutput !== undefined) {
-				await workspaceConfig.update('local.debugOutput', settings.localDebugOutput, vscode.ConfigurationTarget.Global);
+			if (devLocal?.engineArgs !== undefined) {
+				await workspaceConfig.update('development.local.engineArgs', devLocal.engineArgs, vscode.ConfigurationTarget.Global);
 			}
+			if (devLocal?.debugOutput !== undefined) {
+				await workspaceConfig.update('development.local.debugOutput', devLocal.debugOutput, vscode.ConfigurationTarget.Global);
+			}
+
 			if (settings.autoAgentIntegration !== undefined) {
 				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
 			}
-			if (settings.developmentTeamId !== undefined) {
-				await workspaceConfig.update('developmentTeamId', settings.developmentTeamId, vscode.ConfigurationTarget.Global);
-			}
 
 			// Save API key to secure storage
-			if (typeof settings.apiKey === 'string') {
-				if (settings.apiKey.trim() !== '') {
-					await this.configManager.setApiKey(settings.apiKey.trim());
+			if (typeof dev?.apiKey === 'string') {
+				const apiKey = dev.apiKey as string;
+				if (apiKey.trim() !== '') {
+					await this.configManager.setApiKey('development', apiKey.trim());
 				} else {
-					await this.configManager.deleteApiKey();
+					await this.configManager.deleteApiKey('development');
 				}
 			}
 

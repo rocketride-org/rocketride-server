@@ -99,7 +99,7 @@ export class PageSettingsProvider {
 				const result = await vscode.window.showWarningMessage('Are you sure you want to clear the stored API key?', 'Yes', 'No');
 
 				if (result === 'Yes') {
-					await this.configManager.deleteApiKey();
+					await this.configManager.deleteApiKey('development');
 
 					const connectionManager = getConnectionManager();
 
@@ -151,7 +151,7 @@ export class PageSettingsProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.loadAllSettings(panel.webview);
-						await this.connHandler.probeServerInfo(panel.webview);
+						// Server probe is triggered by CloudPanel when cloud mode is selected
 						if (this.pendingFocus) {
 							panel.webview.postMessage({ type: 'setFocus', focus: this.pendingFocus });
 							this.pendingFocus = undefined;
@@ -220,7 +220,7 @@ export class PageSettingsProvider {
 		let apiKey = '';
 		if (hasApiKey) {
 			try {
-				apiKey = config.apiKey || '';
+				apiKey = config.development.apiKey || '';
 			} catch (error) {
 				console.warn('Could not load API key for editing:', error);
 			}
@@ -229,30 +229,37 @@ export class PageSettingsProvider {
 		// Get environment variables
 		const envVars = this.configManager.getEnvVars();
 
+		// Send nested structure matching the webview SettingsData type
 		const allSettings = {
-			// Connection settings from package.json
-			hostUrl: workspaceConfig.get('hostUrl', 'http://localhost:5565'),
-			connectionMode: workspaceConfig.get('connectionMode', 'local'),
-			hasApiKey: hasApiKey,
-			apiKey: apiKey, // Include the actual API key for form editing
-			// Pipeline settings
-			defaultPipelinePath: workspaceConfig.get('defaultPipelinePath', 'pipelines'),
+			// Connection groups
+			development: {
+				connectionMode: config.development.connectionMode,
+				hostUrl: config.development.hostUrl,
+				hasApiKey: hasApiKey,
+				apiKey: apiKey,
+				teamId: config.development.teamId,
+				local: {
+					engineVersion: config.development.local.engineVersion,
+					debugOutput: config.development.local.debugOutput,
+					engineArgs: config.development.local.engineArgs,
+				},
+			},
+			deployment: {
+				connectionMode: config.deployment.connectionMode,
+				hostUrl: config.deployment.hostUrl,
+				hasApiKey: !!config.deployment.apiKey,
+				apiKey: config.deployment.apiKey || '',
+				teamId: config.deployment.teamId,
+				local: {
+					engineVersion: config.deployment.local.engineVersion,
+					debugOutput: config.deployment.local.debugOutput,
+					engineArgs: config.deployment.local.engineArgs,
+				},
+			},
 
-			// Local engine settings
-			localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
-			localDebugOutput: workspaceConfig.get('local.debugOutput', false),
-			localEngineArgs: workspaceConfig.get('engineArgs', ''),
-
-			// Debugging settings
-			pipelineRestartBehavior: workspaceConfig.get('pipelineRestartBehavior', 'prompt'),
-
-			// Development team / Deploy target
-			developmentTeamId: workspaceConfig.get('developmentTeamId', ''),
-			deployTargetMode: workspaceConfig.get('deployTargetMode', null),
-			deployTargetTeamId: workspaceConfig.get('deployTargetTeamId', ''),
-			deployHostUrl: workspaceConfig.get('deployHostUrl', ''),
-			deployApiKey: config.deployApiKey || '',
-			// Environment variables
+			// Top-level settings
+			defaultPipelinePath: config.defaultPipelinePath,
+			pipelineRestartBehavior: config.pipelineRestartBehavior,
 			envVars: envVars,
 
 			// Integration settings
@@ -270,8 +277,7 @@ export class PageSettingsProvider {
 			settings: allSettings,
 		});
 
-		// Fetch teams: try the active connection first, fall back to a temp cloud connection
-		await this.connHandler.fetchCloudTeams(webview);
+		// Teams are fetched by CloudPanel after it confirms the server is SaaS
 	}
 
 	/**
@@ -290,6 +296,16 @@ export class PageSettingsProvider {
 		try {
 			// Cast to the typed snapshot (webview sends the full SettingsData shape)
 			const snapshot = settings as unknown as SettingsSnapshot;
+
+			// Validate: cloud mode requires a team selection
+			if (snapshot.development.connectionMode === 'cloud' && !snapshot.development.teamId) {
+				this.showMessage(webview, 'error', 'Please select a team for the development cloud connection.');
+				return;
+			}
+			if (snapshot.deployment.connectionMode === 'cloud' && !snapshot.deployment.teamId) {
+				this.showMessage(webview, 'error', 'Please select a team for the deployment cloud connection.');
+				return;
+			}
 
 			// 1. Write everything atomically — no listeners fire during this
 			await this.configManager.applyAllSettings(snapshot);
@@ -331,7 +347,7 @@ export class PageSettingsProvider {
 	private async clearCredentials(webview: vscode.Webview): Promise<void> {
 		try {
 			// Clear the API key from secure storage
-			await this.configManager.deleteApiKey();
+			await this.configManager.deleteApiKey('development');
 
 			// Verify it was actually cleared
 			const hasApiKey = this.configManager.hasApiKey();

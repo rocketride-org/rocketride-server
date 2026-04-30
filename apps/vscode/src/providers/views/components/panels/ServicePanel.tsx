@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import serviceIcon from '../../../../../onprem.svg';
+import serviceIcon from '../../../../assets/service.svg';
 import { ServiceStatus, VersionOption, displayVersion, stateLabels, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
 
 // =============================================================================

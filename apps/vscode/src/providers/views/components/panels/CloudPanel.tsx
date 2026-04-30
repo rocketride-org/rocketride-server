@@ -10,7 +10,7 @@
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
 import cloudLogoLight from '../../../../../rocketride-light-icon.png';
 import { settingsStyles as S } from '../../PageSettings/SettingsWebview';
@@ -30,15 +30,31 @@ export interface CloudPanelProps {
 	onTeamChange: (teamId: string) => void;
 	idPrefix: string;
 	simplified?: boolean;
+	/** Whether the server supports SaaS/OAuth. When false, shows an incompatible-server message. */
+	isSaas?: boolean;
+	/** Called on mount to trigger a server probe. Parent updates isSaas when result arrives. */
+	onProbeServer?: () => void;
+	/** Called when isSaas becomes true, to fetch the team list. */
+	onFetchTeams?: () => void;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix }) => {
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 	const theme = useTheme();
+
+	// Stage 1: Probe on mount to check if server supports cloud/OAuth
+	useEffect(() => {
+		if (onProbeServer) onProbeServer();
+	}, []);
+
+	// Stage 2: Once confirmed SaaS, fetch teams
+	useEffect(() => {
+		if (isSaas && onFetchTeams) onFetchTeams();
+	}, [isSaas]);
 
 	return (
 		<>
@@ -47,8 +63,14 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 				<div style={S.modeConfigDesc}>Sign in with your RocketRide account to connect to the cloud.</div>
 			</div>
 
-			{/* Sign-in status */}
-			{cloudSignedIn ? (
+			{/* Probing server... */}
+			{isSaas === undefined && <div style={S.modeConfigDesc}>Checking server compatibility...</div>}
+
+			{/* Server does not support cloud/OAuth */}
+			{isSaas === false && <div style={{ padding: '12px 16px', borderRadius: 4, backgroundColor: 'var(--vscode-inputValidation-warningBackground, #4d3a00)', border: '1px solid var(--vscode-inputValidation-warningBorder, #f0c000)', color: 'var(--rr-text-primary)', fontSize: 13, lineHeight: 1.5 }}>The configured server does not support RocketRide Cloud. Cloud mode requires a RocketRide Cloud server. Please use a different connection mode.</div>}
+
+			{/* Sign-in status — only when server supports cloud */}
+			{isSaas && cloudSignedIn && (
 				<div style={S.formGroup}>
 					<div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
 						<span style={{ fontSize: 20, color: 'var(--vscode-testing-iconPassed, #22c55e)' }}>&#10003;</span>
@@ -69,7 +91,8 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 						Sign Out
 					</button>
 				</div>
-			) : (
+			)}
+			{isSaas && !cloudSignedIn && (
 				<div style={S.formGroup}>
 					<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
 						Sign In
@@ -78,7 +101,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			)}
 
 			{/* Team selector */}
-			{cloudSignedIn && teams.length > 0 && (
+			{isSaas && cloudSignedIn && teams.length > 0 && (
 				<div style={S.formGroup}>
 					<label htmlFor={id('team')} style={S.label}>
 						Team

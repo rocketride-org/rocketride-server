@@ -407,8 +407,8 @@ export class EngineOperations {
 		const configMgr = getConfigManager();
 		if (!configMgr) return;
 		this.postProgress('service', 'Connecting to service...');
-		await configMgr.updateHostUrl(`http://localhost:${SERVICE_PORT}`);
-		await configMgr.updateConnectionMode('onprem');
+		await configMgr.updateHostUrl('development', `http://localhost:${SERVICE_PORT}`);
+		await configMgr.updateConnectionMode('development', 'onprem');
 	}
 
 	private async waitForServiceRunning(): Promise<void> {

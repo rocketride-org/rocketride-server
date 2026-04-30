@@ -40,7 +40,7 @@ import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import { ManagerInfo } from './base-manager';
 import { EngineInstaller } from './engine-installer';
-import { ConfigManager, ConfigManagerInfo } from '../config';
+import { ConnectionGroupConfig } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
@@ -51,6 +51,8 @@ export class EngineManager extends EventEmitter {
 	private started = false;
 	private actualPort?: number;
 	private pidFilePath?: string;
+	/** Last config passed to start(), used by getInfo(). */
+	private lastConfig?: ConnectionGroupConfig;
 
 	constructor(enginesRoot: string) {
 		super();
@@ -75,7 +77,9 @@ export class EngineManager extends EventEmitter {
 	 * Installs the engine (if needed) and starts the engine process.
 	 * Emits 'status' events throughout for UI display.
 	 */
-	public async start(config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void> {
+	public async start(config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
+		this.lastConfig = config;
+
 		// --- Phase 1: Install ---
 		const versionSpec = config.local.engineVersion || 'latest';
 
@@ -142,7 +146,13 @@ export class EngineManager extends EventEmitter {
 			await this.stopProcess();
 		}
 
-		const effectiveArgs = ConfigManager.getInstance().getEffectiveEngineArgs();
+		// Build engine args from config — inject --trace=debugOut if enabled
+		const rawArgs = String(config.local.engineArgs || '').trim();
+		const effectiveArgs: string[] = [];
+		if (rawArgs) effectiveArgs.push(rawArgs);
+		if (config.local.debugOutput && !rawArgs.includes('--trace=')) {
+			effectiveArgs.push('--trace=debugOut');
+		}
 
 		const args = [
 			'--autoterm', // Exit when VS Code closes (stdin monitoring)
@@ -175,7 +185,7 @@ export class EngineManager extends EventEmitter {
 	 * Returns installed engine version info, or null if not installed.
 	 */
 	public getInfo(): ManagerInfo | null {
-		const versionSpec = ConfigManager.getInstance().getConfig().local.engineVersion || 'latest';
+		const versionSpec = this.lastConfig?.local.engineVersion || 'latest';
 		const channel = versionSpec === 'prerelease' ? ('pre' as const) : ('stable' as const);
 		const version = this.installer.getInstalledVersion(channel);
 		const publishedAt = this.installer.getInstalledPublishedAt(channel);

@@ -46,7 +46,7 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from 'rocketride';
-import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../config';
+import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
 import { RemoteManager } from './remote-manager';
@@ -94,15 +94,19 @@ export class ConnectionManager extends EventEmitter {
 	private cachedServicesError: string | null = null;
 	private servicesRefreshPromise: Promise<void> | null = null;
 
-	protected constructor() {
+	/** Which settings group this connection reads from. */
+	public readonly group: ConnectionGroup;
+
+	protected constructor(group: ConnectionGroup = 'development') {
 		super();
+		this.group = group;
 		this.client = this.createClient();
 		this.setupConfigurationListener();
 	}
 
 	public static getInstance(): ConnectionManager {
 		if (!ConnectionManager.instance) {
-			ConnectionManager.instance = new ConnectionManager();
+			ConnectionManager.instance = new ConnectionManager('development');
 		}
 		return ConnectionManager.instance;
 	}
@@ -170,46 +174,27 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	// =========================================================================
-	// CONFIG ACCESSORS (override in subclass for deploy-specific keys)
+	// CONFIG ACCESSORS (reads from this.group — no overrides needed)
 	// =========================================================================
 
-	/**
-	 * Returns the connection mode for this manager.
-	 * DeployManager overrides to return `deployTargetMode`.
-	 */
-	protected getEffectiveConnectionMode(): ConnectionMode {
-		return this.configManager.getConfig().connectionMode;
+	/** Returns the per-group config for this connection. */
+	public getGroupConfig(): ConnectionGroupConfig {
+		return this.configManager.getConfig()[this.group];
 	}
 
-	/**
-	 * Returns the host URL for this manager.
-	 * DeployManager overrides to return `deployHostUrl`.
-	 */
-	protected getEffectiveHostUrl(): string {
-		return this.configManager.getConfig().hostUrl;
+	/** Returns the connection mode for this connection's group. */
+	public getConnectionMode(): ConnectionMode | null {
+		return this.getGroupConfig().connectionMode;
 	}
 
-	/**
-	 * Returns the API key for this manager.
-	 * DeployManager overrides to return `deployApiKey`.
-	 */
-	protected getEffectiveApiKey(): string {
-		return this.configManager.getConfig().apiKey;
+	/** Returns the host URL for this connection's group. */
+	public getHostUrl(): string {
+		return this.getGroupConfig().hostUrl;
 	}
 
-	/**
-	 * Returns a config object with effective values for this connection.
-	 * Base class returns the dev config as-is. DeployManager overrides
-	 * to swap in deploy-specific values (mode, hostUrl, apiKey, etc.).
-	 */
-	protected getEffectiveConfig(): ConfigManagerInfo {
-		const config = this.configManager.getConfig();
-		return {
-			...config,
-			connectionMode: this.getEffectiveConnectionMode(),
-			hostUrl: this.getEffectiveHostUrl(),
-			apiKey: this.getEffectiveApiKey(),
-		};
+	/** Returns the API key for this connection's group. */
+	public getApiKey(): string {
+		return this.getGroupConfig().apiKey;
 	}
 
 	// =========================================================================
@@ -223,7 +208,7 @@ export class ConnectionManager extends EventEmitter {
 
 		await this.updateCredentialsStatus();
 
-		const errors = this.configManager.validateConfig();
+		const errors = this.configManager.validateGroupConfig(this.group);
 		if (errors.length > 0) {
 			this.logger.output(`${icons.error} Configuration errors: ${errors.join(', ')}`);
 			this.updateConnectionStatus({
@@ -234,7 +219,7 @@ export class ConnectionManager extends EventEmitter {
 		}
 
 		this.updateConnectionStatus({
-			connectionMode: this.getEffectiveConnectionMode(),
+			connectionMode: this.getConnectionMode() ?? 'local',
 		});
 
 		if (this.connectionStatus.hasCredentials) {
@@ -322,8 +307,8 @@ export class ConnectionManager extends EventEmitter {
 						progressMessage: undefined,
 					});
 
-					// Open the auth page with the mode so it shows the right form
-					vscode.commands.executeCommand('rocketride.page.auth.open', mode, error.message);
+					// Open the auth page with the group and mode so it shows the right form
+					vscode.commands.executeCommand('rocketride.page.auth.open', this.group, mode, error.message);
 					return;
 				}
 				this.logger.output(`${icons.info} Reconnect attempt failed: ${error.message}`);
@@ -390,7 +375,8 @@ export class ConnectionManager extends EventEmitter {
 			lastError: undefined,
 		});
 
-		const connectionMode = this.getEffectiveConnectionMode();
+		const groupConfig = this.getGroupConfig();
+		const connectionMode = groupConfig.connectionMode ?? 'local';
 
 		try {
 			// Create manager for current mode (if we don't already have one)
@@ -404,11 +390,8 @@ export class ConnectionManager extends EventEmitter {
 			this.engineCts?.dispose();
 			this.engineCts = new vscode.CancellationTokenSource();
 
-			// Build effective config for this connection (overridden by DeployManager)
-			const effectiveConfig = this.getEffectiveConfig();
-
 			// Manager handles everything: install/start engine, validate creds, connect client
-			await this.manager.connect(this.client, effectiveConfig, this.engineCts.token);
+			await this.manager.connect(this.client, groupConfig, this.engineCts.token);
 
 			// onConnected callback handles state update and 'connected' emit
 		} catch (error) {
@@ -572,9 +555,8 @@ export class ConnectionManager extends EventEmitter {
 		if (this.isDisposing) {
 			return;
 		}
-		const mode = this.getEffectiveConnectionMode();
-		const hostUrl = this.getEffectiveHostUrl();
-		const apiKey = this.getEffectiveApiKey();
+		const gc = this.getGroupConfig();
+		const mode = gc.connectionMode ?? 'local';
 		let hasCredentials: boolean;
 
 		if (connectionModeUsesOAuth(mode)) {
@@ -582,10 +564,10 @@ export class ConnectionManager extends EventEmitter {
 			hasCredentials = await CloudAuthProvider.getInstance().isSignedIn();
 		} else if (connectionModeRequiresApiKey(mode)) {
 			// On-prem: need both API key and host URL
-			hasCredentials = !!(apiKey && hostUrl);
+			hasCredentials = !!(gc.apiKey && gc.hostUrl);
 		} else if (mode === 'onprem') {
 			// On-prem without required key: just need host URL
-			hasCredentials = !!hostUrl;
+			hasCredentials = !!gc.hostUrl;
 		} else {
 			// Docker, service, local: always have credentials
 			hasCredentials = true;
@@ -618,4 +600,29 @@ export class ConnectionManager extends EventEmitter {
 		this.configManager.dispose();
 		this.removeAllListeners();
 	}
+}
+
+// =============================================================================
+// CLOUD CONNECTION HELPER
+// =============================================================================
+
+/**
+ * Returns whichever connection (dev or deploy) is in cloud mode and connected.
+ * Used for account/billing operations where either cloud connection works.
+ */
+export function getCloudConnection(): ConnectionManager | undefined {
+	// Import lazily to avoid circular dependency
+	const { DeployManager } = require('./deploy-manager');
+	const dev = ConnectionManager.getInstance();
+	if (dev.getConnectionMode() === 'cloud' && dev.isConnected()) return dev;
+	const deploy = DeployManager.getDeployInstance();
+	if (!deploy.isSharedMode() && deploy.getConnectionMode() === 'cloud' && deploy.isConnected()) return deploy;
+	return undefined;
+}
+
+/**
+ * Returns true if at least one connection is in cloud mode and connected.
+ */
+export function isCloudConnected(): boolean {
+	return getCloudConnection() !== undefined;
 }

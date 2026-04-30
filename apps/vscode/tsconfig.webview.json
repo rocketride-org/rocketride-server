@@ -17,5 +17,5 @@
 			"shared": ["../../packages/shared-ui/src/index.ts"]
 		}
 	},
-	"include": ["src/providers/views/**/*.ts", "src/providers/views/**/*.tsx", "src/providers/components/**/*.ts", "src/providers/components/**/*.tsx", "src/shared/**/*.ts"]
+	"include": ["src/providers/views/**/*.ts", "src/providers/views/**/*.tsx", "src/providers/components/**/*.ts", "src/providers/components/**/*.tsx", "src/shared/**/*.ts", "src/assets/**/*.d.ts"]
 }

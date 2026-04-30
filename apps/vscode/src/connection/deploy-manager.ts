@@ -50,7 +50,6 @@
  */
 
 import { ConnectionManager } from './connection';
-import type { ConnectionMode } from '../config';
 import type { ConnectionStatus } from '../shared/types';
 import type { RocketRideClient } from 'rocketride';
 
@@ -66,6 +65,10 @@ export class DeployManager extends ConnectionManager {
 
 	/** Bound listeners forwarding dev events → deploy events in shared mode. */
 	private forwardHandlers: Map<string, (...args: unknown[]) => void> = new Map();
+
+	private constructor() {
+		super('deployment');
+	}
 
 	// =========================================================================
 	// SINGLETON
@@ -86,9 +89,9 @@ export class DeployManager extends ConnectionManager {
 	// SHARED vs INDEPENDENT MODE
 	// =========================================================================
 
-	/** True when the deploy connection shares the dev connection. */
+	/** True when the deploy connection shares the dev connection (connectionMode === null). */
 	public isSharedMode(): boolean {
-		return this.configManager.getConfig().deployTargetMode === null;
+		return this.configManager.getConfig().deployment.connectionMode === null;
 	}
 
 	private getDevManager(): ConnectionManager {
@@ -252,42 +255,6 @@ export class DeployManager extends ConnectionManager {
 		if (this.getDevManager().isConnected()) {
 			this.emit('connected');
 		}
-	}
-
-	// =========================================================================
-	// CONFIG OVERRIDES — only used in independent mode
-	// =========================================================================
-
-	/**
-	 * Returns the deploy target mode.
-	 * Only called in independent mode (shared mode never reaches connect()).
-	 */
-	protected override getEffectiveConnectionMode(): ConnectionMode {
-		return this.configManager.getConfig().deployTargetMode ?? 'local';
-	}
-
-	/**
-	 * Returns deploy host URL.
-	 * For cloud mode, resolves to the cloud URL (same logic as ConnectionManager).
-	 * For on-prem, returns the deploy-specific host URL.
-	 */
-	protected override getEffectiveHostUrl(): string {
-		const config = this.configManager.getConfig();
-		const mode = config.deployTargetMode;
-		if (mode === 'cloud') {
-			return config.hostUrl;
-		}
-		if (mode === 'docker' || mode === 'service') {
-			return 'http://localhost:5565';
-		}
-		return config.deployHostUrl;
-	}
-
-	/**
-	 * Returns deploy API key for on-prem deploy targets.
-	 */
-	protected override getEffectiveApiKey(): string {
-		return this.configManager.getConfig().deployApiKey;
 	}
 
 	// =========================================================================

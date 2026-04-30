@@ -28,7 +28,7 @@ import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
 import { EnvVariablesSettings } from './EnvVariablesSettings';
 import { IntegrationSettings } from './IntegrationSettings';
-import { DeployTargetSettings } from './DeployTargetSettings';
+import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
@@ -43,23 +43,26 @@ import '../../styles/root.css';
 // TYPE DEFINITIONS
 // ============================================================================
 
-export interface SettingsData {
+export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
+
+export interface ConnectionGroupSettings {
+	connectionMode: ConnectionMode | null;
 	hostUrl: string;
-	connectionMode: 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 	hasApiKey: boolean;
 	apiKey: string;
+	teamId: string;
+	local: {
+		engineVersion: string;
+		debugOutput: boolean;
+		engineArgs: string;
+	};
+}
+
+export interface SettingsData {
+	development: ConnectionGroupSettings;
+	deployment: ConnectionGroupSettings;
 	defaultPipelinePath: string;
-	localEngineVersion: string;
-	localEngineArgs: string;
-	localDebugOutput: boolean;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
-	developmentTeamId: string;
-	deployTargetMode: 'cloud' | 'docker' | 'service' | 'onprem' | 'local' | null;
-	deployTargetTeamId: string;
-	/** Separate host URL for deploy target (on-prem deploy) */
-	deployHostUrl: string;
-	/** Separate API key for deploy target (on-prem deploy) */
-	deployApiKey: string;
 	envVars?: Record<string, string>;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
@@ -106,7 +109,8 @@ export type PageSettingsOutgoingMessage =
 	  }
 	| {
 			type: 'testConnection';
-			settings: SettingsData;
+			hostUrl: string;
+			apiKey: string;
 	  }
 	| {
 			type: 'clearCredentials';
@@ -236,19 +240,24 @@ export const PageSettings: React.FC = () => {
 	// ========================================================================
 
 	const [settings, setSettings] = useState<SettingsData>({
-		hostUrl: 'http://localhost:5565',
-		connectionMode: 'local',
-		hasApiKey: false,
-		apiKey: '', // Initialize empty - will be loaded from secure storage
-		defaultPipelinePath: 'pipelines', // Initialize with default value
-		localEngineVersion: 'latest',
-		localEngineArgs: '',
+		development: {
+			connectionMode: 'local',
+			hostUrl: 'http://localhost:5565',
+			hasApiKey: false,
+			apiKey: '',
+			teamId: '',
+			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		},
+		deployment: {
+			connectionMode: null,
+			hostUrl: '',
+			hasApiKey: false,
+			apiKey: '',
+			teamId: '',
+			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		},
+		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
-		developmentTeamId: '',
-		deployTargetMode: null,
-		deployTargetTeamId: '',
-		deployHostUrl: '',
-		deployApiKey: '',
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
@@ -259,12 +268,13 @@ export const PageSettings: React.FC = () => {
 		integrationAgentsMd: false,
 	});
 	const [message, setMessage] = useState<MessageData | null>(null);
-	const [developmentTestMessage, setDevelopmentTestMessage] = useState<MessageData | null>(null);
+	const [testMessage, setTestMessage] = useState<MessageData | null>(null);
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
 	// Server capabilities (from probe)
 	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
+	const [isSaasProbed, setIsSaasProbed] = useState<boolean | undefined>(undefined);
 
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
@@ -303,7 +313,7 @@ export const PageSettings: React.FC = () => {
 			switch (message.type) {
 				case 'settingsLoaded':
 					setSettings(message.settings);
-					if (message.settings.connectionMode === 'local') {
+					if (message.settings.development.connectionMode === 'local') {
 						setEngineVersionsLoading(true);
 						sendMessage({ type: 'fetchEngineVersions' });
 					}
@@ -329,16 +339,19 @@ export const PageSettings: React.FC = () => {
 					if ((message as any).focus) setActiveTab((message as any).focus);
 					break;
 
-				case 'serverInfo' as any:
-					setServerCapabilities((message as any).capabilities || []);
+				case 'serverInfo' as any: {
+					const caps = (message as any).capabilities || [];
+					setServerCapabilities(caps);
+					setIsSaasProbed(caps.includes('saas'));
 					break;
+				}
 
 				case 'showMessage': {
 					const msg = { level: message.level, message: message.message };
 					const clearAfter = message.level === 'success' ? 5000 : undefined;
 					if (message.context === 'development') {
-						setDevelopmentTestMessage(msg);
-						if (clearAfter) setTimeout(() => setDevelopmentTestMessage(null), clearAfter);
+						setTestMessage(msg);
+						if (clearAfter) setTimeout(() => setTestMessage(null), clearAfter);
 					} else {
 						setMessage(msg);
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
@@ -415,8 +428,20 @@ export const PageSettings: React.FC = () => {
 	/**
 	 * Test development connection (run/debug server)
 	 */
-	const handleTestDevelopmentConnection = (): void => {
-		sendMessage({ type: 'testConnection', settings });
+	const handleTestConnection = (hostUrl: string, apiKey: string): void => {
+		sendMessage({ type: 'testConnection', hostUrl, apiKey });
+	};
+
+	/**
+	 * Probe cloud server to check SaaS compatibility
+	 */
+	const handleProbeCloudServer = (): void => {
+		setIsSaasProbed(undefined); // reset to loading
+		sendMessage({ type: 'probeServerInfo' } as any);
+	};
+
+	const handleFetchTeams = (): void => {
+		sendMessage({ type: 'fetchTeams' } as any);
 	};
 
 	/**
@@ -424,31 +449,58 @@ export const PageSettings: React.FC = () => {
 	 */
 	const handleClearCredentials = (): void => {
 		// Clear the API key from local state and send clear message
-		setSettings((prev) => ({ ...prev, apiKey: '', hasApiKey: false }));
+		setSettings((prev) => ({
+			...prev,
+			development: { ...prev.development, apiKey: '', hasApiKey: false },
+		}));
 		sendMessage({ type: 'clearCredentials' });
 	};
 
 	/**
 	 * Update settings with partial changes
 	 */
-	const handleSettingsChange = (newSettings: Partial<SettingsData>): void => {
+	const handleSettingsChange = (changes: Partial<SettingsData>): void => {
 		setSettings((prev) => {
-			// If switching to local mode (dev or deploy), fetch engine versions
-			if ((newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') || (newSettings.deployTargetMode === 'local' && prev.deployTargetMode !== 'local')) {
+			const next = { ...prev };
+
+			// Deep-merge development group
+			if (changes.development) {
+				next.development = { ...prev.development, ...changes.development };
+				if (changes.development.local) {
+					next.development.local = { ...prev.development.local, ...changes.development.local };
+				}
+			}
+
+			// Deep-merge deployment group
+			if (changes.deployment) {
+				next.deployment = { ...prev.deployment, ...changes.deployment };
+				if (changes.deployment.local) {
+					next.deployment.local = { ...prev.deployment.local, ...changes.deployment.local };
+				}
+			}
+
+			// Top-level fields
+			const { development, deployment, ...topLevel } = changes;
+			Object.assign(next, topLevel);
+
+			// Side effects: fetch engine versions when switching to local mode
+			const devMode = changes.development?.connectionMode;
+			const depMode = changes.deployment?.connectionMode;
+			if ((devMode === 'local' && prev.development.connectionMode !== 'local') || (depMode === 'local' && prev.deployment.connectionMode !== 'local')) {
 				setEngineVersionsLoading(true);
 				sendMessage({ type: 'fetchEngineVersions' });
 			}
-			// If either mode switches to cloud, fetch teams
-			if ((newSettings.connectionMode === 'cloud' && prev.connectionMode !== 'cloud') || (newSettings.deployTargetMode === 'cloud' && prev.deployTargetMode !== 'cloud')) {
-				sendMessage({ type: 'fetchTeams' });
-			}
-			// If switching to docker or service, fetch versions
-			const switchingToDockerOrService = (newSettings.connectionMode === 'docker' || newSettings.connectionMode === 'service') && prev.connectionMode !== newSettings.connectionMode;
-			const deploySwitchingToDockerOrService = (newSettings.deployTargetMode === 'docker' || newSettings.deployTargetMode === 'service') && prev.deployTargetMode !== newSettings.deployTargetMode;
+
+			// Teams are fetched by CloudPanel after it confirms the server is SaaS
+
+			// Fetch versions when switching to docker or service
+			const switchingToDockerOrService = (devMode === 'docker' || devMode === 'service') && prev.development.connectionMode !== devMode;
+			const deploySwitchingToDockerOrService = (depMode === 'docker' || depMode === 'service') && prev.deployment.connectionMode !== depMode;
 			if (switchingToDockerOrService || deploySwitchingToDockerOrService) {
 				sendMessage({ type: 'fetchVersions' } as any);
 			}
-			return { ...prev, ...newSettings };
+
+			return next;
 		});
 	};
 
@@ -566,15 +618,18 @@ export const PageSettings: React.FC = () => {
 							onSettingsChange={handleSettingsChange}
 							onSave={handleSaveSettings}
 							onClearCredentials={handleClearCredentials}
-							onTestDevelopmentConnection={handleTestDevelopmentConnection}
+							onTestDevelopmentConnection={handleTestConnection}
 							serverCapabilities={serverCapabilities}
-							developmentTestMessage={developmentTestMessage}
+							testMessage={testMessage}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
 							cloudSignedIn={cloudSignedIn}
 							cloudUserName={cloudUserName}
 							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
 							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
+							onProbeCloudServer={handleProbeCloudServer}
+							onFetchTeams={handleFetchTeams}
+							isSaas={isSaasProbed}
 							teams={teams}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
@@ -614,7 +669,7 @@ export const PageSettings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DeployTargetSettings
+						<DeploySettings
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
 							onSave={handleSaveSettings}
@@ -623,10 +678,15 @@ export const PageSettings: React.FC = () => {
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
 							onClearCredentials={handleClearCredentials}
+							onTestConnection={handleTestConnection}
+							testMessage={testMessage}
 							cloudSignedIn={cloudSignedIn}
 							cloudUserName={cloudUserName}
 							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
 							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
+							onProbeCloudServer={handleProbeCloudServer}
+							onFetchTeams={handleFetchTeams}
+							isSaas={isSaasProbed}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
 							dockerError={dockerError}
@@ -694,7 +754,7 @@ export const PageSettings: React.FC = () => {
 				),
 			},
 		}),
-		[settings, message, developmentTestMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
+		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (
