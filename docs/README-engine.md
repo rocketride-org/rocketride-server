@@ -284,15 +284,19 @@ Tika's `CompositeExternalParser` (auto-registered via `tika-parsers-standard-pac
 
 **If these tools are absent, `CompositeExternalParser` throws a `TikaException` that aborts the entire file extraction — including the media stream delivery to Python nodes.** No warning is shown in the engine UI; the exception is caught and silently logged by the Java layer.
 
-On Windows, the standard Unix "command not found" exit codes (126/127) used by Tika's check mechanism are not returned by the OS, so Tika does not skip the parser gracefully — it throws instead.
+When a required tool is missing, the OS fails to start the process, producing an `IOException` which Tika wraps into a `TikaException`. Note that `ExternalParser.check()` is a static utility method and is **not** automatically invoked during parsing — the failure surfaces at process-launch time, not during a pre-flight check.
 
-**To disable external parsers** (when the tools are not installed), add to `tika-config.xml`:
+**To disable external parsers** (when the tools are not installed), add the following to `tika-config.xml`:
 
 ```xml
-<parser class="org.apache.tika.parser.DefaultParser">
-    <parser-exclude class="org.apache.tika.parser.external.ExternalParser"/>
-    <parser-exclude class="org.apache.tika.parser.external.CompositeExternalParser"/>
-</parser>
+<properties>
+  <parsers>
+    <parser class="org.apache.tika.parser.DefaultParser">
+      <parser-exclude class="org.apache.tika.parser.external.ExternalParser"/>
+      <parser-exclude class="org.apache.tika.parser.external.CompositeExternalParser"/>
+    </parser>
+  </parsers>
+</properties>
 ```
 
 This causes Tika to fall back to its built-in Java parsers (e.g. `Mp4Parser`) which handle media streams without any external tools.
