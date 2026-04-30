@@ -43,6 +43,20 @@ class IInstance(IInstanceBase):
         """Reset chunk counter for each new object."""
         self.chunkId = 0
 
+    @staticmethod
+    def _copy_metadata(metadata) -> tuple[DocMetadata, str]:
+        """Return mutable document metadata and the original object id."""
+        if metadata is None:
+            return DocMetadata(objectId='', chunkId=0), ''
+
+        if isinstance(metadata, dict):
+            metadata_data = dict(metadata)
+            metadata_data.setdefault('objectId', '')
+            metadata_data.setdefault('chunkId', 0)
+            return DocMetadata(**metadata_data), metadata_data.get('objectId', '') or ''
+
+        return copy.copy(metadata), getattr(metadata, 'objectId', '') or ''
+
     def writeDocuments(self, documents: list[Doc]):
         """
         Chunk each incoming document and emit multiple documents (one per chunk).
@@ -61,9 +75,7 @@ class IInstance(IInstanceBase):
                 continue
 
             # Get the original object ID for parent tracking
-            parent_id = ''
-            if document.metadata is not None:
-                parent_id = getattr(document.metadata, 'objectId', '') or ''
+            source_metadata, parent_id = self._copy_metadata(document.metadata)
 
             # Chunk the text
             chunks = self.IGlobal.strategy.chunk(text)
@@ -77,7 +89,7 @@ class IInstance(IInstanceBase):
             for chunk_data in chunks:
                 # Shallow copy of document, explicit copy of metadata only
                 chunk_doc = copy.copy(document)
-                chunk_doc.metadata = copy.copy(document.metadata) if document.metadata else DocMetadata()
+                chunk_doc.metadata = copy.copy(source_metadata)
                 chunk_doc.page_content = chunk_data['text']
 
                 # Update metadata (always non-None after the copy/create above)

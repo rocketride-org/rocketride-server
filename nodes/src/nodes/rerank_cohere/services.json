@@ -203,6 +203,26 @@
 						{
 							"text": "What is machine learning?"
 						}
+					],
+					"documents": [
+						{
+							"page_content": "Machine learning is a field of artificial intelligence focused on systems that learn from data.",
+							"metadata": {
+								"objectId": "rerank-test-doc-1",
+								"chunkId": 0,
+								"nodeId": "test-node",
+								"parent": "/test"
+							}
+						},
+						{
+							"page_content": "A recipe describes ingredients and steps for preparing a meal.",
+							"metadata": {
+								"objectId": "rerank-test-doc-2",
+								"chunkId": 1,
+								"nodeId": "test-node",
+								"parent": "/test"
+							}
+						}
 					]
 				},
 				"expect": {
