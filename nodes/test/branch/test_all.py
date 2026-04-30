@@ -35,6 +35,8 @@ Covers:
 """
 
 import copy
+import importlib
+import importlib.util
 import json
 import sys
 import types
@@ -44,7 +46,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup and mock engine runtime modules via session-scoped fixture
+# Path setup and mock engine runtime modules
 # ---------------------------------------------------------------------------
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 
@@ -57,6 +59,13 @@ _MOCK_MODULE_NAMES = [
     'ai.common.config',
     'depends',
     'engLib',
+]
+
+_BRANCH_MODULE_NAMES = [
+    'branch',
+    'branch.branch_engine',
+    'branch.IGlobal',
+    'branch.IInstance',
 ]
 
 
@@ -228,21 +237,47 @@ def _install_mocks():
     return _teardown
 
 
-# Install mocks at import time so the branch module can be imported.
-# The module-scoped fixture below ensures teardown restores original state
-# once all tests in THIS module have finished, so the mocked rocketlib / ai
-# modules do not leak to other test modules in the same pytest session.
-_teardown_mocks = _install_mocks()
+def _load_branch_engine():
+    """Load BranchEngine directly from its file without importing the package."""
+    spec = importlib.util.spec_from_file_location(
+        'branch_engine_under_test',
+        NODES_SRC / 'branch' / 'branch_engine.py',
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module.BranchEngine
 
 
-@pytest.fixture(autouse=True, scope='module')
-def _engine_mocks():
-    """Restore sys.path/sys.modules after this module's tests complete."""
-    yield
-    _teardown_mocks()
+BranchEngine = _load_branch_engine()
 
 
-from branch.branch_engine import BranchEngine  # noqa: E402
+@pytest.fixture
+def branch_runtime():
+    """Import branch package with temporary runtime mocks for this test only."""
+    original_branch_modules = {name: sys.modules.get(name) for name in _BRANCH_MODULE_NAMES}
+    for name in _BRANCH_MODULE_NAMES:
+        sys.modules.pop(name, None)
+
+    teardown_mocks = _install_mocks()
+    try:
+        branch = importlib.import_module('branch')
+        branch_engine = importlib.import_module('branch.branch_engine')
+        branch_iglobal = importlib.import_module('branch.IGlobal')
+        branch_iinstance = importlib.import_module('branch.IInstance')
+        yield {
+            'branch': branch,
+            'BranchEngine': branch_engine.BranchEngine,
+            'IGlobal': branch_iglobal.IGlobal,
+            'IInstance': branch_iinstance.IInstance,
+        }
+    finally:
+        for name, orig in original_branch_modules.items():
+            if orig is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = orig
+        teardown_mocks()
 
 
 # =============================================================================
@@ -703,26 +738,21 @@ class TestRoute:
 class TestModuleImports:
     """Verify the node module can be imported without a running engine."""
 
-    def test_branch_engine_import(self):
-        from branch.branch_engine import BranchEngine as BE
+    def test_branch_engine_import(self, branch_runtime):
+        assert branch_runtime['BranchEngine'] is not None
 
-        assert BE is not None
-
-    def test_init_exports(self):
-        import branch
-
+    def test_init_exports(self, branch_runtime):
+        branch = branch_runtime['branch']
         assert hasattr(branch, 'IGlobal')
         assert hasattr(branch, 'IInstance')
 
-    def test_iglobal_has_begin_end(self):
-        from branch.IGlobal import IGlobal
-
+    def test_iglobal_has_begin_end(self, branch_runtime):
+        IGlobal = branch_runtime['IGlobal']
         assert hasattr(IGlobal, 'beginGlobal')
         assert hasattr(IGlobal, 'endGlobal')
 
-    def test_iinstance_has_write_methods(self):
-        from branch.IInstance import IInstance
-
+    def test_iinstance_has_write_methods(self, branch_runtime):
+        IInstance = branch_runtime['IInstance']
         assert hasattr(IInstance, 'writeQuestions')
         assert hasattr(IInstance, 'writeAnswers')
 
@@ -735,9 +765,8 @@ class TestModuleImports:
 class TestIInstanceRouting:
     """Integration tests for IInstance write methods with mocked engine."""
 
-    def _make_instance(self, rules=None, default_lane='questions'):
-        from branch.IInstance import IInstance
-
+    def _make_instance(self, branch_runtime, rules=None, default_lane='questions'):
+        IInstance = branch_runtime['IInstance']
         inst = IInstance()
         # Set up mock IGlobal with engine
         inst.IGlobal = MagicMock()
@@ -751,8 +780,9 @@ class TestIInstanceRouting:
         inst.instance = MagicMock()
         return inst
 
-    def test_write_questions_routes_to_questions(self):
+    def test_write_questions_routes_to_questions(self, branch_runtime):
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
         question = _MockQuestion()
@@ -760,8 +790,9 @@ class TestIInstanceRouting:
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
 
-    def test_write_questions_routes_to_answers(self):
+    def test_write_questions_routes_to_answers(self, branch_runtime):
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
         )
         question = _MockQuestion()
@@ -769,24 +800,27 @@ class TestIInstanceRouting:
         inst.writeQuestions(question)
         inst.instance.writeAnswers.assert_called_once()
 
-    def test_write_answers_routes_to_answers(self):
+    def test_write_answers_routes_to_answers(self, branch_runtime):
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
         )
         answer = _MockAnswer(text='Python is a programming language.')
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
 
-    def test_write_answers_routes_to_questions(self):
+    def test_write_answers_routes_to_questions(self, branch_runtime):
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
         answer = _MockAnswer(text='Python is a programming language.')
         inst.writeAnswers(answer)
         inst.instance.writeQuestions.assert_called_once()
 
-    def test_default_lane_when_no_rules_match(self):
+    def test_default_lane_when_no_rules_match(self, branch_runtime):
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'contains', 'keywords': 'java'}, 'lane': 'answers'}],
             default_lane='questions',
         )
@@ -796,9 +830,10 @@ class TestIInstanceRouting:
         inst.instance.writeQuestions.assert_called_once()
         inst.instance.writeAnswers.assert_not_called()
 
-    def test_original_object_passed_directly(self):
+    def test_original_object_passed_directly(self, branch_runtime):
         """Verify that the original question is passed directly (no deepcopy) since first-match-wins means only one downstream consumer."""
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
         question = _MockQuestion()
@@ -808,10 +843,9 @@ class TestIInstanceRouting:
         routed = inst.instance.writeQuestions.call_args[0][0]
         assert routed is question
 
-    def test_none_engine_raises_runtime_error(self):
+    def test_none_engine_raises_runtime_error(self, branch_runtime):
         """Verify that a RuntimeError is raised when the engine is None."""
-        from branch.IInstance import IInstance
-
+        IInstance = branch_runtime['IInstance']
         inst = IInstance()
         inst.IGlobal = MagicMock()
         inst.IGlobal.engine = None
@@ -826,12 +860,13 @@ class TestIInstanceRouting:
         with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
             inst.writeAnswers(answer)
 
-    def test_answer_to_question_lane_preserves_text_as_context_and_history(self):
+    def test_answer_to_question_lane_preserves_text_as_context_and_history(self, branch_runtime):
         """Cross-lane enrichment: answer->question conversion must carry the
         answer text into both Question.context and Question.history to avoid
         silent data loss.
         """
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
         answer = _MockAnswer(text='Paris is the capital of France.')
@@ -847,9 +882,10 @@ class TestIInstanceRouting:
         assert routed_question.history[0].role == 'assistant'
         assert routed_question.history[0].content == 'Paris is the capital of France.'
 
-    def test_answer_to_question_skips_enrichment_on_empty_text(self):
+    def test_answer_to_question_skips_enrichment_on_empty_text(self, branch_runtime):
         """Empty-text answers should still route but not inject empty context/history entries."""
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
         answer = _MockAnswer(text='')
@@ -858,12 +894,13 @@ class TestIInstanceRouting:
         assert routed_question.context == []
         assert routed_question.history == []
 
-    def test_question_to_answer_lane_carries_prompt_text(self):
+    def test_question_to_answer_lane_carries_prompt_text(self, branch_runtime):
         """Question->answer conversion preserves the rendered prompt text as the
         answer payload. History/context enrichment is intentionally not
         possible (Answer schema has no such fields).
         """
         inst = self._make_instance(
+            branch_runtime,
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
         )
         question = _MockQuestion()
