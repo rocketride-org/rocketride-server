@@ -25,6 +25,7 @@
 # This class controls the data for each thread of the task
 # ------------------------------------------------------------------------------
 import copy
+from collections.abc import Mapping
 
 from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Doc, DocMetadata
@@ -44,16 +45,42 @@ class IInstance(IInstanceBase):
         self.chunkId = 0
 
     @staticmethod
+    def _coerce_document(document) -> Doc:
+        """Normalize runtime-decoded JSON documents to the schema object."""
+        if isinstance(document, Mapping):
+            if hasattr(Doc, 'model_validate'):
+                return Doc.model_validate(document)
+            return Doc(**dict(document))
+
+        if not hasattr(document, 'page_content') and hasattr(document, 'items'):
+            document_data = dict(document.items())
+            if hasattr(Doc, 'model_validate'):
+                return Doc.model_validate(document_data)
+            return Doc(**document_data)
+
+        return document
+
+    @staticmethod
+    def _copy_document(document: Doc) -> Doc:
+        """Copy a document without sharing metadata between emitted chunks."""
+        if hasattr(document, 'model_copy'):
+            return document.model_copy()
+        return copy.copy(document)
+
+    @staticmethod
     def _copy_metadata(metadata) -> tuple[DocMetadata, str]:
         """Return mutable document metadata and the original object id."""
         if metadata is None:
             return DocMetadata(objectId='', chunkId=0), ''
 
-        if isinstance(metadata, dict):
+        if isinstance(metadata, Mapping):
             metadata_data = dict(metadata)
             metadata_data.setdefault('objectId', '')
             metadata_data.setdefault('chunkId', 0)
             return DocMetadata(**metadata_data), metadata_data.get('objectId', '') or ''
+
+        if hasattr(metadata, 'model_copy'):
+            return metadata.model_copy(), getattr(metadata, 'objectId', '') or ''
 
         return copy.copy(metadata), getattr(metadata, 'objectId', '') or ''
 
@@ -68,14 +95,16 @@ class IInstance(IInstanceBase):
         if self.IGlobal.strategy is None:
             raise RuntimeError('Chunker strategy not initialized')
 
-        for document in documents:
+        for raw_document in documents:
+            document = self._coerce_document(raw_document)
+
             # Extract text content
-            text = document.page_content or ''
+            text = getattr(document, 'page_content', None) or ''
             if not text.strip():
                 continue
 
             # Get the original object ID for parent tracking
-            source_metadata, parent_id = self._copy_metadata(document.metadata)
+            source_metadata, parent_id = self._copy_metadata(getattr(document, 'metadata', None))
 
             # Chunk the text
             chunks = self.IGlobal.strategy.chunk(text)
@@ -87,8 +116,8 @@ class IInstance(IInstanceBase):
             # Build output documents
             output_docs: list[Doc] = []
             for chunk_data in chunks:
-                # Shallow copy of document, explicit copy of metadata only
-                chunk_doc = copy.copy(document)
+                # Copy the document and metadata separately so each chunk is independent.
+                chunk_doc = self._copy_document(document)
                 chunk_doc.metadata = copy.copy(source_metadata)
                 chunk_doc.page_content = chunk_data['text']
 

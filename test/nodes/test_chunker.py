@@ -659,6 +659,36 @@ class TestChunkerLifecycle:
         finally:
             self._restore_modules(saved, names)
 
+    def test_write_documents_accepts_dict_payloads(self):
+        """Dynamic lane tests may deliver JSON-decoded document dictionaries."""
+        saved, names, IInstance, RC = self._load_iinstance()
+        try:
+            strategy = RC(chunk_size=20, chunk_overlap=0)
+            inst, mock_instance = self._make_instance(IInstance, strategy=strategy)
+
+            inst.writeDocuments(
+                [
+                    {
+                        'page_content': 'This dictionary document should be split into chunks.',
+                        'metadata': {
+                            'objectId': 'dict-doc',
+                            'chunkId': 0,
+                            'nodeId': 'test-node',
+                            'parent': '/test',
+                        },
+                    }
+                ]
+            )
+
+            assert mock_instance.writeDocuments.called
+            emitted_docs = mock_instance.writeDocuments.call_args[0][0]
+            assert len(emitted_docs) >= 2
+            for chunk_doc in emitted_docs:
+                assert chunk_doc.page_content
+                assert chunk_doc.metadata.parentId == 'dict-doc'
+        finally:
+            self._restore_modules(saved, names)
+
     def test_shallow_copy_does_not_corrupt_original(self):
         """Shallow copy + metadata copy should not mutate the original document."""
         saved, names, IInstance, RC = self._load_iinstance()
