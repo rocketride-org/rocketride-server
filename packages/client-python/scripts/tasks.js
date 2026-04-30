@@ -147,6 +147,12 @@ function makeStartTestServerAction(options = {}) {
 				script: 'ai/eaas.py',
 				trace: options.trace,
 				basePort: 20000,
+				// CI for fork PRs doesn't have repo secrets; the integration tests
+				// expect a shared API key between server and client. Default to the
+				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
+				env: {
+					ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+				},
 				onOutput: (text) => {
 					if (taskComplete) return;
 					const lines = text.trim().split('\n');
