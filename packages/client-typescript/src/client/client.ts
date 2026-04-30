@@ -611,7 +611,9 @@ export class RocketRideClient extends DAPClient {
 		if (credential && typeof credential === 'object') {
 			resolvedCredential = 'cd_' + btoa(JSON.stringify(credential));
 		} else {
-			resolvedCredential = (credential as string | undefined) ?? this._env['ROCKETRIDE_APIKEY'] ?? this._apikey ?? '';
+			const envKey = this._env['ROCKETRIDE_APIKEY'];
+			const envCredential = typeof envKey === 'string' && envKey.trim() !== '' ? envKey : undefined;
+			resolvedCredential = (credential as string | undefined) ?? envCredential ?? this._apikey ?? '';
 		}
 		this._setAuth(resolvedCredential);
 
