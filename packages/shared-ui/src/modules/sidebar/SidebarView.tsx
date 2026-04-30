@@ -737,7 +737,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 			return nodes;
 		},
-		[getChildren, expandedDirs, expandedFiles, hoveredRow, activeTasks, isConnected, onOpenFile, onFileManage, onSourceAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate]
+		[getChildren, expandedDirs, expandedFiles, hoveredRow, activeTasks, isConnected, isSubscribed, onOpenFile, onFileManage, onSourceAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate]
 	);
 
 	// ── Unknown tasks ──────────────────────────────────────────────────────

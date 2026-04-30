@@ -117,12 +117,17 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 
 		for (const [oldKey, newKey] of keyMap) {
 			const inspected = config.inspect<unknown>(oldKey);
+			const migrated = config.inspect<unknown>(newKey);
 			if (inspected?.globalValue !== undefined) {
-				await config.update(newKey, inspected.globalValue, vscode.ConfigurationTarget.Global);
+				if (migrated?.globalValue === undefined) {
+					await config.update(newKey, inspected.globalValue, vscode.ConfigurationTarget.Global);
+				}
 				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Global);
 			}
 			if (inspected?.workspaceValue !== undefined) {
-				await config.update(newKey, inspected.workspaceValue, vscode.ConfigurationTarget.Workspace);
+				if (migrated?.workspaceValue === undefined) {
+					await config.update(newKey, inspected.workspaceValue, vscode.ConfigurationTarget.Workspace);
+				}
 				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Workspace);
 			}
 		}
@@ -136,7 +141,10 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			try {
 				const value = await context.secrets.get(oldSecret);
 				if (value) {
-					await context.secrets.store(newSecret, value);
+					const existing = await context.secrets.get(newSecret);
+					if (!existing) {
+						await context.secrets.store(newSecret, value);
+					}
 					await context.secrets.delete(oldSecret);
 				}
 			} catch {

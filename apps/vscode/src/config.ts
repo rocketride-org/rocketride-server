@@ -178,7 +178,7 @@ export class ConfigManager {
 					await this.refreshConfig();
 
 					// If dev hostUrl changed, sync to .env
-					if (event.affectsConfiguration(`${this.configSection}.development.hostUrl`)) {
+					if (event.affectsConfiguration(`${this.configSection}.development.hostUrl`) || event.affectsConfiguration(`${this.configSection}.development.connectionMode`)) {
 						await this.syncSettingsToEnv();
 					}
 				}
@@ -233,7 +233,7 @@ export class ConfigManager {
 
 		// Cloud: fall back to ROCKETRIDE_URI when hostUrl is not set
 		if (connectionMode === 'cloud' && !hostUrl) {
-			hostUrl = process.env.ROCKETRIDE_URI || 'http://localhost:5565';
+			hostUrl = env.ROCKETRIDE_URI || 'http://localhost:5565';
 		}
 
 		return {
@@ -523,7 +523,7 @@ export class ConfigManager {
 		const dev = this.config.development;
 		// On-prem always uses the user-provided hostUrl.
 		// All other modes fall back to ROCKETRIDE_URI when hostUrl is empty.
-		return dev.hostUrl || (dev.connectionMode === 'onprem' ? '' : process.env.ROCKETRIDE_URI || 'http://localhost:5565');
+		return dev.hostUrl || (dev.connectionMode === 'onprem' ? '' : this.config.env.ROCKETRIDE_URI || 'http://localhost:5565');
 	}
 
 	/**
@@ -678,6 +678,10 @@ export class ConfigManager {
 
 			// --- Sync .env with final hostUrl/apiKey ---
 			await this.syncSettingsToEnv();
+		} catch (error) {
+			// Refresh cache even on failure so subsequent reads see persisted writes
+			await this.refreshConfig();
+			throw error;
 		} finally {
 			this.isBatchApplying = false;
 		}

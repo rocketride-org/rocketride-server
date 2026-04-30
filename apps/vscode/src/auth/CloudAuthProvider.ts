@@ -120,7 +120,11 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 			// Always use the cloud URI for token exchange -- the OAuth code must
 			// be exchanged against the cloud server regardless of the current
 			// connection mode (local, docker, etc.).
-			const cloudUrl = process.env.ROCKETRIDE_URI || '';
+			const cloudUrl = process.env.ROCKETRIDE_URI;
+			if (!cloudUrl) {
+				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: cloud endpoint is not configured (ROCKETRIDE_URI).');
+				return;
+			}
 			const tempClient = new RocketRideClient({ persist: false });
 			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
 

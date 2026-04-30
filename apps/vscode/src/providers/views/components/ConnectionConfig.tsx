@@ -126,7 +126,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 			<div style={S.modeConfigBox}>
 				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={[]} selectedTeamId="" onTeamChange={() => {}} simplified={true} />}
 
-				{(connectionMode === 'onprem' || connectionMode === 'docker' || connectionMode === 'service') && <OnPremPanel idPrefix={idPrefix} hostUrl="" onHostUrlChange={() => {}} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={false} onDebugOutputChange={() => {}} simplified={true} />}
+				{(connectionMode === 'onprem' || connectionMode === 'docker' || connectionMode === 'service') && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={false} onDebugOutputChange={() => {}} simplified={true} />}
 			</div>
 		);
 	}

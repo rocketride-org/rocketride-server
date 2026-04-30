@@ -288,7 +288,7 @@ export class ConnectionManager extends EventEmitter {
 				}
 				this.emit('disconnected');
 			},
-			onConnectError: (error: Error) => {
+			onConnectError: async (error: Error) => {
 				// Auth rejection: stop retrying, clear stale credentials, and
 				// open the auth page so the user can fix them.
 				if (error instanceof AuthenticationException) {
@@ -298,7 +298,7 @@ export class ConnectionManager extends EventEmitter {
 					// Only clear the cloud token — on-prem/docker/service keys
 					// live in config, not SecretStorage.
 					if (connectionModeUsesOAuth(mode)) {
-						CloudAuthProvider.getInstance().signOut();
+						await CloudAuthProvider.getInstance().signOut();
 					}
 
 					this.updateConnectionStatus({

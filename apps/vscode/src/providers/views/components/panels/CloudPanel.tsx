@@ -51,10 +51,10 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 		if (onProbeServer) onProbeServer();
 	}, []);
 
-	// Stage 2: Once confirmed SaaS, fetch teams
+	// Stage 2: Once confirmed SaaS and signed in, fetch teams
 	useEffect(() => {
-		if (isSaas && onFetchTeams) onFetchTeams();
-	}, [isSaas]);
+		if (isSaas && cloudSignedIn && onFetchTeams) onFetchTeams();
+	}, [isSaas, cloudSignedIn, onFetchTeams]);
 
 	return (
 		<>

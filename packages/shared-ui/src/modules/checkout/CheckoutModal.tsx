@@ -430,9 +430,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ appName, appDescri
 						/* ── Step 1: plan picker ──────────────────────────────── */
 						<>
 							<p style={S.stepHeading}>Choose a plan</p>
-							<div style={S.planList}>
+							<div style={S.planList} role="radiogroup" aria-label="Subscription plans">
 								{plans.map((plan) => (
-									<div key={plan.priceId} style={S.planOption(selectedPlan?.priceId === plan.priceId)} onClick={() => setSelectedPlan(plan)} role="radio" aria-checked={selectedPlan?.priceId === plan.priceId}>
+									<div
+										key={plan.priceId}
+										style={S.planOption(selectedPlan?.priceId === plan.priceId)}
+										onClick={() => setSelectedPlan(plan)}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												setSelectedPlan(plan);
+											}
+										}}
+										role="radio"
+										tabIndex={0}
+										aria-checked={selectedPlan?.priceId === plan.priceId}
+									>
 										<span style={S.planLabel}>{plan.label}</span>
 										<span style={S.planAmount}>{plan.amount}</span>
 									</div>

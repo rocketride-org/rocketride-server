@@ -139,11 +139,19 @@ export class PageAuthProvider {
 			try {
 				const signedIn = await cloudAuth.isSignedIn();
 				if (signedIn) {
-					this.panel?.dispose();
-					const connectionManager = getConnectionManager();
-					if (connectionManager) {
-						await connectionManager.settingsApplied();
+					// Reconnect the correct connection group
+					const group = this.pendingGroup || 'development';
+					if (group === 'deployment') {
+						const { DeployManager } = require('../connection/deploy-manager');
+						const deployManager = DeployManager.getDeployInstance();
+						await deployManager.settingsApplied();
+					} else {
+						const connectionManager = getConnectionManager();
+						if (connectionManager) {
+							await connectionManager.settingsApplied();
+						}
 					}
+					this.panel?.dispose();
 				}
 			} catch (error) {
 				console.error('[PageAuthProvider] Reconnect after sign-in failed:', error);
@@ -216,9 +224,6 @@ export class PageAuthProvider {
 				await this.configManager.updateHostUrl(group, message.hostUrl);
 			}
 
-			// Close the panel before reconnecting
-			this.panel?.dispose();
-
 			// Trigger reconnect for the correct connection
 			if (group === 'deployment') {
 				const { DeployManager } = require('../connection/deploy-manager');
@@ -230,6 +235,9 @@ export class PageAuthProvider {
 					await connectionManager.settingsApplied();
 				}
 			}
+
+			// Close the panel only after successful reconnect
+			this.panel?.dispose();
 		} catch (error) {
 			console.error('[PageAuthProvider] Failed to save credentials:', error);
 			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save: ${error}` });

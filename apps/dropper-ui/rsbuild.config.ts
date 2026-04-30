@@ -14,7 +14,9 @@ const { getenv, requireKeys } = require('../../scripts/lib/getenv');
 export default defineConfig(({ command }) => {
 	const isDev = command === 'dev';
 	const fullEnv = getenv();
-	const parsed = Object.fromEntries(Object.entries(fullEnv).filter(([k]) => k.startsWith('ROCKETRIDE_')));
+	// Allowlist: only bundle public client-safe ROCKETRIDE_* vars
+	const clientEnvKeys = ['ROCKETRIDE_URI', ...(isDev ? ['ROCKETRIDE_APIKEY'] : [])];
+	const parsed = Object.fromEntries(clientEnvKeys.flatMap((k) => (fullEnv[k] ? [[k, fullEnv[k]]] : [])));
 
 	requireKeys(parsed, ['ROCKETRIDE_URI'], 'dropper-ui');
 	if (isDev) {

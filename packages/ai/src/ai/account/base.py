@@ -51,7 +51,7 @@ class AccountBase(ABC):
     # Server capability tags — subclasses override to declare their mode.
     # OSS sets ['oss']; SaaS sets ['saas']. Used by the infoOnly auth probe
     # and copied into every AccountInfo returned by authenticate().
-    capabilities: list[str] = []
+    capabilities: tuple[str, ...] = ()
 
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS

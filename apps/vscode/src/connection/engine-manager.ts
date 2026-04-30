@@ -324,12 +324,11 @@ export class EngineManager extends EventEmitter {
 		this.actualPort = undefined;
 
 		return new Promise<void>((resolve) => {
+			// Force-kill fallback if graceful shutdown takes too long
 			const timeout = setTimeout(() => {
 				if (!child.killed) {
 					child.kill('SIGKILL');
 				}
-				this.removePidFile(pidFileToRemove);
-				resolve();
 			}, 5000);
 
 			child.once('exit', () => {

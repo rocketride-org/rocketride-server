@@ -204,6 +204,12 @@ export class DeployManager extends ConnectionManager {
 
 		if (this.wasShared) {
 			this.startForwarding();
+			// Replay current dev state so listeners don't stay stale
+			const devStatus = this.getDevManager().getConnectionStatus();
+			this.emit('connectionStateChanged', devStatus);
+			if (this.getDevManager().isConnected()) {
+				this.emit('connected');
+			}
 			return;
 		}
 

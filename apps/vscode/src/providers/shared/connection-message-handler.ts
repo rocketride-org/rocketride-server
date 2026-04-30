@@ -290,7 +290,11 @@ export class ConnectionMessageHandler {
 				return;
 			}
 
-			apiKey = (apiKey || '').trim() || 'MYAPIKEY';
+			apiKey = (apiKey || '').trim();
+			if (!apiKey) {
+				this.showMessage(webview, 'error', 'API key is required.', messageContext);
+				return;
+			}
 
 			testClient = new RocketRideClient({ auth: apiKey, uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
 

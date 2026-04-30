@@ -42,7 +42,7 @@ export interface DockerPanelProps {
 // COMPONENT
 // =============================================================================
 
-export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop }) => {
+export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop, simplified }) => {
 	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 	const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 	const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -58,6 +58,16 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 		document.addEventListener('click', handler);
 		return () => document.removeEventListener('click', handler);
 	}, [idPrefix]);
+
+	// Simplified mode: description only (used by PageAuth)
+	if (simplified) {
+		return (
+			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+				<img src={dockerIcon} alt="Docker" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the RocketRide engine as a Docker container. Requires Docker to be installed and the daemon running.</div>
+			</div>
+		);
+	}
 
 	const transitional = status.state === 'starting' || status.state === 'stopping';
 	const allDisabled = busy || transitional;

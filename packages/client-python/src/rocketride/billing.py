@@ -29,7 +29,7 @@ commands over the existing WebSocket connection.
 
 Usage:
     details = await client.billing.get_details(org_id)
-    plans = await client.billing.get_product_prices(product_id)
+    plans = await client.billing.get_product_prices(app_id)
     balance = await client.billing.get_credit_balance(org_id)
 """
 

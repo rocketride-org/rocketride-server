@@ -217,7 +217,6 @@ export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipe
 			}}
 			disabled={btn.disabled}
 			onClick={() => {
-				console.log(`[StatusActions] clicked action=${btn.action} disabled=${btn.disabled} isSubscribed=${isSubscribed}`);
 				if (!btn.disabled) onPipelineAction(btn.action, taskStatus?.source);
 			}}
 		>

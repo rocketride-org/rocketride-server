@@ -375,14 +375,16 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
-					console.log(`[PageProjectProvider] pipelineAction: action=${action} source=${source}`);
 					if (action === 'run' || action === 'restart') {
-						// Gate: check subscription before running
+						// Gate: check connection before running
 						const runClient = this.connectionManager.getClient();
+						if (!runClient) {
+							vscode.window.showErrorMessage('Not connected to server');
+							break;
+						}
+						// Gate: check subscription before running
 						const sub = isSubscribed(runClient, PIPE_BUILDER_APP_ID);
-						console.log(`[PageProjectProvider] isSubscribed=${sub} client=${!!runClient}`);
 						if (!sub) {
-							console.log('[PageProjectProvider] sending checkout:required');
 							webview.postMessage({ type: 'checkout:required' });
 							break;
 						}

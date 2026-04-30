@@ -65,7 +65,7 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 	}, [idPrefix]);
 
 	const transitional = status.state === 'starting' || status.state === 'stopping';
-	const allDisabled = busy || transitional;
+	const allDisabled = busy || transitional || sudoPromptVisible;
 	const isRunning = status.state === 'running' || status.state === 'stopping';
 	const showInstall = status.state === 'not-installed' && !(busy && action === 'remove');
 
