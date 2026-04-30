@@ -67,12 +67,6 @@
 	"lanes": {
 		"documents": []
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"output": []
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

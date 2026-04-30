@@ -65,18 +65,6 @@
 		"audio": [],
 		"video": []
 	},
-	"input": [
-		{
-			"lane": "audio",
-			"description": "Audio input",
-			"output": []
-		},
-		{
-			"lane": "video",
-			"description": "Video input",
-			"output": []
-		}
-	],
 	//
 	//
 	//	Optional:

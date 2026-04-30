@@ -60,12 +60,6 @@
 	"lanes": {
 		"text": []
 	},
-	"input": [
-		{
-			"lane": "text",
-			"output": []
-		}
-	],
 
 	//
 	//	Optional:

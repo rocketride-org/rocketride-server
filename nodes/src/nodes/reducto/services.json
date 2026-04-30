@@ -63,19 +63,6 @@
 	"lanes": {
 		"tags": ["text", "table"]
 	},
-	"input": [
-		{
-			"lane": "tags",
-			"output": [
-				{
-					"lane": "text"
-				},
-				{
-					"lane": "table"
-				}
-			]
-		}
-	],
 
 	//
 	// Required:

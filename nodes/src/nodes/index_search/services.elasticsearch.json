@@ -67,44 +67,6 @@
 			}
 		]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": ["Store text into the Elasticsearch index (index mode only)."],
-			"output": []
-		},
-		{
-			"lane": "documents",
-			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors. ", "This node supports both storing documents and searching them - you can use ", "the same Elasticsearch node for both upload and retrieve operations."],
-			"output": []
-		},
-		{
-			"lane": "questions",
-			"description": ["Searches the database for documents most similar to the given questions. ", "This node supports both storing documents and searching them - you can use ", "the same Elasticsearch node for both upload and retrieve operations."],
-			"output": [
-				{
-					"lane": "text",
-					"description": ["Produces text that is most similar to the given question."],
-					"output": []
-				},
-				{
-					"lane": "documents",
-					"description": ["Produces documents that are most similar to the given question."],
-					"output": []
-				},
-				{
-					"lane": "answers",
-					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
-					"output": []
-				},
-				{
-					"lane": "questions",
-					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
-					"output": []
-				}
-			]
-		}
-	],
 	"preconfig": {
 		"default": "self-managed",
 		"profiles": {

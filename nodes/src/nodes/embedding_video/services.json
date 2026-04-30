@@ -61,18 +61,6 @@
 	"lanes": {
 		"video": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "video",
-			"description": "Video to extract frames from and embed.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents containing frame embeddings with timestamp metadata."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

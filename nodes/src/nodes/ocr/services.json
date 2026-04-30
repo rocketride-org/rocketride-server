@@ -70,27 +70,6 @@
 		"documents": ["text"],
 		"image": ["text", "table"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"output": [
-				{
-					"lane": "text"
-				}
-			]
-		},
-		{
-			"lane": "image",
-			"output": [
-				{
-					"lane": "text"
-				},
-				{
-					"lane": "table"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

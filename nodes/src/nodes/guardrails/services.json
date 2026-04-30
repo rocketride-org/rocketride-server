@@ -85,41 +85,6 @@
 			"documents"
 		]
 	},
-	"input": [
-		{
-			"lane": "questions",
-			"description": "Questions to check with input guardrails before forwarding to the LLM",
-			"min": 0,
-			"output": [
-				{
-					"lane": "questions",
-					"description": "Questions that passed guardrails checks"
-				}
-			]
-		},
-		{
-			"lane": "answers",
-			"description": "Answers to check with output guardrails before forwarding to the client",
-			"min": 0,
-			"output": [
-				{
-					"lane": "answers",
-					"description": "Answers that passed guardrails checks"
-				}
-			]
-		},
-		{
-			"lane": "documents",
-			"description": "Source documents used as ground truth for hallucination detection",
-			"min": 0,
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Source documents passed through"
-				}
-			]
-		}
-	],
 	//
 	//	Test configuration for automated node testing
 	//
