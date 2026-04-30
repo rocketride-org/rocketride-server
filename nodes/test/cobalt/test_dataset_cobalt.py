@@ -98,12 +98,23 @@ def _install_mocks():
         def writeQuestions(self, question):
             pass
 
+    class _IEndpointBase:
+        endpoint = None
+
+        def preventDefault(self):
+            raise Exception('No default to prevent')
+
     mock_rocketlib.IGlobalBase = _IGlobalBase
     mock_rocketlib.IInstanceBase = _IInstanceBase
+    mock_rocketlib.IEndpointBase = _IEndpointBase
     mock_rocketlib.Entry = MagicMock
     mock_rocketlib.OPEN_MODE = MagicMock()
     mock_rocketlib.debug = lambda msg: None
     mock_rocketlib.warning = lambda msg: None
+    mock_rocketlib.monitorStatus = lambda msg: None
+    mock_rocketlib.monitorCompleted = lambda size: None
+    mock_rocketlib.monitorFailed = lambda size: None
+    mock_rocketlib.getObject = lambda obj: MagicMock(url=obj.get('url'), name=obj.get('name'))
     mock_rocketlib.getServiceDefinition = MagicMock(return_value={})
     mock_rocketlib.IJson = MagicMock()
     sys.modules['rocketlib'] = mock_rocketlib
@@ -277,6 +288,7 @@ sys.modules['cobalt'] = mock_cobalt
 # Now import the actual node code
 # ---------------------------------------------------------------------------
 from dataset_cobalt.dataset_loader import DatasetLoader
+from dataset_cobalt.IEndpoint import IEndpoint
 from dataset_cobalt.IGlobal import IGlobal
 from dataset_cobalt.IInstance import IInstance
 
@@ -622,6 +634,117 @@ class TestDeepCopyPreventsMutation:
         # Mutating one should not affect the other
         emitted[0].questions.append('mutated')
         assert 'mutated' not in emitted[1].questions
+
+
+# ===========================================================================
+# IEndpoint tests
+# ===========================================================================
+
+
+class TestIEndpointSource:
+    """Test source endpoint emission for real pipeline entrypoint behavior."""
+
+    def _make_endpoint(self, config):
+        endpoint = IEndpoint()
+        endpoint.endpoint = MagicMock()
+        endpoint.endpoint.logicalType = 'dataset_cobalt'
+        endpoint.endpoint.serviceConfig = config
+        endpoint.endpoint.bag = {}
+        return endpoint
+
+    def test_scan_objects_emits_inline_questions(self):
+        config = {
+            'source_type': 'inline',
+            'items': [
+                {'input': 'q1', 'expected': 'a1'},
+                {'input': 'q2', 'expected': 'a2'},
+            ],
+            'sample_size': 0,
+        }
+        endpoint = self._make_endpoint(config)
+        entries = []
+
+        endpoint.scanObjects('', lambda entry: entries.append(entry) or 0)
+
+        assert len(entries) == 2
+        assert entries[0]['name'] == 'q1'
+        assert entries[0]['objectTags']['text'] == 'q1'
+        assert entries[0]['objectTags']['metadata']['expected'] == 'a1'
+        assert entries[1]['objectTags']['text'] == 'q2'
+
+    def test_endpoint_dataset_prefix_keys_are_normalized(self):
+        config = {
+            'dataset.source_type': 'inline',
+            'dataset.items': '[{"input": "q", "expected": "a"}]',
+            'dataset.sample_size': 0,
+        }
+        endpoint = self._make_endpoint(config)
+        entries = []
+
+        endpoint.scanObjects('', lambda entry: entries.append(entry) or 0)
+
+        assert len(entries) == 1
+        assert entries[0]['objectTags']['text'] == 'q'
+        assert entries[0]['objectTags']['metadata']['expected'] == 'a'
+
+    def test_endpoint_reads_source_parameters_block(self):
+        config = {
+            'hideForm': True,
+            'mode': 'Source',
+            'type': 'dataset_cobalt',
+            'parameters': {
+                'profile': 'inline',
+                'inline': {'source_type': 'inline', 'items': '[{"input": "q", "expected": "a"}]', 'sample_size': 0},
+            },
+        }
+        endpoint = self._make_endpoint(config)
+        entries = []
+
+        endpoint.scanObjects('', lambda entry: entries.append(entry) or 0)
+
+        assert len(entries) == 1
+        assert entries[0]['objectTags']['text'] == 'q'
+        assert entries[0]['objectTags']['metadata']['expected'] == 'a'
+
+    def test_endpoint_recovers_config_from_task_pipeline(self):
+        endpoint = self._make_endpoint({'hideForm': True, 'mode': 'Source', 'type': 'dataset_cobalt'})
+        endpoint.endpoint.taskConfig = {
+            'pipeline': {
+                'source': 'dataset_cobalt_1',
+                'components': [
+                    {
+                        'id': 'dataset_cobalt_1',
+                        'provider': 'dataset_cobalt',
+                        'config': {
+                            'parameters': {
+                                'profile': 'inline',
+                                'inline': {'source_type': 'inline', 'items': '[{"input": "q", "expected": "a"}]', 'sample_size': 0},
+                            },
+                        },
+                    },
+                ],
+            },
+        }
+        entries = []
+
+        endpoint.scanObjects('', lambda entry: entries.append(entry) or 0)
+
+        assert len(entries) == 1
+        assert entries[0]['objectTags']['text'] == 'q'
+        assert entries[0]['objectTags']['metadata']['expected'] == 'a'
+
+    def test_render_object_sends_question_from_scan_entry(self):
+        inst = IInstance()
+        inst.instance = MagicMock()
+        entry = MagicMock()
+        entry.objectTags = {'text': 'q', 'metadata': {'expected': 'a'}}
+
+        with pytest.raises(Exception, match='No default to prevent'):
+            inst.renderObject(entry)
+
+        emitted = inst.instance.sendQuestions.call_args.args[0]
+        assert emitted.questions == ['q']
+        assert emitted.metadata['expected'] == 'a'
 
 
 # ===========================================================================

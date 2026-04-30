@@ -4,13 +4,17 @@
 			"id": "dataset_cobalt_1",
 			"provider": "dataset_cobalt",
 			"config": {
-				"profile": "inline",
-				"inline": {
-					"source_type": "inline",
-					"items": "[{\"input\": \"What is the capital of France?\", \"expected\": \"The capital of France is Paris.\"}, {\"input\": \"What is 2 + 2?\", \"expected\": \"2 + 2 equals 4.\"}, {\"input\": \"Name the largest ocean on Earth.\", \"expected\": \"The Pacific Ocean is the largest ocean on Earth.\"}]",
-					"sample_size": 0
-				},
-				"parameters": {}
+				"hideForm": true,
+				"mode": "Source",
+				"type": "dataset_cobalt",
+				"parameters": {
+					"profile": "inline",
+					"inline": {
+						"source_type": "inline",
+						"items": "[{\"input\": \"What is the capital of France?\", \"expected\": \"The capital of France is Paris.\"}, {\"input\": \"What is 2 + 2?\", \"expected\": \"2 + 2 equals 4.\"}, {\"input\": \"Name the largest ocean on Earth.\", \"expected\": \"The Pacific Ocean is the largest ocean on Earth.\"}]",
+						"sample_size": 0
+					}
+				}
 			},
 			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
 		},
@@ -57,6 +61,8 @@
 			"ui": { "position": { "x": 900, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
 		}
 	],
+	"source": "dataset_cobalt_1",
+	"project_id": "d3db3056-0d6b-4d81-ae1d-3f7cfd6f1119",
 	"viewport": { "x": 0, "y": 0, "zoom": 1 },
 	"version": 1
 }

@@ -24,8 +24,9 @@
 import contextlib
 import copy
 
-from rocketlib import IInstanceBase, debug
+from rocketlib import Entry, IInstanceBase, debug
 
+from .common import question_from_item
 from .IGlobal import IGlobal
 
 
@@ -83,3 +84,17 @@ class IInstance(IInstanceBase):
             self.instance.writeQuestions(q)
 
         debug(f'Cobalt Dataset Instance: Finished emitting {len(questions)} questions')
+
+    def renderObject(self, object: Entry):
+        """Render a dataset scan entry as a Question from source mode."""
+        tags = getattr(object, 'objectTags', None)
+        if not tags:
+            debug('Cobalt Dataset Instance: Source entry has no objectTags, skipping')
+            return self.preventDefault()
+
+        item = {
+            'text': tags.get('text', ''),
+            'metadata': tags.get('metadata', {}) or {},
+        }
+        self.instance.sendQuestions(question_from_item(item))
+        return self.preventDefault()

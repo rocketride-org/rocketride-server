@@ -88,7 +88,7 @@ class IGlobal(IGlobalBase):
         In CONFIG mode (pipeline save) this is a no-op to avoid loading
         datasets during configuration saves.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+        if self.IEndpoint.endpoint.openMode in (OPEN_MODE.CONFIG, OPEN_MODE.SOURCE):
             return
 
         debug('Cobalt Dataset Global: Starting global initialization')

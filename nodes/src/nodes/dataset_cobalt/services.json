@@ -19,13 +19,13 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [],
+	"capabilities": ["noinclude"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
-	"register": "filter",
+	"register": "endpoint",
 	//
 	// Optional:
 	//		The node is the actual pyhsical node to instantiate - if
@@ -60,11 +60,11 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": ["questions"]
+		"_source": ["questions"]
 	},
 	"input": [
 		{
-			"lane": "questions",
+			"lane": "_source",
 			"output": [
 				{
 					"lane": "questions"

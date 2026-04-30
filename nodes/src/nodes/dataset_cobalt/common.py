@@ -21,13 +21,24 @@
 # SOFTWARE.
 # =============================================================================
 
-# Import the filters
-from .IEndpoint import IEndpoint
-from .IGlobal import IGlobal
-from .IInstance import IInstance
+from typing import Any, Dict
 
-__all__ = [
-    'IEndpoint',
-    'IGlobal',
-    'IInstance',
-]
+from ai.common.schema import Question
+
+
+def question_from_item(item: Dict[str, Any]) -> Question:
+    question = Question()
+
+    text = item.get('text', '')
+    if text:
+        question.addQuestion(text)
+
+    metadata = item.get('metadata', {})
+    if metadata:
+        existing = getattr(question, 'metadata', None)
+        if isinstance(existing, dict):
+            existing.update(metadata)
+        else:
+            question.metadata = dict(metadata)
+
+    return question
