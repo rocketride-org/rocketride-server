@@ -74,9 +74,9 @@ function getTaskEventDisplay(body: TaskEvent): { color: string; label: string; m
 function getDashboardEventDisplay(body: DashboardEvent): { color: string; label: string; message: string } {
 	switch (body.action) {
 		case 'connection_added':
-			return { color: 'connection', label: 'connect', message: `${formatClient(body.clientName, body.clientVersion, body.connectionId)} connected` };
+			return { color: 'connection', label: 'connect', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} connected` };
 		case 'connection_removed':
-			return { color: 'connection', label: 'disconnect', message: `${formatClient(body.clientName, body.clientVersion, body.connectionId)} disconnected` };
+			return { color: 'connection', label: 'disconnect', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} disconnected` };
 		case 'task_removed':
 			return { color: 'system', label: 'system', message: `Task ${body.taskId} removed` };
 		case 'task_error':
@@ -84,7 +84,9 @@ function getDashboardEventDisplay(body: DashboardEvent): { color: string; label:
 		case 'auth_failed':
 			return { color: 'warning', label: 'security', message: `Auth rejected for #${body.connectionId}: ${body.reason}` };
 		case 'monitor_changed':
-			return { color: 'system', label: 'system', message: `${formatClient(body.clientName, body.clientVersion, body.connectionId)} ${body.change} to ${body.key}` };
+			return { color: 'system', label: 'system', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} ${body.change} to ${body.key}` };
+		default:
+			return { color: 'system', label: 'unknown', message: `Unknown event: ${(body as any).action}` };
 	}
 }
 

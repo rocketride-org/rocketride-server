@@ -30,9 +30,11 @@ export function readTheme(): ThemeTokens {
 /**
  * Fetch a theme JSON file from the server and apply it.
  * Returns the token object so callers can pass it to iframes or buildMuiTheme.
+ * @param themeId  Theme file name without extension (e.g. 'rocketride-light')
+ * @param basePath URL prefix where theme files are hosted (default: '/themes')
  */
-export async function fetchAndApplyTheme(themeId: string): Promise<ThemeTokens> {
-	const response = await fetch(`/themes/${themeId}.json`);
+export async function fetchAndApplyTheme(themeId: string, basePath = '/themes'): Promise<ThemeTokens> {
+	const response = await fetch(`${basePath}/${themeId}.json`);
 	if (!response.ok) throw new Error(`Theme '${themeId}' not found`);
 	const tokens: ThemeTokens = await response.json();
 	applyTheme(tokens);

@@ -221,8 +221,10 @@ function makeCopyToServerStaticAction() {
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			if (options.testport) {
-				ctx.port = options.testport;
+			// Check for --testport from CLI options or direct options
+			const testport = options.testport || ctx.options?.testport;
+			if (testport) {
+				ctx.port = testport;
 				task.output = `Using existing server on port ${ctx.port}`;
 				return { port: ctx.port, server: null };
 			}

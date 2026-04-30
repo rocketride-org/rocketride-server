@@ -22,7 +22,8 @@
 // =============================================================================
 
 /**
- * connection.ts - Centralized Connection Manager for RocketRide VS Code Extension
+ * ConnectionManager — centralized connection manager for the RocketRide VS Code
+ * extension.
  *
  * Owns a single persistent RocketRideClient (created once, never destroyed
  * except at dispose). The SDK's persist mode handles all reconnection and
@@ -31,33 +32,43 @@
  * Delegates backend lifecycle to a BaseManager subclass per mode:
  *   LocalManager  — install/start engine, connect client with retries
  *   RemoteManager — validate credentials, connect client
+ *
+ * Subclass pattern:
+ *   DeployManager extends this class with its own singleton, overriding the
+ *   getEffective*() config accessors to read deploy-specific settings
+ *   (deployTargetMode, deployHostUrl, deployApiKey, etc.).  Both singletons
+ *   coexist — one for the dev connection, one for the deploy connection.
+ *
+ * Members marked `protected` are intended for DeployManager overrides.
+ * Members marked `private` are internal implementation details.
  */
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage } from 'rocketride';
-import { ConfigManager } from '../config';
+import { RocketRideClient, DAPMessage, TraceType } from 'rocketride';
+import { ConfigManager, type ConnectionMode, type ConfigManagerInfo } from '../config';
 import { BaseManager } from './base-manager';
 import { LocalManager } from './local-manager';
 import { RemoteManager } from './remote-manager';
-import { getLogger } from '../shared/util/output';
+import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
 import { getIdeName } from '../shared/util/ide';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
 
 	// Core connection components — client is created once, manager is swapped on mode change
-	private client!: RocketRideClient;
-	private manager?: BaseManager;
-	private enginesRoot?: string;
-	private configManager = ConfigManager.getInstance();
-	private logger = getLogger();
+	protected client!: RocketRideClient;
+	protected manager?: BaseManager;
+	protected enginesRoot?: string;
+	protected configManager = ConfigManager.getInstance();
+	protected logger = getLogger();
 
 	// Connection state tracking
-	private connectionStatus: ConnectionStatus = {
+	protected connectionStatus: ConnectionStatus = {
 		state: ConnectionState.DISCONNECTED,
 		connectionMode: 'local',
 		hasCredentials: false,
@@ -69,21 +80,21 @@ export class ConnectionManager extends EventEmitter {
 	private configChangeTimeout?: NodeJS.Timeout;
 
 	// Engine install cancellation
-	private engineCts?: vscode.CancellationTokenSource;
+	protected engineCts?: vscode.CancellationTokenSource;
 
 	// In-flight connect guard — prevents concurrent connect() calls
 	private connectPromise?: Promise<void>;
 
 	// Resource cleanup tracking
-	private disposables: vscode.Disposable[] = [];
-	private isDisposing: boolean = false;
+	protected disposables: vscode.Disposable[] = [];
+	protected isDisposing: boolean = false;
 
 	// Services list cache
 	private cachedServices: Record<string, unknown> | null = null;
 	private cachedServicesError: string | null = null;
 	private servicesRefreshPromise: Promise<void> | null = null;
 
-	private constructor() {
+	protected constructor() {
 		super();
 		this.client = this.createClient();
 		this.setupConfigurationListener();
@@ -104,7 +115,7 @@ export class ConnectionManager extends EventEmitter {
 	// CONFIGURATION
 	// =========================================================================
 
-	private setupConfigurationListener(): void {
+	protected setupConfigurationListener(): void {
 		this.disposables.push(
 			this.configManager.onEnvVarsChanged((env) => {
 				this.client?.setEnv(env);
@@ -129,7 +140,7 @@ export class ConnectionManager extends EventEmitter {
 		this.disposables.push(disposable);
 	}
 
-	private async handleConfigurationChanged(): Promise<void> {
+	protected async handleConfigurationChanged(): Promise<void> {
 		if (this.isDisposing) {
 			return;
 		}
@@ -143,6 +154,58 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	// =========================================================================
+	// CONFIG ACCESSORS (override in subclass for deploy-specific keys)
+	// =========================================================================
+
+	/**
+	 * Returns the connection mode for this manager.
+	 * DeployManager overrides to return `deployTargetMode`.
+	 */
+	protected getEffectiveConnectionMode(): ConnectionMode {
+		return this.configManager.getConfig().connectionMode;
+	}
+
+	/**
+	 * Returns whether auto-connect is enabled for this manager.
+	 * DeployManager overrides to return `deployAutoConnect`.
+	 */
+	protected getEffectiveAutoConnect(): boolean {
+		return this.configManager.getConfig().autoConnect;
+	}
+
+	/**
+	 * Returns the host URL for this manager.
+	 * DeployManager overrides to return `deployHostUrl`.
+	 */
+	protected getEffectiveHostUrl(): string {
+		return this.configManager.getConfig().hostUrl;
+	}
+
+	/**
+	 * Returns the API key for this manager.
+	 * DeployManager overrides to return `deployApiKey`.
+	 */
+	protected getEffectiveApiKey(): string {
+		return this.configManager.getConfig().apiKey;
+	}
+
+	/**
+	 * Returns a config object with effective values for this connection.
+	 * Base class returns the dev config as-is. DeployManager overrides
+	 * to swap in deploy-specific values (mode, hostUrl, apiKey, etc.).
+	 */
+	protected getEffectiveConfig(): ConfigManagerInfo {
+		const config = this.configManager.getConfig();
+		return {
+			...config,
+			connectionMode: this.getEffectiveConnectionMode(),
+			autoConnect: this.getEffectiveAutoConnect(),
+			hostUrl: this.getEffectiveHostUrl(),
+			apiKey: this.getEffectiveApiKey(),
+		};
+	}
+
+	// =========================================================================
 	// INITIALIZATION
 	// =========================================================================
 
@@ -153,9 +216,7 @@ export class ConnectionManager extends EventEmitter {
 
 		await this.updateCredentialsStatus();
 
-		const config = this.configManager.getConfig();
 		const errors = this.configManager.validateConfig();
-
 		if (errors.length > 0) {
 			this.logger.output(`${icons.error} Configuration errors: ${errors.join(', ')}`);
 			this.updateConnectionStatus({
@@ -166,10 +227,10 @@ export class ConnectionManager extends EventEmitter {
 		}
 
 		this.updateConnectionStatus({
-			connectionMode: config.connectionMode,
+			connectionMode: this.getEffectiveConnectionMode(),
 		});
 
-		if (config.autoConnect && this.connectionStatus.hasCredentials) {
+		if (this.getEffectiveAutoConnect() && this.connectionStatus.hasCredentials) {
 			await this.connect();
 		}
 	}
@@ -178,13 +239,22 @@ export class ConnectionManager extends EventEmitter {
 	// CLIENT (created once, lives forever, persist: true)
 	// =========================================================================
 
-	private createClient(): RocketRideClient {
+	protected createClient(): RocketRideClient {
 		const client = new RocketRideClient({
 			persist: true,
 			env: this.configManager.getEnv(),
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
+			onTrace: (traceType: number, message: any) => {
+				if (traceType === TraceType.Request) {
+					this.logger.output(`${icons.send} ${message.command} ${JSON.stringify(message.arguments ?? {})}`);
+				} else if (traceType === TraceType.Success) {
+					this.logger.output(`${icons.receive} ${message.command} ${JSON.stringify(message.body ?? {})}`);
+				} else {
+					this.logger.output(`${icons.error} ${message.command} ${message.message ?? 'failed'}`);
+				}
+			},
 			onEvent: async (message: DAPMessage) => {
 				if (message.event === 'output') {
 					const body = message.body;
@@ -237,7 +307,7 @@ export class ConnectionManager extends EventEmitter {
 	// MANAGER (swapped on mode change)
 	// =========================================================================
 
-	private createManagerForMode(connectionMode: string): BaseManager {
+	protected createManagerForMode(connectionMode: string): BaseManager {
 		if (connectionMode === 'local') {
 			if (!this.enginesRoot) {
 				throw new Error('Engines root path not set. Cannot create LocalManager.');
@@ -247,7 +317,7 @@ export class ConnectionManager extends EventEmitter {
 		return new RemoteManager();
 	}
 
-	private wireManagerEvents(manager: BaseManager): void {
+	protected wireManagerEvents(manager: BaseManager): void {
 		manager.on('status', (msg: string) => {
 			this.updateConnectionStatus({ progressMessage: msg });
 		});
@@ -282,12 +352,12 @@ export class ConnectionManager extends EventEmitter {
 			lastError: undefined,
 		});
 
-		const config = this.configManager.getConfig();
+		const connectionMode = this.getEffectiveConnectionMode();
 
 		try {
 			// Create manager for current mode (if we don't already have one)
 			if (!this.manager) {
-				this.manager = this.createManagerForMode(config.connectionMode);
+				this.manager = this.createManagerForMode(connectionMode);
 				this.wireManagerEvents(this.manager);
 			}
 
@@ -296,8 +366,11 @@ export class ConnectionManager extends EventEmitter {
 			this.engineCts?.dispose();
 			this.engineCts = new vscode.CancellationTokenSource();
 
+			// Build effective config for this connection (overridden by DeployManager)
+			const effectiveConfig = this.getEffectiveConfig();
+
 			// Manager handles everything: install/start engine, validate creds, connect client
-			await this.manager.connect(this.client, config, this.engineCts.token);
+			await this.manager.connect(this.client, effectiveConfig, this.engineCts.token);
 
 			// onConnected callback handles state update and 'connected' emit
 		} catch (error) {
@@ -434,7 +507,7 @@ export class ConnectionManager extends EventEmitter {
 		return this.servicesRefreshPromise;
 	}
 
-	private clearServicesCache(): void {
+	protected clearServicesCache(): void {
 		this.cachedServices = null;
 		this.cachedServicesError = null;
 		this.servicesRefreshPromise = null;
@@ -444,7 +517,7 @@ export class ConnectionManager extends EventEmitter {
 	// HELPERS
 	// =========================================================================
 
-	private updateConnectionStatus(updates: Partial<ConnectionStatus>): void {
+	protected updateConnectionStatus(updates: Partial<ConnectionStatus>): void {
 		if (this.isDisposing) {
 			return;
 		}
@@ -452,12 +525,29 @@ export class ConnectionManager extends EventEmitter {
 		this.emit('connectionStateChanged', this.connectionStatus);
 	}
 
-	private async updateCredentialsStatus(): Promise<void> {
+	protected async updateCredentialsStatus(): Promise<void> {
 		if (this.isDisposing) {
 			return;
 		}
-		const config = this.configManager.getConfig();
-		const hasCredentials = connectionModeRequiresApiKey(config.connectionMode) ? !!(config.apiKey && config.hostUrl) : config.connectionMode === 'onprem' ? !!config.hostUrl : true;
+		const mode = this.getEffectiveConnectionMode();
+		const hostUrl = this.getEffectiveHostUrl();
+		const apiKey = this.getEffectiveApiKey();
+		let hasCredentials: boolean;
+
+		if (connectionModeUsesOAuth(mode)) {
+			// Cloud mode: check if we have a stored cloud token
+			hasCredentials = await CloudAuthProvider.getInstance().isSignedIn();
+		} else if (connectionModeRequiresApiKey(mode)) {
+			// On-prem: need both API key and host URL
+			hasCredentials = !!(apiKey && hostUrl);
+		} else if (mode === 'onprem') {
+			// On-prem without required key: just need host URL
+			hasCredentials = !!hostUrl;
+		} else {
+			// Docker, service, local: always have credentials
+			hasCredentials = true;
+		}
+
 		this.updateConnectionStatus({ hasCredentials });
 	}
 

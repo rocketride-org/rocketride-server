@@ -1,8 +1,17 @@
-FROM ubuntu:jammy
+# ---------------------------------------------------------------------------
+# Dockerfile.engine — RocketRide Engine container
+#
+# MIT License
+# Copyright (c) 2026 RocketRide
+# ---------------------------------------------------------------------------
+
+# === Runtime stage =========================================================
+FROM ubuntu:jammy-20240808
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates \
+       curl \
        libc++1 \
        libc++abi1 \
        libgomp1 \
@@ -16,5 +25,8 @@ WORKDIR /opt/rocketride
 USER rocketride
 
 EXPOSE 5565
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:5565/ping || exit 1
 
 ENTRYPOINT ["./engine", "./ai/eaas.py"]

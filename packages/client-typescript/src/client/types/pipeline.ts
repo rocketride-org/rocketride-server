@@ -85,9 +85,6 @@ export interface PipelineComponent {
  * of connected components that transform, analyze, or route information.
  */
 export interface PipelineConfig {
-	/** Human-readable pipeline name */
-	name?: string;
-
 	/** Pipeline description */
 	description?: string;
 

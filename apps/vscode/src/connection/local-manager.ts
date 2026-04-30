@@ -84,7 +84,7 @@ export class LocalManager extends BaseManager {
 
 		while (attempts < MAX_CONNECT_ATTEMPTS) {
 			try {
-				await client.connect({ uri, auth: LOCAL_AUTH, timeout: 5000 });
+				await client.connect(LOCAL_AUTH, { uri, timeout: 5000 });
 				return;
 			} catch (error: unknown) {
 				attempts++;
