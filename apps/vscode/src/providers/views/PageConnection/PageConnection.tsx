@@ -1,33 +1,18 @@
 // =============================================================================
 // MIT License
 // Copyright (c) 2026 Aparavi Software AG
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 // =============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, CSSProperties } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 
-// Import the styles
-import '../../styles/vscode.css'
-import '../../styles/app.css';
-import './styles.css';
+import 'shared/themes/rocketride-default.css';
+import 'shared/themes/rocketride-vscode.css';
+import '../../styles/root.css';
+
+// =============================================================================
+// TYPES
+// =============================================================================
 
 interface ConnectionState {
 	state: 'connected' | 'connecting' | 'downloading-engine' | 'starting-engine' | 'stopping-engine' | 'disconnected' | 'engine-startup-failed';
@@ -35,9 +20,10 @@ interface ConnectionState {
 	retryAttempt: number;
 	maxRetryAttempts: number;
 	lastError?: string;
-	hasCredentials: boolean;
 	progressMessage?: string;
 }
+
+const TRANSITIONAL_STATES: ReadonlySet<ConnectionState['state']> = new Set(['connecting', 'downloading-engine', 'starting-engine', 'stopping-engine']);
 
 interface Config {
 	hostUrl: string;
@@ -62,204 +48,283 @@ type PageConnectionIncomingMessage = {
 	data: ConnectionData;
 };
 
-type PageConnectionOutgoingMessage =
-	| { type: 'ready' }
-	| { type: 'connect' }
-	| { type: 'disconnect' }
-	| { type: 'reconnect' }
-	| { type: 'openSettings' }
-	| { type: 'openDocs' }
-	| { type: 'openDeploy' };
+type PageConnectionOutgoingMessage = { type: 'ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'reconnect' } | { type: 'openSettings' } | { type: 'openDocs' } | { type: 'openDeploy' } | { type: 'openDashboard' };
+
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	container: {
+		position: 'fixed',
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		backgroundColor: 'var(--rr-bg-widget)',
+		overflowY: 'auto',
+	} as CSSProperties,
+	view: {
+		backgroundColor: 'var(--rr-bg-widget)',
+		color: 'var(--rr-fg-widget)',
+		padding: 8,
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 8,
+		minHeight: '100%',
+	} as CSSProperties,
+	warningBanner: {
+		display: 'flex',
+		alignItems: 'flex-start',
+		gap: 8,
+		padding: 8,
+		background: 'var(--vscode-inputValidation-warningBackground)',
+		border: '1px solid var(--vscode-inputValidation-warningBorder)',
+		borderRadius: 3,
+	} as CSSProperties,
+	warningIcon: {
+		fontSize: 16,
+		lineHeight: 1,
+		flexShrink: 0,
+	} as CSSProperties,
+	warningTitle: {
+		fontWeight: 600,
+		fontSize: 12,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 2,
+	} as CSSProperties,
+	warningMessage: {
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+	statusCard: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+		padding: 8,
+	} as CSSProperties,
+	statusIndicatorBase: {
+		width: 32,
+		height: 32,
+		borderRadius: '50%',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		fontSize: 16,
+		flexShrink: 0,
+		transition: 'all 0.3s ease',
+		color: 'white',
+		fontWeight: 'bold',
+	} as CSSProperties,
+	statusText: {
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+	statusLabel: {
+		fontSize: 13,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 2,
+	} as CSSProperties,
+	statusDetail: {
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+		minHeight: '1.25em',
+		lineHeight: '1.25em',
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap',
+	} as CSSProperties,
+	connectionInfo: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 6,
+		padding: 8,
+	} as CSSProperties,
+	infoRow: {
+		display: 'flex',
+		justifyContent: 'space-between',
+		alignItems: 'center',
+		fontSize: 12,
+		gap: 8,
+	} as CSSProperties,
+	infoLabel: {
+		color: 'var(--rr-text-secondary)',
+		fontWeight: 400,
+		flexShrink: 0,
+	} as CSSProperties,
+	infoValue: {
+		color: 'var(--rr-text-primary)',
+		fontFamily: 'var(--vscode-editor-font-family)',
+		wordBreak: 'break-all',
+		textAlign: 'right',
+		fontSize: 11,
+	} as CSSProperties,
+	actionButtons: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'center',
+		gap: 6,
+		padding: '0 12px',
+		marginTop: 8,
+	} as CSSProperties,
+	btn: {
+		padding: '4px 10px',
+		border: 'none',
+		borderRadius: 4,
+		fontSize: 13,
+		fontWeight: 400,
+		cursor: 'pointer',
+		textAlign: 'center',
+		lineHeight: '20px',
+		width: '100%',
+		maxWidth: 200,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap',
+		background: 'var(--rr-bg-button)',
+		color: 'var(--rr-fg-button)',
+	} as CSSProperties,
+	btnDisabled: {
+		opacity: 0.4,
+		cursor: 'not-allowed',
+	} as CSSProperties,
+};
+
+const STATUS_COLORS: Record<string, string> = {
+	connected: 'var(--rr-color-success)',
+	connecting: 'var(--rr-color-warning)',
+	'downloading-engine': 'var(--rr-color-warning)',
+	'starting-engine': 'var(--rr-color-warning)',
+	'stopping-engine': 'var(--rr-color-warning)',
+	disconnected: 'var(--rr-text-disabled)',
+	'engine-startup-failed': 'var(--rr-text-disabled)',
+	loading: 'var(--rr-text-disabled)',
+};
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
 
 export const PageConnection: React.FC = () => {
 	const [connectionData, setConnectionData] = useState<ConnectionData | null>(null);
 	const [animationPhase, setAnimationPhase] = useState(0);
+	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
 	const { sendMessage } = useMessaging<PageConnectionOutgoingMessage, PageConnectionIncomingMessage>({
 		onMessage: (message) => {
 			if (message.type === 'connectionUpdate') {
 				setConnectionData(message.data);
 			}
-		}
+		},
 	});
 
 	// Animate connecting dots
 	useEffect(() => {
-		const isConnecting = connectionData?.connectionState.state === 'connecting' ||
-			connectionData?.connectionState.state === 'downloading-engine' ||
-			connectionData?.connectionState.state === 'starting-engine' ||
-			connectionData?.connectionState.state === 'stopping-engine';
-
-		if (isConnecting) {
-			const interval = setInterval(() => {
-				setAnimationPhase((prev) => (prev + 1) % 4);
-			}, 500);
+		const isTransitional = connectionData?.connectionState.state && TRANSITIONAL_STATES.has(connectionData.connectionState.state);
+		if (isTransitional) {
+			const interval = setInterval(() => setAnimationPhase((prev) => (prev + 1) % 4), 500);
 			return () => clearInterval(interval);
 		}
 	}, [connectionData?.connectionState.state]);
 
-	const getAnimatedDots = (): string => {
-		switch (animationPhase) {
-			case 0: return '';
-			case 1: return '.';
-			case 2: return '..';
-			case 3: return '...';
-			default: return '';
-		}
-	};
+	const getAnimatedDots = (): string => '.'.repeat(animationPhase);
 
 	const getStatusLabel = (): string => {
 		if (!connectionData) return 'Loading...';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'Connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return `Connecting${getAnimatedDots()}`;
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'Disconnected';
-		}
-	};
-
-	const getStatusClass = (): string => {
-		if (!connectionData) return 'status-loading';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'status-connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return 'status-connecting';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'status-disconnected';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return 'Connected';
+		if (TRANSITIONAL_STATES.has(state)) return `Connecting${getAnimatedDots()}`;
+		return 'Disconnected';
 	};
 
 	const getStatusIcon = (): string => {
 		if (!connectionData) return '○';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return '✓';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return '◷';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return '○';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return '✓';
+		if (TRANSITIONAL_STATES.has(state)) return '◷';
+		return '○';
 	};
 
 	const getStatusDetailLine = (): string => {
 		if (!connectionData) return '';
 		const { state, lastError, progressMessage } = connectionData.connectionState;
+		const isTransitional = TRANSITIONAL_STATES.has(state);
 
-		// Show progressMessage first if available (e.g. download progress, retry wait)
-		if (isConnecting && progressMessage) return progressMessage;
+		if (isTransitional && progressMessage) return progressMessage;
 
-		// State-specific detail
 		switch (state) {
 			case 'downloading-engine':
 				return 'Downloading server...';
 			case 'starting-engine':
 				return 'Starting server...';
 			case 'connecting':
-				if (connectionData.connectionState.retryAttempt > 0) {
-					return 'Retrying...';
-				}
-				return 'Connecting to server...';
+				return connectionData.connectionState.retryAttempt > 0 ? 'Retrying...' : 'Connecting to server...';
 			case 'stopping-engine':
 				return 'Stopping server...';
 			default:
 				break;
 		}
 
-		// Show error for connecting states
-		if (isConnecting && lastError) {
+		if (isTransitional && lastError) {
 			const lower = lastError.toLowerCase();
 			if (lower.includes('rate limit') || lower.includes('github')) return 'No release info.';
 			return lastError.length > 40 ? lastError.slice(0, 37) + '...' : lastError;
 		}
 
-		// Show error when disconnected or engine-startup-failed
 		if ((state === 'disconnected' || state === 'engine-startup-failed') && lastError) {
 			return lastError.length > 40 ? lastError.slice(0, 37) + '...' : lastError;
 		}
 		return '';
 	};
 
-	const handleConnect = () => {
-		sendMessage({ type: 'connect' });
-	};
-
-	const handleDisconnect = () => {
-		sendMessage({ type: 'disconnect' });
-	};
-
-	const handleOpenSettings = () => {
-		sendMessage({ type: 'openSettings' });
-	};
-
-	const handleOpenDocs = () => {
-		sendMessage({ type: 'openDocs' });
-	};
-
-	const isConnecting = connectionData?.connectionState.state === 'connecting' ||
-		connectionData?.connectionState.state === 'downloading-engine' ||
-		connectionData?.connectionState.state === 'starting-engine' ||
-		connectionData?.connectionState.state === 'stopping-engine';
-
+	const isConnecting = connectionData?.connectionState.state ? TRANSITIONAL_STATES.has(connectionData.connectionState.state) : false;
 	const isConnected = connectionData?.connectionState.state === 'connected';
 	const needsApiKeySetup = (connectionData?.config.connectionMode === 'cloud' || connectionData?.config.connectionMode === 'onprem') && !connectionData?.hasApiKey;
+	const statusColor = STATUS_COLORS[connectionData?.connectionState.state ?? 'loading'];
+
+	const btnStyle = (id: string, disabled?: boolean): CSSProperties => ({
+		...styles.btn,
+		...(disabled ? styles.btnDisabled : {}),
+		...(hoveredBtn === id && !disabled ? { filter: 'brightness(1.2)' } : {}),
+	});
 
 	return (
-		<div className="connection-container">
-			<div className="connection-view">
+		<div style={styles.container}>
+			<div style={styles.view}>
 				{needsApiKeySetup && (
-					<div className="warning-banner">
-						<div className="warning-icon">⚠️</div>
-						<div className="warning-content">
-							<div className="warning-title">Setup Required</div>
-							<div className="warning-message">API Key must be configured for cloud mode</div>
+					<div style={styles.warningBanner}>
+						<div style={styles.warningIcon}>⚠️</div>
+						<div>
+							<div style={styles.warningTitle}>Setup Required</div>
+							<div style={styles.warningMessage}>API Key must be configured for cloud mode</div>
 						</div>
 					</div>
 				)}
 
-				<div className="status-card">
-					<div className={`status-indicator ${getStatusClass()}`}>
-						<span className="status-icon">{getStatusIcon()}</span>
+				<div style={styles.statusCard}>
+					<div style={{ ...styles.statusIndicatorBase, background: statusColor }}>
+						<span>{getStatusIcon()}</span>
 					</div>
-					<div className="status-text">
-						<div className="status-label">{getStatusLabel()}</div>
+					<div style={styles.statusText}>
+						<div style={styles.statusLabel}>{getStatusLabel()}</div>
 						{getStatusDetailLine() && (
-							<div className="status-detail" title={connectionData?.connectionState.lastError || undefined}>
+							<div style={styles.statusDetail} title={connectionData?.connectionState.lastError || undefined}>
 								{getStatusDetailLine()}
 							</div>
 						)}
 					</div>
 				</div>
 
-				<div className="connection-info">
-					<div className="info-row">
-						<span className="info-label">Server:</span>
-						<span className="info-value">{connectionData?.config.connectionMode === 'local' ? 'Local' : (connectionData?.config.hostUrl || 'N/A')}</span>
+				<div style={styles.connectionInfo}>
+					<div style={styles.infoRow}>
+						<span style={styles.infoLabel}>Server:</span>
+						<span style={styles.infoValue}>{connectionData?.config.connectionMode === 'local' ? 'Local' : connectionData?.config.hostUrl || 'N/A'}</span>
 					</div>
 					{connectionData?.config.connectionMode === 'local' && connectionData?.engineInfo?.version && (
-						<div className="info-row">
-							<span className="info-label">Engine:</span>
-							<span className="info-value">
+						<div style={styles.infoRow}>
+							<span style={styles.infoLabel}>Engine:</span>
+							<span style={styles.infoValue}>
 								{connectionData.engineInfo.version.replace(/^server-/, '')}
 								{connectionData.engineInfo.publishedAt && ` (${new Date(connectionData.engineInfo.publishedAt).toLocaleDateString()})`}
 							</span>
@@ -267,46 +332,44 @@ export const PageConnection: React.FC = () => {
 					)}
 				</div>
 
-				<div className="action-buttons">
+				<div style={styles.actionButtons}>
 					{isConnected ? (
-						<button
-							className="btn btn-secondary"
-							onClick={handleDisconnect}
-							disabled={isConnecting}
-						>
+						<button style={btnStyle('disconnect', isConnecting)} onClick={() => sendMessage({ type: 'disconnect' })} disabled={isConnecting} onMouseEnter={() => setHoveredBtn('disconnect')} onMouseLeave={() => setHoveredBtn(null)}>
 							Disconnect
 						</button>
-					) : (
+					) : isConnecting ? (
 						<button
-							className="btn btn-primary"
-							onClick={handleConnect}
-							disabled={isConnecting || needsApiKeySetup}
+							style={{
+								...btnStyle('cancel'),
+								background: 'var(--vscode-inputValidation-errorBackground)',
+								color: 'var(--vscode-inputValidation-errorForeground)',
+								border: '1px solid var(--vscode-inputValidation-errorBorder)',
+							}}
+							onClick={() => sendMessage({ type: 'disconnect' })}
+							onMouseEnter={() => setHoveredBtn('cancel')}
+							onMouseLeave={() => setHoveredBtn(null)}
 						>
+							Cancel Connection
+						</button>
+					) : (
+						<button style={btnStyle('connect', needsApiKeySetup)} onClick={() => sendMessage({ type: 'connect' })} disabled={needsApiKeySetup} onMouseEnter={() => setHoveredBtn('connect')} onMouseLeave={() => setHoveredBtn(null)}>
 							Connect
 						</button>
 					)}
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenSettings}
-			>
-				Settings
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={() => sendMessage({ type: 'openDeploy' })}
-				title="Deploy to RocketRide.ai cloud or on-prem"
-			>
-				Deploy
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenDocs}
-				title="View RocketRide API documentation and integration guide"
-			>
-				Documentation
-			</button>
+					<button style={btnStyle('monitor', !isConnected)} onClick={() => sendMessage({ type: 'openDashboard' })} title="Open server monitoring dashboard" disabled={!isConnected} onMouseEnter={() => setHoveredBtn('monitor')} onMouseLeave={() => setHoveredBtn(null)}>
+						Monitor
+					</button>
+					<button style={btnStyle('settings')} onClick={() => sendMessage({ type: 'openSettings' })} onMouseEnter={() => setHoveredBtn('settings')} onMouseLeave={() => setHoveredBtn(null)}>
+						Settings
+					</button>
+					<button style={btnStyle('deploy')} onClick={() => sendMessage({ type: 'openDeploy' })} title="Deploy to RocketRide.ai cloud or on-prem" onMouseEnter={() => setHoveredBtn('deploy')} onMouseLeave={() => setHoveredBtn(null)}>
+						Deploy
+					</button>
+					<button style={btnStyle('docs')} onClick={() => sendMessage({ type: 'openDocs' })} title="View RocketRide API documentation and integration guide" onMouseEnter={() => setHoveredBtn('docs')} onMouseLeave={() => setHoveredBtn(null)}>
+						Documentation
+					</button>
+				</div>
+			</div>
 		</div>
-		</div>
-	</div>
 	);
 };
