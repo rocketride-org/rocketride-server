@@ -316,7 +316,9 @@ class ChatBase:
                 # Calculate exponential backoff delay
                 delay = min(base_delay * (2**attempt), max_delay)
 
-                debug(f'Network/API error on attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...')
+                debug(
+                    f'Network/API error on attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...'
+                )
 
                 # Wait before retrying
                 time.sleep(delay)
@@ -365,7 +367,9 @@ class ChatBase:
         # We reserve 100 tokens for the response to ensure the model has room to answer
         # This is a conservative estimate - adjust based on your use case
         if prompt_tokens >= self._modelTotalTokens - 100:
-            debug(f'Warning: Prompt ({prompt_tokens} tokens) exceeds input allocation ({self._modelTotalTokens} tokens)')
+            debug(
+                f'Warning: Prompt ({prompt_tokens} tokens) exceeds input allocation ({self._modelTotalTokens} tokens)'
+            )
 
         # Call the chat implementation with network retry logic
         # This is where the real communication with the AI provider happens

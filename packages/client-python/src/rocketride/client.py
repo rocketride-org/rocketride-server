@@ -176,7 +176,9 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (
+                                    value.startswith("'") and value.endswith("'")
+                                ):
                                     value = value[1:-1]
                                 # Preserve already-defined process env values.
                                 self._env.setdefault(key, value)

@@ -98,7 +98,10 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                 if msg is not None:
                     return ChatResult(generations=[ChatGeneration(message=msg)])
                 if attempt < 2:
-                    prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+                    prompt = (
+                        prompt
+                        + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+                    )
 
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
@@ -413,7 +416,9 @@ class DeepAgentDriver(AgentBase):
             try:
                 pSelf.instance.invoke(req, component_id=node_id)
             except Exception as e:
-                error(f'deepagent _collect_subagents invoke failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+                error(
+                    f'deepagent _collect_subagents invoke failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}'
+                )
                 continue
 
             for d in req.agents:
@@ -449,7 +454,9 @@ class DeepAgentDriver(AgentBase):
                         )
                     )
                 except Exception as e:
-                    error(f'deepagent _collect_subagents build failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+                    error(
+                        f'deepagent _collect_subagents build failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}'
+                    )
 
         return subagents
 

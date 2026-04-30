@@ -92,7 +92,14 @@ class Store(DocumentStoreBase):
         if profile == 'local':
             self.client = chromadb.HttpClient(host=self.host, port=self.port)
         else:
-            self.client = chromadb.HttpClient(host=self.host, port=self.port, settings=Settings(chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider', chroma_client_auth_credentials=self.apikey))
+            self.client = chromadb.HttpClient(
+                host=self.host,
+                port=self.port,
+                settings=Settings(
+                    chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider',
+                    chroma_client_auth_credentials=self.apikey,
+                ),
+            )
         return
 
     def __del__(self):

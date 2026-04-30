@@ -28,7 +28,7 @@ data flow through the RocketRide pipeline system.
 
 Usage:
     from echo_pipeline import get_echo_pipeline
-    
+
     pipeline = get_echo_pipeline()
     token = await client.use(pipeline)
 """
@@ -39,10 +39,10 @@ from typing import Dict, Any
 def get_echo_pipeline() -> Dict[str, Any]:
     """
     Get the echo pipeline configuration.
-    
+
     This pipeline receives data and returns it unchanged, making it ideal
     for testing basic connectivity and data transmission.
-    
+
     Returns:
         Echo pipeline configuration.
     """

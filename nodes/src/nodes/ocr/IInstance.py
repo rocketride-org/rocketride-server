@@ -26,7 +26,7 @@ import io
 import numpy as np
 from PIL import Image
 from typing import List
-from rocketlib import IInstanceBase, AVI_ACTION, Entry, debug
+from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.schema import Doc
 from .IGlobal import IGlobal
 
@@ -44,12 +44,13 @@ class IInstance(IInstanceBase):
         :param image_data: Image in bytes
         :param table_callback: Function to call with each extracted Markdown table
         """
+
         # Write diagnostics to a file since print() goes to DAP
         def _diag(msg):
             pass
-        
+
         _diag(f'[DIAG] extract_tables_from_image called, image size: {len(image_data)} bytes')
-        
+
         if not hasattr(self.IGlobal, 'table_ocr'):
             _diag('[DIAG] Table OCR not initialized - SKIPPING')
             return
@@ -111,13 +112,14 @@ class IInstance(IInstanceBase):
                 _diag(f'[DIAG] Table {idx} markdown generated ({len(markdown_str)} chars)')
 
                 if table_callback:
-                    _diag(f'[DIAG] Calling table_callback with markdown')
+                    _diag('[DIAG] Calling table_callback with markdown')
                     table_callback(markdown_str)
                 else:
                     _diag('[DIAG] No table_callback provided!')
 
         except Exception as e:
             import traceback
+
             _diag(f'[DIAG] Table extraction EXCEPTION: {str(e)}')
             _diag(f'[DIAG] Traceback: {traceback.format_exc()}')
 

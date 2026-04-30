@@ -64,7 +64,9 @@ def _setup_profiling_endpoints(server: WebServer, profiler: WebServerProfiler):
         history_count: int = None
         last_profiles: list = None
 
-    async def start_profiling(request: Request, session: str = Query(None, description='Optional session name for the profiling session')) -> ProfileControlResponse:
+    async def start_profiling(
+        request: Request, session: str = Query(None, description='Optional session name for the profiling session')
+    ) -> ProfileControlResponse:
         """
         Start a new profiling session.
 

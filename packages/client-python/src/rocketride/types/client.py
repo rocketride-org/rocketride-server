@@ -112,7 +112,9 @@ class TransportCallbacks(TypedDict, total=False):
     onDebugProtocol: Callable[[str], None]  # Called when protocol messages are sent/received for debugging
     onReceive: Callable[[DAPMessage], Awaitable[None]]  # Called when a message is received from the server
     onConnected: Callable[[Optional[str]], Awaitable[None]]  # Called when connection is established
-    onDisconnected: Callable[[Optional[str], Optional[bool]], Awaitable[None]]  # Called when connection is lost or closed
+    onDisconnected: Callable[
+        [Optional[str], Optional[bool]], Awaitable[None]
+    ]  # Called when connection is lost or closed
 
 
 class ConnectionInfo(TypedDict):

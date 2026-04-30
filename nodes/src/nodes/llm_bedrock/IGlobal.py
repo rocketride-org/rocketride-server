@@ -68,14 +68,20 @@ class IGlobal(IGlobalBase):
                 has_provider_prefix = bool(re.match(r'^[a-z0-9]+\.', model))
                 is_arn = model.startswith('arn:')
                 if not (is_arn or has_provider_prefix or has_region_prefix):
-                    warning("Enter a full Bedrock model identifier (e.g., 'anthropic.claude-3-7-sonnet-20250219-v1:0') or an ARN")
+                    warning(
+                        "Enter a full Bedrock model identifier (e.g., 'anthropic.claude-3-7-sonnet-20250219-v1:0') or an ARN"
+                    )
                     return
 
             # Test AWS credentials and model availability using a minimal call
             try:
                 # Add region prefix when not already present or ARN
                 test_model = model or ''
-                if test_model and not test_model.startswith('arn:') and not re.match(r'^(us\.|eu\.|apac\.)', test_model):
+                if (
+                    test_model
+                    and not test_model.startswith('arn:')
+                    and not re.match(r'^(us\.|eu\.|apac\.)', test_model)
+                ):
                     model_prefix = 'us.'
                     if region and region[:2] == 'eu':
                         model_prefix = 'eu.'
@@ -84,7 +90,13 @@ class IGlobal(IGlobalBase):
                     test_model = model_prefix + test_model
 
                 # Test with minimal API call (limit output to minimal to avoid spend)
-                llm = ChatBedrock(model=test_model, aws_access_key_id=accessKey, aws_secret_access_key=secretKey, region=region, temperature=0)
+                llm = ChatBedrock(
+                    model=test_model,
+                    aws_access_key_id=accessKey,
+                    aws_secret_access_key=secretKey,
+                    region=region,
+                    temperature=0,
+                )
 
                 # Try a minimal test call
                 _ = llm.invoke('Hi')
@@ -104,7 +116,9 @@ class IGlobal(IGlobalBase):
                         ParamValidationError,
                     )
                 except Exception:
-                    ClientError = BotoCoreError = NoCredentialsError = PartialCredentialsError = EndpointConnectionError = ReadTimeoutError = ConnectTimeoutError = SSLError = ParamValidationError = type('E', (), {})  # type: ignore
+                    ClientError = BotoCoreError = NoCredentialsError = PartialCredentialsError = (
+                        EndpointConnectionError
+                    ) = ReadTimeoutError = ConnectTimeoutError = SSLError = ParamValidationError = type('E', (), {})  # type: ignore
 
                 # Re-raise into typed branches if matches
                 if isinstance(e, ClientError):
@@ -120,7 +134,19 @@ class IGlobal(IGlobalBase):
                         message = f'{message}.. Verify the AWS region matches your account'
                     warning(message)
                     return
-                if isinstance(e, (ParamValidationError, NoCredentialsError, PartialCredentialsError, EndpointConnectionError, ReadTimeoutError, ConnectTimeoutError, SSLError, BotoCoreError)):
+                if isinstance(
+                    e,
+                    (
+                        ParamValidationError,
+                        NoCredentialsError,
+                        PartialCredentialsError,
+                        EndpointConnectionError,
+                        ReadTimeoutError,
+                        ConnectTimeoutError,
+                        SSLError,
+                        BotoCoreError,
+                    ),
+                ):
                     message = self._format_error(None, None, None, str(e))
                     warning(message)
                     return

@@ -64,24 +64,21 @@ class TestDynamicNodesFull:
             await runner.setup()
 
             for i, case in enumerate(config.cases):
-                case_id = f"{config.node_name}:{profile or 'default'}:case_{i}"
+                case_id = f'{config.node_name}:{profile or "default"}:case_{i}'
 
                 try:
                     results, errors = await runner.run_case(case)
 
                     if errors:
-                        error_msgs = [
-                            f"  - {e.path}: {e.args[0]}"
-                            for e in errors
-                        ]
+                        error_msgs = [f'  - {e.path}: {e.args[0]}' for e in errors]
                         pytest.fail(
-                            f"Test case {case_id} failed validation:\n" +
-                            "\n".join(error_msgs) +
-                            f"\n\nResults: {results}"
+                            f'Test case {case_id} failed validation:\n'
+                            + '\n'.join(error_msgs)
+                            + f'\n\nResults: {results}'
                         )
 
                 except Exception as e:
-                    pytest.fail(f"Test case {case_id} raised exception: {e}")
+                    pytest.fail(f'Test case {case_id} raised exception: {e}')
 
         finally:
             await runner.teardown()

@@ -72,7 +72,14 @@ from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from ai.constants import CONST_CLEANUP_DELAY_TIME, CONST_CLEANUP_SLEEP_TIME, CONST_DEFAULT_TTL, CONST_TTL_CHECK, CONST_MAX_UNAUTHED_CONNS_PER_IP, CONST_MAX_UNAUTHED_IPS
+from ai.constants import (
+    CONST_CLEANUP_DELAY_TIME,
+    CONST_CLEANUP_SLEEP_TIME,
+    CONST_DEFAULT_TTL,
+    CONST_TTL_CHECK,
+    CONST_MAX_UNAUTHED_CONNS_PER_IP,
+    CONST_MAX_UNAUTHED_IPS,
+)
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
@@ -345,7 +352,9 @@ class TaskServer(DAPBase):
 
                     # Check if task has exceeded its TTL
                     if control.task._idle_time >= control.task._ttl:
-                        self.debug_message(f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...')
+                        self.debug_message(
+                            f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...'
+                        )
                         # Terminate the idle task
                         await self.stop_task(control.token)
 
@@ -872,7 +881,11 @@ class TaskServer(DAPBase):
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
                 # Remove exact source key, pipe-scoped keys, and token-scoped keys
-                keys_to_remove = [k for k in conn._monitors if k == project_key or k.startswith(f'{project_key}.') or k == token or k.startswith(f'{token}.')]
+                keys_to_remove = [
+                    k
+                    for k in conn._monitors
+                    if k == project_key or k.startswith(f'{project_key}.') or k == token or k.startswith(f'{token}.')
+                ]
                 for key in keys_to_remove:
                     conn._monitors.pop(key, None)
 

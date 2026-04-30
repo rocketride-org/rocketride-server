@@ -24,25 +24,25 @@ def get_embedding_image_pipeline() -> Dict[str, Any]:
     Client should send JSON body with documents containing page_content as base64 image.
     """
     return {
-        "components": [
+        'components': [
             {
-                "id": "webhook_1",
-                "provider": "webhook",
-                "config": {"hideForm": True, "mode": "Source", "type": "webhook"},
+                'id': 'webhook_1',
+                'provider': 'webhook',
+                'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
             },
             {
-                "id": "embedding_image_1",
-                "provider": "embedding_image",
-                "config": {"profile": "openai-patch16"},
-                "input": [{"lane": "documents", "from": "webhook_1"}],
+                'id': 'embedding_image_1',
+                'provider': 'embedding_image',
+                'config': {'profile': 'openai-patch16'},
+                'input': [{'lane': 'documents', 'from': 'webhook_1'}],
             },
             {
-                "id": "response_1",
-                "provider": "response",
-                "config": {"lanes": []},
-                "input": [{"lane": "documents", "from": "embedding_image_1"}],
+                'id': 'response_1',
+                'provider': 'response',
+                'config': {'lanes': []},
+                'input': [{'lane': 'documents', 'from': 'embedding_image_1'}],
             },
         ],
-        "source": "webhook_1",
-        "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+        'source': 'webhook_1',
+        'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42',
     }

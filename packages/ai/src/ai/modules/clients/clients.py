@@ -76,12 +76,24 @@ async def client_python_file(request: Request, filename: str):
         # Find the latest wheel file
         wheel_file = _find_latest_file(clients_root, 'rocketlib_client_python*.whl')
         if not wheel_file or not wheel_file.exists():
-            return JSONResponse(status_code=404, content={'error': 'Python client package not found', 'message': 'No Python client packages found in the build directory.'})
+            return JSONResponse(
+                status_code=404,
+                content={
+                    'error': 'Python client package not found',
+                    'message': 'No Python client packages found in the build directory.',
+                },
+            )
     else:
         # Serve specific version
         wheel_file = clients_root / filename
         if not wheel_file.exists():
-            return JSONResponse(status_code=404, content={'error': 'Python client package not found', 'message': f'The file {filename} could not be found.'})
+            return JSONResponse(
+                status_code=404,
+                content={
+                    'error': 'Python client package not found',
+                    'message': f'The file {filename} could not be found.',
+                },
+            )
 
     # Serve the wheel file with appropriate headers
     # Use application/zip since wheel files are zip archives
@@ -113,7 +125,13 @@ async def client_typescript(request: Request):
     tgz_file = _find_latest_file(clients_root, 'rocketlib-client-typescript*.tgz')
 
     if not tgz_file or not tgz_file.exists():
-        return JSONResponse(status_code=404, content={'error': 'TypeScript client package not found', 'message': 'The TypeScript client package could not be found in the build directory.'})
+        return JSONResponse(
+            status_code=404,
+            content={
+                'error': 'TypeScript client package not found',
+                'message': 'The TypeScript client package could not be found in the build directory.',
+            },
+        )
 
     # Serve the tgz file with appropriate headers
     return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name)
@@ -144,7 +162,13 @@ async def client_vscode(request: Request):
     vsix_file = _find_latest_file(clients_root, 'rocketlib-*.vsix')
 
     if not vsix_file or not vsix_file.exists():
-        return JSONResponse(status_code=404, content={'error': 'VSCode extension package not found', 'message': 'The VSCode extension package could not be found in the build directory.'})
+        return JSONResponse(
+            status_code=404,
+            content={
+                'error': 'VSCode extension package not found',
+                'message': 'The VSCode extension package could not be found in the build directory.',
+            },
+        )
 
     # Serve the vsix file with appropriate headers
     return FileResponse(vsix_file, media_type='application/octet-stream', filename=vsix_file.name)

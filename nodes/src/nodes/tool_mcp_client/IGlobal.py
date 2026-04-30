@@ -137,7 +137,9 @@ class IGlobal(IGlobalBase):
                     self._client = McpStreamableHttpClient(endpoint=endpoint, headers=headers)
 
             else:
-                raise Exception(f'mcp_client transport {self.transport!r} not supported (use stdio, streamable-http, or sse)')
+                raise Exception(
+                    f'mcp_client transport {self.transport!r} not supported (use stdio, streamable-http, or sse)'
+                )
 
             self._client.start()
             tools = self._client.list_tools()

@@ -375,7 +375,9 @@ class StatusMonitor(BoxMonitor):
                 file_info = parts[2].strip()
 
                 # Extract just filename from full path
-                filename = file_info.split('\\')[-1].split('/')[-1] if ('\\' in file_info or '/' in file_info) else file_info
+                filename = (
+                    file_info.split('\\')[-1].split('/')[-1] if ('\\' in file_info or '/' in file_info) else file_info
+                )
 
                 # Format as type: message with filename on next line
                 lines.append(f'{color}{err_type}{ANSI_RESET}: {message}')

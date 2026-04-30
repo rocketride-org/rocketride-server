@@ -59,8 +59,8 @@ Or manually:
     python -m pytest nodes/test/test_dynamic.py -k astra_db -s -v
 """
 
-from typing import List, Any, Optional, Dict, Iterator
-from dataclasses import dataclass, field
+from typing import List, Any, Dict, Iterator
+
 import re
 
 
@@ -79,6 +79,7 @@ from .info import CollectionDefinition, CollectionVectorOptions, CollectionLexic
 # =============================================================================
 # Payload Serialization Helper
 # =============================================================================
+
 
 def _serialize_value(value: Any, exclude_none: bool = False) -> Any:
     """
@@ -110,6 +111,7 @@ def _serialize_value(value: Any, exclude_none: bool = False) -> Any:
 # =============================================================================
 # MongoDB-Style Filter Evaluator
 # =============================================================================
+
 
 def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> bool:
     """
@@ -190,6 +192,7 @@ def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> b
 # Mock Collection Class
 # =============================================================================
 
+
 class Collection:
     """
     Mock implementation of an Astra DB collection.
@@ -222,7 +225,7 @@ class Collection:
         projection: Dict[str, int] = None,
         include_similarity: bool = False,
         include_sort_vector: bool = False,
-        **kwargs
+        **kwargs,
     ) -> 'Cursor':
         """
         Find documents matching the filter.
@@ -325,18 +328,11 @@ class Collection:
             return {'deleted_count': 0}
 
         original_count = len(Database._data[self.name])
-        Database._data[self.name] = [
-            doc for doc in Database._data[self.name]
-            if not _evaluate_filter(filter, doc)
-        ]
+        Database._data[self.name] = [doc for doc in Database._data[self.name] if not _evaluate_filter(filter, doc)]
 
         return {'deleted_count': original_count - len(Database._data[self.name])}
 
-    def update_many(
-        self,
-        filter: Dict[str, Any],
-        update: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def update_many(self, filter: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update documents matching the filter.
 
@@ -393,6 +389,7 @@ class Collection:
 # Mock Cursor Class
 # =============================================================================
 
+
 class Cursor:
     """
     Mock cursor for iterating over query results.
@@ -420,6 +417,7 @@ class Cursor:
 # Mock Database Class
 # =============================================================================
 
+
 class Database:
     """
     Mock implementation of an Astra DB database.
@@ -429,7 +427,7 @@ class Database:
 
     # Class-level storage
     _collections: Dict[str, Dict[str, Any]] = {}  # Collection metadata
-    _data: Dict[str, List[Dict[str, Any]]] = {}    # Collection name -> documents
+    _data: Dict[str, List[Dict[str, Any]]] = {}  # Collection name -> documents
 
     def __init__(self, api_endpoint: str, token: str = None):
         """
@@ -451,12 +449,7 @@ class Database:
         """
         return list(Database._collections.keys())
 
-    def create_collection(
-        self,
-        name: str,
-        definition: 'CollectionDefinition' = None,
-        **kwargs
-    ) -> Collection:
+    def create_collection(self, name: str, definition: 'CollectionDefinition' = None, **kwargs) -> Collection:
         """
         Create a new collection.
 
@@ -501,6 +494,7 @@ class Database:
 # Mock DataAPIClient Class
 # =============================================================================
 
+
 class DataAPIClient:
     """
     Mock implementation of the Astra DB Data API client.
@@ -516,12 +510,7 @@ class DataAPIClient:
         """
         pass
 
-    def get_database(
-        self,
-        api_endpoint: str,
-        token: str = None,
-        **kwargs
-    ) -> Database:
+    def get_database(self, api_endpoint: str, token: str = None, **kwargs) -> Database:
         """
         Get a database connection.
 
@@ -554,15 +543,12 @@ __all__ = [
     'Database',
     'Collection',
     'Cursor',
-
     # Submodules
     'data_types',
     'info',
-
     # Re-exported types
     'DataAPIVector',
     'CollectionDefinition',
     'CollectionVectorOptions',
     'CollectionLexicalOptions',
 ]
-

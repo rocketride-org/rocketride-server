@@ -11,7 +11,10 @@ class AutopipeProfile(BaseModel):
     """
 
     profile: str = Field(..., description='Profile name (must match a section of the same name).')
-    config: Dict[str, Any] = Field(..., description='Configuration for the specified profile. The section must be the same name as the specified profile name')
+    config: Dict[str, Any] = Field(
+        ...,
+        description='Configuration for the specified profile. The section must be the same name as the specified profile name',
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -36,7 +39,10 @@ class AutopipeProvider(BaseModel):
     """
 
     provider: str = Field(..., description='Provider name, which must also exist as a key in this object.')
-    config: Dict[str, Any] = Field(..., description="Provider-specific configuration (must include 'profile'). The section must be the same name as the specified provider name")
+    config: Dict[str, Any] = Field(
+        ...,
+        description="Provider-specific configuration (must include 'profile'). The section must be the same name as the specified provider name",
+    )
 
     @model_validator(mode='before')
     @classmethod

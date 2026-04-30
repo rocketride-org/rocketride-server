@@ -165,7 +165,15 @@ def test_mutation_updates_only_matching_object_ids(
     remaining_object_ids = [record['properties']['objectId'] for record in collection._storage.values()]
     assert remaining_object_ids == expected_remaining_object_ids
 
-    obj1 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-1']
-    obj2 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-2']
+    obj1 = [
+        record['properties']['isDeleted']
+        for record in collection._storage.values()
+        if record['properties']['objectId'] == 'obj-1'
+    ]
+    obj2 = [
+        record['properties']['isDeleted']
+        for record in collection._storage.values()
+        if record['properties']['objectId'] == 'obj-2'
+    ]
     assert obj1 == expected_obj1_is_deleted
     assert obj2 == expected_obj2_is_deleted

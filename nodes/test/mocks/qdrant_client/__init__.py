@@ -76,7 +76,6 @@ from typing import List, Any, Optional, Tuple, Dict
 from dataclasses import dataclass, field
 
 
-
 # =============================================================================
 # Submodule Imports
 # =============================================================================
@@ -98,20 +97,20 @@ from .conversions import common_types
 #   from qdrant_client.models import PointStruct
 
 from .models import (
-    PointStruct,      # Represents a point (vector + payload) to store
-    Filter,           # Query filter with must/should/must_not conditions
-    FieldCondition,   # Single field condition (key + match criteria)
-    Record,           # Result record from scroll() operations
-    MatchValue,       # Match exact value
-    MatchAny,         # Match any value in a list
-    MatchText,        # Full-text match
-    Range,            # Numeric range match (gte, lte, gt, lt)
-    SearchParams,     # Search algorithm parameters
+    PointStruct,  # Represents a point (vector + payload) to store
+    Filter,  # Query filter with must/should/must_not conditions
+    FieldCondition,  # Single field condition (key + match criteria)
+    Record,  # Result record from scroll() operations
+    MatchValue,  # Match exact value
+    MatchAny,  # Match any value in a list
+    MatchText,  # Full-text match
+    Range,  # Numeric range match (gte, lte, gt, lt)
+    SearchParams,  # Search algorithm parameters
     TextIndexParams,  # Text indexing configuration
-    TokenizerType,    # Text tokenization options
-    PayloadSchemaType,# Payload field type for indexing
-    TextIndexType,    # Text index type
-    ScoredPoint,      # Search result with similarity score
+    TokenizerType,  # Text tokenization options
+    PayloadSchemaType,  # Payload field type for indexing
+    TextIndexType,  # Text index type
+    ScoredPoint,  # Search result with similarity score
 )
 from .conversions.common_types import CollectionInfo, VectorParams
 
@@ -120,6 +119,7 @@ from .conversions.common_types import CollectionInfo, VectorParams
 # Query Result Container
 # =============================================================================
 
+
 @dataclass
 class QueryResult:
     """
@@ -127,12 +127,14 @@ class QueryResult:
 
     The real Qdrant returns a QueryResponse object; we simplify to just the points list.
     """
+
     points: List[ScoredPoint] = field(default_factory=list)
 
 
 # =============================================================================
 # Payload Serialization Helper
 # =============================================================================
+
 
 def _serialize_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
@@ -177,6 +179,7 @@ def _serialize_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
 # =============================================================================
 # Mock QdrantClient
 # =============================================================================
+
 
 class QdrantClient:
     """
@@ -223,7 +226,7 @@ class QdrantClient:
     # instances are created within the same process/pipeline run.
 
     _collections: Dict[str, Dict[str, Any]] = {}  # Collection metadata
-    _points: Dict[str, List[PointStruct]] = {}     # Collection name -> points list
+    _points: Dict[str, List[PointStruct]] = {}  # Collection name -> points list
 
     # -------------------------------------------------------------------------
     # Constructor
@@ -237,7 +240,7 @@ class QdrantClient:
         api_key: str = None,
         prefer_grpc: bool = False,
         timeout: int = 60,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize a mock Qdrant client connection.
@@ -282,10 +285,7 @@ class QdrantClient:
             collection_name: Name for the new collection
             vectors_config: Vector configuration (VectorParams with size and distance metric)
         """
-        QdrantClient._collections[collection_name] = {
-            'vectors_config': vectors_config,
-            'payload_schema': {}
-        }
+        QdrantClient._collections[collection_name] = {'vectors_config': vectors_config, 'payload_schema': {}}
         QdrantClient._points[collection_name] = []
 
     def get_collection(self, collection_name: str) -> CollectionInfo:
@@ -302,19 +302,15 @@ class QdrantClient:
             Exception: If collection doesn't exist
         """
         if collection_name not in QdrantClient._collections:
-            raise Exception(f"Collection {collection_name} not found")
+            raise Exception(f'Collection {collection_name} not found')
 
         return CollectionInfo(
             vectors_count=len(QdrantClient._points.get(collection_name, [])),
-            payload_schema=QdrantClient._collections[collection_name].get('payload_schema', {})
+            payload_schema=QdrantClient._collections[collection_name].get('payload_schema', {}),
         )
 
     def create_payload_index(
-        self,
-        collection_name: str,
-        field_name: str,
-        field_type: str = None,
-        field_schema: Any = None
+        self, collection_name: str, field_name: str, field_type: str = None, field_schema: Any = None
     ) -> None:
         """
         Create an index on a payload field for faster filtering.
@@ -328,9 +324,7 @@ class QdrantClient:
             field_schema: Complex schema object (e.g., TextIndexParams)
         """
         if collection_name in QdrantClient._collections:
-            QdrantClient._collections[collection_name]['payload_schema'][field_name] = (
-                field_type or field_schema
-            )
+            QdrantClient._collections[collection_name]['payload_schema'][field_name] = field_type or field_schema
 
     # -------------------------------------------------------------------------
     # Data Retrieval: scroll()
@@ -343,7 +337,7 @@ class QdrantClient:
         offset: int = 0,
         limit: int = 100,
         with_vectors: bool = False,
-        with_payload: bool = True
+        with_payload: bool = True,
     ) -> Tuple[List[Record], Optional[str]]:
         """
         Scroll through collection points with optional filtering.
@@ -404,16 +398,10 @@ class QdrantClient:
                     filtered_points = [p for p in filtered_points if matches_condition(p)]
 
         # Apply pagination
-        result = filtered_points[offset:offset + limit]
+        result = filtered_points[offset : offset + limit]
 
         # Convert to Record objects with serialized payloads
-        records = [
-            Record(
-                id=p.id,
-                payload=_serialize_payload(p.payload) if with_payload else None
-            )
-            for p in result
-        ]
+        records = [Record(id=p.id, payload=_serialize_payload(p.payload) if with_payload else None) for p in result]
 
         # Return next offset for pagination, or None if we've reached the end
         next_offset = None if len(result) < limit else str(offset + limit)
@@ -432,7 +420,7 @@ class QdrantClient:
         with_payload: bool = True,
         limit: int = 10,
         score_threshold: float = 0.0,
-        search_params: Any = None
+        search_params: Any = None,
     ) -> QueryResult:
         """
         Perform semantic similarity search.
@@ -485,7 +473,7 @@ class QdrantClient:
             ScoredPoint(
                 id=p.id,
                 score=0.95,  # Fixed score for mock
-                payload=_serialize_payload(p.payload) if with_payload else None
+                payload=_serialize_payload(p.payload) if with_payload else None,
             )
             for p in filtered_points[:limit]
         ]
@@ -496,11 +484,7 @@ class QdrantClient:
     # Data Modification: batch_update_points()
     # -------------------------------------------------------------------------
 
-    def batch_update_points(
-        self,
-        collection_name: str,
-        update_operations: List[Any]
-    ) -> None:
+    def batch_update_points(self, collection_name: str, update_operations: List[Any]) -> None:
         """
         Perform batch update operations (upsert, delete, etc.).
 
@@ -528,12 +512,7 @@ class QdrantClient:
     # Additional Operations (Minimal Implementation)
     # -------------------------------------------------------------------------
 
-    def delete(
-        self,
-        collection_name: str,
-        points_selector: Any,
-        wait: bool = True
-    ) -> None:
+    def delete(self, collection_name: str, points_selector: Any, wait: bool = True) -> None:
         """
         Delete points from a collection.
 
@@ -542,12 +521,7 @@ class QdrantClient:
         """
         pass
 
-    def set_payload(
-        self,
-        collection_name: str,
-        payload: dict,
-        points: Any
-    ) -> None:
+    def set_payload(self, collection_name: str, payload: dict, points: Any) -> None:
         """
         Update payload on existing points.
 
@@ -589,13 +563,11 @@ class QdrantClient:
 __all__ = [
     # Main client class
     'QdrantClient',
-
     # Submodules (for `from qdrant_client import models` style imports)
     'models',
     'http',
     'conversions',
     'common_types',
-
     # Re-exported types (for direct import convenience)
     'PointStruct',
     'Filter',
@@ -613,7 +585,6 @@ __all__ = [
     'ScoredPoint',
     'CollectionInfo',
     'VectorParams',
-
     # Query result container
     'QueryResult',
 ]

@@ -289,7 +289,11 @@ class TaskMetrics:
                             # Fallback: total GPU memory - baseline
                             mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                             current_total_mb = float(mem_info.used // (1024 * 1024))
-                            baseline_mb = self._gpu_baseline_memory_mb[gpu_index] if gpu_index < len(self._gpu_baseline_memory_mb) else 0.0
+                            baseline_mb = (
+                                self._gpu_baseline_memory_mb[gpu_index]
+                                if gpu_index < len(self._gpu_baseline_memory_mb)
+                                else 0.0
+                            )
                             gpu_memory_this_gpu = max(0.0, current_total_mb - baseline_mb)
                         # else: driver supports it, our process truly has 0 memory
 
@@ -326,9 +330,15 @@ class TaskMetrics:
             self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
 
         # Track peaks (user-facing)
-        self._status.metrics.peak_cpu_percent = max(self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent)
-        self._status.metrics.peak_cpu_memory_mb = max(self._status.metrics.peak_cpu_memory_mb, self._status.metrics.cpu_memory_mb)
-        self._status.metrics.peak_gpu_memory_mb = max(self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb)
+        self._status.metrics.peak_cpu_percent = max(
+            self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent
+        )
+        self._status.metrics.peak_cpu_memory_mb = max(
+            self._status.metrics.peak_cpu_memory_mb, self._status.metrics.cpu_memory_mb
+        )
+        self._status.metrics.peak_gpu_memory_mb = max(
+            self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb
+        )
 
         # Calculate averages (user-facing)
         if self._duration_seconds > 0:
@@ -361,7 +371,9 @@ class TaskMetrics:
         self._status.tokens.cpu_utilization = round(cpu_tokens, 1)
         self._status.tokens.cpu_memory = round(memory_tokens, 1)
         self._status.tokens.gpu_memory = round(gpu_tokens, 1)
-        self._status.tokens.total = round(self._status.tokens.cpu_utilization + self._status.tokens.cpu_memory + self._status.tokens.gpu_memory, 1)
+        self._status.tokens.total = round(
+            self._status.tokens.cpu_utilization + self._status.tokens.cpu_memory + self._status.tokens.gpu_memory, 1
+        )
 
     def _report_to_billing_system(self) -> None:
         """
@@ -447,9 +459,15 @@ class TaskMetrics:
         # STUB: Log the report (will be replaced with actual API call)
         try:
             debug('[TaskMetrics] Billing report:')
-            debug(f'  Incremental Tokens (this period): CPU Utilization={delta_tokens_cpu:.2f}, CPU Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, Total={delta_tokens_total:.2f}')
-            debug(f'  Cumulative Tokens (lifetime): CPU Utilization={self._status.tokens.cpu_utilization}, CPU Memory={self._status.tokens.cpu_memory}, GPU Memory={self._status.tokens.gpu_memory}, Total={self._status.tokens.total}')
-            debug(f'  Current Metrics: CPU={self._status.metrics.cpu_percent:.1f}%, CPU Memory={self._status.metrics.cpu_memory_mb:.1f}MB, GPU Memory={self._status.metrics.gpu_memory_mb:.1f}MB')
+            debug(
+                f'  Incremental Tokens (this period): CPU Utilization={delta_tokens_cpu:.2f}, CPU Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, Total={delta_tokens_total:.2f}'
+            )
+            debug(
+                f'  Cumulative Tokens (lifetime): CPU Utilization={self._status.tokens.cpu_utilization}, CPU Memory={self._status.tokens.cpu_memory}, GPU Memory={self._status.tokens.gpu_memory}, Total={self._status.tokens.total}'
+            )
+            debug(
+                f'  Current Metrics: CPU={self._status.metrics.cpu_percent:.1f}%, CPU Memory={self._status.metrics.cpu_memory_mb:.1f}MB, GPU Memory={self._status.metrics.gpu_memory_mb:.1f}MB'
+            )
         except Exception:
             # Don't let print failures break billing tracking
             pass

@@ -2,8 +2,6 @@
 # Copyright (c) 2026 Aparavi Software AG
 # Tests for rocketride_mcp.config.
 
-import os
-
 import pytest
 
 from rocketride_mcp.config import Settings, load_settings

@@ -26,7 +26,15 @@ from typing import Dict, Any, TYPE_CHECKING
 from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.schema import Question, Doc, Answer
-from rocketlib import IServiceEndpoint, IServiceFilterPipe, getObject, Entry, AVI_ACTION, monitorCompleted, monitorFailed
+from rocketlib import (
+    IServiceEndpoint,
+    IServiceFilterPipe,
+    getObject,
+    Entry,
+    AVI_ACTION,
+    monitorCompleted,
+    monitorFailed,
+)
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -135,7 +143,9 @@ class DataConn(DAPConn):
         self._monitor_task = asyncio.create_task(self._monitor_pipes())
 
         # Log initialization for debugging and monitoring
-        self.debug_message(f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...')
+        self.debug_message(
+            f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
+        )
 
     async def disconnect(self):
         """
@@ -365,7 +375,9 @@ class DataConn(DAPConn):
 
                 # Clean up zombie pipes
                 for pipe_id, inactive_time in zombie_pipes:
-                    self.debug_message(f'Cleaning up zombie pipe {pipe_id} after {inactive_time:.1f}s of inactivity (timeout: {self._pipe_timeout}s)')
+                    self.debug_message(
+                        f'Cleaning up zombie pipe {pipe_id} after {inactive_time:.1f}s of inactivity (timeout: {self._pipe_timeout}s)'
+                    )
                     conn_pipe = self._pipe_map.pop(pipe_id, None)
                     if conn_pipe:
                         conn_pipe.has_failed = True  # Mark as failed for monitoring
@@ -379,7 +391,9 @@ class DataConn(DAPConn):
                 # Log monitoring status if we have active pipes
                 if self._pipe_map:
                     active_count = len(self._pipe_map)
-                    self.debug_message(f'Pipe monitor: {active_count} active pipes, cleaned {len(zombie_pipes)} zombies')
+                    self.debug_message(
+                        f'Pipe monitor: {active_count} active pipes, cleaned {len(zombie_pipes)} zombies'
+                    )
 
             except Exception as e:
                 self.debug_message(f'Error in zombie pipe cleanup: {e}')
@@ -497,7 +511,9 @@ class DataConn(DAPConn):
                     # Store in pipe map
                     self._pipe_map[pipe_id] = conn_pipe
 
-                    self.debug_message(f'Successfully opened pipe {pipe_id} with lane {lane}, zombie timeout: {self._pipe_timeout}s')
+                    self.debug_message(
+                        f'Successfully opened pipe {pipe_id} with lane {lane}, zombie timeout: {self._pipe_timeout}s'
+                    )
 
                     return pipe_id
 

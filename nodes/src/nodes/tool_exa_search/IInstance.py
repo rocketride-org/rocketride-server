@@ -119,7 +119,13 @@ class IInstance(IInstanceBase):
 
         query = (args.get('query') or '').strip()
         if not query:
-            return {'success': False, 'query': '', 'num_results': 0, 'results': [], 'error': 'query is required and must be a non-empty string'}
+            return {
+                'success': False,
+                'query': '',
+                'num_results': 0,
+                'results': [],
+                'error': 'query is required and must be a non-empty string',
+            }
 
         cfg = self.IGlobal
         num_results = args.get('num_results', cfg.num_results)
@@ -224,7 +230,9 @@ def _request_with_retry(
             if 500 <= resp.status_code < 600:
                 if attempt < max_retries:
                     delay = base_delay * (2**attempt)
-                    debug(f'Exa server error ({resp.status_code}), retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
+                    debug(
+                        f'Exa server error ({resp.status_code}), retrying in {delay}s (attempt {attempt + 1}/{max_retries})'
+                    )
                     time.sleep(delay)
                     continue
                 resp.raise_for_status()

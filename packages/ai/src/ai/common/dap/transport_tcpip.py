@@ -37,7 +37,11 @@ Usage Patterns:
     ```python
     async def handle_client(reader, writer):
         transport = TransportTCP()
-        transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=dap_server.handle_client_message)
+        transport.bind(
+            on_debug_message=logger.debug,
+            on_debug_protocol=protocol_logger.debug,
+            on_receive=dap_server.handle_client_message,
+        )
         await transport.accept((reader, writer))  # Blocks until disconnect
         print('Client disconnected')
 
@@ -48,7 +52,11 @@ Usage Patterns:
     For DAP clients connecting to servers:
     ```python
     transport = TransportTCP()
-    transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=dap_client.handle_server_response)
+    transport.bind(
+        on_debug_message=logger.debug,
+        on_debug_protocol=protocol_logger.debug,
+        on_receive=dap_client.handle_server_response,
+    )
     await transport.connect('tcp://localhost:8080')
     # Messages automatically received in background
     ```
@@ -56,7 +64,13 @@ Usage Patterns:
     For listening servers (reverse connection):
     ```python
     transport = TransportTCP('tcp://localhost:0')
-    transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message, on_connected=handle_connected, on_disconnected=handle_disconnected)
+    transport.bind(
+        on_debug_message=logger.debug,
+        on_debug_protocol=protocol_logger.debug,
+        on_receive=handle_message,
+        on_connected=handle_connected,
+        on_disconnected=handle_disconnected,
+    )
     actual_uri = await transport.listen()
     # Tell debugpy to connect to actual_uri
     ```
@@ -107,20 +121,30 @@ class TransportTCP(TransportBase):
         # Server usage - asyncio TCP server
         async def handle_client(reader, writer):
             transport = TransportTCP()
-            transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message)
+            transport.bind(
+                on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message
+            )
             await transport.accept((reader, writer))  # Blocks until disconnect
             print('Client disconnected')
 
 
         # Client usage - automatic background receiving
         transport = TransportTCP()
-        transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message)
+        transport.bind(
+            on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message
+        )
         await transport.connect('tcp://localhost:8080')
         # Messages received automatically in background
 
         # Listen usage - reverse connection for debugpy
         transport = TransportTCP('tcp://localhost:0')
-        transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_message, on_connected=lambda info: print(f'Connected: {info}'), on_disconnected=lambda reason, error: print(f'Disconnected: {reason}'))
+        transport.bind(
+            on_debug_message=logger.debug,
+            on_debug_protocol=protocol_logger.debug,
+            on_receive=handle_message,
+            on_connected=lambda info: print(f'Connected: {info}'),
+            on_disconnected=lambda reason, error: print(f'Disconnected: {reason}'),
+        )
         actual_uri = await transport.listen()
         debugpy.connect(parse_uri(actual_uri))
 
@@ -173,7 +197,13 @@ class TransportTCP(TransportBase):
         Example:
             ```python
             transport = TransportTCP('tcp://localhost:0')
-            transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_debugpy_message, on_connected=handle_connected, on_disconnected=handle_disconnected)
+            transport.bind(
+                on_debug_message=logger.debug,
+                on_debug_protocol=protocol_logger.debug,
+                on_receive=handle_debugpy_message,
+                on_connected=handle_connected,
+                on_disconnected=handle_disconnected,
+            )
 
             # Start listening and get the actual URI
             actual_uri = await transport.listen()
@@ -284,7 +314,13 @@ class TransportTCP(TransportBase):
         Example:
             ```python
             transport = TransportTCP('tcp://localhost:8080')
-            transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_server_message, on_connected=handle_connected, on_disconnected=handle_disconnected)
+            transport.bind(
+                on_debug_message=logger.debug,
+                on_debug_protocol=protocol_logger.debug,
+                on_receive=handle_server_message,
+                on_connected=handle_connected,
+                on_disconnected=handle_disconnected,
+            )
 
             await transport.connect()
             # Messages are now automatically received and dispatched
@@ -352,7 +388,13 @@ class TransportTCP(TransportBase):
             ```python
             async def handle_client(reader, writer):
                 transport = TransportTCP()
-                transport.bind(on_debug_message=logger.debug, on_debug_protocol=protocol_logger.debug, on_receive=handle_client_message, on_connected=handle_connected, on_disconnected=handle_disconnected)
+                transport.bind(
+                    on_debug_message=logger.debug,
+                    on_debug_protocol=protocol_logger.debug,
+                    on_receive=handle_client_message,
+                    on_connected=handle_connected,
+                    on_disconnected=handle_disconnected,
+                )
 
                 await transport.accept((reader, writer))
                 # This line runs after the client disconnects
@@ -668,10 +710,25 @@ class TransportTCP(TransportBase):
         Example Usage:
             ```python
             # Standard JSON message
-            await transport.send({'type': 'response', 'command': 'initialize', 'request_seq': 1, 'success': True, 'body': {'capabilities': {...}}})
+            await transport.send(
+                {
+                    'type': 'response',
+                    'command': 'initialize',
+                    'request_seq': 1,
+                    'success': True,
+                    'body': {'capabilities': {...}},
+                }
+            )
 
             # Message with binary data (will be base64 encoded)
-            await transport.send({'type': 'event', 'event': 'output', 'body': {'category': 'stdout', 'output': 'Debug output'}, 'data': b'large_binary_debug_data'})
+            await transport.send(
+                {
+                    'type': 'event',
+                    'event': 'output',
+                    'body': {'category': 'stdout', 'output': 'Debug output'},
+                    'data': b'large_binary_debug_data',
+                }
+            )
             ```
 
         Error Handling:
@@ -723,7 +780,9 @@ class TransportTCP(TransportBase):
 
             # Build DAP-over-TCP message with headers
             content_length = len(content_bytes)
-            headers = f'Content-Length: {content_length}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n'
+            headers = (
+                f'Content-Length: {content_length}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n'
+            )
 
             # Combine headers and content
             full_message = headers.encode('utf-8') + content_bytes

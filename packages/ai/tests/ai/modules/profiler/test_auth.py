@@ -42,7 +42,7 @@ def _get_report_handler_and_profiler():
     _setup_profiling_endpoints(mock_server, profiler)
     calls = mock_server.add_route.call_args_list
     report_calls = [c for c in calls if c[0][0] == '/profile/report']
-    assert len(report_calls) == 1, "Expected exactly one /profile/report route"
+    assert len(report_calls) == 1, 'Expected exactly one /profile/report route'
     handler = report_calls[0][0][1]
     return handler, profiler
 
@@ -96,7 +96,7 @@ class TestProfilerRoutesRequireAuth:
         for c in calls:
             _, kwargs = c
             assert kwargs.get('public', False) is False, (
-                f"Route {c[0][0]} is registered as public but should require auth"
+                f'Route {c[0][0]} is registered as public but should require auth'
             )
 
 
@@ -149,6 +149,7 @@ class TestProfilerReportXSSEscape:
         response = asyncio.run(handler(mock_request))
 
         from fastapi.responses import HTMLResponse
+
         assert isinstance(response, HTMLResponse)
         assert response.media_type == 'text/html'
 

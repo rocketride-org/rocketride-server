@@ -106,7 +106,17 @@ class IGlobal(IGlobalBase):
                     message = self._format_error(status, None, None, message)
                 warning(message)
                 return
-            except (APIConnectionError, APITimeoutError, RateLimitError, AuthenticationError, BadRequestError, PermissionDeniedError, NotFoundError, InternalServerError, APIError) as e:
+            except (
+                APIConnectionError,
+                APITimeoutError,
+                RateLimitError,
+                AuthenticationError,
+                BadRequestError,
+                PermissionDeniedError,
+                NotFoundError,
+                InternalServerError,
+                APIError,
+            ) as e:
                 message = self._format_error(None, None, None, str(e))
                 warning(message)
                 return

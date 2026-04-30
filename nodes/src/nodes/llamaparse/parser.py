@@ -121,7 +121,14 @@ class Parser(ReaderBase):
         # Validate file_data
         if file_data is None:
             debug('Error: file_data is None, cannot proceed with parsing')
-            return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {}}
+            return {
+                'text': '',
+                'structured_data': [],
+                'page_count': 0,
+                'project_id': None,
+                'file_id': None,
+                'parsing_metadata': {},
+            }
 
         debug(f'File size: {len(file_data)} bytes')
 
@@ -223,7 +230,9 @@ class Parser(ReaderBase):
                             except Exception as e:
                                 debug(f'Could not record metrics from metadata: \n \n {str(e)}')
 
-                            debug(f'counter llamaparse pages: {page_count}, mode: {self._parse_mode}, model: {self._lvm_model}')
+                            debug(
+                                f'counter llamaparse pages: {page_count}, mode: {self._parse_mode}, model: {self._lvm_model}'
+                            )
 
                         # Extract project and file IDs
                         if 'project_id' in doc.metadata:
@@ -257,7 +266,9 @@ class Parser(ReaderBase):
                         except Exception as e:
                             debug(f'Could not record metrics from parsing output: \n \n {str(e)}')
 
-                        debug(f'counter llamaparse pages: {page_count}, mode: {self._parse_mode}, model: {self._lvm_model}')
+                        debug(
+                            f'counter llamaparse pages: {page_count}, mode: {self._parse_mode}, model: {self._lvm_model}'
+                        )
 
                 # text_content = parsed_document[0].text
                 debug(f'Extracted text length: {len(text_content)} characters')
@@ -272,18 +283,46 @@ class Parser(ReaderBase):
                 debug(f'parsing_metadata: {parsing_metadata}, structured_data: {structured_data}')
 
                 # Return text, structured data, page count, and metadata
-                return {'text': text_content, 'structured_data': structured_data, 'page_count': page_count, 'project_id': project_id, 'file_id': file_id, 'parsing_metadata': parsing_metadata}
+                return {
+                    'text': text_content,
+                    'structured_data': structured_data,
+                    'page_count': page_count,
+                    'project_id': project_id,
+                    'file_id': file_id,
+                    'parsing_metadata': parsing_metadata,
+                }
             else:
                 debug('No text content extracted from document')
-                return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {}}
+                return {
+                    'text': '',
+                    'structured_data': [],
+                    'page_count': 0,
+                    'project_id': None,
+                    'file_id': None,
+                    'parsing_metadata': {},
+                }
 
         except ImportError as e:
             debug(f'Import error: {str(e)}')
             debug('Please install llama-parse: pip install llama-parse==0.3.4')
-            return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {}}
+            return {
+                'text': '',
+                'structured_data': [],
+                'page_count': 0,
+                'project_id': None,
+                'file_id': None,
+                'parsing_metadata': {},
+            }
         except Exception as e:
             debug(f'Error parsing document with LlamaParse: {str(e)}')
-            return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {}}
+            return {
+                'text': '',
+                'structured_data': [],
+                'page_count': 0,
+                'project_id': None,
+                'file_id': None,
+                'parsing_metadata': {},
+            }
 
     def _safe_load_data(self, parser, file_data: bytes, extra_info: dict):
         """
@@ -325,7 +364,9 @@ class Parser(ReaderBase):
 
                 try:
                     # Debug parser configuration
-                    debug(f'Parser configuration: parse_mode={getattr(parser, "parse_mode", "default")}, max_pages={getattr(parser, "max_pages", "unlimited")}')
+                    debug(
+                        f'Parser configuration: parse_mode={getattr(parser, "parse_mode", "default")}, max_pages={getattr(parser, "max_pages", "unlimited")}'
+                    )
                     debug(f'File data type: {type(file_data)}, size: {len(file_data)} bytes')
                     debug(f'Extra info: {extra_info}')
 
@@ -335,13 +376,17 @@ class Parser(ReaderBase):
                         debug(f'Large file detected ({file_size_mb:.1f}MB), adjusting parser settings')
                         # Increase timeout for large files
                         if hasattr(parser, 'job_timeout_in_seconds'):
-                            parser.job_timeout_in_seconds = max(600, parser.job_timeout_in_seconds)  # At least 10 minutes
+                            parser.job_timeout_in_seconds = max(
+                                600, parser.job_timeout_in_seconds
+                            )  # At least 10 minutes
                         if hasattr(parser, 'max_timeout'):
                             parser.max_timeout = max(600, parser.max_timeout)
 
                     # Run the LlamaParse call
                     result = parser.load_data(file_data, extra_info=extra_info)
-                    debug(f'LlamaParse returned: {type(result)}, length: {len(result) if hasattr(result, "__len__") else "N/A"}')
+                    debug(
+                        f'LlamaParse returned: {type(result)}, length: {len(result) if hasattr(result, "__len__") else "N/A"}'
+                    )
 
                     if hasattr(result, '__len__') and len(result) == 0:
                         debug('Warning: LlamaParse returned empty result - trying alternative approach')
@@ -355,7 +400,9 @@ class Parser(ReaderBase):
 
                             # Try parsing again
                             result = parser.load_data(file_data, extra_info=extra_info)
-                            debug(f'Alternative parsing returned: {type(result)}, length: {len(result) if hasattr(result, "__len__") else "N/A"}')
+                            debug(
+                                f'Alternative parsing returned: {type(result)}, length: {len(result) if hasattr(result, "__len__") else "N/A"}'
+                            )
                         except Exception as alt_e:
                             debug(f'Alternative parsing also failed: {str(alt_e)}')
 
@@ -414,7 +461,16 @@ class Parser(ReaderBase):
             # The daemon=True ensures the thread won't prevent program exit
             debug('Thread marked as daemon - will not prevent program exit')
 
-            return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {'error': f'Processing timeout after {timeout_seconds} seconds for {file_size_mb:.1f}MB file'}}
+            return {
+                'text': '',
+                'structured_data': [],
+                'page_count': 0,
+                'project_id': None,
+                'file_id': None,
+                'parsing_metadata': {
+                    'error': f'Processing timeout after {timeout_seconds} seconds for {file_size_mb:.1f}MB file'
+                },
+            }
 
         # Check for errors first
         if not error_queue.empty():
@@ -429,7 +485,14 @@ class Parser(ReaderBase):
             return result
         else:
             debug('No result available from isolated thread')
-            return {'text': '', 'structured_data': [], 'page_count': 0, 'project_id': None, 'file_id': None, 'parsing_metadata': {'error': 'No result from isolated processing'}}
+            return {
+                'text': '',
+                'structured_data': [],
+                'page_count': 0,
+                'project_id': None,
+                'file_id': None,
+                'parsing_metadata': {'error': 'No result from isolated processing'},
+            }
 
     def _detect_file_type_from_bytes(self, file_data: bytes) -> str:
         """

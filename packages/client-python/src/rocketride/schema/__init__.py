@@ -47,12 +47,12 @@ Document Models:
 
 Usage:
     from rocketride.schema import Question, Doc, DocFilter
-    
+
     # Create a question with document context
     question = Question()
     question.addQuestion('What are the main themes?')
     question.addDocument(Doc(page_content='Your text here'))
-    
+
     # Use filtering to select specific documents
     filter = DocFilter(where={'category': 'financial'})
 """

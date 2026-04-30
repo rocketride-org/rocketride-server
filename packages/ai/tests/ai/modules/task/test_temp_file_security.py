@@ -12,7 +12,7 @@ import json
 import os
 import stat
 import unittest
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock
 
 
 class TestWriteTaskFileSecurity(unittest.TestCase):
@@ -28,11 +28,13 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
 
         mock = MagicMock(spec=Task)
         mock.id = 'test-task-1234'
-        mock._build_task = MagicMock(return_value={
-            'config': {'pipeline': {'name': 'test'}},
-            'taskId': 'tok-abc',
-            'type': 'pipeline',
-        })
+        mock._build_task = MagicMock(
+            return_value={
+                'config': {'pipeline': {'name': 'test'}},
+                'taskId': 'tok-abc',
+                'type': 'pipeline',
+            }
+        )
         # Bind the real method to our mock
         mock._write_task_file = Task._write_task_file.__get__(mock, Task)
         return mock
@@ -46,10 +48,9 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
             file_stat = os.stat(taskpath)
             mode = stat.S_IMODE(file_stat.st_mode)
             self.assertEqual(
-                mode, 0o600,
-                f'Expected file permissions 0o600, got {oct(mode)}. '
-                f'Temp files with pipeline config (may contain API keys) '
-                f'must not be world-readable.'
+                mode,
+                0o600,
+                f'Expected file permissions 0o600, got {oct(mode)}. Temp files with pipeline config (may contain API keys) must not be world-readable.',
             )
         finally:
             os.unlink(taskpath)
@@ -62,9 +63,9 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
             basename = os.path.basename(taskpath)
             predictable_name = f'{engine.id}.json'
             self.assertNotEqual(
-                basename, predictable_name,
-                f'Filename must not be the predictable "{predictable_name}". '
-                f'Predictable temp paths enable symlink attacks.'
+                basename,
+                predictable_name,
+                f'Filename must not be the predictable "{predictable_name}". Predictable temp paths enable symlink attacks.',
             )
         finally:
             os.unlink(taskpath)
@@ -74,10 +75,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         engine = self._make_task_engine()
         taskpath = asyncio.run(engine._write_task_file())
         try:
-            self.assertTrue(
-                taskpath.endswith('.json'),
-                f'Expected .json suffix, got: {taskpath}'
-            )
+            self.assertTrue(taskpath.endswith('.json'), f'Expected .json suffix, got: {taskpath}')
         finally:
             os.unlink(taskpath)
 
@@ -104,14 +102,8 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         engine = self._make_task_engine()
         taskpath = asyncio.run(engine._write_task_file())
         try:
-            self.assertFalse(
-                os.path.islink(taskpath),
-                'Temporary file must not be a symlink.'
-            )
-            self.assertTrue(
-                os.path.isfile(taskpath),
-                'Temporary file must be a regular file.'
-            )
+            self.assertFalse(os.path.islink(taskpath), 'Temporary file must not be a symlink.')
+            self.assertTrue(os.path.isfile(taskpath), 'Temporary file must be a regular file.')
         finally:
             os.unlink(taskpath)
 
@@ -122,10 +114,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         taskpath = asyncio.run(engine._write_task_file())
         try:
             file_stat = os.stat(taskpath)
-            self.assertEqual(
-                file_stat.st_uid, os.getuid(),
-                'Temporary file must be owned by the current user.'
-            )
+            self.assertEqual(file_stat.st_uid, os.getuid(), 'Temporary file must be owned by the current user.')
         finally:
             os.unlink(taskpath)
 

@@ -58,7 +58,9 @@ class Chat(ChatBase):
     def _format_user_error(self, error_msg: str) -> str:
         """Convert API error messages to user-friendly format."""
         error_lower = error_msg.lower()
-        if any(p in error_lower for p in ['connection refused', 'connection error', 'failed to connect', 'cannot connect']):
+        if any(
+            p in error_lower for p in ['connection refused', 'connection error', 'failed to connect', 'cannot connect']
+        ):
             return f'Cannot connect to Ollama server. Is Ollama running? (tried: {self._serverbase})'
         if any(p in error_lower for p in ['model not found', 'no such model', '404']):
             return f"Model '{self._model}' is not loaded in Ollama. Run: ollama pull {self._model}"
@@ -69,7 +71,9 @@ class Chat(ChatBase):
         if any(p in error_lower for p in ['timeout', 'timed out']):
             return f"Vision request timed out. The model '{self._model}' may need more time — please try again."
         if any(p in error_lower for p in ['image', 'vision', 'multimodal']):
-            return 'Image processing error. Please check that your image is in a supported format (JPEG, PNG, GIF, WEBP).'
+            return (
+                'Image processing error. Please check that your image is in a supported format (JPEG, PNG, GIF, WEBP).'
+            )
         return f'Ollama Vision error: {error_msg}'
 
     def chat(self, question: Question) -> Answer:
@@ -137,7 +141,9 @@ class Chat(ChatBase):
                 t.start()
                 t.join(timeout=hard_timeout)
                 if t.is_alive():
-                    warning(f'Ollama Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running')
+                    warning(
+                        f'Ollama Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running'
+                    )
                     raise TimeoutError(f'Vision inference timed out after {hard_timeout}s (attempt {attempt + 1})')
                 if exc[0]:
                     raise exc[0]

@@ -88,7 +88,9 @@ class IGlobal(IGlobalTransform):
 
             # Collection name validation (official Weaviate rule)
             if not WEAVIATE_COLLECTION_RE.fullmatch(collection or ''):
-                warning('Start with uppercase; only letters/numbers/underscore; no spaces or special characters (/ , . : ; \' " { } ( ) % ^ & $ # @ - ! ? * + = [ ] | \\ ~ < >).')
+                warning(
+                    'Start with uppercase; only letters/numbers/underscore; no spaces or special characters (/ , . : ; \' " { } ( ) % ^ & $ # @ - ! ? * + = [ ] | \\ ~ < >).'
+                )
                 return
 
             # Load dependencies before importing SDK

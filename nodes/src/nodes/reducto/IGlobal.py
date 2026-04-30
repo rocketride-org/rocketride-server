@@ -101,7 +101,9 @@ class IGlobal(IGlobalBase):
 
                     # Ensure it's actually a dictionary
                     if not isinstance(parsed_dict, dict):
-                        raise ValueError(f'Reducto {field_name} must be a Python dictionary, got {type(parsed_dict).__name__}')
+                        raise ValueError(
+                            f'Reducto {field_name} must be a Python dictionary, got {type(parsed_dict).__name__}'
+                        )
 
                 except (ValueError, SyntaxError) as e:
                     raise ValueError(f'Reducto {field_name} contains invalid Python dictionary syntax: {str(e)}')

@@ -80,7 +80,10 @@ class StoreMixin(DAPClient):
             Bytes read. Empty bytes indicates EOF.
         """
         # fs_read returns binary data in response.arguments (not body), so use raw request
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_read', 'handle': handle, 'offset': offset, 'length': length})
+        request = self.build_request(
+            command='rrext_store',
+            arguments={'subcommand': 'fs_read', 'handle': handle, 'offset': offset, 'length': length},
+        )
         response = await self.request(request)
         if self.did_fail(response):
             raise RuntimeError(response.get('message', 'Failed to read from handle'))
@@ -318,7 +321,11 @@ class StoreMixin(DAPClient):
             self._validate_id(source, 'source')
 
         dir_result = await self.fs_list_dir(f'.logs/{project_id}')
-        logs = [{'name': e['name'], 'modified': e.get('modified')} for e in dir_result.get('entries', []) if e['type'] == 'file' and e['name'].endswith('.log')]
+        logs = [
+            {'name': e['name'], 'modified': e.get('modified')}
+            for e in dir_result.get('entries', [])
+            if e['type'] == 'file' and e['name'].endswith('.log')
+        ]
 
         if source:
             logs = [entry for entry in logs if entry['name'].startswith(f'{source}-')]
@@ -344,8 +351,22 @@ class StoreMixin(DAPClient):
                 for component in pipeline.get('components', []):
                     config = component.get('config', {})
                     if config.get('mode') == 'Source':
-                        sources.append({'id': component.get('id'), 'provider': component.get('provider'), 'name': config.get('name', component.get('id'))})
-                items.append({id_key: item_id, 'name': pipeline.get('name', 'Untitled'), 'description': pipeline.get('description', ''), 'sources': sources, 'totalComponents': len(pipeline.get('components', []))})
+                        sources.append(
+                            {
+                                'id': component.get('id'),
+                                'provider': component.get('provider'),
+                                'name': config.get('name', component.get('id')),
+                            }
+                        )
+                items.append(
+                    {
+                        id_key: item_id,
+                        'name': pipeline.get('name', 'Untitled'),
+                        'description': pipeline.get('description', ''),
+                        'sources': sources,
+                        'totalComponents': len(pipeline.get('components', [])),
+                    }
+                )
             except Exception as e:
                 import logging
 

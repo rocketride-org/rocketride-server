@@ -118,7 +118,10 @@ class IGlobal(IGlobalBase):
         # If we are running a transform or instance task, we basically
         # bring in the parser, ocr if needed and vectorizer, but we
         # configure for local or remote operation here
-        elif self.IEndpoint.endpoint.openMode == OPEN_MODE.INSTANCE or self.IEndpoint.endpoint.openMode == OPEN_MODE.TRANSFORM:
+        elif (
+            self.IEndpoint.endpoint.openMode == OPEN_MODE.INSTANCE
+            or self.IEndpoint.endpoint.openMode == OPEN_MODE.TRANSFORM
+        ):
             # Where we go to for our isSet functions
             if self.IEndpoint.endpoint.openMode == OPEN_MODE.INSTANCE:
                 # This is a instance task, look in the service section for flags

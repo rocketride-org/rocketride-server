@@ -197,7 +197,9 @@ class FileStore:
         self._handles[handle.handle_id] = handle
         return {'handle': handle.handle_id, 'size': result['size']}
 
-    async def read_chunk(self, handle_id: str, offset: int, length: int = MAX_CHUNK_SIZE, connection_id: int = 0) -> bytes:
+    async def read_chunk(
+        self, handle_id: str, offset: int, length: int = MAX_CHUNK_SIZE, connection_id: int = 0
+    ) -> bytes:
         """
         Read data from an open read handle.
 
@@ -269,7 +271,9 @@ class FileStore:
         # Fail fast if the backend reports a size larger than the cap
         if info.get('size', 0) > max_size:
             await self.close_read(info['handle'])
-            raise StorageError(f'File exceeds max_size ({info["size"]} > {max_size}); use the streaming handle API for large files')
+            raise StorageError(
+                f'File exceeds max_size ({info["size"]} > {max_size}); use the streaming handle API for large files'
+            )
         try:
             chunks = []
             offset = 0
@@ -587,7 +591,9 @@ class FileStore:
         except Exception as e:
             # Best-effort cleanup — log at debug level so disconnect-time
             # commit failures are traceable rather than silently lost.
-            debug(f'FileStore._force_close_handle failed handle={handle_id} mode={handle.mode.value} path={handle.path}: {e}')
+            debug(
+                f'FileStore._force_close_handle failed handle={handle_id} mode={handle.mode.value} path={handle.path}: {e}'
+            )
         finally:
             self._release_handle(handle)
 

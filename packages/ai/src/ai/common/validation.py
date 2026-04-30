@@ -81,7 +81,9 @@ def validate_prompt(prompt: str, max_tokens: int, token_counter) -> str:
     try:
         token_count = token_counter(prompt)
         if token_count > max_tokens:
-            debug(f'Warning: Prompt ({token_count} tokens) exceeds model context window ({max_tokens} tokens). The request will likely be rejected by the provider.')
+            debug(
+                f'Warning: Prompt ({token_count} tokens) exceeds model context window ({max_tokens} tokens). The request will likely be rejected by the provider.'
+            )
     except Exception:
         # Token counting failures should not block the request
         pass
@@ -115,7 +117,9 @@ def validate_model_name(model: Optional[str]) -> Optional[str]:
     model = model.strip()
 
     if not _MODEL_NAME_RE.match(model):
-        raise ValueError(f'Invalid model name: {model!r}. Model names must start with an alphanumeric character and contain only letters, digits, hyphens, dots, underscores, colons, at-signs, or slashes.')
+        raise ValueError(
+            f'Invalid model name: {model!r}. Model names must start with an alphanumeric character and contain only letters, digits, hyphens, dots, underscores, colons, at-signs, or slashes.'
+        )
 
     return model
 
@@ -140,11 +144,15 @@ def validate_max_tokens(output_tokens: int, total_tokens: int) -> int:
         raise ValueError(f'Total tokens must be a positive integer, got {total_tokens!r}.')
 
     if output_tokens > MAX_OUTPUT_TOKENS:
-        debug(f'Warning: Output tokens ({output_tokens}) exceeds maximum known limit ({MAX_OUTPUT_TOKENS}). Clamping to {MAX_OUTPUT_TOKENS}.')
+        debug(
+            f'Warning: Output tokens ({output_tokens}) exceeds maximum known limit ({MAX_OUTPUT_TOKENS}). Clamping to {MAX_OUTPUT_TOKENS}.'
+        )
         output_tokens = MAX_OUTPUT_TOKENS
 
     if output_tokens > total_tokens:
-        debug(f'Warning: Output tokens ({output_tokens}) exceeds total tokens ({total_tokens}). Clamping to total tokens.')
+        debug(
+            f'Warning: Output tokens ({output_tokens}) exceeds total tokens ({total_tokens}). Clamping to total tokens.'
+        )
         output_tokens = total_tokens
 
     return output_tokens

@@ -82,7 +82,12 @@ def detect_language_by_regex(code: str) -> str:
     scores['javascript'] += 2 * _count(r'\bmodule\.exports\b', sample)
 
     # --- C++ (C++-only markers) ---
-    cpp_only = _count(r'\bstd::\w+', sample) + _count(r'\btemplate\s*<', sample) + _count(r'\bnamespace\s+[A-Za-z_]\w+', sample) + _count(r'::\s*[A-Za-z_]\w*', sample)
+    cpp_only = (
+        _count(r'\bstd::\w+', sample)
+        + _count(r'\btemplate\s*<', sample)
+        + _count(r'\bnamespace\s+[A-Za-z_]\w+', sample)
+        + _count(r'::\s*[A-Za-z_]\w*', sample)
+    )
     scores['cpp'] += 8 * _count(r'\bstd::\w+', sample)
     scores['cpp'] += 6 * _count(r'\btemplate\s*<', sample)
     scores['cpp'] += 5 * _count(r'\busing\s+namespace\s+std\b', sample)
@@ -213,7 +218,9 @@ class PreProcessor(PreProcessorBase):
             try:
                 module = importlib.import_module(modname)
             except ImportError as e:
-                raise Exception(f"Language module '{modname}' not installed for '{lang_key}'. Install it or add a loader.") from e
+                raise Exception(
+                    f"Language module '{modname}' not installed for '{lang_key}'. Install it or add a loader."
+                ) from e
 
             if not hasattr(module, fnname):
                 raise Exception(f"Module '{modname}' does not expose '{fnname}()' (required for '{lang_key}').")
