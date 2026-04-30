@@ -199,6 +199,10 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_URI: serverUri,
+				// CI can provide ROCKETRIDE_APIKEY as an empty string; pytest's
+				// TEST_CONFIG uses os.getenv(..., 'MYAPIKEY') which does not treat
+				// empty as missing. Ensure a usable default for local test server auth.
+				ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 			};
 
 			// Use absolute paths since cwd is dist/server
