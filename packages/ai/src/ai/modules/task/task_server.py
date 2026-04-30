@@ -1314,11 +1314,13 @@ class TaskServer(DAPBase):
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
-                # Route through the shared cleanup helper so the registry slot,
-                # monitor subscriptions, and the task_removed dashboard event are
-                # all handled consistently. Without this, a subsequent use() with
-                # the same token races against a phantom registry entry.
-                await self.remove_task(token)
+                # Stop the inner task first so its state-transition monitor can
+                # still find this control in _task_control while the busy-wait
+                # in task_engine.stop_task() polls for COMPLETED/CANCELLED.
+                await control.task.stop_task()
+                # Free the slot so a subsequent use() with the same token does
+                # not race against a phantom registry entry.
+                self._task_control.pop(token, None)
                 self.debug_message(f'Task "{control.id}" stopped on request')
 
         except Exception as e:
