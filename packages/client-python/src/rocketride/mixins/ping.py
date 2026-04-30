@@ -145,13 +145,4 @@ class PingMixin(DAPClient):
             - Failed pings may indicate network, server, or authentication issues
             - Regular pings can detect connection problems early
         """
-        # Build ping request
-        request = self.build_request(command='rrext_ping')
-
-        # Send to server and wait for response
-        response = await self.request(request)
-
-        # Check if ping failed
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Ping failed')
-            raise RuntimeError(f'Ping failed: {error_msg}')
+        await self.call('rrext_ping')

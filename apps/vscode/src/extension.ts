@@ -34,34 +34,36 @@ import { icons } from './shared/util/icons';
 
 // import { registerDebugger } from './debugger/adapter'; // Disabled: debugger removed from package.json
 import { ConnectionManager } from './connection/connection';
+import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
 
-import { PageConnectionProvider } from './providers/PageConnectionProvider';
-import { SidebarFilesProvider } from './providers/SidebarFilesProvider';
+import { PageSidebarProvider } from './providers/PageSidebarProvider';
 import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageMonitorProvider } from './providers/PageMonitorProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
+import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
-import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
+import { PageAccountProvider } from './providers/PageAccountProvider';
+import { PageBillingProvider } from './providers/PageBillingProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
+import { CloudAuthProvider } from './auth/CloudAuthProvider';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
 let configManager: ConfigManager | undefined;
 
 // Provider references
-let pageConnection: PageConnectionProvider | undefined;
-let sidebarFiles: SidebarFilesProvider | undefined;
+let pageSidebar: PageSidebarProvider | undefined;
 let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let _pageMonitor: PageMonitorProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
+let pageStatus: PageStatusProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
-let sidebarConnection: SidebarConnectionProvider | undefined;
 
 /**
  * One-time migrations for settings/files that changed between extension versions.
@@ -107,6 +109,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	configManager = ConfigManager.getInstance();
 	await configManager.initialize(context);
 
+	// Initialize cloud auth provider (registers vscode:// URI handler)
+	const cloudAuth = CloudAuthProvider.getInstance();
+	cloudAuth.initialize(context);
+	context.subscriptions.push(cloudAuth);
+
 	// Run one-time migrations (idempotent — safe on every startup)
 	await runMigrations(context);
 
@@ -144,6 +151,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				connectionManager = ConnectionManager.getInstance();
 				connectionManager.setEnginesRoot(context.globalStorageUri.fsPath);
 
+				// Deploy connection manager — same pattern, same engines root
+				const deployManager = DeployManager.getDeployInstance();
+				deployManager.setEnginesRoot(context.globalStorageUri.fsPath);
+
 				//-------------------------------------
 				// Create status bar
 				//-------------------------------------
@@ -156,16 +167,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				logger.output(`${icons.info} Creating tree providers...`);
 				progress.report({ increment: 50, message: 'Creating tree providers...' });
 
-				sidebarFiles = new SidebarFilesProvider(context);
-				const pipelineFilesTreeDataProvider = vscode.window.registerTreeDataProvider('rocketride.provider.files', sidebarFiles);
+				// Register unified sidebar webview
+				pageSidebar = new PageSidebarProvider(context.extensionUri);
+				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(PageSidebarProvider.viewType, pageSidebar);
 
-				// Register connection webview provider
-				pageConnection = new PageConnectionProvider(context.extensionUri);
-				const connectionWebviewProvider = vscode.window.registerWebviewViewProvider(PageConnectionProvider.viewType, pageConnection);
-
-				sidebarConnection = new SidebarConnectionProvider(context);
-
-				context.subscriptions.push(pipelineFilesTreeDataProvider, connectionWebviewProvider, sidebarConnection);
+				context.subscriptions.push(sidebarWebviewProvider);
 
 				//-------------------------------------
 				// Create webview providers
@@ -176,7 +182,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				_pageMonitor = new PageMonitorProvider(context);
 				pageDeploy = new PageDeployProvider(context);
+				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
+				new PageAccountProvider(context);
+				new PageBillingProvider(context);
 
 				// Register unified project editor (canvas + status + trace)
 				pageProject = new PageProjectProvider(context);
@@ -207,7 +216,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				setupConnectionEventHandlers();
 
 				// Add all providers to context subscriptions for proper cleanup
-				context.subscriptions.push(pageProjectRegistration, pageSettings, pageProject, pageConnection, sidebarFiles, pageWelcome!);
+				context.subscriptions.push(pageProjectRegistration, pageSettings, pageProject, pageWelcome!);
 
 				//-------------------------------------
 				// Update tree providers with initial data
@@ -241,6 +250,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					barStatus.setReady();
 					connectionManager.initialize().catch((error) => {
 						console.error('[ROCKETRIDE] Connection initialization failed:', error);
+					});
+					deployManager.initialize().catch((error) => {
+						console.error('[ROCKETRIDE] Deploy connection initialization failed:', error);
 					});
 				}
 
@@ -288,6 +300,18 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 	const agentManager = new AgentManager();
 
 	const commands = [
+		vscode.commands.registerCommand('rocketride.sidebar.connection.connect', async () => {
+			await connectionManager?.connect();
+		}),
+		vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', async () => {
+			await connectionManager?.disconnect();
+		}),
+		vscode.commands.registerCommand('rocketride.sidebar.connection.reconnect', async () => {
+			await connectionManager?.reconnect();
+		}),
+		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
+			pageStatus?.show(projectId, sourceId, displayName);
+		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
 			vscode.window.showInformationMessage('RocketRide views refreshed');
@@ -318,6 +342,71 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				vscode.window.showErrorMessage(`Failed to remove agent documentation: ${err}`);
 			}
 		}),
+
+		// ── Pipeline file commands (previously in SidebarFilesProvider) ──────────
+		vscode.commands.registerCommand('rocketride.sidebar.files.createFile', async () => {
+			if (!vscode.workspace.workspaceFolders) {
+				vscode.window.showErrorMessage('No workspace folder open');
+				return;
+			}
+			const workspaceFolder = vscode.workspace.workspaceFolders[0];
+			const config = ConfigManager.getInstance().getConfig();
+			const rawPath = config?.defaultPipelinePath || 'pipelines';
+			const relativePath = rawPath.replace(/^\$\{workspaceFolder\}[/\\]?/, '');
+			const defaultDir = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+
+			const fileUri = await vscode.window.showSaveDialog({
+				defaultUri: vscode.Uri.joinPath(defaultDir, 'new-pipeline'),
+				filters: { 'RocketRide Pipeline': ['pipe'] },
+				title: 'Create New Pipeline',
+			});
+			if (!fileUri) return;
+
+			await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, '..'));
+			const template = { components: [] };
+			try {
+				await vscode.workspace.fs.writeFile(fileUri, Buffer.from(JSON.stringify(template, null, 2), 'utf8'));
+				await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageProject');
+			} catch (error) {
+				vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
+			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.openFileAtLine', async (filePath: string, lineNumber?: number) => {
+			if (!filePath || typeof filePath !== 'string') return;
+			const line = typeof lineNumber === 'number' && lineNumber > 0 ? lineNumber : 1;
+			let uri: vscode.Uri;
+			if (path.isAbsolute(filePath)) {
+				uri = vscode.Uri.file(filePath);
+			} else {
+				const folders = vscode.workspace.workspaceFolders;
+				uri = folders?.length ? vscode.Uri.joinPath(folders[0].uri, filePath) : vscode.Uri.file(filePath);
+			}
+			try {
+				const doc = await vscode.workspace.openTextDocument(uri);
+				const range = new vscode.Range(line - 1, 0, line - 1, 0);
+				await vscode.window.showTextDocument(doc, { selection: range, preview: false });
+			} catch (e) {
+				vscode.window.showErrorMessage(`Could not open ${path.basename(filePath)}: ${e}`);
+			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.refresh', async () => {
+			vscode.window.showInformationMessage('Pipeline views refreshed');
+		}),
+
+		vscode.commands.registerCommand('rocketride.cloud.logout', async () => {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			await cloudAuth.signOut();
+		}),
+
+		// Stub commands — run/stop/open are handled via webview messages now,
+		// but package.json still declares them so they must be registered.
+		vscode.commands.registerCommand('rocketride.sidebar.files.openFile', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.openStatus', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.stopPipeline', () => {}),
+		vscode.commands.registerCommand('rocketride.sidebar.files.revealErrorsSection', () => {}),
 	];
 
 	commands.forEach((command) => context.subscriptions.push(command));
@@ -327,10 +416,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
  * Sets up event handlers for cross-provider communication
  */
 function setupConnectionEventHandlers(): void {
-	// Update pipeline data when connected
-	connectionManager?.on('pipelineDataChanged', () => {
-		sidebarFiles?.refresh();
-	});
+	// Pipeline data changes are now handled by PageSidebarProvider's event listeners
 
 	// Sync service catalog + schemas to .rocketride/ when services are fetched
 	connectionManager?.on('servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
@@ -351,8 +437,7 @@ function setupConnectionEventHandlers(): void {
  * Refreshes all data providers
  */
 async function refreshAllProviders(): Promise<void> {
-	sidebarFiles?.refresh();
-	pageConnection?.refresh();
+	// PageSidebarProvider handles its own refresh via event listeners
 }
 
 /**
@@ -408,8 +493,8 @@ export async function deactivate(): Promise<void> {
 export const getConnectionManager = () => connectionManager;
 export const getSettingsProvider = () => pageSettings;
 export const getConfigManager = () => configManager;
-export const getPipelineFilesTreeProvider = () => sidebarFiles;
-export const getConnectionTreeProvider = () => pageConnection;
+export const getPipelineFilesTreeProvider = () => undefined;
+export const getConnectionTreeProvider = () => undefined;
 export const getPageProjectProvider = () => pageProject;
 export const getBarStatus = () => barStatus;
 export const getPageWelcomeProvider = () => pageWelcome;

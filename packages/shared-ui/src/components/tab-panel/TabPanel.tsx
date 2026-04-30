@@ -8,9 +8,10 @@
  *
  * Layout:  The bar is absolutely positioned at the top center, transparent,
  *          so content (e.g. the canvas) flows underneath.
- *
- * Only the active panel is mounted; switching tabs unmounts the previous
- * panel and mounts the new one.
+ *          Each panel fills the wrapper with overflow:auto, so scrollable
+ *          content (e.g. settings) scrolls within the panel while the pill
+ *          bar stays pinned. The canvas doesn't overflow, so no scrollbar
+ *          appears on the design tab.
  */
 
 import React, { CSSProperties } from 'react';
@@ -41,14 +42,14 @@ const styles = {
 	} as CSSProperties,
 	pill: {
 		display: 'flex',
-		alignItems: 'center',
-		gap: 2,
+		alignItems: 'stretch',
+		gap: 0,
 		borderRadius: 6,
-		border: '1px solid var(--rr-border)',
-		padding: 2,
+		padding: 0,
 		height: 38,
 		pointerEvents: 'auto',
 		backgroundColor: 'var(--rr-bg-widget)',
+		overflow: 'hidden',
 	} as CSSProperties,
 	segment: (active: boolean): CSSProperties => ({
 		display: 'flex',
@@ -60,7 +61,7 @@ const styles = {
 		cursor: 'pointer',
 		border: 'none',
 		outline: 'none',
-		borderRadius: 4,
+		borderRadius: 0,
 		backgroundColor: active ? 'var(--rr-brand)' : 'transparent',
 		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)',
 		transition: 'background-color 0.15s, color 0.15s',

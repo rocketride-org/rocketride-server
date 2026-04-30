@@ -21,8 +21,27 @@
 // SOFTWARE.
 // =============================================================================
 
-export type RocketRideConnectionMode = 'cloud' | 'local' | 'onprem';
+export type RocketRideConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
+/**
+ * Whether the mode requires the user to provide an API key manually.
+ * Cloud uses OAuth2 (no manual key), docker/service use env-derived keys,
+ * local needs no auth. Only on-prem requires user-provided API key.
+ */
 export function connectionModeRequiresApiKey(connectionMode: RocketRideConnectionMode | string): boolean {
+	return connectionMode === 'onprem';
+}
+
+/**
+ * Whether the mode uses OAuth2 authentication (browser sign-in).
+ */
+export function connectionModeUsesOAuth(connectionMode: RocketRideConnectionMode | string): boolean {
 	return connectionMode === 'cloud';
+}
+
+/**
+ * Whether the mode has a fixed URL that the user cannot change.
+ */
+export function connectionModeHasFixedUrl(connectionMode: RocketRideConnectionMode | string): boolean {
+	return connectionMode === 'cloud' || connectionMode === 'docker' || connectionMode === 'service' || connectionMode === 'local';
 }

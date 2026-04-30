@@ -29,7 +29,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { RocketRideClient } from 'rocketride';
 
-export type ConnectionMode = 'cloud' | 'onprem' | 'local';
+export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
 export interface ConfigManagerInfo {
 	/** Connection mode: cloud (RocketRide.ai), onprem (your server), or local (localhost port) */
@@ -60,6 +60,35 @@ export interface ConfigManagerInfo {
 
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+
+	/** Cloud team ID for development mode (which team's engine to connect to) */
+	developmentTeamId: string;
+
+	/** Deploy target mode (null = not configured / same as development) */
+	deployTargetMode: ConnectionMode | null;
+
+	/** Cloud team ID for deploy target */
+	deployTargetTeamId: string;
+
+	/** Separate host URL for deploy target (on-prem deploy) */
+	deployHostUrl: string;
+
+	/** Separate API key for deploy target (on-prem deploy) — from secure storage */
+	deployApiKey: string;
+
+	/** Auto-connect to deploy target on startup */
+	deployAutoConnect: boolean;
+
+	/** Deploy local engine configuration */
+	deployLocal: {
+		/** Engine version for local deploy target */
+		engineVersion: string;
+		/** Enable debug output for local deploy engine */
+		debugOutput: boolean;
+	};
+
+	/** Additional engine arguments for deploy engine */
+	deployEngineArgs: string;
 
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
@@ -94,6 +123,17 @@ export class ConfigManager {
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
+		developmentTeamId: '',
+		deployTargetMode: null,
+		deployTargetTeamId: '',
+		deployHostUrl: '',
+		deployApiKey: '',
+		deployAutoConnect: false,
+		deployLocal: {
+			engineVersion: 'latest',
+			debugOutput: false,
+		},
+		deployEngineArgs: '',
 		env: {},
 	};
 
@@ -163,10 +203,11 @@ export class ConfigManager {
 	 */
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
+		const connectionMode = config.get('connectionMode', 'local') as ConnectionMode;
+		let hostUrl = config.get('hostUrl', 'http://localhost:5565');
 
 		// Get API key from secure storage
-		const apiKey = await this.getApiKeyFromStorage();
+		let apiKey = await this.getApiKeyFromStorage();
 
 		// Ensure env is loaded (preserve existing env if already loaded)
 		const existingEnv = this.config?.env || {};
@@ -174,8 +215,21 @@ export class ConfigManager {
 			await this.loadEnvFile();
 		}
 
+		const env = this.config?.env || {};
+
+		// Docker/Service modes: fixed URL and API key from env
+		if (connectionMode === 'docker' || connectionMode === 'service') {
+			hostUrl = 'http://localhost:5565';
+			apiKey = env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+		}
+
+		// Cloud mode: workspace .env override, then build-time default, then hardcoded fallback
+		if (connectionMode === 'cloud') {
+			hostUrl = env.RR_CLOUD_URL || process.env.RR_CLOUD_URL || 'https://cloud.rocketride.ai';
+		}
+
 		this.config = {
-			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
+			connectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
@@ -186,7 +240,18 @@ export class ConfigManager {
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {},
+			developmentTeamId: config.get('developmentTeamId', ''),
+			deployTargetMode: config.get<ConnectionMode | null>('deployTargetMode', null),
+			deployTargetTeamId: config.get('deployTargetTeamId', ''),
+			deployHostUrl: config.get('deployHostUrl', ''),
+			deployApiKey: await this.getDeployApiKeyFromStorage(),
+			deployAutoConnect: config.get('deployAutoConnect', false),
+			deployLocal: {
+				engineVersion: config.get('deploy.local.engineVersion', 'latest'),
+				debugOutput: config.get('deploy.local.debugOutput', false),
+			},
+			deployEngineArgs: config.get('deployEngineArgs', ''),
+			env,
 		};
 	}
 
@@ -555,6 +620,53 @@ export class ConfigManager {
 		}
 	}
 
+	// =========================================================================
+	// DEPLOY API KEY (separate secure storage key)
+	// =========================================================================
+
+	private readonly DEPLOY_API_KEY_SECRET_KEY = 'rocketride.deployApiKey';
+
+	/**
+	 * Gets the deploy API key from secure storage.
+	 */
+	private async getDeployApiKeyFromStorage(): Promise<string> {
+		if (this.isDisposing || !this.context) return '';
+		try {
+			return (await this.context.secrets.get(this.DEPLOY_API_KEY_SECRET_KEY)) || '';
+		} catch {
+			return '';
+		}
+	}
+
+	/**
+	 * Stores the deploy API key in secure storage.
+	 */
+	public async setDeployApiKey(apiKey: string): Promise<void> {
+		if (!this.context) throw new Error('ConfigManager not initialized with context');
+		if (apiKey.trim()) {
+			await this.context.secrets.store(this.DEPLOY_API_KEY_SECRET_KEY, apiKey.trim());
+		} else {
+			await this.context.secrets.delete(this.DEPLOY_API_KEY_SECRET_KEY);
+		}
+		if (this.config) this.config.deployApiKey = apiKey.trim();
+	}
+
+	/**
+	 * Updates the deploy host URL in settings.
+	 */
+	public async updateDeployHostUrl(hostUrl: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		await config.update('deployHostUrl', hostUrl, vscode.ConfigurationTarget.Global);
+	}
+
+	/**
+	 * Updates the deploy auto-connect setting.
+	 */
+	public async updateDeployAutoConnect(autoConnect: boolean): Promise<void> {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		await config.update('deployAutoConnect', autoConnect, vscode.ConfigurationTarget.Global);
+	}
+
 	/**
 	 * Opens the RocketRide configuration settings page
 	 */
@@ -580,6 +692,46 @@ export class ConfigManager {
 		await config.update('connectionMode', connectionMode, vscode.ConfigurationTarget.Global);
 
 		// Cache will be updated via onDidChangeConfiguration listener
+	}
+
+	/**
+	 * Sets the development team ID in cache only (runtime, not persisted).
+	 * Use when the sidebar changes the team at runtime.
+	 */
+	public setDevelopmentTeamId(teamId: string): void {
+		this.config.developmentTeamId = teamId;
+	}
+
+	/**
+	 * Sets the deploy target team ID in cache only (runtime, not persisted).
+	 * Use when the sidebar changes the team at runtime.
+	 */
+	public setDeployTargetTeamId(teamId: string): void {
+		this.config.deployTargetTeamId = teamId;
+	}
+
+	/**
+	 * Updates the development team ID (ASYNC - updates both cache and storage)
+	 */
+	public async updateDevelopmentTeamId(teamId: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		await config.update('developmentTeamId', teamId, vscode.ConfigurationTarget.Global);
+	}
+
+	/**
+	 * Updates the deploy target mode (ASYNC - updates both cache and storage)
+	 */
+	public async updateDeployTargetMode(mode: ConnectionMode | null): Promise<void> {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		await config.update('deployTargetMode', mode, vscode.ConfigurationTarget.Global);
+	}
+
+	/**
+	 * Updates the deploy target team ID (ASYNC - updates both cache and storage)
+	 */
+	public async updateDeployTargetTeamId(teamId: string): Promise<void> {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		await config.update('deployTargetTeamId', teamId, vscode.ConfigurationTarget.Global);
 	}
 
 	/**

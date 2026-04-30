@@ -32,7 +32,7 @@ Constants:
                           custom service URI is provided during client initialization.
                           Points to the official RocketRide Enterprise as a Service (EaaS)
                           endpoint.
-    
+
     CONST_SOCKET_TIMEOUT: WebSocket timeout in seconds. This value controls how long
                          the client will wait for server responses before timing out.
                          Set to 180 seconds (3 minutes) to accommodate long-running
@@ -40,10 +40,10 @@ Constants:
 
 Usage:
     from rocketride.core.constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT
-    
+
     # Use default service endpoint
     client = RocketRideClient(uri=CONST_DEFAULT_SERVICE, auth='api_key')
-    
+
     # Access timeout for custom configurations
     custom_timeout = CONST_SOCKET_TIMEOUT * 2  # Double the default timeout
 """
@@ -82,3 +82,7 @@ CONST_WS_PING_INTERVAL = 15
 # If no pong response is received within this period after a ping,
 # the connection is considered dead and will be closed
 CONST_WS_PING_TIMEOUT = 60
+
+# Default store directory for project pipeline files.
+# Use this constant instead of hardcoding '.projects'.
+PROJECT_DIR = '.projects'

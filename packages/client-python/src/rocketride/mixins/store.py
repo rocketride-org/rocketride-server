@@ -31,7 +31,6 @@ open/close internally.
 import json
 from typing import Dict, Any, Optional
 from ..core import DAPClient
-from ..types.pipeline import PipelineConfig
 
 
 class StoreMixin(DAPClient):
@@ -66,11 +65,7 @@ class StoreMixin(DAPClient):
             Dict with 'handle' (str). Read mode also includes 'size' (int).
         """
         self._validate_store_path(path)
-        args: Dict[str, Any] = {'subcommand': 'fs_open', 'path': path, 'mode': mode}
-        request = self.build_request(command='rrext_store', arguments=args)
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_open', path=path, mode=mode)
 
     async def fs_read(self, handle: str, offset: int = 0, length: int = 4_194_304) -> bytes:
         """
@@ -84,9 +79,11 @@ class StoreMixin(DAPClient):
         Returns:
             Bytes read. Empty bytes indicates EOF.
         """
+        # fs_read returns binary data in response.arguments (not body), so use raw request
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_read', 'handle': handle, 'offset': offset, 'length': length})
         response = await self.request(request)
-        self._check_response(response)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message', 'Failed to read from handle'))
         return response.get('arguments', {}).get('data', b'')
 
     async def fs_write(self, handle: str, data: bytes) -> int:
@@ -100,10 +97,8 @@ class StoreMixin(DAPClient):
         Returns:
             Number of bytes written.
         """
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_write', 'handle': handle, 'data': data})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {}).get('bytesWritten', 0)
+        body = await self.call('rrext_store', subcommand='fs_write', handle=handle, data=data)
+        return body.get('bytesWritten', 0)
 
     async def fs_close(self, handle: str, mode: str = 'r') -> None:
         """
@@ -113,9 +108,7 @@ class StoreMixin(DAPClient):
             handle: Handle ID returned by fs_open.
             mode: 'r' or 'w' (must match the mode used in fs_open).
         """
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_close', 'handle': handle, 'mode': mode})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_close', handle=handle, mode=mode)
 
     # =========================================================================
     # Other File Operations
@@ -129,9 +122,7 @@ class StoreMixin(DAPClient):
             path: Relative path within the account store.
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_delete', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_delete', path=path)
 
     async def fs_list_dir(self, path: str = '') -> Dict[str, Any]:
         """
@@ -146,10 +137,7 @@ class StoreMixin(DAPClient):
         """
         if path:
             self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_list_dir', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_list_dir', path=path)
 
     async def fs_mkdir(self, path: str) -> None:
         """
@@ -159,9 +147,25 @@ class StoreMixin(DAPClient):
             path: Relative directory path.
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_mkdir', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
+        await self.call('rrext_store', subcommand='fs_mkdir', path=path)
+
+    async def fs_rmdir(self, path: str, *, recursive: bool = False) -> None:
+        """
+        Remove a directory.
+
+        Args:
+            path: Relative directory path. Must be non-empty and must not start
+                with ``/`` or ``\\`` — destructive ops reject absolute-like
+                paths so a bad input cannot act on the account root.
+            recursive: Keyword-only. If True, delete all contents recursively
+                (default: False).
+
+        Raises:
+            ValueError: If ``path`` is empty or absolute-like.
+            RuntimeError: If directory is not empty and recursive is False.
+        """
+        self._validate_relative_path(path, 'path')
+        await self.call('rrext_store', subcommand='fs_rmdir', path=path, recursive=recursive)
 
     async def fs_stat(self, path: str) -> Dict[str, Any]:
         """
@@ -175,10 +179,28 @@ class StoreMixin(DAPClient):
             modified (epoch timestamp, files only).
         """
         self._validate_store_path(path)
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_stat', 'path': path})
-        response = await self.request(request)
-        self._check_response(response)
-        return response.get('body', {})
+        return await self.call('rrext_store', subcommand='fs_stat', path=path)
+
+    async def fs_rename(self, old_path: str, new_path: str) -> None:
+        """
+        Rename a file or directory.
+
+        On object stores this is implemented as copy + delete. For directories,
+        all contents are moved recursively.
+
+        Args:
+            old_path: Current relative path within the account store. Must be
+                non-empty and must not start with ``/`` or ``\\``.
+            new_path: New relative path within the account store. Same
+                constraints as ``old_path``.
+
+        Raises:
+            ValueError: If either path is empty or absolute-like.
+            RuntimeError: If old_path does not exist or rename fails.
+        """
+        self._validate_relative_path(old_path, 'old_path')
+        self._validate_relative_path(new_path, 'new_path')
+        await self.call('rrext_store', subcommand='fs_rename', old_path=old_path, new_path=new_path)
 
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)
@@ -226,32 +248,6 @@ class StoreMixin(DAPClient):
 
     # =========================================================================
     # Domain Convenience - Projects
-    # =========================================================================
-
-    async def save_project(self, name: str, pipeline: PipelineConfig) -> None:
-        """Save a project pipeline to .projects/<name>.json."""
-        self._validate_id(name, 'name')
-        if not pipeline or not isinstance(pipeline, dict):
-            raise ValueError('pipeline must be a non-empty dictionary')
-
-        await self.fs_write_json(f'.projects/{name}.json', pipeline)
-
-    async def get_project(self, name: str) -> PipelineConfig:
-        """Get a project by file name from .projects/<name>.json."""
-        self._validate_id(name, 'name')
-
-        return await self.fs_read_json(f'.projects/{name}.json')
-
-    async def delete_project(self, name: str) -> None:
-        """Delete a project by file name."""
-        self._validate_id(name, 'name')
-
-        await self.fs_delete(f'.projects/{name}.json')
-
-    async def get_all_projects(self) -> Dict[str, Any]:
-        """List all projects with summaries."""
-        return await self._get_all_items('.projects', 'id', 'projects')
-
     # =========================================================================
     # Domain Convenience - Templates
     # =========================================================================
@@ -366,6 +362,22 @@ class StoreMixin(DAPClient):
                 raise ValueError(f'Path traversal not allowed: {path}')
             if segment and any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in segment):
                 raise ValueError(f'Path contains invalid characters: {path}')
+
+    @staticmethod
+    def _validate_relative_path(path: str, name: str = 'path') -> None:
+        """
+        Validate a path for destructive operations (rmdir, rename).
+
+        Stricter than ``_validate_store_path``: rejects empty strings and paths
+        with a leading ``/`` or ``\\`` so a bad input cannot slip past and act
+        on the account root. Delegates to ``_validate_store_path`` for the
+        per-segment character/traversal checks.
+        """
+        if not isinstance(path, str) or not path:
+            raise ValueError(f'{name} must be a non-empty string')
+        if path.startswith('/') or path.startswith('\\'):
+            raise ValueError(f'{name} must be a relative path (got {path!r})')
+        StoreMixin._validate_store_path(path)
 
     @staticmethod
     def _validate_id(value: str, name: str) -> None:

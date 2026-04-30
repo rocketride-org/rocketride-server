@@ -170,6 +170,8 @@ export enum EVENT_TYPE {
 interface TaskRunningEntry {
 	/** Unique task identifier. */
 	id: string;
+	/** Display name of the task (e.g. 'Parser1.Chat'). */
+	name: string;
 	/** Project identifier. */
 	projectId: string;
 	/** Source component entry point. */

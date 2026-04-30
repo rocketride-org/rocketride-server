@@ -52,7 +52,7 @@ export enum ConnectionState {
 	FAILED = 'failed',
 
 	/** Local mode: engine process is shutting down */
-	STOPPING_ENGINE = 'stopping-engine'
+	STOPPING_ENGINE = 'stopping-engine',
 }
 
 /**
@@ -61,7 +61,7 @@ export enum ConnectionState {
  * - onprem: Your own hosted server (needs host URL + API key)
  * - local: Your local machine (just needs port to connect to)
  */
-export type ConnectionMode = 'cloud' | 'onprem' | 'local';
+export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
 /**
  * Connection status tracking for UI updates and status monitoring

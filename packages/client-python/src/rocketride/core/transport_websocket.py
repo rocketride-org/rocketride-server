@@ -99,9 +99,25 @@ class TransportWebSocket(TransportBase):
     - Binary messages using DAP format (JSON header + newline + binary data)
     - Automatic format detection based on message content
 
-    This is used internally by RocketRideClient to communicate with servers
-    over WebSocket connections. The transport handles all low-level details
-    while providing a clean interface to higher-level client code.
+    Disconnect / drain lifecycle
+    ----------------------------
+    Both paths (server via accept(), client via connect()) share the same
+    two-phase shutdown driven by disconnect():
+
+      Phase 1 — Drain:
+        _draining is set to True. _receive_loop keeps calling recv() but
+        silently discards incoming packets without creating new _message_tasks.
+        disconnect() awaits all pending _message_tasks so in-flight handlers
+        can finish sending their responses.
+
+      Phase 2 — Close:
+        Server path: disconnect() closes the socket directly, which unblocks
+          recv() with ConnectionClosed. accept()'s finally handles teardown.
+        Client path: disconnect() cancels _receive_task, which unblocks recv()
+          with CancelledError. _run_receive_task()'s finally handles teardown.
+
+    _receive_loop is intentionally free of cleanup logic — it simply loops and
+    propagates exceptions. The caller (accept or _run_receive_task) owns cleanup.
     """
 
     def __init__(self, uri: str = CONST_DEFAULT_SERVICE, **kwargs) -> None:
@@ -119,6 +135,7 @@ class TransportWebSocket(TransportBase):
         self._uri = uri
         self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
+        self._draining: bool = False
 
     def get_auth(self) -> Optional[str]:
         """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
@@ -151,34 +168,31 @@ class TransportWebSocket(TransportBase):
             return False
         return isinstance(self._websocket, WebSocket)
 
-    async def _cleanup_and_disconnect(self, reason: str, has_error: bool) -> None:
+    async def _close_websocket(self) -> None:
         """
-        Stop accepting new messages, cancel in-flight tasks, then notify disconnection.
+        Close the underlying WebSocket and null _websocket.
 
-        Ensures _receive_data cannot interleave with _transport_disconnected callback
-        by setting _connected=False first and waiting for all tasks to complete.
-
-        Args:
-            reason: Reason for disconnection
-            has_error: Whether this was an error disconnection
+        Does not notify the application — call _cleanup() for that.
+        Safe to call multiple times.
         """
-        if not self._connected:  # Already disconnected, skip
-            return
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception:
+                pass
+            self._websocket = None
 
-        # Stop accepting new messages immediately
-        self._connected = False
+    async def _drain_message_tasks(self) -> None:
+        """
+        Wait for all pending message tasks to complete.
 
-        # Cancel and await all in-flight message tasks
-        if self._message_tasks:
-            tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
-            for task in tasks_to_cancel:
-                task.cancel()
-            if tasks_to_cancel:
-                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
-            self._message_tasks.clear()
-
-        # Now safe to notify disconnection
-        await self._transport_disconnected(reason, has_error)
+        Called during disconnect() after _draining is set, so no new tasks
+        will be added while we wait. Allows in-flight handlers to finish
+        sending their responses before the socket is closed.
+        """
+        pending = [t for t in self._message_tasks if not t.done()]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _receive_data(self, data: Union[str, bytes]) -> None:
         """
@@ -230,81 +244,101 @@ class TransportWebSocket(TransportBase):
             if self._connected:
                 self._debug_message(f'Error processing WebSocket message: {e}')
 
+            return
+
     async def _receive_loop(self) -> None:
         """
-        Message receiving loop for WebSocket connections.
+        Message receiving loop. Purely reads and dispatches — no cleanup.
 
-        Continuously receives and processes messages until disconnection.
-        Handles different WebSocket implementations and connection events.
+        Loops until the socket is closed or an exception is raised.
+        While _draining is True, incoming packets are consumed but discarded
+        so recv() does not block disconnect() from closing the socket.
+
+        Exceptions propagate to the caller (accept or _run_receive_task)
+        which owns cleanup.
         """
-        try:
-            while self._connected:
-                if self._is_fastapi_websocket():
-                    # FastAPI WebSocket receiving
-                    message = await self._websocket.receive()
+        while self._connected:
+            if self._is_fastapi_websocket():
+                # FastAPI WebSocket receiving
+                message = await self._websocket.receive()
 
-                    if message['type'] == 'websocket.disconnect':
-                        if fastapi and WebSocketDisconnect:
-                            raise WebSocketDisconnect('Connection closed')
-                        else:
-                            raise ConnectionError('Connection closed')
+                if message['type'] == 'websocket.disconnect':
+                    if fastapi and WebSocketDisconnect:
+                        raise WebSocketDisconnect('Connection closed')
+                    else:
+                        raise ConnectionError('Connection closed')
 
-                    elif message['type'] == 'websocket.ping':
-                        # Respond to ping
-                        await self._websocket.pong(message.get('bytes', b''))
-                        self._debug_message('Responded to client ping')
+                elif message['type'] == 'websocket.ping':
+                    await self._websocket.pong(message.get('bytes', b''))
+                    self._debug_message('Responded to client ping')
+                    continue
+
+                elif message['type'] == 'websocket.pong':
+                    self._debug_message('Received pong from client')
+                    continue
+
+                elif message['type'] == 'websocket.receive':
+                    if 'text' in message:
+                        data = message['text']
+                    elif 'bytes' in message:
+                        data = message['bytes']
+                    else:
                         continue
-
-                    elif message['type'] == 'websocket.pong':
-                        # Pong response received
-                        self._debug_message('Received pong from client')
-                        continue
-
-                    elif message['type'] == 'websocket.receive':
-                        # Extract message data
-                        if 'text' in message:
-                            data = message['text']
-                        elif 'bytes' in message:
-                            data = message['bytes']
-                        else:
-                            continue
-
-                else:
-                    # websockets library receiving
-                    data = await self._websocket.recv()
-
-                # Process each message in its own task so others can be processed concurrently
-                task = asyncio.create_task(self._receive_data(data))
-                self._message_tasks.add(task)
-                task.add_done_callback(self._on_message_task_done)
-
-        except asyncio.CancelledError:
-            self._debug_message('WebSocket receive loop cancelled')
-            await self._cleanup_and_disconnect('Cancelled by application', has_error=False)
-
-        except Exception as e:
-            # Handle different exception types
-            if fastapi and WebSocketDisconnect and isinstance(e, WebSocketDisconnect):
-                await self._cleanup_and_disconnect('Connection closed', has_error=False)
-
-            elif websockets and hasattr(websockets.exceptions, 'ConnectionClosed') and isinstance(e, websockets.exceptions.ConnectionClosed):
-                await self._cleanup_and_disconnect('Connection closed', has_error=False)
-
-            elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
-                await self._cleanup_and_disconnect(f'Connection error: {e}', has_error=True)
 
             else:
-                await self._cleanup_and_disconnect(f'Unexpected error: {e}', has_error=True)
+                # websockets library receiving
+                data = await self._websocket.recv()
+
+            # While draining, discard incoming packets — don't create new tasks
+            if self._draining:
+                continue
+
+            # Dispatch each message in its own task for concurrent processing
+            task = asyncio.create_task(self._receive_data(data))
+            self._message_tasks.add(task)
+            task.add_done_callback(self._on_message_task_done)
+
+    async def _run_receive_task(self) -> None:
+        """
+        Client-side receive task wrapper.
+
+        Runs _receive_loop and owns cleanup when it exits — whether normally,
+        via CancelledError (from disconnect()), or from an unexpected exception.
+        """
+        reason = 'Connection closed'
+        has_error = False
+        try:
+            await self._receive_loop()
+
+        except asyncio.CancelledError:
+            # disconnect() cancelled us after draining — clean exit
+            reason = 'Disconnected by application'
+            has_error = False
+
+        except Exception as e:
+            if websockets and hasattr(websockets.exceptions, 'ConnectionClosed') and isinstance(e, websockets.exceptions.ConnectionClosed):
+                reason = 'Connection closed'
+                has_error = False
+            elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
+                reason = f'Connection error: {e}'
+                has_error = True
+            else:
+                reason = f'Unexpected error: {e}'
+                has_error = True
 
         finally:
             self._connected = False
+            self._draining = False
+            await self._drain_message_tasks()
+            await self._close_websocket()
+            await self._transport_disconnected(reason, has_error)
 
     async def connect(self, timeout: Optional[float] = None) -> None:
         """
         Connect to WebSocket server and start receiving messages.
 
         Establishes WebSocket connection using websockets library and starts
-        background message receiving task for continuous communication.
+        a background receive task for continuous communication.
 
         Args:
             timeout: Optional connection timeout in milliseconds. Falls back to
@@ -327,11 +361,11 @@ class TransportWebSocket(TransportBase):
             # Convert ms to seconds for websockets library, or use default
             effective_open_timeout = timeout / 1000.0 if timeout is not None else CONST_SOCKET_TIMEOUT
 
-            # Connect without auth on upgrade; first DAP message must be auth (sent by connect flow via request())
+            # Connect without auth on upgrade; first DAP message must be auth
             self._websocket = await websockets.connect(
                 self._uri,
-                ping_interval=CONST_WS_PING_INTERVAL,  # Send ping every 15 seconds
-                ping_timeout=CONST_WS_PING_TIMEOUT,  # Wait up to 60 seconds for pong
+                ping_interval=CONST_WS_PING_INTERVAL,
+                ping_timeout=CONST_WS_PING_TIMEOUT,
                 close_timeout=CONST_SOCKET_TIMEOUT,
                 open_timeout=effective_open_timeout,
                 max_size=250 * 1024 * 1024,  # 250MB max message size
@@ -339,36 +373,27 @@ class TransportWebSocket(TransportBase):
             )
 
             self._connected = True
+            self._draining = False
             self._debug_message(f'Successfully connected to {self._uri}')
 
-            # Start background message receiving
-            self._receive_task = asyncio.create_task(self._receive_loop())
+            # Start background receive task — _run_receive_task owns its cleanup
+            self._receive_task = asyncio.create_task(self._run_receive_task())
             self._debug_message('Started background message receiving')
-            # Do not notify connected here; DAP client will call on_connected after auth
 
         except Exception as e:
             self._debug_message(f'Failed to connect to {self._uri}: {e}')
+            self._connected = False
 
-            # Clean up websocket if it was created
-            if self._websocket:
-                try:
-                    await self._websocket.close()
-                except Exception:
-                    pass
-                self._websocket = None
-
-            # Clean up receive task if started
+            # Cancel receive task if it was started before the exception
             if self._receive_task and not self._receive_task.done():
                 self._receive_task.cancel()
                 try:
                     await self._receive_task
                 except Exception:
                     pass
-                self._receive_task = None
+            self._receive_task = None
 
-            self._connected = False
-
-            # Always notify about disconnection to enable reconnection logic
+            await self._close_websocket()
             await self._transport_disconnected(f'{e}', has_error=True)
             raise ConnectionError(f'{e}')
 
@@ -376,8 +401,8 @@ class TransportWebSocket(TransportBase):
         """
         Accept incoming WebSocket connection and start receiving messages.
 
-        Accepts FastAPI WebSocket connection and blocks in message receiving
-        loop until connection closes or fails.
+        Accepts a FastAPI WebSocket connection and blocks until the connection
+        closes. Owns cleanup for the server-side path.
 
         Args:
             websocket: FastAPI WebSocket instance
@@ -398,78 +423,100 @@ class TransportWebSocket(TransportBase):
             self._debug_message(error_msg)
             raise ValueError(error_msg)
 
+        reason = 'Connection closed'
+        has_error = False
         try:
-            # Accept the WebSocket connection
             await websocket.accept()
             self._websocket = websocket
             self._connected = True
+            self._draining = False
 
-            # Determine client info for connection callback
             client_info = f'ws://{websocket.client.host}:{websocket.client.port}' if websocket.client else 'ws://unknown'
-
-            # Notify about accepted connection
             await self._transport_connected(client_info)
 
-            # Block in receive loop until connection closes
+            # Block in receive loop — propagates exceptions for us to handle below
             await self._receive_loop()
 
         except Exception as e:
-            self._debug_message(f'Failed to accept WebSocket connection: {e}')
-            await self._transport_disconnected(f'Accept failed: {e}', has_error=True)
-            raise ConnectionError(f'WebSocket accept failed: {e}')
-
-    async def disconnect(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """
-        Disconnect and close the WebSocket connection gracefully.
-
-        Cancels background tasks, closes the connection, and cleans up resources.
-        Safe to call multiple times.
-
-        Args:
-            reason: Optional reason for disconnection (reported to on_disconnected).
-            has_error: If True, report as error to on_disconnected.
-        """
-        if not self._connected or not self._websocket:
-            return
-
-        try:
-            self._debug_message('Gracefully disconnecting WebSocket')
-
-            # Cancel background receive task
-            if self._receive_task and not self._receive_task.done():
-                self._receive_task.cancel()
-                try:
-                    await self._receive_task
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
-                self._debug_message('Background receiving stopped')
-
-            # Close WebSocket connection
-            if self._websocket:
-                await self._websocket.close()
-
-            self._debug_message('WebSocket disconnected successfully')
-
-            # Stop accepting new messages and cancel in-flight message tasks before notifying
-            await self._cleanup_and_disconnect(reason or 'Disconnected by request', has_error)
-
-        except asyncio.TimeoutError:
-            self._debug_message('Timeout during disconnect - forcing close')
-            await self._cleanup_and_disconnect('Disconnect timeout', has_error=True)
-
-        except (ConnectionResetError, ConnectionAbortedError):
-            self._debug_message('Connection closed by peer during disconnect')
-            await self._cleanup_and_disconnect('Connection closed by peer', has_error=False)
-
-        except Exception as e:
-            self._debug_message(f'Error during disconnect: {e}')
-            await self._cleanup_and_disconnect(f'Disconnect error: {e}', has_error=True)
+            if fastapi and WebSocketDisconnect and isinstance(e, WebSocketDisconnect):
+                reason = 'Connection closed'
+                has_error = False
+            elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
+                reason = f'Connection error: {e}'
+                has_error = True
+            else:
+                reason = f'Accept error: {e}'
+                has_error = True
 
         finally:
-            # Always clean up remaining resources
-            self._websocket = None
+            # _receive_loop has exited — socket is already closed (disconnect()
+            # closed it) or needs closing now (peer disconnect / error).
+            # Await any in-flight message tasks so they can finish sending
+            # responses before we tear down and notify disconnection.
+            self._connected = False
+            self._draining = False
+            await self._drain_message_tasks()
+            await self._close_websocket()
+            await self._transport_disconnected(reason, has_error)
+
+    async def _do_disconnect(self) -> None:
+        """
+        Run the two-phase drain-then-close implementation.
+
+        _draining is already set by disconnect() before this coroutine runs,
+        so no new message tasks will be created while we drain.
+
+        Phase 1 — Drain:
+          Awaits all pending _message_tasks so in-flight handlers can finish
+          sending their responses before the socket closes.
+
+        Phase 2 — Close:
+          Server path: closes the socket directly, which unblocks recv() with
+            ConnectionClosed. accept()'s finally handles teardown.
+          Client path: cancels _receive_task, which unblocks recv() with
+            CancelledError. _run_receive_task()'s finally handles teardown.
+        """
+        if not self._websocket:
+            return
+
+        self._debug_message('Gracefully disconnecting WebSocket')
+
+        # Phase 1: let in-flight handlers finish (_draining already set)
+        await self._drain_message_tasks()
+
+        # Phase 2: unblock recv() so the receive loop exits
+        if self._receive_task and not self._receive_task.done():
+            # Client path: cancel the task — _run_receive_task owns cleanup
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
             self._receive_task = None
-            self._message_tasks.clear()
+        else:
+            # Server path: close the socket — accept()'s finally owns cleanup
+            await self._close_websocket()
+
+        self._debug_message('WebSocket disconnected successfully')
+
+    def disconnect(self) -> asyncio.Task:
+        """
+        Initiate a graceful disconnect and return the Task.
+
+        Sets _draining immediately (synchronous) so no new message tasks are
+        created from this point, then schedules _do_disconnect() as an asyncio
+        Task. Returns the Task so callers choose how to handle it:
+
+            self._transport.disconnect()          # fire-and-forget (on_* handlers)
+            await self._transport.disconnect()    # wait for completion (normal callers)
+
+        Both forms are valid — asyncio.Task is awaitable.
+        Safe to call multiple times.
+        """
+        # Set draining synchronously before any event-loop switch so the
+        # receive loop stops creating new tasks immediately.
+        self._draining = True
+        return asyncio.create_task(self._do_disconnect())
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
@@ -515,40 +562,31 @@ class TransportWebSocket(TransportBase):
                 json_header = json.dumps(message).encode('utf-8')
                 combined_message = json_header + b'\n' + binary_data
 
-                # Send based on WebSocket type
                 if self._is_fastapi_websocket():
-                    # FastAPI WebSocket
                     await self._websocket.send_bytes(combined_message)
                 else:
-                    # websockets library
                     await self._websocket.send(combined_message)
 
             else:
                 # Standard JSON message
                 self._debug_protocol(f'SEND: {message}')
 
-                # Send based on WebSocket type
                 if self._is_fastapi_websocket():
-                    # FastAPI WebSocket - use send_json
                     await self._websocket.send_json(message)
                 else:
-                    # websockets library - use send with JSON string
                     await self._websocket.send(json.dumps(message))
 
         except asyncio.TimeoutError:
-            # Send timeout - connection lost
             self._connected = False
             self._debug_message(f'WebSocket send timeout after {CONST_SOCKET_TIMEOUT}s')
             raise ConnectionError(f'Send timeout after {CONST_SOCKET_TIMEOUT} seconds')
 
         except (ConnectionResetError, BrokenPipeError) as e:
-            # Connection errors should update state
             self._connected = False
             self._debug_message(f'Connection lost during send: {e}')
             raise ConnectionError(f'Connection lost during send: {e}')
 
         except Exception as e:
-            # Log send failures for debugging
             self._debug_message(f'Failed to send message: {e}')
             raise
 

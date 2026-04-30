@@ -247,7 +247,7 @@ class TestServicesOperations:
 class TestPipelineOperations:
     """Test pipeline lifecycle operations."""
 
-    PIPELINE_TOKEN = 'PY-PIPELINE-OPS'
+    PIPELINE_TOKEN = 'PY-PL'
 
     @pytest.mark.asyncio
     async def test_should_start_a_pipeline(self):
@@ -308,7 +308,7 @@ class TestPipelineOperations:
 class TestDataOperations:
     """Test data sending and processing operations."""
 
-    DATA_TOKEN = 'PY-DATA-OPS'
+    DATA_TOKEN = 'PY-DA'
 
     @pytest.mark.asyncio
     async def test_should_send_text_data_no_mime_type(self):
@@ -620,7 +620,7 @@ class TestDataOperations:
 class TestChatOperations:
     """Test chat functionality."""
 
-    CHAT_TOKEN = 'PY-CHAT-OPS'
+    CHAT_TOKEN = 'PY-CH'
 
     @pytest.mark.asyncio
     async def test_should_send_simple_chat_question(self):
@@ -916,7 +916,7 @@ class TestConnectionEvents:
 class TestEventHandling:
     """Test event subscription and handling."""
 
-    EVENT_TOKEN = 'PY-EVENT-OPS'
+    EVENT_TOKEN = 'PY-EV'
 
     @pytest.mark.asyncio
     async def test_should_subscribe_to_events_and_receive_them(self):
@@ -1452,7 +1452,7 @@ class TestValidationOperations:
 class TestErrorHandling:
     """Test error handling scenarios."""
 
-    ERROR_TOKEN = 'PY-ERROR-OPS'
+    ERROR_TOKEN = 'PY-ER'
 
     @pytest.mark.asyncio
     async def test_should_handle_invalid_pipeline_configuration(self):
@@ -1500,7 +1500,7 @@ class TestErrorHandling:
 class TestEndToEndWorkflow:
     """Test complete end-to-end workflows."""
 
-    E2E_TOKEN = 'PY-E2E-WORKFLOW'
+    E2E_TOKEN = 'PY-E2'
 
     @pytest.mark.asyncio
     async def test_should_complete_full_data_processing_workflow(self):
@@ -1884,7 +1884,7 @@ Line 3: random data {random.random()}"""
 class TestConcurrentPipelineOperations:
     """Test concurrent pipeline operations."""
 
-    CONCURRENT_TOKEN = 'PY-CONCURRENT-OPS'
+    CONCURRENT_TOKEN = 'PY-CC'
     PIPELINE_COUNT = 16  # Full 16 pipeline testing
 
     @pytest.mark.asyncio
@@ -1996,7 +1996,7 @@ class TestConcurrentPipelineOperations:
             await client.connect()
 
             # Create a single pipeline
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-single')
+            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-1p')
             pipeline_tokens = [result['token']]
 
             SEND_COUNT = 10
@@ -2051,7 +2051,7 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-single')
+            await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-1p')
             if client.is_connected():
                 await client.disconnect()
 
@@ -2065,9 +2065,13 @@ class TestConcurrentPipelineOperations:
             PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
+            # Clean up any leftover pipelines from previous runs
+            for i in range(PIPELINE_COUNT):
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
+
             # Create pipelines concurrently
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-mixed-{index}')
+                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-m{index}')
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(PIPELINE_COUNT)]
@@ -2138,7 +2142,7 @@ class TestConcurrentPipelineOperations:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
             for i in range(4):  # PIPELINE_COUNT
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-mixed-{i}')
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
 
             if client.is_connected():
                 await client.disconnect()
@@ -2153,8 +2157,12 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
+            # Clean up any leftover pipelines from previous runs
+            for i in range(SUBPROCESS_COUNT):
+                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-s{i}')
+
             # Create 4 independent subprocesses concurrently
-            sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
+            sub_tokens = [f'{self.CONCURRENT_TOKEN}-s{i}' for i in range(SUBPROCESS_COUNT)]
             # fmt: off
             await asyncio.gather(*[
                 client.use(pipeline=get_echo_pipeline(), token=token)
@@ -2216,7 +2224,7 @@ class TestConcurrentPipelineOperations:
         collides with itself. Two independent clients fanning into one task are
         the necessary precondition.
         """
-        SHARED_TOKEN = f'{self.CONCURRENT_TOKEN}-cross-client-shared'
+        SHARED_TOKEN = f'{self.CONCURRENT_TOKEN}-cs'
         SENDS_PER_CLIENT = 12
 
         # Two independent clients.  Each has its own DAP connection, its own

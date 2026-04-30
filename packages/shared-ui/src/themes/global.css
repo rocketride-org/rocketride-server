@@ -1,0 +1,50 @@
+/**
+ * RocketRide base stylesheet — import once per document.
+ *
+ * Provides:
+ *   - Figtree variable font
+ *   - Box-model reset
+ *   - html/body/#root full-height layout
+ *   - Sensible button/input defaults
+ *
+ * CSS custom properties (--rr-*) are injected separately by the theme
+ * system (applyTheme / fetchAndApplyTheme) at runtime.
+ */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+	font-family: var(--rr-font-family);
+	font-size: var(--rr-font-size-widget);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-default);
+	overflow: hidden;
+}
+
+#root {
+	display: flex;
+	flex-direction: column;
+}
+
+button {
+	font-family: inherit;
+	cursor: pointer;
+	border: none;
+	background: none;
+	color: inherit;
+}
+
+input,
+textarea {
+	font-family: inherit;
+	font-size: inherit;
+}

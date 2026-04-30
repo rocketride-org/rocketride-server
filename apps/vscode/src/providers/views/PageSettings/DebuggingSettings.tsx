@@ -22,7 +22,7 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData, settingsStyles as S } from './PageSettings';
+import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
 // TYPES
@@ -31,33 +31,35 @@ import { SettingsData, settingsStyles as S } from './PageSettings';
 interface DebuggingSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	onSave: () => void;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange }) => {
+export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
 	const handleRestartBehaviorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onSettingsChange({ pipelineRestartBehavior: e.target.value as 'auto' | 'manual' | 'prompt' });
 	};
 
 	return (
-		<div style={S.section}>
-			<div style={S.sectionTitle}>Debugging Settings</div>
-			<div style={S.sectionDescription}>Configure debugging and pipeline restart behavior</div>
-
-			<div style={S.formGrid}>
-				<div style={S.formGroup}>
-					<label htmlFor="pipelineRestartBehavior" style={S.label}>
-						Pipeline Restart Behavior
-					</label>
-					<select id="pipelineRestartBehavior" value={settings.pipelineRestartBehavior} onChange={handleRestartBehaviorChange}>
-						<option value="auto">Automatically restart when .pipe changes</option>
-						<option value="manual">Do not automatically restart</option>
-						<option value="prompt">Prompt to restart when .pipe changes</option>
-					</select>
-					<div style={S.helpText}>Choose what happens when a .pipe file changes while the pipeline is running</div>
+		<div style={S.card}>
+			<SettingsCardHeader title="Debugging Settings" onSave={onSave} />
+			<div style={S.cardBody}>
+				<div style={S.sectionDescription}>Configure debugging and pipeline restart behavior</div>
+				<div style={S.formGrid}>
+					<div style={S.formGroup}>
+						<label htmlFor="pipelineRestartBehavior" style={S.label}>
+							Pipeline Restart Behavior
+						</label>
+						<select id="pipelineRestartBehavior" value={settings.pipelineRestartBehavior} onChange={handleRestartBehaviorChange}>
+							<option value="auto">Automatically restart when .pipe changes</option>
+							<option value="manual">Do not automatically restart</option>
+							<option value="prompt">Prompt to restart when .pipe changes</option>
+						</select>
+						<div style={S.helpText}>Choose what happens when a .pipe file changes while the pipeline is running</div>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import { PageWelcome } from './PageWelcome';
+import { PageWelcome } from './WelcomeWebview';
 import { mountComponent } from '../../../shared/util/mount';
 
 // Mount the Welcome component

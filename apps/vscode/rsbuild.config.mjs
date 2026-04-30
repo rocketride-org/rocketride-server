@@ -36,18 +36,21 @@ export default defineConfig({
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'page-connection': './src/providers/views/PageConnection/index.tsx',
+			'page-sidebar': './src/providers/views/PageSidebar/index.tsx',
 			'page-settings': './src/providers/views/PageSettings/index.tsx',
 			'page-project': './src/providers/views/PageProject/index.tsx',
 			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
 			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
 			'page-monitor': './src/providers/views/PageMonitor/index.tsx',
+			'page-status': './src/providers/views/PageStatus/index.tsx',
+			'page-account': './src/providers/views/PageAccount/index.tsx',
+			'page-billing': './src/providers/views/PageBilling/index.tsx',
 		},
 	},
 
 	resolve: {
 		alias: {
-			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},
