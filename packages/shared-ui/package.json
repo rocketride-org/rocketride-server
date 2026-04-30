@@ -7,6 +7,7 @@
 	"types": "./index.ts",
 	"peerDependencies": {
 		"chart.js": "^4.4.0",
+		"react-chartjs-2": "^5.2.0",
 		"@dnd-kit/core": "~6.1.0",
 		"@dnd-kit/modifiers": "~7.0.0",
 		"@dnd-kit/sortable": "~8.0.0",
@@ -55,6 +56,7 @@
 		"react-markdown": "^10.1.0",
 		"react-syntax-highlighter": "^15.6.6",
 		"rehype-raw": "^7.0.0",
+		"rehype-sanitize": "^6.0.0",
 		"remark-gfm": "^4.0.1"
 	},
 	"devDependencies": {
