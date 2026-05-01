@@ -132,7 +132,7 @@ jobs:
         # between server and client in this single CI run.
         env:
           ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY }}
-        run: ${{ matrix.builder_cmd }} test --verbose
+        run: ${{ matrix.builder_cmd }} test --verbose -s
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
