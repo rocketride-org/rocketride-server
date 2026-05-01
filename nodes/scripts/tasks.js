@@ -30,6 +30,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
+const os = require('os');
 const {
     exists,
     syncDir,
@@ -139,7 +140,8 @@ function makeRunPytestAction(options = {}) {
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`
+                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 
             // Use absolute paths since cwd is dist/server
@@ -182,12 +184,22 @@ function makeRunPytestAction(options = {}) {
 
             // Allow filtering tests by marker or pattern
             const markers = options.markers;
-            const pattern = options.pattern;
+            const pattern = options.pytestPattern;
             if (markers) {
                 pytestArgs.push('-m', markers);
             }
             if (pattern) {
                 pytestArgs.push('-k', pattern);
+            }
+
+            // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
+            // flag is not set: empirically, cloud-LLM rate limits + node-subprocess
+            // fan-out make >8 workers counterproductive on this test shape. Explicit
+            // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
+            const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
+            const parallelVal = String(parallelRaw).trim().toLowerCase();
+            if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
+                pytestArgs.push('-n', parallelVal);
             }
 
             await execCommand(ENGINE, pytestArgs, {

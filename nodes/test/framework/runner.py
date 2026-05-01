@@ -182,6 +182,16 @@ class NodeTestRunner:
         
         # Load input data (case.input_lane = type of input: text, image, etc.)
         data_bytes = self._load_input_data(case.input_data, case.input_lane)
+
+        # For file-based lanes, use the real MIME type from the file extension
+        # so that nodes receive e.g. "image/png" instead of "lane/image".
+        FILE_LANES = {'image', 'audio', 'video', 'documents'}
+        if pipeline_input_lane in FILE_LANES and isinstance(case.input_data, str):
+            import mimetypes
+            guessed, _ = mimetypes.guess_type(case.input_data)
+            if guessed:
+                mime_type = guessed
+
         # Node expects Question JSON on "questions" lane; wrap plain text when case gave a string
         if pipeline_input_lane == 'questions' and isinstance(case.input_data, str):
             data_bytes = json.dumps({'questions': [{'text': case.input_data}]}).encode('utf-8')

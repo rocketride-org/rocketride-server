@@ -36,7 +36,7 @@ transport layers.
 Components:
     DAPBase: Base class providing DAP messaging and logging capabilities
     DAPClient: Client implementation of the Debug Adapter Protocol
-    TransportBase: Abstract base class for transport implementations  
+    TransportBase: Abstract base class for transport implementations
     TransportWebSocket: WebSocket transport for client-server communication
     RocketRideException: Base exception class for all RocketRide operations
     ConnectionException: Raised for connection-related errors
@@ -61,6 +61,7 @@ from .constants import (
     CONST_DEFAULT_WEB_PORT,
     CONST_DEFAULT_WEB_PROTOCOL,
     CONST_SOCKET_TIMEOUT,
+    PROJECT_DIR,
 )
 from .exceptions import (
     DAPException,
@@ -80,6 +81,7 @@ __all__ = [
     'CONST_DEFAULT_WEB_PORT',
     'CONST_DEFAULT_WEB_PROTOCOL',
     'CONST_SOCKET_TIMEOUT',
+    'PROJECT_DIR',
     'RocketRideException',
     'AuthenticationException',
     'ConnectionException',

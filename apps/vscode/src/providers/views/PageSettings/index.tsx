@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import { PageSettings } from './PageSettings';
+import { PageSettings } from './SettingsWebview';
 import { mountComponent } from '../../../shared/util/mount';
 
 // Mount the Settings component

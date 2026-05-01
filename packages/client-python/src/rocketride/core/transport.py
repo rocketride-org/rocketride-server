@@ -45,6 +45,7 @@ Key Features:
 - Extensible design for different transport types (WebSocket, TCP, etc.)
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, Awaitable, Optional
 
@@ -189,9 +190,7 @@ class TransportBase(ABC):
             self._on_caller_disconnected = on_disconnected
 
     def get_connection_info(self) -> Optional[str]:
-        """
-        Connection info for the "connected" callback (e.g. URI). Default none.
-        """
+        """Return connection info for the "connected" callback (e.g. URI). Default none."""
         return None
 
     def set_auth(self, auth: str) -> None:
@@ -264,23 +263,17 @@ class TransportBase(ABC):
         pass
 
     @abstractmethod
-    async def disconnect(self, reason: Optional[str] = None, has_error: bool = False) -> None:
+    def disconnect(self) -> 'asyncio.Task':
         """
-        Close connection and cleanup resources.
+        Initiate graceful connection closure and return the Task.
 
-        This method must be implemented by concrete transport classes to handle
-        graceful connection closure. Should be safe to call multiple times.
+        Sets _draining synchronously then schedules the actual drain-and-close.
+        Returns an asyncio.Task so callers choose how to handle it:
 
-        Args:
-            reason: Optional reason for disconnection (reported to on_disconnected).
-            has_error: If True, report this as an error to on_disconnected.
+            transport.disconnect()          # fire-and-forget
+            await transport.disconnect()    # wait for completion
 
-        Implementation Requirements:
-        - Close underlying connection gracefully
-        - Cancel any background tasks
-        - Set self._connected = False
-        - Clean up transport-specific resources
-        - Call _transport_disconnected(reason or default, has_error)
+        Should be safe to call multiple times.
         """
         pass
 

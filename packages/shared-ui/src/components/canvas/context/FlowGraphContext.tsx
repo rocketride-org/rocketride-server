@@ -295,6 +295,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	/** The last docRevision number we sent to the host. -1 ensures initial load always runs. */
 	const lastSentVersion = useRef(-1);
+	/** The project_id we last loaded — used to bypass echo-detection when project identity changes. */
+	const lastLoadedProjectId = useRef<string | undefined>(undefined);
 
 	// --- Derived state -----------------------------------------------------
 
@@ -969,17 +971,21 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	// Undo/redo sends an older docRevision, which triggers a reload.
 
 	const incomingVersion = currentProject?.docRevision ?? 0;
+	const incomingProjectId = currentProject?.project_id;
 
 	useEffect(() => {
 		if (!currentProject) return;
 
-		// Skip if this is an echo of our own change
-		if (incomingVersion === lastSentVersion.current) return;
+		const projectChanged = incomingProjectId !== lastLoadedProjectId.current;
+
+		// Skip if this is an echo of our own change — but always load when project identity changes
+		if (!projectChanged && incomingVersion === lastSentVersion.current) return;
 
 		lastSentVersion.current = incomingVersion;
+		lastLoadedProjectId.current = incomingProjectId;
 		loadData(currentProject);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [incomingVersion]);
+	}, [incomingVersion, incomingProjectId]);
 
 	// --- Restore viewport + clear loading guard when flow is ready ----------
 	useEffect(() => {

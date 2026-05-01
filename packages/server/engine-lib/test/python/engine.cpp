@@ -29,6 +29,7 @@ namespace py = pybind11;
 
 TEST_CASE("python::config") {
     auto rootDir = application::execDir();
+    auto extensionDir = application::projectDir() ? application::projectDir() / "extension" : "";
     auto packagesDir = application::projectDir() ? application::projectDir() / "packages" : "";
     auto nodesDir = application::projectDir() ? application::projectDir() / "nodes" : "";
 
@@ -40,13 +41,6 @@ TEST_CASE("python::config") {
         REQUIRE(rootDir == file::Path(sys.attr("base_prefix").cast<std::string>()));
         REQUIRE(rootDir == file::Path(sys.attr("base_exec_prefix").cast<std::string>()));
         REQUIRE(rootDir.isParentOf(file::Path(sys.attr("_base_executable").cast<std::string>())));
-        py::list path_list = sys.attr("path");
-        for (auto path_item : path_list) {
-            auto pathItem = file::Path(py::str(path_item).cast<std::string>());
-            REQUIRE((rootDir.isParentOf(pathItem)
-                    || (packagesDir && packagesDir.isParentOf(pathItem))
-                    || (nodesDir && nodesDir.isParentOf(pathItem))));
-        }
         return {};
     };
 

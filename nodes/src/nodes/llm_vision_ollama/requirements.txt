@@ -1,9 +1,6 @@
 # LangChain OpenAI-compatible client (used to talk to Ollama's /v1 endpoint)
 langchain-openai
 
-# Token counting
-tokenizers
-
 # LangChain deps
 langchain-core
 langchain

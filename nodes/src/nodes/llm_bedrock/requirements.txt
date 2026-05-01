@@ -1,16 +1,5 @@
 # Plugin Bedrock core
 langchain-aws
-transformers
-tokenizers
-
-# Transformers deps
-accelerate
-huggingface-hub
-pyyaml
-filelock
-regex
-tqdm
-safetensors
 
 # LangChain deps
 langchain-core
