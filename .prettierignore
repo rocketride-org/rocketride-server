@@ -26,3 +26,7 @@ packages/server/**/*.cmake
 # Java
 **/*.java
 
+# Legacy 4-space indented scripts (predates useTabs rule)
+nodes/scripts/tasks.js
+packages/client-mcp/scripts/tasks.js
+

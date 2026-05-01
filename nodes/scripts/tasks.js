@@ -136,11 +136,12 @@ function makeRunPytestAction(options = {}) {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-            const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            const bracket = ctx.brackets?.['node-test-server'];
+            if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_URI: `http://localhost:${bracket.port}`,
                 ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 

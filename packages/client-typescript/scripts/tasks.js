@@ -273,11 +273,13 @@ function makeRunJestAction(options = {}) {
 			// Load .env for test configuration
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-			const port = ctx.brackets?.['ts-test-server']?.port || ctx.port;
+			const bracket = ctx.brackets?.['ts-test-server'];
+			if (!bracket?.port) throw new Error('ts-test-server bracket missing — server did not start');
+			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
 
 			const testEnv = {
 				...process.env,
-				ROCKETRIDE_URI: `http://localhost:${port}`,
+				ROCKETRIDE_URI: serverUri,
 			};
 
 			const jestArgs = ['jest', '--verbose', '--colors'];

@@ -145,7 +145,7 @@ jobs:
         # (.env.template, the engine's built-in dev key).
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
-        run: ${{ matrix.builder_cmd }} test --verbose -s
+        run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
