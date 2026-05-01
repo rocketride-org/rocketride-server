@@ -39,10 +39,20 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     chunkId: int = 0
+    _pending_docs: list[Doc]
 
     def open(self, obj: Entry):
         """Reset chunk counter for each new object."""
         self.chunkId = 0
+        self._pending_docs = []
+
+    def closing(self):
+        """Emit buffered chunks once the current object has been fully written."""
+        pending_docs = getattr(self, '_pending_docs', [])
+        if pending_docs:
+            debug(f'Chunker emitting {len(pending_docs)} chunks')
+            self.instance.writeDocuments(pending_docs)
+            self._pending_docs = []
 
     @staticmethod
     def _coerce_document(document) -> Doc:
@@ -95,6 +105,9 @@ class IInstance(IInstanceBase):
         if self.IGlobal.strategy is None:
             raise RuntimeError('Chunker strategy not initialized')
 
+        if not hasattr(self, '_pending_docs'):
+            self._pending_docs = []
+
         for raw_document in documents:
             document = self._coerce_document(raw_document)
 
@@ -135,7 +148,6 @@ class IInstance(IInstanceBase):
                 self.chunkId += 1
                 output_docs.append(chunk_doc)
 
-            # Emit all chunks for this document
             if output_docs:
-                debug(f'Chunker emitting {len(output_docs)} chunks for document (parent_id={parent_id})')
-                self.instance.writeDocuments(output_docs)
+                debug(f'Chunker buffered {len(output_docs)} chunks for document (parent_id={parent_id})')
+                self._pending_docs.extend(output_docs)

@@ -595,6 +595,7 @@ class TestChunkerLifecycle:
         """Create an IInstance with mocked IGlobal and instance."""
         inst = IInstance.__new__(IInstance)
         inst.chunkId = 0
+        inst._pending_docs = []
 
         iglobal = MagicMock()
         iglobal.strategy = strategy
@@ -629,6 +630,7 @@ class TestChunkerLifecycle:
             meta = DocMetadata(objectId='doc-123', chunkId=0)
             doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=meta)
             inst.writeDocuments([doc])
+            inst.closing()
 
             assert mock_instance.writeDocuments.called
             emitted_docs = mock_instance.writeDocuments.call_args[0][0]
@@ -649,6 +651,7 @@ class TestChunkerLifecycle:
 
             doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=None)
             inst.writeDocuments([doc])
+            inst.closing()
 
             assert mock_instance.writeDocuments.called
             emitted_docs = mock_instance.writeDocuments.call_args[0][0]
@@ -679,6 +682,7 @@ class TestChunkerLifecycle:
                     }
                 ]
             )
+            inst.closing()
 
             assert mock_instance.writeDocuments.called
             emitted_docs = mock_instance.writeDocuments.call_args[0][0]
@@ -703,6 +707,7 @@ class TestChunkerLifecycle:
             doc = Doc(page_content=original_content, metadata=meta)
 
             inst.writeDocuments([doc])
+            inst.closing()
 
             # Original document should not be mutated
             assert doc.page_content == original_content
