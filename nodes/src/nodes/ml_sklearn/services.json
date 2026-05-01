@@ -1,29 +1,52 @@
 {
-  "title": "ML Sklearn Prediction",
-  "protocol": "preprocessor_code://",
-  "classType": ["preprocessor"],
-  "capabilities": [],
-  "register": "filter",
-  "node": "python",
-  "path": "nodes.ml_sklearn",
-  "prefix": "Preprocessor",
-  "description": [
-    "A machine learning node that performs prediction using a trained sklearn model."
-  ],
-  "icon": "python.svg",
-  "documentation": "https://docs.rocketride.org",
-  "lanes": {
-    "input": ["text"],
-    "output": ["text"]
-  },
-  "input": [
-    {
-      "lane": "input",
-      "output": [
-        {
-          "lane": "text"
+    "ml_sklearn": {
+        "name": "ML sklearn",
+        "description": "Applies a trained scikit-learn model to process text through the pipeline.",
+        "icon": "python.svg",
+        "group": "preprocessor",
+        "color": "#f97316",
+        "runtime": "python",
+        "pipe": {
+            "lanes": {
+                "answers": {
+                    "in": true,
+                    "out": true
+                }
+            }
+        },
+        "preconfig": {
+            "default": {
+                "object": "default",
+                "properties": []
+            }
+        },
+        "profiles": {
+            "ml_sklearn.default": {
+                "object": "default",
+                "properties": []
+            }
+        },
+        "fields": [],
+        "shape": {
+            "inputs": [
+                {
+                    "name": "answers",
+                    "type": "answers"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "answers",
+                    "type": "answers"
+                }
+            ]
+        },
+        "test": {
+            "answers": [
+                {
+                    "text": "hello world"
+                }
+            ]
         }
-      ]
     }
-  ]
 }
