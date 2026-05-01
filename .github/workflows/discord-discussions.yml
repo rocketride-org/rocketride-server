@@ -170,9 +170,11 @@ jobs:
                   -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER")
               fi
 
+              # GraphQL returns author.login as "github-actions" (no [bot] suffix);
+              # REST returns "github-actions[bot]". Match either to be safe.
               m=$(echo "$page" | jq -c '
                 [.data.repository.discussion.comments.nodes[]
-                  | select(.author.login == "github-actions[bot]"
+                  | select((.author.login == "github-actions" or .author.login == "github-actions[bot]")
                     and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
                 ] | first // empty')
 
