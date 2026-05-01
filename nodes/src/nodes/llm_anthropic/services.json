@@ -99,31 +99,49 @@
 			"claude-sonnet-4-6": {
 				"title": "Claude Sonnet 4.6",
 				"model": "claude-sonnet-4-6",
-				"modelTotalTokens": 200000,
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": ""
 			},
 			"claude-opus-4-6": {
 				"title": "Claude Opus 4.6",
 				"model": "claude-opus-4-6",
-				"modelTotalTokens": 200000,
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": ""
 			},
 			"claude-haiku-4-5": {
 				"title": "Claude Haiku 4.5",
 				"model": "claude-haiku-4-5",
-				"modelTotalTokens": 200000,
+				"modelSource": "manual",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 64000, // openrouter
 				"apikey": ""
 			},
 			"claude-sonnet-4-5": {
 				"title": "Claude Sonnet 4.5",
 				"model": "claude-sonnet-4-5",
-				"modelTotalTokens": 200000,
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 64000, // openrouter
 				"apikey": ""
 			},
 			"claude-opus-4-5": {
 				"title": "Claude Opus 4.5",
 				"model": "claude-opus-4-5",
-				"modelTotalTokens": 200000,
+				"modelSource": "manual",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 64000, // openrouter
+				"apikey": ""
+			},
+			"claude-opus-4-7": {
+				"title": "Anthropic: Claude Opus 4.7",
+				"model": "claude-opus-4-7",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": ""
 			}
 		}
@@ -146,27 +164,27 @@
 		},
 		"anthropic.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey"]
+			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-sonnet-4-6": {
 			"object": "claude-sonnet-4-6",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-opus-4-6": {
 			"object": "claude-opus-4-6",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-haiku-4-5": {
 			"object": "claude-haiku-4-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-sonnet-4-5": {
 			"object": "claude-sonnet-4-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"anthropic.profile": {
 			"title": "Model",
@@ -198,8 +216,16 @@
 				{
 					"value": "claude-opus-4-5",
 					"properties": ["anthropic.claude-opus-4-5"]
+				},
+				{
+					"value": "claude-opus-4-7",
+					"properties": ["anthropic.claude-opus-4-7"]
 				}
 			]
+		},
+		"anthropic.claude-opus-4-7": {
+			"object": "claude-opus-4-7",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
 	//
