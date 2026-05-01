@@ -23,10 +23,10 @@
 
 /**
  * Status Bar Provider for Extension Status Display
- * 
+ *
  * Manages the VS Code status bar item to display connection status, errors, and actions.
  * Provides visual feedback for extension state and clickable actions for users.
- * 
+ *
  * Features:
  * - Connection status display with mode indicators
  * - Visual state changes with appropriate icons and colors
@@ -45,7 +45,7 @@ export class BarStatus {
 
 	/**
 	 * Creates a new BarStatus provider
-	 * 
+	 *
 	 * @param context VS Code extension context for command registration
 	 */
 	constructor(private context: vscode.ExtensionContext) {
@@ -87,12 +87,12 @@ export class BarStatus {
 
 			vscode.commands.registerCommand('rocketride.statusBar.showDetails', () => {
 				this.showStatusDetails();
-			})
+			}),
 		];
 
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
-		commands.forEach(command => this.context.subscriptions.push(command));
+		commands.forEach((command) => this.context.subscriptions.push(command));
 	}
 
 	/**
@@ -120,7 +120,8 @@ export class BarStatus {
 	 */
 	private handleConnectionStatusChange(status: ConnectionStatus): void {
 		if (status.state === ConnectionState.CONNECTED) {
-			this.statusBarItem.text = `$(debug-console) RocketRide: Connected (${status.connectionMode})`;
+			const modeLabel: Record<string, string> = { cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'On-prem', local: 'Local' };
+			this.statusBarItem.text = `$(debug-console) RocketRide: Connected (${modeLabel[status.connectionMode] || status.connectionMode})`;
 			this.statusBarItem.command = 'rocketride.sidebar.connection.disconnect';
 			this.statusBarItem.tooltip = 'Connected - Click to disconnect';
 			this.statusBarItem.backgroundColor = undefined;
@@ -210,18 +211,9 @@ export class BarStatus {
 		const connectionManager = this.getConnectionManager();
 		if (connectionManager) {
 			const state = connectionManager.getConnectionStatus();
-			const details = [
-				`Status: ${state.state}`,
-				`Mode: ${state.connectionMode}`,
-				`Has Credentials: ${state.hasCredentials}`,
-				state.lastError ? `Last Error: ${state.lastError}` : ''
-			].filter(Boolean).join('\n');
+			const details = [`Status: ${state.state}`, `Mode: ${state.connectionMode}`, `Has Credentials: ${state.hasCredentials}`, state.lastError ? `Last Error: ${state.lastError}` : ''].filter(Boolean).join('\n');
 
-			vscode.window.showInformationMessage(
-				`RocketRide Extension Status\n\n${details}`,
-				'Open Settings',
-				'Test Connection'
-			).then(selection => {
+			vscode.window.showInformationMessage(`RocketRide Extension Status\n\n${details}`, 'Open Settings', 'Test Connection').then((selection) => {
 				switch (selection) {
 					case 'Open Settings':
 						vscode.commands.executeCommand('rocketride.page.settings.open');
@@ -274,7 +266,7 @@ export class BarStatus {
 	 */
 	public dispose(): void {
 		this.statusBarItem.dispose();
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}
 }

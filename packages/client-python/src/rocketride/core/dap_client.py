@@ -291,7 +291,7 @@ class DAPClient(DAPBase):
         )
         return await self.request(request, timeout=timeout)
 
-    async def connect(self, timeout: Optional[float] = None) -> None:
+    async def connect(self, timeout: Optional[float] = None) -> Dict[str, Any]:
         """
         Establish connection to the DAP server.
 
@@ -301,6 +301,10 @@ class DAPClient(DAPBase):
         Args:
             timeout: Optional overall timeout in milliseconds covering both the
                 WebSocket handshake and auth request.
+
+        Returns:
+            The auth response body dict (ConnectResult fields) on success, or {} for
+            transports that don't require authentication.
 
         Raises:
             ConnectionError: If connection fails
@@ -321,6 +325,7 @@ class DAPClient(DAPBase):
         # Send auth as first DAP message only if the transport provides credentials
         # (e.g. WebSocket to a task server). Transports without get_auth (e.g. stdio
         # to a subprocess) skip auth entirely — the subprocess doesn't speak DAP.
+        auth_body: Dict[str, Any] = {}
         if hasattr(self._transport, 'get_auth'):
             auth = self._transport.get_auth() or ''
             auth_args = {'auth': auth}
@@ -337,17 +342,19 @@ class DAPClient(DAPBase):
             try:
                 response = await self.request(request, timeout=auth_timeout)
             except Exception:
-                await self._transport.disconnect('Auth request failed', True)
+                await self._transport.disconnect()
                 raise
             if not response.get('success', False):
                 message = response.get('message', 'Authentication failed')
-                await self._transport.disconnect(message, True)
+                await self._transport.disconnect()
                 raise AuthenticationException({'message': message})
+            auth_body = response.get('body') or {}
 
         # Only now are we connected (transport up + authenticated)
         self._authenticated = True
         connection_info = self._transport.get_connection_info()
         await self.on_connected(connection_info)
+        return auth_body
 
     async def disconnect(self) -> None:
         """

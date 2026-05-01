@@ -17,8 +17,7 @@ import { readFileSync } from 'fs';
 import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
-import type { PageMonitorIncomingMessage } from '../shared/types/pageMonitor';
-import type { DashboardEvent } from 'rocketride';
+import type { DashboardResponse } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -72,14 +71,20 @@ export class PageMonitorProvider {
 		panel.webview.onDidReceiveMessage(async (message) => {
 			try {
 				switch (message.type) {
-					case 'ready':
+					case 'view:ready':
+						// Send initial connection state so the webview knows if we're connected
+						await panel.webview.postMessage({
+							type: 'shell:init',
+							theme: {},
+							isConnected: this.connectionManager.isConnected(),
+						});
 						await this.fetchAndPost();
 						this.subscribeDashboardEvents().catch((err) => {
 							this.logger.error(`[PageMonitorProvider] Event subscription error: ${err}`);
 						});
 						this.startPolling();
 						break;
-					case 'refresh':
+					case 'monitor:refresh':
 						await this.fetchAndPost();
 						break;
 				}
@@ -118,11 +123,7 @@ export class PageMonitorProvider {
 				return;
 			}
 			const dashboard = await client.getDashboard();
-			const msg: PageMonitorIncomingMessage = {
-				type: 'dashboardData',
-				data: dashboard,
-			};
-			await this.panel.webview.postMessage(msg);
+			await this.panel.webview.postMessage({ type: 'monitor:dashboard', data: dashboard as DashboardResponse });
 		} catch (error) {
 			this.logger.error(`[PageMonitorProvider] Failed to fetch dashboard: ${error}`);
 		} finally {
@@ -200,8 +201,7 @@ export class PageMonitorProvider {
 	private async handleConnectionStateChange(status: ConnectionStatus): Promise<void> {
 		if (!this.panel) return;
 
-		const msg: PageMonitorIncomingMessage = { type: 'connectionState', state: status.state };
-		await this.panel.webview.postMessage(msg);
+		await this.panel.webview.postMessage({ type: 'shell:connectionChange', isConnected: status.state === ConnectionState.CONNECTED });
 
 		if (status.state === ConnectionState.CONNECTED) {
 			// SDK replays monitor subscriptions automatically on reconnect;
@@ -216,19 +216,9 @@ export class PageMonitorProvider {
 	private handleEvent(event: GenericEvent): void {
 		if (!this.panel) return;
 
-		if (event.event === 'apaevt_task') {
-			this.fetchAndPost().catch((err) => {
-				this.logger.error(`[PageMonitorProvider] Refresh error: ${err}`);
-			});
-			this.panel.webview.postMessage({ type: 'taskEvent', body: event.body as Record<string, unknown> }).then(undefined, (err: unknown) => {
-				this.logger.error(`[PageMonitorProvider] Failed to post task event: ${err}`);
-			});
-		} else if (event.event === 'apaevt_dashboard') {
-			this.fetchAndPost().catch((err) => {
-				this.logger.error(`[PageMonitorProvider] Refresh error: ${err}`);
-			});
-			this.panel.webview.postMessage({ type: 'dashboardEvent', body: event.body as DashboardEvent }).then(undefined, (err: unknown) => {
-				this.logger.error(`[PageMonitorProvider] Failed to post dashboard event: ${err}`);
+		if (event.event === 'apaevt_task' || event.event === 'apaevt_dashboard') {
+			this.panel.webview.postMessage({ type: 'server:event', event }).then(undefined, (err: unknown) => {
+				this.logger.error(`[PageMonitorProvider] Failed to post server event: ${err}`);
 			});
 		}
 	}

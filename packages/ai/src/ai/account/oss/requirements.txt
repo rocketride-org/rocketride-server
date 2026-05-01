@@ -1,0 +1,2 @@
+# OSS Account has no additional dependencies beyond the standard library.
+# Authentication uses hmac + os (stdlib only).

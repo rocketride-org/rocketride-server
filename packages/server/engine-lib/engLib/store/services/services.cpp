@@ -671,6 +671,36 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             info.children.push_back(_mv(subfield));
         }
 
+        // For "object" subsections (profile fields), inject preconfig profile
+        // values as field defaults so the UI can display them (e.g. modelSource).
+        // The profile key is fieldName; child names match preconfig keys by the
+        // last segment of their field ID (e.g. "modelSource" from
+        // "llm.cloud.modelSource").
+        if (fieldInfo.isMember("object")) {
+            auto &svcDef = context.def.serviceDefinition;
+            if (svcDef.isMember("preconfig") &&
+                svcDef["preconfig"].isMember("profiles")) {
+                const auto &profiles = svcDef["preconfig"]["profiles"];
+                if (profiles.isMember(fieldName)) {
+                    const auto &profile = profiles[fieldName];
+                    for (auto &child : info.children) {
+                        // Only inject defaults for readonly string fields
+                        // (e.g. "modelSource") from the preconfig profile.
+                        // Skip user-configurable fields like "apikey".
+                        const bool isReadonly =
+                            child.ui.isMember("ui:readonly") &&
+                            child.ui["ui:readonly"].asBool();
+                        if (isReadonly && profile.isMember(child.name) &&
+                            !child.field.isMember("default") &&
+                            profile[child.name].isString()) {
+                            child.field["default"] =
+                                profile[child.name].asString();
+                        }
+                    }
+                }
+            }
+        }
+
         // Remove what we have parsed
         info.field.removeMember("section");
         info.field.removeMember("properties");

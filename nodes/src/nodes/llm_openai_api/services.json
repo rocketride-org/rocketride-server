@@ -59,7 +59,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//		the configuration should be used to display information
 	//
-	"tile": ["Model: ${parameters.llm_openai_api.model}"],
+	"tile": ["Model: ${parameters.llm_openai_api.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -118,7 +118,20 @@
 		},
 		"openai_api.custom": {
 			"object": "custom",
-			"properties": ["model", "base_url", "modelTotalTokens", "llm.cloud.apikey"]
+			"properties": ["model", "base_url", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai_api.profile": {
+			"title": "Model",
+			"description": "Profile selection",
+			"type": "string",
+			"default": "custom",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": ["openai_api.custom"]
+				}
+			]
 		}
 	},
 	//
@@ -130,7 +143,7 @@
 		{
 			"section": "Pipe",
 			"title": "OpenAI-Compatible API",
-			"properties": ["openai_api.custom"]
+			"properties": ["openai_api.profile"]
 		}
 	],
 	//

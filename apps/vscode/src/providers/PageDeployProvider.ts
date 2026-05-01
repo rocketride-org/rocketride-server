@@ -46,9 +46,9 @@ export class PageDeployProvider {
 			}),
 			vscode.commands.registerCommand('rocketride.page.deploy.close', () => {
 				this.close();
-			})
+			}),
 		];
-		commands.forEach(c => this.context.subscriptions.push(c));
+		commands.forEach((c) => this.context.subscriptions.push(c));
 	}
 
 	public async show(): Promise<void> {
@@ -57,20 +57,11 @@ export class PageDeployProvider {
 			return;
 		}
 
-		this.webviewPanel = vscode.window.createWebviewPanel(
-			'rocketrideDeploy',
-			'Deploy',
-			vscode.ViewColumn.One,
-			{
-				enableScripts: true,
-				retainContextWhenHidden: true,
-				localResourceRoots: [
-					vscode.Uri.file(path.join(this.context.extensionPath, 'dist')),
-					vscode.Uri.file(path.join(this.context.extensionPath, 'webview')),
-					this.context.extensionUri
-				]
-			}
-		);
+		this.webviewPanel = vscode.window.createWebviewPanel('rocketrideDeploy', 'Deploy', vscode.ViewColumn.One, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'dist')), vscode.Uri.file(path.join(this.context.extensionPath, 'webview')), this.context.extensionUri],
+		});
 
 		this.webviewPanel.webview.html = this.getHtmlForWebview(this.webviewPanel.webview);
 
@@ -78,7 +69,7 @@ export class PageDeployProvider {
 			async (message: { type: string; [key: string]: unknown }) => {
 				try {
 					switch (message.type) {
-						case 'ready':
+						case 'view:ready':
 							await this.sendInit();
 							await this.sendServiceStatus();
 							await this.sendDockerStatus();
@@ -170,7 +161,7 @@ export class PageDeployProvider {
 	}
 
 	private async ensureSudoCredentials(): Promise<void> {
-		if (!await this.serviceManager.needsElevation()) return;
+		if (!(await this.serviceManager.needsElevation())) return;
 		const password = await this.requestSudoPassword();
 		this.serviceManager.setElevationPassword(password);
 	}
@@ -217,7 +208,7 @@ export class PageDeployProvider {
 		const progress = {
 			report: (value: { message?: string }) => {
 				if (value.message) this.postMessage({ type: 'serviceProgress', message: value.message });
-			}
+			},
 		};
 		const executablePath = await installer.install(versionSpec, progress, undefined, githubToken);
 		const engineDir = path.dirname(executablePath);
@@ -227,7 +218,7 @@ export class PageDeployProvider {
 		await this.serviceManager.install(executablePath, engineDir);
 
 		// Step 4: Write config with version info
-		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
+		const channel = versionSpec === 'prerelease' ? ('pre' as const) : ('stable' as const);
 		this.writeServiceConfig({
 			versionSpec,
 			version: installer.getInstalledVersion(channel) ?? versionSpec,
@@ -258,13 +249,13 @@ export class PageDeployProvider {
 		const progress = {
 			report: (value: { message?: string }) => {
 				if (value.message) this.postMessage({ type: 'serviceProgress', message: value.message });
-			}
+			},
 		};
 		const executablePath = await installer.install(versionSpec, progress, undefined, githubToken);
 		const engineDir = path.dirname(executablePath);
 
 		// Step 2: Check if the installed version changed
-		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
+		const channel = versionSpec === 'prerelease' ? ('pre' as const) : ('stable' as const);
 		const newVersion = installer.getInstalledVersion(channel) ?? versionSpec;
 		const currentConfig = this.readServiceConfig();
 
@@ -287,7 +278,11 @@ export class PageDeployProvider {
 		});
 
 		// Step 5: Clean up old versions (non-elevated — may skip SYSTEM-owned dirs)
-		try { await installer.cleanupOldVersions(engineDir); } catch { /* best effort */ }
+		try {
+			await installer.cleanupOldVersions(engineDir);
+		} catch {
+			/* best effort */
+		}
 
 		// Step 6: Wait for service to be fully running
 		await this.waitForServiceRunning();
@@ -342,7 +337,7 @@ export class PageDeployProvider {
 			}
 
 			// 'starting' or 'stopping' — process is alive, keep waiting.
-			await new Promise(r => setTimeout(r, 2000));
+			await new Promise((r) => setTimeout(r, 2000));
 		}
 	}
 
@@ -361,7 +356,7 @@ export class PageDeployProvider {
 		} catch {
 			this.postMessage({
 				type: 'serviceStatus',
-				status: { state: 'not-installed', version: null, publishedAt: null, installPath: null }
+				status: { state: 'not-installed', version: null, publishedAt: null, installPath: null },
 			});
 		}
 	}
@@ -409,11 +404,11 @@ export class PageDeployProvider {
 	private async fetchGhcrTags(): Promise<{ stable: string[]; all: string[] }> {
 		// Step 1: Get anonymous pull token for the public image
 		const tokenUrl = 'https://ghcr.io/token?scope=repository:rocketride-org/rocketride-engine:pull';
-		const tokenData = await this.httpsGetJson(tokenUrl) as { token: string };
+		const tokenData = (await this.httpsGetJson(tokenUrl)) as { token: string };
 
 		// Step 2: List tags
 		const tagsUrl = 'https://ghcr.io/v2/rocketride-org/rocketride-engine/tags/list';
-		const tagsData = await this.httpsGetJson(tagsUrl, tokenData.token) as { tags: string[] };
+		const tagsData = (await this.httpsGetJson(tagsUrl, tokenData.token)) as { tags: string[] };
 
 		const all = (tagsData.tags || [])
 			.filter((t: string) => /^\d+/.test(t)) // version tags only (exclude 'latest', digests)
@@ -430,23 +425,30 @@ export class PageDeployProvider {
 		return new Promise((resolve, reject) => {
 			const options: Record<string, unknown> = {
 				headers: {
-					'Accept': 'application/json',
-					...(bearerToken ? { 'Authorization': `Bearer ${bearerToken}` } : {}),
-				}
+					Accept: 'application/json',
+					...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+				},
 			};
-			https.get(url, options, (res: import('http').IncomingMessage) => {
-				if (res.statusCode !== 200) {
-					reject(new Error(`GHCR API returned ${res.statusCode}`));
-					return;
-				}
-				let data = '';
-				res.setEncoding('utf8');
-				res.on('data', (chunk: string) => { data += chunk; });
-				res.on('end', () => {
-					try { resolve(JSON.parse(data)); }
-					catch (e) { reject(e); }
-				});
-			}).on('error', reject);
+			https
+				.get(url, options, (res: import('http').IncomingMessage) => {
+					if (res.statusCode !== 200) {
+						reject(new Error(`GHCR API returned ${res.statusCode}`));
+						return;
+					}
+					let data = '';
+					res.setEncoding('utf8');
+					res.on('data', (chunk: string) => {
+						data += chunk;
+					});
+					res.on('end', () => {
+						try {
+							resolve(JSON.parse(data));
+						} catch (e) {
+							reject(e);
+						}
+					});
+				})
+				.on('error', reject);
 		});
 	}
 
@@ -454,18 +456,23 @@ export class PageDeployProvider {
 	// Service config — version tracking (separate from ServiceManager)
 	// =========================================================================
 
-	private static readonly CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')),
-		'RocketRide', 'config.json'
-	);
+	private static readonly CONFIG_PATH = path.join(process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')), 'RocketRide', 'config.json');
 
 	private writeServiceConfig(info: { versionSpec: string; version: string; publishedAt: string }): void {
 		const configDir = path.dirname(PageDeployProvider.CONFIG_PATH);
 		fs.mkdirSync(configDir, { recursive: true });
-		fs.writeFileSync(PageDeployProvider.CONFIG_PATH, JSON.stringify({
-			...info,
-			installedAt: new Date().toISOString()
-		}, null, 2), 'utf8');
+		fs.writeFileSync(
+			PageDeployProvider.CONFIG_PATH,
+			JSON.stringify(
+				{
+					...info,
+					installedAt: new Date().toISOString(),
+				},
+				null,
+				2
+			),
+			'utf8'
+		);
 	}
 
 	private readServiceConfig(): { versionSpec: string; version: string; publishedAt: string } | null {
@@ -473,7 +480,9 @@ export class PageDeployProvider {
 			if (fs.existsSync(PageDeployProvider.CONFIG_PATH)) {
 				return JSON.parse(fs.readFileSync(PageDeployProvider.CONFIG_PATH, 'utf8'));
 			}
-		} catch { /* corrupt */ }
+		} catch {
+			/* corrupt */
+		}
 		return null;
 	}
 
@@ -490,7 +499,7 @@ export class PageDeployProvider {
 	private getDockerImageTag(versionSpec: string): string {
 		if (versionSpec === 'latest') return 'latest';
 		if (versionSpec === 'prerelease') {
-			const pre = this.ghcrTags.find(t => t.endsWith('-prerelease'));
+			const pre = this.ghcrTags.find((t) => t.endsWith('-prerelease'));
 			if (!pre) throw new Error('No prerelease image found on GHCR');
 			return pre;
 		}
@@ -567,7 +576,7 @@ export class PageDeployProvider {
 		} catch {
 			this.postMessage({
 				type: 'dockerStatus',
-				status: { state: 'not-installed', version: null, publishedAt: null, imageTag: null }
+				status: { state: 'not-installed', version: null, publishedAt: null, imageTag: null },
 			});
 		}
 	}
@@ -595,7 +604,7 @@ export class PageDeployProvider {
 			}
 
 			// 'starting' or 'stopping' — keep waiting.
-			await new Promise(r => setTimeout(r, 2000));
+			await new Promise((r) => setTimeout(r, 2000));
 		}
 	}
 
@@ -603,18 +612,23 @@ export class PageDeployProvider {
 	// Docker config — version tracking
 	// =========================================================================
 
-	private static readonly DOCKER_CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')),
-		'RocketRide', 'docker-config.json'
-	);
+	private static readonly DOCKER_CONFIG_PATH = path.join(process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')), 'RocketRide', 'docker-config.json');
 
 	private writeDockerConfig(info: { versionSpec: string; imageTag: string }): void {
 		const configDir = path.dirname(PageDeployProvider.DOCKER_CONFIG_PATH);
 		fs.mkdirSync(configDir, { recursive: true });
-		fs.writeFileSync(PageDeployProvider.DOCKER_CONFIG_PATH, JSON.stringify({
-			...info,
-			installedAt: new Date().toISOString()
-		}, null, 2), 'utf8');
+		fs.writeFileSync(
+			PageDeployProvider.DOCKER_CONFIG_PATH,
+			JSON.stringify(
+				{
+					...info,
+					installedAt: new Date().toISOString(),
+				},
+				null,
+				2
+			),
+			'utf8'
+		);
 	}
 
 	private readDockerConfig(): { versionSpec: string; imageTag: string } | null {
@@ -622,7 +636,9 @@ export class PageDeployProvider {
 			if (fs.existsSync(PageDeployProvider.DOCKER_CONFIG_PATH)) {
 				return JSON.parse(fs.readFileSync(PageDeployProvider.DOCKER_CONFIG_PATH, 'utf8'));
 			}
-		} catch { /* corrupt */ }
+		} catch {
+			/* corrupt */
+		}
 		return null;
 	}
 
@@ -631,14 +647,14 @@ export class PageDeployProvider {
 			if (fs.existsSync(PageDeployProvider.DOCKER_CONFIG_PATH)) {
 				fs.unlinkSync(PageDeployProvider.DOCKER_CONFIG_PATH);
 			}
-		} catch { /* best effort */ }
+		} catch {
+			/* best effort */
+		}
 	}
 
 	// =========================================================================
 	// Helpers
 	// =========================================================================
-
-
 
 	private async getGithubToken(): Promise<string | undefined> {
 		try {
@@ -661,18 +677,10 @@ export class PageDeployProvider {
 		if (!this.webviewPanel) return;
 
 		const webview = this.webviewPanel.webview;
-		const logoDarkUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-dark-icon.png')
-		);
-		const logoLightUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-light-icon.png')
-		);
-		const dockerUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'docker.svg')
-		);
-		const onpremUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'onprem.svg')
-		);
+		const logoDarkUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-dark-icon.png'));
+		const logoLightUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-light-icon.png'));
+		const dockerUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'docker.svg'));
+		const onpremUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'onprem.svg'));
 
 		webview.postMessage({
 			type: 'init',
@@ -695,20 +703,13 @@ export class PageDeployProvider {
 
 		try {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			return `<!DOCTYPE html><html><body><h1>Deploy page failed to load</h1><p>${String(error)}</p><p>Expected: ${htmlPath.fsPath}</p></body></html>`;
 		}
@@ -725,7 +726,7 @@ export class PageDeployProvider {
 
 	public dispose(): void {
 		this.close();
-		this.disposables.forEach(d => d.dispose());
+		this.disposables.forEach((d) => d.dispose());
 		this.disposables = [];
 	}
 }

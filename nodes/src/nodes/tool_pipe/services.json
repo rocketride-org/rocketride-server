@@ -1,0 +1,54 @@
+{
+	"title": "Pipeline Tool",
+	"protocol": "tool_pipe://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_pipe",
+	"prefix": "tool_pipe",
+	"description": ["Exposes an inline pipeline as an agent tool.", "Connect this node's output lanes to any pipeline nodes on the same canvas.", "When an agent calls the tool, the input is routed to every connected output lane.", "End each connected branch with a response node to return results."],
+	"icon": "pipetool.svg",
+	"tile": ["run_pipe"],
+	"lanes": {
+		"_source": ["text", "questions", "documents", "table", "answers"]
+	},
+	"input": [
+		{
+			"lane": "_source",
+			"output": [{ "lane": "text" }, { "lane": "questions" }, { "lane": "documents" }, { "lane": "table" }, { "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Pipeline Tool",
+				"tool_description": "",
+				"return_type": "text"
+			}
+		}
+	},
+	"fields": {
+		"tool_pipe.tool_description": {
+			"type": "string",
+			"title": "Tool Description",
+			"description": "Natural-language description the agent uses to decide when to call this tool",
+			"default": ""
+		},
+		"tool_pipe.return_type": {
+			"type": "string",
+			"title": "Return Type",
+			"description": "Which response lane value to return to the agent",
+			"default": "text",
+			"enum": ["text", "answers", "documents", "table"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Pipeline Tool",
+			"properties": ["type", "tool_pipe.tool_description", "tool_pipe.return_type"]
+		}
+	]
+}
