@@ -1,15 +1,45 @@
-class Instance:
-    '''ML Sklearn Instance Node'''
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide Contributors
+# =============================================================================
 
-    def __init__(self, IGlobal):
-        self.IGlobal = IGlobal
+# ------------------------------------------------------------------------------
+# This class controls the data for each thread of the task
+# ------------------------------------------------------------------------------
+import copy
 
-    def process(self, text):
-        try:
-            preprocessor = self.IGlobal.preprocessor
-            if preprocessor:
-                return preprocessor.process(text)
-        except Exception:
-            pass
+from rocketlib import IInstanceBase, Entry
 
-        return text
+from .IGlobal import IGlobal
+
+
+class IInstance(IInstanceBase):
+    """Per-thread instance for the ml_sklearn node."""
+
+    IGlobal: IGlobal
+
+    def open(self, obj: Entry):
+        """Called before each new pipeline object — nothing to reset for this node."""
+        pass
+
+    def writeAnswers(self, question):
+        """
+        Receive a question from upstream, run sklearn inference on its text,
+        and forward the result to the answers output lane.
+
+        The question is deep-copied to prevent mutation in fan-out pipelines.
+        """
+        if self.IGlobal.preprocessor is None:
+            raise RuntimeError('sklearn PreProcessor not initialized')
+
+        question = copy.deepcopy(question)
+
+        # Get the text to process
+        text = question.text if hasattr(question, 'text') else str(question)
+
+        # Run inference
+        result = self.IGlobal.preprocessor.process(text)
+
+        # Write result back to the question object and forward downstream
+        question.text = result
+        self.instance.writeAnswers(question)
