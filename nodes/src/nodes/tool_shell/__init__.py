@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+"""Shell tool node package: exposes a host shell-execution tool to agents."""
+
 from .IGlobal import IGlobal
 from .IInstance import IInstance
 

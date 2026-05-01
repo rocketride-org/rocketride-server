@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 
 
 _TRUNCATED_MARKER = '\n...[truncated]'
+_READ_CHUNK_SIZE = 4096
 
 
 def execute_command(
@@ -46,29 +48,21 @@ def execute_command(
 ) -> dict:
     """Run *command* in the host shell and capture its result.
 
-    Returns a dict with ``stdout``, ``stderr``, ``exit_code``, ``timed_out``,
-    and ``truncated`` keys. Output is decoded as UTF-8 (errors replaced) and
-    capped at ``max_output_bytes`` bytes for each stream.
+    Stdout and stderr are streamed through reader threads and capped at
+    ``max_output_bytes`` per stream so a runaway command cannot exhaust
+    engine memory. Once a stream's buffer reaches the cap, further chunks
+    are drained and discarded so the child can finish writing without
+    blocking on a full OS pipe (preserving its natural exit code).
     """
-    timed_out = False
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             command,
             shell=True,
             cwd=cwd,
             env=env,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        stdout_bytes = completed.stdout or b''
-        stderr_bytes = completed.stderr or b''
-        exit_code = completed.returncode
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        stdout_bytes = exc.stdout or b''
-        stderr_bytes = exc.stderr or b''
-        exit_code = -1
     except FileNotFoundError as exc:
         return {
             'stdout': '',
@@ -78,28 +72,60 @@ def execute_command(
             'truncated': False,
         }
 
-    stdout, stdout_truncated = _decode_and_cap(stdout_bytes, max_output_bytes)
-    stderr, stderr_truncated = _decode_and_cap(stderr_bytes, max_output_bytes)
+    stdout_buf = bytearray()
+    stderr_buf = bytearray()
+    capped = {'stdout': False, 'stderr': False}
+
+    def _drain(stream, buf: bytearray, key: str) -> None:
+        """Append chunks to *buf* up to the cap; discard anything beyond it."""
+        try:
+            while True:
+                chunk = stream.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    return
+                remaining = max_output_bytes - len(buf)
+                if remaining <= 0:
+                    capped[key] = True
+                    continue
+                if len(chunk) > remaining:
+                    buf.extend(chunk[:remaining])
+                    capped[key] = True
+                    continue
+                buf.extend(chunk)
+        except (ValueError, OSError):
+            return
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_buf, 'stdout'), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_buf, 'stderr'), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    timed_out = False
+    try:
+        exit_code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait()
+        exit_code = -1
+
+    t_out.join()
+    t_err.join()
+
+    stdout_text = bytes(stdout_buf).decode('utf-8', errors='replace')
+    stderr_text = bytes(stderr_buf).decode('utf-8', errors='replace')
+    if capped['stdout']:
+        stdout_text += _TRUNCATED_MARKER
+    if capped['stderr']:
+        stderr_text += _TRUNCATED_MARKER
 
     return {
-        'stdout': stdout,
-        'stderr': stderr,
+        'stdout': stdout_text,
+        'stderr': stderr_text,
         'exit_code': exit_code,
         'timed_out': timed_out,
-        'truncated': stdout_truncated or stderr_truncated,
+        'truncated': capped['stdout'] or capped['stderr'],
     }
-
-
-def _decode_and_cap(data: bytes, max_bytes: int) -> tuple[str, bool]:
-    if not data:
-        return '', False
-    truncated = len(data) > max_bytes
-    if truncated:
-        data = data[:max_bytes]
-    text = data.decode('utf-8', errors='replace')
-    if truncated:
-        text += _TRUNCATED_MARKER
-    return text, truncated
 
 
 def build_environment(

@@ -61,6 +61,7 @@ class IGlobal(IGlobalBase):
     command_patterns: list[re.Pattern] | None = None
 
     def beginGlobal(self) -> None:
+        """Load node config into instance state; refuses to start with a broken allowlist."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -70,9 +71,21 @@ class IGlobal(IGlobalBase):
         self.max_output_bytes = parse_max_output(cfg)
         self.env_vars = parse_env_vars(cfg)
         self.allow_external_env = bool(cfg.get('allowExternalEnv', True))
-        self.command_patterns = parse_command_patterns(cfg, on_invalid=warning)
+
+        invalid_pattern_errors: list[str] = []
+
+        def _on_invalid_pattern(msg: str) -> None:
+            """Record a pattern compile failure and emit a warning."""
+            invalid_pattern_errors.append(msg)
+            warning(msg)
+
+        compiled_patterns = parse_command_patterns(cfg, on_invalid=_on_invalid_pattern)
+        if invalid_pattern_errors and not compiled_patterns:
+            raise ValueError(f'commandAllowlist is configured but every pattern failed to compile; refusing to start with a non-functional allowlist (would silently allow all commands). First error: {invalid_pattern_errors[0]}')
+        self.command_patterns = compiled_patterns
 
     def endGlobal(self) -> None:
+        """Reset shared state to defaults when the node tears down."""
         self.working_dir = None
         self.timeout = DEFAULT_TIMEOUT
         self.max_output_bytes = DEFAULT_MAX_OUTPUT_BYTES
