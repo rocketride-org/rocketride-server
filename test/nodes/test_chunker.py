@@ -697,8 +697,8 @@ class TestChunkerLifecycle:
         finally:
             self._restore_modules(saved, names)
 
-    def test_close_flushes_buffered_documents(self):
-        """Data pipes finalize with close(), not closing()."""
+    def test_close_does_not_duplicate_emitted_documents(self):
+        """Documents are emitted synchronously and close does not duplicate them."""
         saved, names, IInstance, RC = self._load_iinstance()
         try:
             Doc = sys.modules['ai.common.schema'].Doc
@@ -710,7 +710,7 @@ class TestChunkerLifecycle:
             inst.preventDefault.assert_called_once()
             inst.close()
 
-            assert mock_instance.writeDocuments.called
+            assert mock_instance.writeDocuments.call_count == 1
             emitted_docs = mock_instance.writeDocuments.call_args[0][0]
             assert len(emitted_docs) >= 2
         finally:

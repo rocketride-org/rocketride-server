@@ -116,7 +116,7 @@ class IInstance(IInstanceBase):
         if not hasattr(self, '_pending_docs'):
             self._pending_docs = []
 
-        buffered = False
+        chunked_docs: list[Doc] = []
         for raw_document in documents:
             document = self._coerce_document(raw_document)
 
@@ -158,9 +158,10 @@ class IInstance(IInstanceBase):
                 output_docs.append(chunk_doc)
 
             if output_docs:
-                debug(f'Chunker buffered {len(output_docs)} chunks for document (parent_id={parent_id})')
-                self._pending_docs.extend(output_docs)
-                buffered = True
+                debug(f'Chunker built {len(output_docs)} chunks for document (parent_id={parent_id})')
+                chunked_docs.extend(output_docs)
 
-        if buffered:
+        if chunked_docs:
+            debug(f'Chunker emitting {len(chunked_docs)} chunks')
+            self.instance.writeDocuments(chunked_docs)
             return self.preventDefault()
