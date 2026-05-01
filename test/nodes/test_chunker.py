@@ -603,6 +603,7 @@ class TestChunkerLifecycle:
 
         mock_instance = MagicMock()
         inst.instance = mock_instance
+        inst.preventDefault = MagicMock(return_value=None)
 
         return inst, mock_instance
 
@@ -630,6 +631,7 @@ class TestChunkerLifecycle:
             meta = DocMetadata(objectId='doc-123', chunkId=0)
             doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=meta)
             inst.writeDocuments([doc])
+            inst.preventDefault.assert_called_once()
             inst.closing()
 
             assert mock_instance.writeDocuments.called
@@ -651,6 +653,7 @@ class TestChunkerLifecycle:
 
             doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=None)
             inst.writeDocuments([doc])
+            inst.preventDefault.assert_called_once()
             inst.closing()
 
             assert mock_instance.writeDocuments.called
@@ -682,6 +685,7 @@ class TestChunkerLifecycle:
                     }
                 ]
             )
+            inst.preventDefault.assert_called_once()
             inst.closing()
 
             assert mock_instance.writeDocuments.called
@@ -703,6 +707,7 @@ class TestChunkerLifecycle:
 
             doc = Doc(page_content='This is text that will be split when the pipe closes.', metadata=None)
             inst.writeDocuments([doc])
+            inst.preventDefault.assert_called_once()
             inst.close()
 
             assert mock_instance.writeDocuments.called
