@@ -77,21 +77,118 @@
 	//
 	//	Test configuration for automated node testing
 	//
-	"test": {
-		"profiles": ["auto"],
-		"cases": [
-			{
-				"questions": {
-					"questions": [{ "text": "What is the capital of France?" }]
-				},
-				"expect": {
+	"test": [
+		{
+			"profiles": ["auto"],
+			"cases": [
+				{
 					"questions": {
-						"notEmpty": true
+						"questions": [{ "text": "What is the capital of France?" }]
+					},
+					"expect": {
+						"questions": {
+							"notEmpty": true
+						}
 					}
 				}
-			}
-		]
-	},
+			]
+		},
+		{
+			"profiles": ["ci_tiny"],
+			"cases": [
+				{
+					"name": "truncates over-budget question",
+					"questions": {
+						"questions": [{ "text": "alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha alpha." }]
+					},
+					"expect": {
+						"questions": {
+							"property": [
+								{
+									"path": "[0].questions[0].text",
+									"beginsWith": "alpha"
+								},
+								{
+									"path": "[0].questions[0].text",
+									"maxLength": 160
+								}
+							],
+							"notEmpty": true
+						}
+					}
+				},
+				{
+					"name": "selects documents within budget",
+					"questions": {
+						"questions": [{ "text": "Which source should answer the alpha question?" }],
+						"documents": [
+							{
+								"page_content": "Priority alpha source.",
+								"score": 0.95,
+								"metadata": { "objectId": "doc-priority", "chunkId": 0 }
+							},
+							{
+								"page_content": "oversized beta source beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta beta.",
+								"score": 0.9,
+								"metadata": { "objectId": "doc-oversized", "chunkId": 1 }
+							},
+							{
+								"page_content": "Followup alpha source.",
+								"score": 0.8,
+								"metadata": { "objectId": "doc-followup", "chunkId": 2 }
+							}
+						]
+					},
+					"expect": {
+						"questions": {
+							"property": [
+								{
+									"path": "[0].documents",
+									"maxLength": 2
+								},
+								{
+									"path": "[0].documents[0].metadata.objectId",
+									"equals": "doc-priority"
+								},
+								{
+									"path": "[0].documents[1].metadata.objectId",
+									"equals": "doc-followup"
+								}
+							],
+							"notEmpty": true
+						}
+					}
+				},
+				{
+					"name": "compresses over-budget history",
+					"questions": {
+						"questions": [{ "text": "Summarize the recent decision." }],
+						"history": [
+							{ "role": "user", "content": "Start of the conversation." },
+							{ "role": "assistant", "content": "middle detail one one one one one one one one one one one one one one one one one one one one one one one one one one one one one one." },
+							{ "role": "user", "content": "middle detail two two two two two two two two two two two two two two two two two two two two two two two two two two two two two two." },
+							{ "role": "assistant", "content": "The recent decision is ready." }
+						]
+					},
+					"expect": {
+						"questions": {
+							"property": [
+								{
+									"path": "[0].history",
+									"maxLength": 3
+								},
+								{
+									"path": "[0].history[1].content",
+									"contains": "Earlier conversation summarized"
+								}
+							],
+							"notEmpty": true
+						}
+					}
+				}
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver
@@ -117,6 +214,15 @@
 				"query_budget_pct": 15,
 				"document_budget_pct": 50,
 				"history_budget_pct": 25
+			},
+			"ci_tiny": {
+				"title": "CI tiny - force budget optimization",
+				"model_name": "custom",
+				"max_context_tokens": 80,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 20,
+				"document_budget_pct": 35,
+				"history_budget_pct": 35
 			}
 		}
 	},
