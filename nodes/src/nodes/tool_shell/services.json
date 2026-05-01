@@ -56,8 +56,8 @@
 		"tool_shell.allowExternalEnv": {
 			"type": "boolean",
 			"title": "Allow agent-supplied env vars",
-			"description": "If enabled, the agent may inject additional environment variables per call. Variables defined in this node's config always take precedence.",
-			"default": true,
+			"description": "If enabled, the agent may inject additional environment variables per call. Variables defined in this node's config always take precedence. Defaults off because env vars like LD_PRELOAD, PATH, or NODE_OPTIONS can redirect command execution.",
+			"default": false,
 			"enum": [
 				[true, "Yes"],
 				[false, "No"]
@@ -91,7 +91,7 @@
 		},
 		"tool_shell.commandAllowlist": {
 			"title": "Command allowlist",
-			"description": "Regex patterns for allowed commands. A command must match at least one pattern to run. If empty, any command is allowed.",
+			"description": "Regex patterns for allowed commands. The full command string must match at least one pattern (re.fullmatch) to run; use .* for substring matching (e.g. 'npm .*'). If empty, any command is allowed.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,

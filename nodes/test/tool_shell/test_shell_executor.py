@@ -71,6 +71,10 @@ class TestExecuteCommandTimeout:
 
     def test_kills_long_running_command(self):
         """Long-running commands are killed and reported as timed_out."""
+        import time
+
+        # Track wall time so we can verify the tree-kill returns promptly.
+        start = time.monotonic()
         result = execute_command(
             f'{PY} -c "import time; time.sleep(5)"',
             cwd=None,
@@ -78,8 +82,14 @@ class TestExecuteCommandTimeout:
             timeout=1,
             max_output_bytes=4096,
         )
+        elapsed = time.monotonic() - start
         assert result['timed_out'] is True
         assert result['exit_code'] == -1
+        # Without tree-kill the reader threads stay blocked on the orphan's
+        # pipes until the child's own sleep finishes (~5s). Tree-kill should
+        # bring everything down well under that. Generous bound to absorb
+        # CI jitter while still failing if the regression returns.
+        assert elapsed < 4.0, f'expected tree-kill to return fast; took {elapsed:.2f}s'
 
 
 class TestExecuteCommandWorkingDir:
