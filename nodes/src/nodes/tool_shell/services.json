@@ -48,7 +48,7 @@
 		"tool_shell.maxOutputBytes": {
 			"type": "integer",
 			"title": "Max output size (bytes)",
-			"description": "Maximum combined size of captured stdout + stderr. Output beyond this is truncated. Default 1 MiB.",
+			"description": "Maximum size applied to each of stdout and stderr individually; each stream is truncated beyond this limit. Default 1 MiB.",
 			"default": 1048576,
 			"minimum": 1024,
 			"optional": true

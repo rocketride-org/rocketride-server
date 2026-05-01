@@ -41,6 +41,7 @@ DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 def parse_working_dir(cfg: dict) -> str | None:
+    """Return the configured working directory, or None when unset/blank."""
     raw = cfg.get('workingDir')
     if raw is None:
         return None
@@ -49,6 +50,7 @@ def parse_working_dir(cfg: dict) -> str | None:
 
 
 def parse_timeout(cfg: dict) -> int:
+    """Return the configured timeout in seconds, clamped to [1, MAX_TIMEOUT]."""
     raw = cfg.get('timeout')
     if raw is None:
         return DEFAULT_TIMEOUT
@@ -60,6 +62,7 @@ def parse_timeout(cfg: dict) -> int:
 
 
 def parse_max_output(cfg: dict) -> int:
+    """Return the per-stream output cap in bytes (minimum 1 KiB)."""
     raw = cfg.get('maxOutputBytes')
     if raw is None:
         return DEFAULT_MAX_OUTPUT_BYTES
@@ -71,6 +74,7 @@ def parse_max_output(cfg: dict) -> int:
 
 
 def parse_env_vars(cfg: dict) -> dict[str, str]:
+    """Parse the envVars config rows into a {name: str(value)} mapping."""
     raw = _coerce_list(cfg.get('envVars'))
     env: dict[str, str] = {}
     for row in raw:
@@ -79,7 +83,8 @@ def parse_env_vars(cfg: dict) -> dict[str, str]:
         name = str(row.get('envName') or '').strip()
         if not name:
             continue
-        env[name] = str(row.get('envValue') or '')
+        value = row.get('envValue')
+        env[name] = '' if value is None else str(value)
     return env
 
 
@@ -111,6 +116,7 @@ def parse_command_patterns(
 
 
 def _coerce_list(raw: object) -> list:
+    """Accept a list directly or a JSON-encoded list string; otherwise return []."""
     if raw is None:
         return []
     if isinstance(raw, list):

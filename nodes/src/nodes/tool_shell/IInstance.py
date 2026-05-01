@@ -39,6 +39,8 @@ from .shell_executor import build_environment, execute_command
 
 
 class IInstance(IInstanceBase):
+    """Per-call instance for the shell tool; exposes the ``execute`` tool function."""
+
     IGlobal: IGlobal
 
     @tool_function(
@@ -118,23 +120,35 @@ class IInstance(IInstanceBase):
         )
 
     def _validate_command(self, command: str) -> None:
+        """Reject commands that don't match any configured allowlist regex."""
         patterns = self.IGlobal.command_patterns or []
         if patterns and not any(p.search(command) for p in patterns):
             raise ValueError('Command is not permitted by the configured allowlist.')
 
     def _resolve_cwd(self, override: object) -> str | None:
+        """Pick the per-call cwd override (validated) or fall back to the configured default."""
         if override is None:
-            return self.IGlobal.working_dir
+            return self._validated_default_cwd()
         if not isinstance(override, str):
             raise ValueError('"working_dir" must be a string')
         path = override.strip()
         if not path:
-            return self.IGlobal.working_dir
+            return self._validated_default_cwd()
         if not os.path.isdir(path):
             raise ValueError(f'working_dir does not exist or is not a directory: {path!r}')
         return path
 
+    def _validated_default_cwd(self) -> str | None:
+        """Return the configured default cwd after verifying it exists, or None if unset."""
+        default = self.IGlobal.working_dir
+        if default is None:
+            return None
+        if not os.path.isdir(default):
+            raise ValueError(f'working_dir does not exist or is not a directory: {default!r}')
+        return default
+
     def _resolve_timeout(self, override: object) -> int:
+        """Coerce a per-call timeout override and clamp it to the configured maximum."""
         if override is None:
             return self.IGlobal.timeout
         try:
