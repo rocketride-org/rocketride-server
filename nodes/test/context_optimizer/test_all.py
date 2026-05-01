@@ -215,6 +215,24 @@ ContextOptimizer = _import_with_stubs('nodes.context_optimizer.optimizer').Conte
 # ===========================================================================
 
 
+@pytest.fixture(autouse=True)
+def _install_tiktoken_stub_for_test():
+    """Keep the lazy tiktoken import available for each test when absent."""
+    if _TIKTOKEN_AVAILABLE:
+        yield
+        return
+
+    original_module = sys.modules.get('tiktoken', _MISSING)
+    sys.modules['tiktoken'] = _STUB_MODULES['tiktoken']
+    try:
+        yield
+    finally:
+        if original_module is _MISSING:
+            sys.modules.pop('tiktoken', None)
+        else:
+            sys.modules['tiktoken'] = original_module
+
+
 @pytest.fixture
 def default_config() -> Dict[str, Any]:
     """Default optimizer configuration."""
