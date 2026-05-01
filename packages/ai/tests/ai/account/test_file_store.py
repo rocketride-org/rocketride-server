@@ -471,3 +471,169 @@ class TestHandleIO:
             await fs.write_chunk(info['handle'], b'nope')
 
         await fs.close_read(info['handle'])
+
+
+# ============================================================================
+# Safety guards: empty-path rmdir, destination checks, subtree locks, handle cap
+# ============================================================================
+
+
+class TestRmdirGuards:
+    """rmdir must refuse empty/root paths and open-handle subtrees."""
+
+    @pytest.mark.asyncio
+    async def test_rmdir_empty_path_rejected(self, fs):
+        """rmdir('') must not wipe the account store."""
+        await fs.write('survivor.txt', b'stay')
+        with pytest.raises(StorageError, match='non-empty path'):
+            await fs.rmdir('', recursive=True)
+        # Survivor still there
+        assert await fs.read('survivor.txt') == b'stay'
+
+    @pytest.mark.asyncio
+    async def test_rmdir_slash_path_rejected(self, fs):
+        """rmdir('/') normalises to empty — also rejected."""
+        await fs.write('survivor.txt', b'stay')
+        with pytest.raises(StorageError, match='non-empty path'):
+            await fs.rmdir('/', recursive=True)
+        assert await fs.read('survivor.txt') == b'stay'
+
+    @pytest.mark.asyncio
+    async def test_rmdir_refuses_when_writer_open(self, fs):
+        """Open writer under the prefix must block rmdir."""
+        handle_id = await fs.open_write('project/data.bin', connection_id=1)
+        try:
+            with pytest.raises(StorageError, match='open for writing'):
+                await fs.rmdir('project', recursive=True)
+        finally:
+            await fs.close_write(handle_id, connection_id=1)
+
+    @pytest.mark.asyncio
+    async def test_rmdir_refuses_when_reader_open(self, fs):
+        """Open reader under the prefix must block rmdir."""
+        await fs.write('project/data.bin', b'x')
+        info = await fs.open_read('project/data.bin', connection_id=1)
+        try:
+            with pytest.raises(StorageError, match='handle open under'):
+                await fs.rmdir('project', recursive=True)
+        finally:
+            await fs.close_read(info['handle'], connection_id=1)
+
+
+class TestRenameGuards:
+    """rename must refuse destination collisions and open-handle subtrees."""
+
+    @pytest.mark.asyncio
+    async def test_rename_refuses_existing_file_destination(self, fs):
+        """Refuse to clobber an existing file without overwrite=True."""
+        await fs.write('src.bin', b'source')
+        await fs.write('dest.bin', b'destination')
+
+        with pytest.raises(StorageError, match='Destination already exists'):
+            await fs.rename('src.bin', 'dest.bin')
+
+        # Both preserved
+        assert await fs.read('src.bin') == b'source'
+        assert await fs.read('dest.bin') == b'destination'
+
+    @pytest.mark.asyncio
+    async def test_rename_overwrite_replaces_destination(self, fs):
+        """rename(..., overwrite=True) replaces the destination file."""
+        await fs.write('src.bin', b'source')
+        await fs.write('dest.bin', b'destination')
+
+        await fs.rename('src.bin', 'dest.bin', overwrite=True)
+
+        # Source is gone, destination has source's content
+        with pytest.raises(StorageError):
+            await fs.read('src.bin')
+        assert await fs.read('dest.bin') == b'source'
+
+    @pytest.mark.asyncio
+    async def test_rename_refuses_existing_dir_destination(self, fs):
+        """Refuse to merge into an existing directory without overwrite."""
+        await fs.write('src_dir/a.bin', b'a')
+        await fs.write('src_dir/b.bin', b'b')
+        await fs.write('dest_dir/existing.bin', b'existing')
+
+        with pytest.raises(StorageError, match='Destination already exists'):
+            await fs.rename('src_dir', 'dest_dir')
+
+        assert await fs.read('dest_dir/existing.bin') == b'existing'
+
+    @pytest.mark.asyncio
+    async def test_rename_file_refuses_when_source_open(self, fs):
+        """Refuse rename if the source file is open for writing."""
+        handle_id = await fs.open_write('src.bin', connection_id=1)
+        try:
+            with pytest.raises(StorageError, match='open for writing'):
+                await fs.rename('src.bin', 'dest.bin')
+        finally:
+            await fs.close_write(handle_id, connection_id=1)
+
+    @pytest.mark.asyncio
+    async def test_rename_file_refuses_when_destination_locked(self, fs):
+        """Refuse rename if the destination file is open for writing."""
+        await fs.write('src.bin', b'source')
+        handle_id = await fs.open_write('dest.bin', connection_id=1)
+        try:
+            with pytest.raises(StorageError, match='open for writing'):
+                await fs.rename('src.bin', 'dest.bin', overwrite=True)
+        finally:
+            await fs.close_write(handle_id, connection_id=1)
+
+    @pytest.mark.asyncio
+    async def test_rename_dir_refuses_when_subtree_writer_open(self, fs):
+        """Directory rename refuses if any file under the source prefix is open."""
+        await fs.write('src_dir/a.bin', b'a')
+        handle_id = await fs.open_write('src_dir/b.bin', connection_id=1)
+        try:
+            with pytest.raises(StorageError, match='open for writing'):
+                await fs.rename('src_dir', 'dest_dir')
+        finally:
+            await fs.close_write(handle_id, connection_id=1)
+
+
+class TestHandleCap:
+    """open_read/open_write must refuse beyond MAX_HANDLES_PER_CONNECTION."""
+
+    @pytest.mark.asyncio
+    async def test_write_handle_cap_enforced(self, fs):
+        """Opening beyond the cap on a real connection_id raises StorageError."""
+        from ai.account.file_store import MAX_HANDLES_PER_CONNECTION
+
+        handles = []
+        for i in range(MAX_HANDLES_PER_CONNECTION):
+            handles.append(await fs.open_write(f'file-{i}.bin', connection_id=7))
+
+        with pytest.raises(StorageError, match='Too many open handles'):
+            await fs.open_write('overflow.bin', connection_id=7)
+
+        # Cleanup
+        for h in handles:
+            await fs.close_write(h, connection_id=7)
+
+    @pytest.mark.asyncio
+    async def test_handle_cap_not_enforced_for_connection_zero(self, fs):
+        """connection_id=0 ('unowned', used by tests) bypasses the cap."""
+        from ai.account.file_store import MAX_HANDLES_PER_CONNECTION
+
+        handles = []
+        for i in range(MAX_HANDLES_PER_CONNECTION + 5):
+            handles.append(await fs.open_write(f'nocap-{i}.bin', connection_id=0))
+        for h in handles:
+            await fs.close_write(h)
+
+
+class TestPathValidationColon:
+    """Windows drive-letter syntax must be rejected by _validate_path."""
+
+    def test_rejects_colon_in_segment(self, fs):
+        """A path segment containing ':' (e.g. Windows 'C:') must be rejected."""
+        with pytest.raises(ValueError, match='invalid characters'):
+            fs._validate_path('C:/foo/bar')
+
+    def test_rejects_backslash_colon_combo(self, fs):
+        """Windows-style 'C:\\foo' converts to 'C:/foo' and is rejected."""
+        with pytest.raises(ValueError, match='invalid characters'):
+            fs._validate_path('C:\\foo\\bar')

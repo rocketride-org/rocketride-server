@@ -77,3 +77,9 @@ export const CONST_WS_PING_INTERVAL = 15;
  * the connection is considered dead and will be closed.
  */
 export const CONST_WS_PING_TIMEOUT = 60;
+
+/**
+ * Default store directory for project pipeline files.
+ * Use this constant instead of hardcoding '.projects'.
+ */
+export const PROJECT_DIR = '.projects';

@@ -59,15 +59,19 @@
 					"type": "string",
 					"enum": [
 						"cloud",
+						"docker",
+						"service",
 						"onprem",
 						"local"
 					],
 					"default": "local",
 					"description": "Connection mode for RocketRide debugging",
 					"enumDescriptions": [
-						"Cloud (RocketRide.ai cloud) – needs a RocketRide account",
+						"RocketRide Cloud – sign in with your RocketRide account",
+						"Docker – connect to your local Docker instance",
+						"Service – connect to your local RocketRide service",
 						"On-prem (your own hosted server) – needs host address and API key",
-						"Local (your local machine) – just needs a port to connect to"
+						"Local (your local machine) – downloads and runs a local engine"
 					]
 				},
 				"rocketride.hostUrl": {
@@ -106,6 +110,11 @@
 					"default": true,
 					"description": "Automatically connect to RocketRide server when extension activates"
 				},
+				"rocketride.welcomeDismissed": {
+					"type": "boolean",
+					"default": false,
+					"description": "Set to true to skip the welcome/setup page on startup. Reset to false to show it again."
+				},
 				"rocketride.pipelineRestartBehavior": {
 					"type": "string",
 					"enum": [
@@ -120,6 +129,56 @@
 						"Do not automatically restart the pipeline",
 						"Prompt the user to restart the pipeline"
 					]
+				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID to use for development (which team's engine to connect to)"
+				},
+				"rocketride.deployTargetMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						null,
+						"cloud",
+						"onprem",
+						"docker",
+						"service"
+					],
+					"default": null,
+					"description": "Deploy target mode (null = not configured / same as development mode)"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID for the deployment target"
+				},
+				"rocketride.deployHostUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Host URL for on-prem deploy target (separate from dev connection)"
+				},
+				"rocketride.deployAutoConnect": {
+					"type": "boolean",
+					"default": false,
+					"description": "Automatically connect to the deploy target when extension starts"
+				},
+				"rocketride.deploy.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local deploy target"
+				},
+				"rocketride.deploy.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable debug output for the local deploy engine"
+				},
+				"rocketride.deployEngineArgs": {
+					"type": "string",
+					"default": "",
+					"description": "Additional command-line arguments for the deploy engine"
 				},
 				"rocketride.oauth2RootUrl": {
 					"type": "string",
@@ -189,6 +248,11 @@
 				"title": "Server Monitor",
 				"category": "RocketRide",
 				"icon": "$(dashboard)"
+			},
+			{
+				"command": "rocketride.page.status.open",
+				"title": "Task Status",
+				"category": "RocketRide"
 			},
 			{
 				"command": "rocketride.sidebar.connection.connect",
@@ -361,27 +425,15 @@
 			"rocketride": [
 				{
 					"type": "webview",
-					"id": "rocketride.provider.connection",
-					"name": "Connection Manager"
-				}
-			],
-			"explorer": [
-				{
-					"type": "tree",
-					"id": "rocketride.provider.files",
-					"name": "Pipelines",
-					"when": "rocketride.loaded"
+					"id": "rocketride.sidebar.main",
+					"name": "RocketRide"
 				}
 			]
 		},
 		"viewsWelcome": [
 			{
-				"view": "rocketride.provider.connection",
+				"view": "rocketride.sidebar.main",
 				"contents": "Loading..."
-			},
-			{
-				"view": "rocketride.provider.files",
-				"contents": "No pipeline files found"
 			}
 		]
 	},

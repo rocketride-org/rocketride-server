@@ -146,7 +146,7 @@
 				"mode": "cloud",
 				"title": "Weaviate cloud server",
 				"host": "",
-				"port": 433,
+				"port": 443,
 				"apikey": "",
 				"collection": "ROCKETRIDE"
 			}
@@ -163,7 +163,7 @@
 			"description": "Enter the server IP address e.g. <your-instance-name>.weaviate.cloud"
 		},
 		"vector.cloud.port": {
-			"default": 433
+			"default": 443
 		},
 		"vector.local.host": {
 			"default": "localhost"

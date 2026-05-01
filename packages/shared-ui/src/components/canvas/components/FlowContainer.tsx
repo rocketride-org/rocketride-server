@@ -125,6 +125,13 @@ export interface IFlowContainerProps {
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
 
+	/** Whether the document has unsaved changes. Controls the save button's active state. */
+	isDirty?: boolean;
+	/** Whether the document is new (has never been saved to a backing file). */
+	isNew?: boolean;
+	/** Called when the user triggers save from the canvas toolbar. */
+	onSave?: () => void;
+
 	/** Child components (typically the Canvas grid). */
 	children?: ReactNode;
 }
@@ -139,12 +146,12 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, features, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, features, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, isDirty, isNew, onSave, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
 			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${project.name}`}>
-				<FlowProvider project={project} projectId={project.project_id ?? ''} features={features} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} initialViewport={initialViewport}>
+				<FlowProvider project={project} projectId={project.project_id ?? ''} features={features} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave}>
 					{children}
 				</FlowProvider>
 			</div>

@@ -27,9 +27,9 @@
  * Shows a branded welcome/setup page on first install. Delays engine download
  * and connection until the user explicitly configures and confirms their setup.
  *
- * The page auto-opens until the user dismisses it or completes setup. A
- * globalState flag ('rocketride.welcomeDismissed') persists the dismissal
- * across all workspaces so users only see the welcome once per installation.
+ * The page auto-opens until the user dismisses it or completes setup. The
+ * user setting 'rocketride.welcomeDismissed' persists the dismissal. Users
+ * can reset it to false in Settings to re-show the welcome page.
  */
 
 import * as vscode from 'vscode';
@@ -39,7 +39,7 @@ import { getConnectionManager } from '../extension';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { EngineInstaller } from '../connection/engine-installer';
 
-const DISMISSED_KEY = 'rocketride.welcomeDismissed';
+const DISMISSED_KEY = 'welcomeDismissed';
 
 export class PageWelcomeProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -58,7 +58,7 @@ export class PageWelcomeProvider {
 
 	/** Whether the user has already dismissed the welcome page */
 	public isDismissed(): boolean {
-		return this.context.globalState.get<boolean>(DISMISSED_KEY, false);
+		return vscode.workspace.getConfiguration('rocketride').get<boolean>(DISMISSED_KEY, false);
 	}
 
 	private registerCommands(): void {
@@ -87,7 +87,7 @@ export class PageWelcomeProvider {
 		const messageDisposable = this.panel.webview.onDidReceiveMessage(async (message) => {
 			try {
 				switch (message.type) {
-					case 'ready':
+					case 'view:ready':
 						await this.sendCurrentSettings();
 						break;
 
@@ -201,7 +201,7 @@ export class PageWelcomeProvider {
 			}
 
 			// Mark dismissed
-			await this.context.globalState.update(DISMISSED_KEY, true);
+			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
 
 			// Close panel
 			this.panel?.dispose();
@@ -219,7 +219,7 @@ export class PageWelcomeProvider {
 
 	/** Dismiss without configuring */
 	private async dismiss(): Promise<void> {
-		await this.context.globalState.update(DISMISSED_KEY, true);
+		await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
 		this.panel?.dispose();
 	}
 
@@ -274,7 +274,7 @@ export class PageWelcomeProvider {
 			});
 
 			try {
-				await testClient.connect(8000);
+				await testClient.connect(undefined, { timeout: 8000 });
 			} catch (connectError) {
 				if (testClient) await testClient.disconnect();
 				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);

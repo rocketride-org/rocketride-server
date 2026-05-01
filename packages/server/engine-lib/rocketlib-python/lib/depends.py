@@ -210,19 +210,16 @@ def _ensure_pip():
         raise
 
 
-def _uv_rel_path() -> str:
-    """Relative path to uv from the engine executable directory."""
-    if os.name == 'nt':
-        return '.\\Scripts\\uv.exe'
-    return './bin/uv'
+def _uv_abs_path() -> str:
+    """Get the absolute path to the uv executable based on platform."""
+    exe_dir = _get_executable_dir()
+    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else \
+           os.path.join(exe_dir, 'bin', 'uv')
 
 
 def _uv_available() -> bool:
     """Check if uv executable exists."""
-    exe_dir = _get_executable_dir()
-    if os.name == 'nt':
-        return os.path.isfile(os.path.join(exe_dir, 'Scripts', 'uv.exe'))
-    return os.path.isfile(os.path.join(exe_dir, 'bin', 'uv'))
+    return os.path.isfile(_uv_abs_path())
 
 
 def _wheel_available() -> bool:
@@ -430,7 +427,7 @@ def _compile_constraints(constraints_path: str):
     monitorStatus('Compiling constraints...')
 
     args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'compile',
         './cache/combined.txt',
@@ -640,7 +637,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     exe_dir = _get_executable_dir()
     args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'install',
         '--python',
@@ -722,7 +719,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     # Build uv command
     exe_dir = _get_executable_dir()
     uv_args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'install',
         '-r',
@@ -856,7 +853,7 @@ def main():
             exe_dir = _get_executable_dir()
 
             # Build uv args
-            uv_args = [_uv_rel_path(), 'pip'] + sys.argv[1:] + ['--python', sys.executable]
+            uv_args = [_uv_abs_path(), 'pip'] + sys.argv[1:] + ['--python', sys.executable]
 
             # --index-strategy is only valid for install, compile, sync commands
             is_install_cmd = sys.argv[1] in ('install', 'compile', 'sync')
