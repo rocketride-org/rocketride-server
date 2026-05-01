@@ -83,8 +83,17 @@ export class LocalManager extends BaseManager {
 		let attempts = 0;
 
 		while (attempts < MAX_CONNECT_ATTEMPTS) {
+			if (token?.isCancellationRequested) {
+				this.logger.output(`${icons.warning} Connection cancelled by user`);
+				throw new Error('Connection cancelled');
+			}
+
 			try {
-				await client.connect(LOCAL_AUTH, { uri, timeout: 5000 });
+				await client.connect({
+					 redirectUri: uri, 
+					 auth: LOCAL_AUTH, 
+					 timeout: 5000 
+					} as any);
 				return;
 			} catch (error: unknown) {
 				attempts++;
@@ -99,7 +108,9 @@ export class LocalManager extends BaseManager {
 				const delaySec = Math.round(delayMs / 1000);
 				this.logger.output(`${icons.info} Connection attempt ${attempts} failed, waiting ${delaySec}s...`);
 				this.emit('status', `Waiting ${delaySec}s before next attempt`);
-				await LocalManager.delay(delayMs);
+
+				// Cancellable delay
+				await this.delayWithToken(delayMs, token);
 			}
 		}
 	}
@@ -136,7 +147,35 @@ export class LocalManager extends BaseManager {
 		return Math.min(delay, BACKOFF_MAX_MS);
 	}
 
-	private static delay(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
+	private delayWithToken(ms: number, token?: vscode.CancellationToken): Promise<void> {
+		return new Promise((resolve, reject) => {
+			if (token?.isCancellationRequested) {
+				return reject(new Error('Connection cancelled'));
+			}
+
+			let timeout: NodeJS.Timeout | undefined;
+			let sub: vscode.Disposable | undefined;
+
+			const cleanup = () => {
+				if (timeout !== undefined) {
+					clearTimeout(timeout);
+					timeout = undefined;
+				}
+				if (sub !== undefined) {
+					sub.dispose();
+					sub = undefined;
+				}
+			};
+
+			sub = token?.onCancellationRequested(() => {
+				cleanup();
+				reject(new Error('Connection cancelled'));
+			});
+
+			timeout = setTimeout(() => {
+				cleanup();
+				resolve();
+			}, ms);
+		});
 	}
 }
