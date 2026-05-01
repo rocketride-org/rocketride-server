@@ -435,13 +435,23 @@ export class RocketRideClient extends DAPClient {
 	 */
 	private _getWebsocketUri(uri: string): string {
 		const httpUrl = RocketRideClient.normalizeUri(uri);
+		const SERVICE_PATH = '/task/service';
 
 		try {
 			const url = new URL(httpUrl);
 			const wsScheme = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
-			return `${wsScheme}//${url.host}/task/service`;
+			// Normalize the path: strip trailing slash, then append /task/service
+			// only if it isn't already present (prevents double-path when callers
+			// pass an already-normalized WebSocket endpoint).
+			let path = url.pathname.replace(/\/+$/, '');
+			if (!path.endsWith(SERVICE_PATH)) {
+				path = path ? `${path}${SERVICE_PATH}` : SERVICE_PATH;
+			}
+			return `${wsScheme}//${url.host}${path}`;
 		} catch {
-			return `${httpUrl}/task/service`;
+			// Fallback for unparseable URIs — same trailing-slash + dedup logic
+			const stripped = httpUrl.replace(/\/+$/, '');
+			return stripped.endsWith(SERVICE_PATH) ? stripped : `${stripped}${SERVICE_PATH}`;
 		}
 	}
 
