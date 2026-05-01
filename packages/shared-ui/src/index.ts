@@ -45,6 +45,10 @@ export type { DashboardResponse, DashboardOverview, DashboardConnection, Dashboa
 export { SidebarView } from './modules/sidebar/SidebarView';
 export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
 
+// --- Explorer module (generic file tree panel) -------------------------------
+export { Explorer } from './modules/explorer';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
