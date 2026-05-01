@@ -46,13 +46,21 @@ class IInstance(IInstanceBase):
         self.chunkId = 0
         self._pending_docs = []
 
-    def closing(self):
+    def _flush_documents(self):
         """Emit buffered chunks once the current object has been fully written."""
         pending_docs = getattr(self, '_pending_docs', [])
         if pending_docs:
             debug(f'Chunker emitting {len(pending_docs)} chunks')
             self.instance.writeDocuments(pending_docs)
             self._pending_docs = []
+
+    def closing(self):
+        """Flush chunks when the caller uses the explicit closing lifecycle."""
+        self._flush_documents()
+
+    def close(self):
+        """Flush chunks when the data pipe finalizes the object."""
+        self._flush_documents()
 
     @staticmethod
     def _coerce_document(document) -> Doc:

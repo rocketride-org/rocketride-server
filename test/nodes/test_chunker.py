@@ -693,6 +693,24 @@ class TestChunkerLifecycle:
         finally:
             self._restore_modules(saved, names)
 
+    def test_close_flushes_buffered_documents(self):
+        """Data pipes finalize with close(), not closing()."""
+        saved, names, IInstance, RC = self._load_iinstance()
+        try:
+            Doc = sys.modules['ai.common.schema'].Doc
+            strategy = RC(chunk_size=20, chunk_overlap=0)
+            inst, mock_instance = self._make_instance(IInstance, strategy=strategy)
+
+            doc = Doc(page_content='This is text that will be split when the pipe closes.', metadata=None)
+            inst.writeDocuments([doc])
+            inst.close()
+
+            assert mock_instance.writeDocuments.called
+            emitted_docs = mock_instance.writeDocuments.call_args[0][0]
+            assert len(emitted_docs) >= 2
+        finally:
+            self._restore_modules(saved, names)
+
     def test_shallow_copy_does_not_corrupt_original(self):
         """Shallow copy + metadata copy should not mutate the original document."""
         saved, names, IInstance, RC = self._load_iinstance()
