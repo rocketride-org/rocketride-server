@@ -56,6 +56,7 @@ class NodeTestConfig:
 
     # Test configuration
     requires: List[str] = field(default_factory=list)
+    avoid_mocks: bool = False
     profiles: List[str] = field(default_factory=list)
     controls: List[str] = field(default_factory=list)
     chain: List[str] = field(default_factory=list)
@@ -269,6 +270,7 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
                 provider=provider,
                 service_file=service_file,
                 requires=_ensure_list_field(group.get('requires'), 'requires', service_file),
+                avoid_mocks=bool(group.get('avoidMocks', False)),
                 profiles=_ensure_list_field(group.get('profiles'), 'profiles', service_file),
                 controls=_ensure_list_field(group.get('controls'), 'controls', service_file),
                 chain=(['*'] if group.get('chain') is None else _ensure_list_field(group.get('chain'), 'chain', service_file)),

@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, CSSProperties } from 'react';
-import { useMessaging } from '../../../shared/util/useMessaging';
+import { useMessaging } from '../hooks/useMessaging';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
@@ -38,7 +38,7 @@ interface VersionItem {
 
 type IncomingMessage = { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'versionsLoaded'; versions: VersionItem[] } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceProgress'; message: string } | { type: 'serviceComplete' } | { type: 'serviceError'; message: string } | { type: 'serviceNeedsSudo' } | { type: 'dockerProgress'; message: string } | { type: 'dockerComplete' } | { type: 'dockerError'; message: string };
 
-type OutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string } | { type: 'fetchVersions' } | { type: 'serviceInstall'; version: string } | { type: 'serviceRemove' } | { type: 'serviceUpdate'; version: string } | { type: 'serviceStart' } | { type: 'serviceStop' } | { type: 'sudoPassword'; password: string } | { type: 'dockerInstall'; version: string } | { type: 'dockerRemove' } | { type: 'dockerUpdate'; version: string } | { type: 'dockerStart' } | { type: 'dockerStop' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'copyToClipboard'; text: string } | { type: 'fetchVersions' } | { type: 'serviceInstall'; version: string } | { type: 'serviceRemove' } | { type: 'serviceUpdate'; version: string } | { type: 'serviceStart' } | { type: 'serviceStop' } | { type: 'sudoPassword'; password: string } | { type: 'dockerInstall'; version: string } | { type: 'dockerRemove' } | { type: 'dockerUpdate'; version: string } | { type: 'dockerStart' } | { type: 'dockerStop' };
 
 // =============================================================================
 // HELPERS
@@ -259,7 +259,7 @@ export const PageDeploy: React.FC = () => {
 	});
 
 	useEffect(() => {
-		sendMessage({ type: 'ready' });
+		sendMessage({ type: 'view:ready' });
 		sendMessage({ type: 'fetchVersions' });
 	}, [sendMessage]);
 

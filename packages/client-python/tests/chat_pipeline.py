@@ -29,7 +29,7 @@ provider based on available API keys in environment variables.
 
 Usage:
     from chat_pipeline import get_chat_pipeline
-    
+
     # The pipeline will be created on demand with current environment variables
     pipeline = get_chat_pipeline()
     token = await client.use(pipeline)
@@ -42,17 +42,17 @@ from typing import Dict, Any
 def _create_llm_component() -> Dict[str, Any]:
     """
     Create a dynamically configured LLM component based on available API keys.
-    
+
     Priority Order:
-    1. OpenAI (ROCKETRIDE_APIKEY_OPENAI)
-    2. Anthropic (ROCKETRIDE_APIKEY_ANTHROPIC)
-    3. Gemini (ROCKETRIDE_APIKEY_GEMINI)
-    4. Ollama (ROCKETRIDE_HOST_OLLAMA)
+    1. OpenAI (ROCKETRIDE_OPENAI_KEY)
+    2. Anthropic (ROCKETRIDE_ANTHROPIC_KEY)
+    3. Gemini (ROCKETRIDE_GEMINI_KEY)
+    4. Ollama (ROCKETRIDE_OLLAMA_HOST)
     """
-    openai_key = os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
-    anthropic_key = os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
-    gemini_key = os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
-    ollama_host = os.environ.get('ROCKETRIDE_HOST_OLLAMA')
+    openai_key = os.environ.get('ROCKETRIDE_OPENAI_KEY')
+    anthropic_key = os.environ.get('ROCKETRIDE_ANTHROPIC_KEY')
+    gemini_key = os.environ.get('ROCKETRIDE_GEMINI_KEY')
+    ollama_host = os.environ.get('ROCKETRIDE_OLLAMA_HOST')
 
     if openai_key:
         return {
@@ -95,27 +95,21 @@ def _create_llm_component() -> Dict[str, Any]:
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     else:
-        raise RuntimeError(
-            'No LLM API key found. Please set one of the following environment variables:\n'
-            '- ROCKETRIDE_APIKEY_OPENAI (for OpenAI GPT-4)\n'
-            '- ROCKETRIDE_APIKEY_ANTHROPIC (for Anthropic Claude)\n'
-            '- ROCKETRIDE_APIKEY_GEMINI (for Google Gemini)\n'
-            '- ROCKETRIDE_HOST_OLLAMA (for Ollama)'
-        )
+        raise RuntimeError('No LLM API key found. Please set one of the following environment variables:\n- ROCKETRIDE_OPENAI_KEY (for OpenAI GPT-4)\n- ROCKETRIDE_ANTHROPIC_KEY (for Anthropic Claude)\n- ROCKETRIDE_GEMINI_KEY (for Google Gemini)\n- ROCKETRIDE_OLLAMA_HOST (for Ollama)')
 
 
 def get_chat_pipeline() -> Dict[str, Any]:
     """
     Get the chat pipeline configuration.
-    
+
     This function creates the pipeline lazily on demand, avoiding the need
     for LLM API keys to be present at module load time.
-    
+
     Returns:
         Complete pipeline configuration for chat-based LLM interactions.
     """
     llm_component = _create_llm_component()
-    
+
     return {
         'components': [
             {

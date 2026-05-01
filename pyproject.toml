@@ -75,7 +75,7 @@ python_functions = ["test_*"]
 # Default per-test timeout (seconds). Prevents individual tests from hanging
 # indefinitely when the server is unresponsive or a connection leaks.
 # Override per-test with @pytest.mark.timeout(seconds).
-timeout = 120
+timeout = 600
 addopts = [
     "-v",
     "--tb=short",

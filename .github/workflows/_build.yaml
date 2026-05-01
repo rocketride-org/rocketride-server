@@ -124,7 +124,28 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false
-        run: ${{ matrix.builder_cmd }} test --verbose
+        # Integration tests boot a local server on :5565 and connect a test
+        # client. Both sides need the same shared secret to authenticate;
+        # without ROCKETRIDE_APIKEY the server raises AuthenticationException
+        # and the client tests fail with "No authentication configured".
+        #
+        # Use a literal CI-only value rather than ${{ secrets.ROCKETRIDE_APIKEY }}.
+        # The original PR #712 wired this through a secret, but as its own
+        # inline comment noted, "the secret value itself doesn't matter — it
+        # just has to match between server and client in this single CI run."
+        # Sourcing it from a secret introduced an empty-string failure mode:
+        # when the secret is unset / cleared / rotated, the workflow silently
+        # passes ROCKETRIDE_APIKEY="" into the test step. The test client
+        # then picks that empty value up via os.getenv (which returns "" —
+        # not the MYAPIKEY default — when the variable is set-but-empty),
+        # and all 48 client-python integration tests fail uniformly with
+        # AuthenticationException. The literal below has no production
+        # significance — it never leaves the runner — and matches the
+        # documented "MYAPIKEY" placeholder used elsewhere in the codebase
+        # (.env.template, the engine's built-in dev key).
+        env:
+          ROCKETRIDE_APIKEY: MYAPIKEY
+        run: ${{ matrix.builder_cmd }} test --verbose -s
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'

@@ -30,6 +30,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
+const os = require('os');
 const {
     exists,
     syncDir,
@@ -139,11 +140,18 @@ function makeRunPytestAction(options = {}) {
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`
+                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 
             // Use absolute paths since cwd is dist/server
             const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
+
+            if (!options.test_full) {
+                pytestArgs.push(
+                    '--ignore-glob', '**/test_*_full.py',
+                    '--ignore-glob', '**/test_*_full/**');
+            }
 
             // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
             const pytestOpts = options.pytest;
@@ -176,12 +184,22 @@ function makeRunPytestAction(options = {}) {
 
             // Allow filtering tests by marker or pattern
             const markers = options.markers;
-            const pattern = options.pattern;
+            const pattern = options.pytestPattern;
             if (markers) {
                 pytestArgs.push('-m', markers);
             }
             if (pattern) {
                 pytestArgs.push('-k', pattern);
+            }
+
+            // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
+            // flag is not set: empirically, cloud-LLM rate limits + node-subprocess
+            // fan-out make >8 workers counterproductive on this test shape. Explicit
+            // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
+            const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
+            const parallelVal = String(parallelRaw).trim().toLowerCase();
+            if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
+                pytestArgs.push('-n', parallelVal);
             }
 
             await execCommand(ENGINE, pytestArgs, {
@@ -211,6 +229,33 @@ function makeRunContractTestsAction() {
     };
 }
 
+function makeTestAction(options = {}) {
+    return {
+        description: 'Test pipeline nodes (full integration)',
+        steps: [
+            'server:build',
+            parallel([
+                'nodes:build',
+                'ai:build',
+                'client-python:build'
+            ], 'Build dependencies'),
+            bracket({
+                name: 'node-test-server',
+                setup: makeStartTestServerAction(options),
+                teardown: makeStopTestServerAction(options),
+                steps: [
+                    {
+                        name: options.test_full 
+                            ? 'nodes:run-pytest-full'
+                            : 'nodes:run-pytest',
+                        action: makeRunPytestAction(options)
+                    }
+                ]
+            })
+        ]
+    }
+}
+
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -224,7 +269,6 @@ module.exports = {
         { name: 'nodes:sync', action: makeSyncNodesAction },
         { name: 'nodes:start-server', action: makeStartTestServerAction },
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
-        { name: 'nodes:run-pytest', action: makeRunPytestAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
 
         // Public actions (have descriptions)
@@ -232,27 +276,8 @@ module.exports = {
             description: 'Build pipeline nodes',
             steps: ['server:build', 'nodes:sync']
         })},
-        { name: 'nodes:test', action: () => ({
-            description: 'Test pipeline nodes',
-            steps: ['nodes:build', 'nodes:run-contracts']
-        })},
-        { name: 'nodes:test-full', action: () => ({
-            description: 'Test pipeline nodes (full integration)',
-            steps: [
-                'server:build',
-                parallel([
-                    'nodes:build',
-                    'ai:build',
-                    'client-python:build'
-                ], 'Build dependencies'),
-                bracket({
-                    name: 'node-test-server',
-                    setup: makeStartTestServerAction(),
-                    teardown: makeStopTestServerAction(),
-                    steps: ['nodes:run-pytest']
-                })
-            ]
-        })},
+        { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
+        { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
         { name: 'nodes:test-contracts', action: () => ({
             description: 'Test node contracts',
             steps: ['server:build', 'nodes:run-contracts']

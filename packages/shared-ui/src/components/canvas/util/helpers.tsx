@@ -112,6 +112,7 @@ export const renameLanes = (originalLaneName = ''): string => {
 const INVOKE_TYPE_LABELS: Record<string, string> = {
 	llm: 'LLM',
 	crewai: 'CrewAI',
+	deepagent: 'Deep Agents',
 };
 
 /**

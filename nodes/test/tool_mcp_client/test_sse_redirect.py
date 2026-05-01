@@ -10,7 +10,7 @@ import sys
 import pytest
 
 # Add the mcp_client source directory to sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'mcp_client'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'tool_mcp_client'))
 
 from mcp_sse_client import McpProtocolError, McpSseClient
 
