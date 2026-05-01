@@ -120,9 +120,11 @@ class IInstance(IInstanceBase):
         )
 
     def _validate_command(self, command: str) -> None:
-        """Reject commands that don't match any configured allowlist regex."""
+        """Reject commands that don't fully match any configured allowlist regex."""
+        # Use fullmatch (not search) so that an unanchored pattern like
+        # "git status" cannot be smuggled past via "git status; rm -rf /".
         patterns = self.IGlobal.command_patterns or []
-        if patterns and not any(p.search(command) for p in patterns):
+        if patterns and not any(p.fullmatch(command) for p in patterns):
             raise ValueError('Command is not permitted by the configured allowlist.')
 
     def _resolve_cwd(self, override: object) -> str | None:

@@ -30,12 +30,43 @@ Runs a command string in the host shell with bounded timeout and output capture.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import sys
 import threading
 
 
 _TRUNCATED_MARKER = '\n...[truncated]'
 _READ_CHUNK_SIZE = 4096
+_IS_WINDOWS = sys.platform == 'win32'
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Force-kill *proc* and every descendant it spawned through the shell."""
+    if _IS_WINDOWS:
+        # taskkill /T walks the process tree; /F forces termination.
+        # Falls back to proc.kill() if taskkill itself can't run.
+        try:
+            subprocess.run(
+                ['taskkill', '/T', '/F', '/PID', str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 def execute_command(
@@ -54,15 +85,23 @@ def execute_command(
     are drained and discarded so the child can finish writing without
     blocking on a full OS pipe (preserving its natural exit code).
     """
+    # Spawn the child in its own process group/session so we can later kill
+    # the entire tree on timeout — otherwise shell-spawned grandchildren
+    # outlive proc.kill() and keep our reader threads blocked on their pipes.
+    popen_kwargs: dict = {
+        'shell': True,
+        'cwd': cwd,
+        'env': env,
+        'stdout': subprocess.PIPE,
+        'stderr': subprocess.PIPE,
+    }
+    if _IS_WINDOWS:
+        popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs['start_new_session'] = True
+
     try:
-        proc = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        proc = subprocess.Popen(command, **popen_kwargs)
     except FileNotFoundError as exc:
         return {
             'stdout': '',
@@ -105,7 +144,7 @@ def execute_command(
         exit_code = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        proc.kill()
+        _kill_process_tree(proc)
         proc.wait()
         exit_code = -1
 

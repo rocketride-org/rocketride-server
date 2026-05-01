@@ -54,15 +54,15 @@ Common use cases:
 
 ## Configuration
 
-| Field                         | Description                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------- |
-| Tool Namespace                | Prefix for the tool name (default: `shell`)                                                  |
-| Default working directory     | Working directory used when the agent does not provide one. Defaults to the host process CWD |
-| Execution timeout (seconds)   | Maximum seconds a command may run (default 30, max 1800)                                     |
-| Max output size (bytes)       | Cap on stdout and stderr each (default 1 MiB). Output beyond this is truncated               |
-| Allow agent-supplied env vars | Whether the agent may add env vars per call. Node-defined vars always take precedence        |
-| Environment variables         | Variables injected into every command                                                        |
-| Command allowlist             | Regex patterns. If non-empty, the command must match at least one pattern to run             |
+| Field                         | Description                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool Namespace                | Prefix for the tool name (default: `shell`)                                                                                                  |
+| Default working directory     | Working directory used when the agent does not provide one. Defaults to the host process CWD                                                 |
+| Execution timeout (seconds)   | Maximum seconds a command may run (default 30, max 1800)                                                                                     |
+| Max output size (bytes)       | Cap on stdout and stderr each (default 1 MiB). Output beyond this is truncated                                                               |
+| Allow agent-supplied env vars | Whether the agent may add env vars per call (default off). Node-defined vars always take precedence when on                                  |
+| Environment variables         | Variables injected into every command                                                                                                        |
+| Command allowlist             | Regex patterns. If non-empty, the full command must match at least one pattern (re.fullmatch). Use `.*` for substring matches, e.g. `npm .*` |
 
 ## Security
 

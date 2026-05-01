@@ -70,7 +70,7 @@ class IGlobal(IGlobalBase):
         self.timeout = parse_timeout(cfg)
         self.max_output_bytes = parse_max_output(cfg)
         self.env_vars = parse_env_vars(cfg)
-        self.allow_external_env = bool(cfg.get('allowExternalEnv', True))
+        self.allow_external_env = bool(cfg.get('allowExternalEnv', False))
 
         invalid_pattern_errors: list[str] = []
 
