@@ -10,10 +10,10 @@
 	"icon": "git.svg",
 	"documentation": "https://docs.rocketride.org",
 	"description": [
-		"Executes Git operations without requiring a host git binary.",
-		"Uses libgit2 (via pygit2) for a self-contained, environment-independent implementation.",
-		"Supports clone, commit, push/pull, branching, diff, log, blame, and code search.",
-		"Credentials are stored securely via RocketRide's secrets system."
+		"Exposes local Git repository operations as agent tools. ",
+		"Covers clone, init, status, log, show, diff, blame, stage, commit, stash, branch management, pull, push, and code search. ",
+		"Runs entirely in-process without requiring a host git installation. ",
+		"Supports secure authentication via personal access tokens and SSH keys."
 	],
 	"tile": ["Git: ${parameters.git.repoPath || 'not configured'}"],
 	"lanes": {},
