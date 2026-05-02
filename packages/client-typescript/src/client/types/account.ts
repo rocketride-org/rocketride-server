@@ -168,7 +168,7 @@ export interface TeamMemberRecord {
  * Union type for the five navigable sections within AccountView.
  * Controls which tab panel is active and which data is fetched.
  */
-export type AccountSection = 'profile' | 'api-keys' | 'organization' | 'teams' | 'members';
+export type AccountSection = 'profile' | 'billing' | 'api-keys' | 'organization' | 'teams' | 'members';
 
 // =============================================================================
 // PROFILE UPDATE

@@ -52,6 +52,10 @@ class BillingDetail(TypedDict):
         stripeSubscriptionId: Stripe sub_* subscription identifier.
         stripePriceId: Stripe price_* for the subscribed plan.
         status: One of: active, trialing, past_due, canceled.
+        planNickname: Human-readable plan name from Stripe price (e.g. "Pro Monthly"), or None.
+        unitAmount: Price in USD cents for the subscribed plan, or None.
+        billingInterval: Billing interval ("month" or "year"), or None.
+        currentPeriodStart: ISO 8601 datetime when the current billing period started, or None.
         currentPeriodEnd: ISO 8601 datetime when the current billing period ends, or None.
         cancelAtPeriodEnd: True when the user has requested cancellation at period end.
     """
@@ -60,6 +64,10 @@ class BillingDetail(TypedDict):
     stripeSubscriptionId: str
     stripePriceId: str
     status: str
+    planNickname: str | None
+    unitAmount: int | None
+    billingInterval: str | None
+    currentPeriodStart: str | None
     currentPeriodEnd: str | None
     cancelAtPeriodEnd: bool
 

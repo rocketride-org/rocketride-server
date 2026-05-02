@@ -13,9 +13,28 @@
  */
 
 import React from 'react';
+import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ConnectResult, TeamRecord, TeamDetail, TeamMemberRecord } from '../types';
-import { S, Btn, PermPill, Avatar, avatarColor } from './shared';
+import { S, PermPill, Avatar, avatarColor } from './shared';
+
+// =============================================================================
+// DANGER ZONE STYLES
+// =============================================================================
+
+/** Styles for the danger zone section at the bottom of the team detail view. */
+const dangerStyles = {
+	/** Red-tinted bordered box that groups destructive actions. */
+	zone: { border: '1px solid var(--rr-color-error)', borderRadius: 9, overflow: 'hidden', marginBottom: 14, marginTop: 20 } as CSSProperties,
+	/** Header bar inside the danger zone. */
+	hdr: { padding: '10px 18px', background: 'var(--rr-bg-surface-alt)', borderBottom: '1px solid var(--rr-border)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.5px', color: 'var(--rr-color-error)' } as CSSProperties,
+	/** Horizontal row inside the danger zone that pairs a description with an action button. */
+	row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px' } as CSSProperties,
+	/** Bold label text for a danger-zone action. */
+	label: { fontSize: 12, fontWeight: 500, color: 'var(--rr-text-primary)', marginBottom: 2 } as CSSProperties,
+	/** Descriptive sub-text for a danger-zone action. */
+	desc: { fontSize: 11, color: 'var(--rr-text-secondary)' } as CSSProperties,
+};
 
 // =============================================================================
 // PROPS
@@ -41,10 +60,14 @@ export interface TeamsPanelProps {
 	onAddMember: () => void;
 	/** Opens the Edit Permissions modal for a team member. */
 	onEditPerms: (m: TeamMemberRecord) => void;
-	/** Immediately removes a user from the current team. */
-	onRemoveMember: (userId: string) => void;
+	/** Opens the remove-from-team confirmation modal. */
+	onRemoveMember: (userId: string, displayName: string) => void;
 	/** Immediately deletes the given team. */
 	onDeleteTeam: (id: string) => void;
+	/** True when the current user has org.admin permissions. */
+	isOrgAdmin: boolean;
+	/** True when the current user has team.admin on the active team. */
+	isTeamAdmin: boolean;
 }
 
 // =============================================================================
@@ -59,29 +82,27 @@ export interface TeamsPanelProps {
  * The detail view lists members with permission pills and provides controls to
  * add/remove members, edit permissions, and delete the team.
  */
-export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activeTeamId, profile, onSelectTeam, onBack, onCreateTeam, onAddMember, onEditPerms, onRemoveMember, onDeleteTeam }) => {
+export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activeTeamId, profile, onSelectTeam, onBack, onCreateTeam, onAddMember, onEditPerms, onRemoveMember, onDeleteTeam, isOrgAdmin, isTeamAdmin }) => {
 	// -- Detail view -- shown when a team row has been clicked
 	if (activeTeamId && teamDetail) {
 		return (
 			<section>
-				<div style={commonStyles.sectionHeader}>
-					<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-						<Btn variant="ghost" small onClick={onBack}>
-							{'\u2190'} Teams
-						</Btn>
-						<div style={{ width: 22, height: 22, borderRadius: 5, background: teamDetail.color || avatarColor(teamDetail.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{teamDetail.name[0]}</div>
-						<span style={commonStyles.sectionHeaderLabel}>{teamDetail.name}</span>
-					</div>
-				</div>
-
 				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 					<div style={commonStyles.cardHeader}>
-						<span>
-							{teamDetail.members.length} member{teamDetail.members.length !== 1 ? 's' : ''}
-						</span>
-						<Btn variant="primary" small onClick={onAddMember}>
-							+ Add Member
-						</Btn>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+							<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.buttonSmall, border: 'none', background: 'transparent' } as CSSProperties} onClick={onBack}>
+								{'\u2190'}
+							</button>
+							<div style={{ width: 22, height: 22, borderRadius: 5, background: teamDetail.color || avatarColor(teamDetail.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{teamDetail.name[0]}</div>
+							<span>
+								{teamDetail.name} — {teamDetail.members.length} member{teamDetail.members.length !== 1 ? 's' : ''}
+							</span>
+						</div>
+						{isTeamAdmin && (
+							<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onAddMember}>
+								+ Add Member
+							</button>
+						)}
 					</div>
 					<div style={S.rowList}>
 						{teamDetail.members.map((m, i) => (
@@ -89,22 +110,22 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 								<Avatar name={m.displayName} email={m.email} size={28} />
 								<div style={S.rowInfo}>
 									<div style={S.rowName}>{m.displayName}</div>
-									<div style={S.rowSub}>{m.email}</div>
+									<div style={commonStyles.textMuted}>{m.email}</div>
 									<div style={S.perms}>
 										{m.permissions.map((p) => (
 											<PermPill key={p} perm={p} />
 										))}
 									</div>
 								</div>
-								{/* Hide edit/remove controls for the current user to prevent self-removal. */}
-								{m.userId !== profile?.userId && (
+								{/* Hide edit/remove controls for the current user and non-team-admins. */}
+								{isTeamAdmin && m.userId !== profile?.userId && (
 									<div style={S.rowActions}>
-										<Btn variant="secondary" small onClick={() => onEditPerms(m)}>
+										<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onEditPerms(m)}>
 											Edit Perms
-										</Btn>
-										<Btn variant="danger" small onClick={() => onRemoveMember(m.userId)}>
+										</button>
+										<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemoveMember(m.userId, m.displayName)}>
 											Remove
-										</Btn>
+										</button>
 									</div>
 								)}
 							</div>
@@ -112,18 +133,20 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 					</div>
 				</div>
 
-				<div style={S.dangerZone}>
-					<div style={S.dangerHdr}>Danger Zone</div>
-					<div style={S.dangerRow}>
-						<div>
-							<div style={S.dangerLabel}>Delete Team</div>
-							<div style={S.dangerDesc}>Members are not deleted from the organization.</div>
+				{isTeamAdmin && (
+					<div style={dangerStyles.zone}>
+						<div style={dangerStyles.hdr}>Danger Zone</div>
+						<div style={dangerStyles.row}>
+							<div>
+								<div style={dangerStyles.label}>Delete Team</div>
+								<div style={dangerStyles.desc}>Members are not deleted from the organization.</div>
+							</div>
+							<button style={commonStyles.buttonDanger as CSSProperties} onClick={() => onDeleteTeam(teamDetail.id)}>
+								Delete
+							</button>
 						</div>
-						<Btn variant="danger" onClick={() => onDeleteTeam(teamDetail.id)}>
-							Delete
-						</Btn>
 					</div>
-				</div>
+				)}
 			</section>
 		);
 	}
@@ -131,18 +154,16 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 	// -- List view -- default when no team is selected
 	return (
 		<section>
-			<div style={commonStyles.sectionHeader}>
-				<span style={commonStyles.sectionHeaderLabel}>Teams</span>
-			</div>
-
 			<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 				<div style={commonStyles.cardHeader}>
 					<span>
-						{teams.length} team{teams.length !== 1 ? 's' : ''}
+						Teams — {teams.length} team{teams.length !== 1 ? 's' : ''}
 					</span>
-					<Btn variant="primary" small onClick={onCreateTeam}>
-						+ New Team
-					</Btn>
+					{isOrgAdmin && (
+						<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onCreateTeam}>
+							+ New Team
+						</button>
+					)}
 				</div>
 				<div style={S.rowList}>
 					{teams.map((t, i) => (
@@ -150,21 +171,20 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 							<div style={{ width: 32, height: 32, borderRadius: 7, background: t.color || avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
 							<div style={S.rowInfo}>
 								<div style={S.rowName}>{t.name}</div>
-								<div style={S.rowSub}>
+								<div style={commonStyles.textMuted}>
 									{t.memberCount} member{t.memberCount !== 1 ? 's' : ''}
 								</div>
 							</div>
 							{/* stopPropagation prevents the row's onClick from firing twice when the button is clicked directly. */}
-							<Btn
-								variant="secondary"
-								small
+							<button
+								style={commonStyles.buttonSecondarySmall as CSSProperties}
 								onClick={(e) => {
 									e?.stopPropagation?.();
 									onSelectTeam(t.id);
 								}}
 							>
 								Manage {'\u2192'}
-							</Btn>
+							</button>
 						</div>
 					))}
 					{teams.length === 0 && <div style={{ padding: '20px 18px', color: 'var(--rr-text-disabled)', fontSize: 12 }}>No teams yet.</div>}

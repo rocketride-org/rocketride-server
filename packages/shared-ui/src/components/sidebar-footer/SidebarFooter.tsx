@@ -178,11 +178,7 @@ const S = {
 	}),
 
 	// ── Popup divider ───────────────────────────────────────────────────────
-	divider: {
-		height: 1,
-		background: 'var(--rr-border)',
-		margin: '4px 0',
-	} as CSSProperties,
+	divider: commonStyles.divider,
 };
 
 // =============================================================================

@@ -188,7 +188,7 @@ export class AccountApi {
 	 * @param userId - The member's user ID.
 	 */
 	async removeMember(orgId: string, userId: string): Promise<void> {
-		await this.client.call('rrext_account_members', { subcommand: 'remove', orgId, userId });
+		await this.client.call('rrext_account_members', { subcommand: 'delete', orgId, userId });
 	}
 
 	// =========================================================================
@@ -264,6 +264,6 @@ export class AccountApi {
 	 * @param params - Parameters (teamId, userId).
 	 */
 	async removeTeamMember(orgId: string, params: { teamId: string; userId: string }): Promise<void> {
-		await this.client.call('rrext_account_teams', { subcommand: 'remove_member', orgId, ...params });
+		await this.client.call('rrext_account_teams', { subcommand: 'delete_member', orgId, ...params });
 	}
 }

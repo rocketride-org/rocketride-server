@@ -23,12 +23,32 @@ import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { commonStyles } from '../../themes/styles';
 import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
+import type { BillingDetail, CreditBalance, CreditPack } from '../billing/types';
 import { ProfilePanel } from './components/ProfilePanel';
+import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
 import { TeamsPanel } from './components/TeamsPanel';
 import { MembersPanel } from './components/MembersPanel';
-import { S, Btn, Modal, PermGrid, ExpiryOpts, Avatar, relativeTime } from './components/shared';
+import { S, Modal, PermGrid, ExpiryOpts, Avatar, relativeTime } from './components/shared';
+
+// =============================================================================
+// REVEAL STYLES
+// =============================================================================
+
+/** Styles for the API key reveal box shown after creating a new key. */
+const revealStyles = {
+	/** Highlighted box used to display a newly created API key. */
+	box: { background: 'var(--rr-bg-surface-alt)', border: '1px solid var(--rr-border)', borderRadius: 7, padding: 12, marginBottom: 12 } as CSSProperties,
+	/** Uppercase section label inside the reveal box. */
+	label: { ...commonStyles.labelUppercase, marginBottom: 7 } as CSSProperties,
+	/** Horizontal row pairing the key value with the copy button. */
+	row: { display: 'flex', alignItems: 'center', gap: 7 } as CSSProperties,
+	/** Monospace display for the raw API key string. */
+	key: { ...commonStyles.inputField, ...commonStyles.fontMono, flex: 1, fontSize: 11, wordBreak: 'break-all' as const, lineHeight: 1.5 } as CSSProperties,
+	/** Warning message below the reveal box reminding the user to copy the key. */
+	warn: { fontSize: 10, color: 'var(--rr-color-warning)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 7 } as CSSProperties,
+};
 
 // =============================================================================
 // LAYOUT STYLES
@@ -106,6 +126,26 @@ export interface IAccountViewProps {
 	/** Full detail for the currently selected team, or null. */
 	teamDetail: TeamDetail | null;
 
+	// -- Billing data ----------------------------------------------------------
+	/** Per-app subscription rows for the billing panel. */
+	subscriptions: BillingDetail[];
+	/** True while billing data is being fetched. */
+	billingLoading: boolean;
+	/** Error message from the last billing operation, or null. */
+	billingError: string | null;
+	/** Current org credit balance, or null while loading. */
+	creditBalance: CreditBalance | null;
+	/** Available credit packs for purchase. */
+	creditPacks: CreditPack[];
+
+	// -- Billing callbacks -----------------------------------------------------
+	/** Cancel a subscription. Host re-fetches and updates subscriptions prop. */
+	onCancelSubscription: (appId: string) => Promise<void>;
+	/** Open the Stripe customer portal for payment management. */
+	onOpenPortal: () => Promise<void>;
+	/** Purchase a credit pack. Host handles Stripe checkout redirect/URL. */
+	onBuyCredits: (pack: CreditPack) => Promise<void>;
+
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */
 	section: AccountSection;
@@ -163,14 +203,43 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, profile, authUser, keys, org, members, teams, teamDetail, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+
+	// =========================================================================
+	// PERMISSION HELPERS
+	// =========================================================================
+
+	/** True when the current user has org.admin on their primary organization. */
+	const isOrgAdmin = useMemo(() => {
+		return profile?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
+	}, [profile]);
+
+	/**
+	 * Returns true when the current user has team.admin on the given team.
+	 * Org admins implicitly have team.admin on all teams.
+	 */
+	const isTeamAdmin = useMemo(() => {
+		return (teamId: string): boolean => {
+			if (isOrgAdmin) return true;
+			const orgs = profile?.organizations ?? [];
+			for (const o of orgs) {
+				for (const t of o.teams ?? []) {
+					if (t.id === teamId && t.permissions?.includes('team.admin')) return true;
+				}
+			}
+			return false;
+		};
+	}, [profile, isOrgAdmin]);
+
+	/** True when the user has team.admin on the currently viewed team detail. */
+	const isActiveTeamAdmin = activeTeamId ? isTeamAdmin(activeTeamId) : false;
 
 	// =========================================================================
 	// MODAL STATE
 	// =========================================================================
 
 	/** Union of all modal identifiers; null means no modal is open. */
-	type ModalId = 'create-key' | 'reveal-key' | 'revoke-key' | 'invite' | 'change-role' | 'edit-perms' | 'add-member' | 'create-team' | null;
+	type ModalId = 'create-key' | 'reveal-key' | 'revoke-key' | 'invite' | 'change-role' | 'edit-perms' | 'add-member' | 'create-team' | 'cancel-sub' | 'remove-member' | 'remove-team-member' | null;
 	const [modal, setModal] = useState<ModalId>(null);
 
 	// -- Modal form state -- one group of fields per modal dialog.
@@ -194,6 +263,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const [addMemberUserId, setAddMemberUserId] = useState('');
 	const [addMemberPerms, setAddMemberPerms] = useState<string[]>(['task.control', 'task.monitor']);
 	const [newTeamName, setNewTeamName] = useState('');
+	/** Tracks the appId of the subscription being cancelled. */
+	const [cancelSubAppId, setCancelSubAppId] = useState<string | null>(null);
+	/** Tracks the member being removed from the org. */
+	const [removeMemberTarget, setRemoveMemberTarget] = useState<MemberRecord | null>(null);
+	/** Tracks the team member being removed from a team. */
+	const [removeTeamMemberTarget, setRemoveTeamMemberTarget] = useState<{ userId: string; displayName: string } | null>(null);
 	/** Shared saving flag used by all modal submit handlers. */
 	const [saving, setSaving] = useState(false);
 	/** Shared error string shown inside the active modal on failure. */
@@ -339,15 +414,50 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// REMOVE MEMBER
 	// =========================================================================
 
-	/**
-	 * Immediately removes an organization member (or cancels a pending invitation).
-	 * @param userId - The ID of the member to remove.
-	 */
-	const handleRemoveMember = async (userId: string) => {
+	/** Confirms removal of an org member (or cancels a pending invitation). */
+	const handleRemoveMember = async () => {
+		if (!removeMemberTarget) return;
+		setSaving(true);
+		setSaveError(null);
 		try {
-			await onRemoveMember(userId);
+			await onRemoveMember(removeMemberTarget.userId);
+			setModal(null);
 		} catch (e) {
-			console.log('remove member error:', e);
+			setSaveError(e instanceof Error ? e.message : 'Failed to remove member');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// =========================================================================
+	// CANCEL SUBSCRIPTION
+	// =========================================================================
+
+	/** Confirms the cancellation and delegates to the host callback. */
+	const handleCancelSubscription = async () => {
+		if (!cancelSubAppId) return;
+		setSaving(true);
+		setSaveError(null);
+		try {
+			await onCancelSubscription(cancelSubAppId);
+			setModal(null);
+		} catch (e) {
+			setSaveError(e instanceof Error ? e.message : 'Failed to cancel subscription');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// =========================================================================
+	// PORTAL ERROR HANDLING
+	// =========================================================================
+
+	/** Wraps the portal callback with local error handling. */
+	const handlePortal = async () => {
+		try {
+			await onOpenPortal();
+		} catch (e) {
+			console.log('open portal error:', e);
 		}
 	};
 
@@ -435,16 +545,18 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// REMOVE TEAM MEMBER
 	// =========================================================================
 
-	/**
-	 * Removes a member from the current team.
-	 * @param userId - The ID of the user to remove from the team.
-	 */
-	const handleRemoveTeamMember = async (userId: string) => {
-		if (!teamDetail) return;
+	/** Confirms removal of a member from the current team. */
+	const handleRemoveTeamMember = async () => {
+		if (!removeTeamMemberTarget || !teamDetail) return;
+		setSaving(true);
+		setSaveError(null);
 		try {
-			await onRemoveTeamMember({ teamId: teamDetail.id, userId });
+			await onRemoveTeamMember({ teamId: teamDetail.id, userId: removeTeamMemberTarget.userId });
+			setModal(null);
 		} catch (e) {
-			console.log('remove team member error:', e);
+			setSaveError(e instanceof Error ? e.message : 'Failed to remove team member');
+		} finally {
+			setSaving(false);
 		}
 	};
 
@@ -490,6 +602,27 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		setSaveError(null);
 		setModal('edit-perms');
 	};
+	/** Stores the target member and opens the remove-member confirmation modal. */
+	const openRemoveMember = (m: MemberRecord) => {
+		setRemoveMemberTarget(m);
+		setSaveError(null);
+		setModal('remove-member');
+	};
+
+	/** Stores the target team member and opens the remove-team-member confirmation modal. */
+	const openRemoveTeamMember = (userId: string, displayName: string) => {
+		setRemoveTeamMemberTarget({ userId, displayName });
+		setSaveError(null);
+		setModal('remove-team-member');
+	};
+
+	/** Stores the target subscription appId and opens the cancel confirmation modal. */
+	const openCancelSub = (appId: string) => {
+		setCancelSubAppId(appId);
+		setSaveError(null);
+		setModal('cancel-sub');
+	};
+
 	/**
 	 * Pre-selects the first eligible organization member (one not already in the team)
 	 * and opens the Add Member to Team modal.
@@ -512,12 +645,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const tabs = useMemo<ITabPanelTab[]>(
 		() => [
 			{ id: 'profile', label: 'Profile' },
+			{ id: 'billing', label: 'Billing', badge: subscriptions.length > 0 ? subscriptions.length : undefined },
 			{ id: 'api-keys', label: 'API Keys', badge: keys.filter((k) => k.active).length > 0 ? keys.filter((k) => k.active).length : undefined },
 			{ id: 'organization', label: 'Organization' },
 			{ id: 'teams', label: 'Teams', badge: teams.length > 0 ? teams.length : undefined },
 			{ id: 'members', label: 'Members', badge: members.length > 0 ? members.length : undefined },
 		],
-		[keys, teams, members]
+		[subscriptions, keys, teams, members]
 	);
 
 	// =========================================================================
@@ -537,6 +671,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					</div>
 				),
 			},
+			billing: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} />
+					</div>
+				),
+			},
 			'api-keys': {
 				content: (
 					<div style={commonStyles.tabContent}>
@@ -547,7 +688,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			organization: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<OrganizationPanel org={org} editOrgName={editOrgName} orgSaving={orgSaving} orgError={orgError} onOrgNameChange={setEditOrgName} onOrgNameSave={saveOrgName} />
+						<OrganizationPanel org={org} editOrgName={editOrgName} orgSaving={orgSaving} orgError={orgError} onOrgNameChange={setEditOrgName} onOrgNameSave={saveOrgName} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},
@@ -571,8 +712,10 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							}}
 							onAddMember={openAddMember}
 							onEditPerms={openEditPerms}
-							onRemoveMember={handleRemoveTeamMember}
+							onRemoveMember={openRemoveTeamMember}
 							onDeleteTeam={handleDeleteTeam}
+							isOrgAdmin={isOrgAdmin}
+							isTeamAdmin={isActiveTeamAdmin}
 						/>
 					</div>
 				),
@@ -580,12 +723,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			members: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={handleRemoveMember} />
+						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={openRemoveMember} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},
 		}),
-		[profile, authUser, keys, org, editOrgName, orgSaving, orgError, teams, teamDetail, activeTeamId, members]
+		[profile, authUser, keys, org, editOrgName, orgSaving, orgError, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
 	);
 
 	// =========================================================================
@@ -624,29 +767,29 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleCreateKey} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleCreateKey} disabled={saving}>
 								{saving ? 'Creating\u2026' : 'Create Key'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Key Name</div>
-						<input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={S.fieldInput} />
+						<input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={commonStyles.inputField} />
 					</div>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Team</div>
-						<select value={newKeyTeamId} onChange={(e) => setNewKeyTeamId(e.target.value)} style={S.selectInput}>
+						<select value={newKeyTeamId} onChange={(e) => setNewKeyTeamId(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
 							{teams.map((t) => (
 								<option key={t.id} value={t.id}>
 									{t.name}
 								</option>
 							))}
 						</select>
-						<div style={S.fieldHint}>This key can only start tasks within the selected team.</div>
+						<div style={commonStyles.textMuted}>This key can only start tasks within the selected team.</div>
 					</div>
 					<div style={{ ...S.field, marginBottom: 14 }}>
 						<div style={S.fieldLabel}>Permissions</div>
@@ -666,18 +809,18 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					title="Key Created"
 					onClose={() => setModal(null)}
 					footer={
-						<Btn variant="primary" onClick={() => setModal(null)}>
+						<button style={commonStyles.buttonPrimary as CSSProperties} onClick={() => setModal(null)}>
 							Done
-						</Btn>
+						</button>
 					}
 				>
 					<p style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 14, lineHeight: 1.6 }}>
 						Copy it now -- <strong style={{ color: 'var(--rr-text-primary)' }}>it won't be shown again.</strong>
 					</p>
-					<div style={S.revealBox}>
-						<div style={S.revealLabel}>Your API Key</div>
-						<div style={S.revealRow}>
-							<div style={S.revealKey}>{revealedKey.key}</div>
+					<div style={revealStyles.box}>
+						<div style={revealStyles.label}>Your API Key</div>
+						<div style={revealStyles.row}>
+							<div style={revealStyles.key}>{revealedKey.key}</div>
 							{/* Copy button: flips to "Copied" for 2s after a successful clipboard write. */}
 							<button
 								onClick={() => {
@@ -690,9 +833,9 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								{keyCopied ? '\u2713 Copied' : '\u2398 Copy'}
 							</button>
 						</div>
-						<div style={S.revealWarn}>{'\u26A0'} Store safely -- cannot be retrieved after closing.</div>
+						<div style={revealStyles.warn}>{'\u26A0'} Store safely -- cannot be retrieved after closing.</div>
 					</div>
-					<div style={S.infoStrip}>
+					<div style={{ background: 'var(--rr-bg-surface-alt)', border: '1px solid var(--rr-border)', borderRadius: 7, padding: '10px 13px', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1.6 }}>
 						<strong>Team:</strong> {teams.find((t) => t.id === revealedKey.record.teamId)?.name || revealedKey.record.teamId} &nbsp;{'\u00B7'}&nbsp;
 						<strong>Perms:</strong> {revealedKey.record.permissions.join(', ')} &nbsp;{'\u00B7'}&nbsp;
 						<strong>Expires:</strong> {revealedKey.record.expiresAt ? new Date(revealedKey.record.expiresAt).toLocaleDateString() : 'No expiry'}
@@ -707,12 +850,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="danger" onClick={handleRevokeKey} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleRevokeKey} disabled={saving}>
 								{saving ? 'Revoking\u2026' : 'Revoke Key'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
@@ -737,32 +880,32 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleInvite} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleInvite} disabled={saving}>
 								{saving ? 'Inviting\u2026' : 'Send Invite'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Email Address</div>
-						<input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="colleague@acme.com" style={S.fieldInput} autoFocus />
+						<input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="colleague@acme.com" style={commonStyles.inputField} autoFocus />
 					</div>
 					<div style={S.fieldRow}>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>First Name</div>
-							<input value={inviteGivenName} onChange={(e) => setInviteGivenName(e.target.value)} placeholder="Jane" style={S.fieldInput} />
+							<input value={inviteGivenName} onChange={(e) => setInviteGivenName(e.target.value)} placeholder="Jane" style={commonStyles.inputField} />
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Last Name</div>
-							<input value={inviteFamilyName} onChange={(e) => setInviteFamilyName(e.target.value)} placeholder="Smith" style={S.fieldInput} />
+							<input value={inviteFamilyName} onChange={(e) => setInviteFamilyName(e.target.value)} placeholder="Smith" style={commonStyles.inputField} />
 						</div>
 					</div>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Organization Role</div>
-						<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={S.selectInput}>
+						<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
 							<option value="member">Member</option>
 							<option value="admin">Admin</option>
 						</select>
@@ -778,12 +921,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleUpdateRole} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleUpdateRole} disabled={saving}>
 								{saving ? 'Saving\u2026' : 'Save'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
@@ -796,7 +939,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					</div>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Organization Role</div>
-						<select value={editRoleValue} onChange={(e) => setEditRoleValue(e.target.value)} style={S.selectInput}>
+						<select value={editRoleValue} onChange={(e) => setEditRoleValue(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
 							<option value="member">Member</option>
 							<option value="admin">Admin</option>
 						</select>
@@ -812,12 +955,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleEditPerms} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleEditPerms} disabled={saving}>
 								{saving ? 'Saving\u2026' : 'Save Permissions'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
@@ -843,13 +986,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							onClose={() => setModal(null)}
 							footer={
 								<>
-									<Btn variant="secondary" onClick={() => setModal(null)}>
+									<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 										Cancel
-									</Btn>
+									</button>
 									{eligible.length > 0 && (
-										<Btn variant="primary" onClick={handleAddTeamMember} disabled={saving}>
+										<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleAddTeamMember} disabled={saving}>
 											{saving ? 'Adding\u2026' : 'Add to Team'}
-										</Btn>
+										</button>
 									)}
 								</>
 							}
@@ -859,7 +1002,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								{eligible.length === 0 ? (
 									<div style={{ fontSize: 12, color: 'var(--rr-text-disabled)', padding: '7px 0' }}>All organization members are already in this team.</div>
 								) : (
-									<select value={addMemberUserId} onChange={(e) => setAddMemberUserId(e.target.value)} style={S.selectInput}>
+									<select value={addMemberUserId} onChange={(e) => setAddMemberUserId(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
 										<option value="" disabled>
 											Select a member\u2026
 										</option>
@@ -882,6 +1025,83 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					);
 				})()}
 
+			{/* Cancel Subscription */}
+			{modal === 'cancel-sub' && cancelSubAppId && (
+				<Modal
+					title="Cancel Subscription"
+					onClose={() => setModal(null)}
+					footer={
+						<>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
+								Keep Subscription
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleCancelSubscription} disabled={saving}>
+								{saving ? 'Cancelling\u2026' : 'Yes, Cancel'}
+							</button>
+						</>
+					}
+				>
+					<p style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
+						Are you sure you want to cancel <strong style={{ color: 'var(--rr-text-primary)' }}>{cancelSubAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
+					</p>
+					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
+				</Modal>
+			)}
+
+			{/* Remove Org Member */}
+			{modal === 'remove-member' && removeMemberTarget && (
+				<Modal
+					title={removeMemberTarget.status === 'pending' ? 'Cancel Invitation' : 'Remove Member'}
+					onClose={() => setModal(null)}
+					footer={
+						<>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
+								Cancel
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleRemoveMember} disabled={saving}>
+								{saving ? 'Removing\u2026' : removeMemberTarget.status === 'pending' ? 'Yes, Cancel Invite' : 'Yes, Remove'}
+							</button>
+						</>
+					}
+				>
+					<p style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
+						{removeMemberTarget.status === 'pending' ? (
+							<>
+								Are you sure you want to cancel the invitation for <strong style={{ color: 'var(--rr-text-primary)' }}>{removeMemberTarget.displayName}</strong> ({removeMemberTarget.email})?
+							</>
+						) : (
+							<>
+								Are you sure you want to remove <strong style={{ color: 'var(--rr-text-primary)' }}>{removeMemberTarget.displayName}</strong> ({removeMemberTarget.email}) from the organization?
+							</>
+						)}
+					</p>
+					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
+				</Modal>
+			)}
+
+			{/* Remove Team Member */}
+			{modal === 'remove-team-member' && removeTeamMemberTarget && (
+				<Modal
+					title="Remove from Team"
+					onClose={() => setModal(null)}
+					footer={
+						<>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
+								Cancel
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleRemoveTeamMember} disabled={saving}>
+								{saving ? 'Removing\u2026' : 'Yes, Remove'}
+							</button>
+						</>
+					}
+				>
+					<p style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
+						Are you sure you want to remove <strong style={{ color: 'var(--rr-text-primary)' }}>{removeTeamMemberTarget.displayName}</strong> from <strong style={{ color: 'var(--rr-text-primary)' }}>{teamDetail?.name}</strong>?
+					</p>
+					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
+				</Modal>
+			)}
+
 			{/* Create Team */}
 			{modal === 'create-team' && (
 				<Modal
@@ -889,19 +1109,19 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					onClose={() => setModal(null)}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={() => setModal(null)}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleCreateTeam} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleCreateTeam} disabled={saving}>
 								{saving ? 'Creating\u2026' : 'Create Team'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Team Name</div>
-						<input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="e.g. Engineering, Data Science, QA" style={S.fieldInput} autoFocus />
-						<div style={S.fieldHint}>You'll be added as admin automatically.</div>
+						<input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="e.g. Engineering, Data Science, QA" style={commonStyles.inputField} autoFocus />
+						<div style={commonStyles.textMuted}>You'll be added as admin automatically.</div>
 					</div>
 					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
 				</Modal>

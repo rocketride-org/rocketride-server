@@ -99,12 +99,8 @@ const S = {
 	} as CSSProperties,
 
 	planRecapLabel: {
-		fontSize: 11,
-		fontWeight: 600,
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
-		color: 'var(--rr-text-secondary)',
-		marginBottom: 4,
+		...commonStyles.labelUppercase,
+		marginBottom: 6,
 	} as CSSProperties,
 
 	planRecapName: {

@@ -36,12 +36,14 @@ export { TeamsPanel } from './components/TeamsPanel';
 export type { TeamsPanelProps } from './components/TeamsPanel';
 export { MembersPanel } from './components/MembersPanel';
 export type { MembersPanelProps } from './components/MembersPanel';
+export { BillingPanel } from './components/BillingPanel';
+export type { BillingPanelProps } from './components/BillingPanel';
 
 // =============================================================================
 // SHARED PRIMITIVES
 // =============================================================================
 
-export { Btn, Badge, PermPill, Avatar, RowIcon, Modal, PermGrid, ExpiryOpts } from './components/shared';
+export { Badge, PermPill, Avatar, RowIcon, Modal, PermGrid, ExpiryOpts } from './components/shared';
 export { initials, avatarColor, relativeTime } from './components/shared';
 export { S, PERMS, EXPIRY_OPTS } from './components/shared';
 

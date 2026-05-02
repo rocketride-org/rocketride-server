@@ -130,9 +130,6 @@ class AccountInfo(BaseModel):
 # without storing redundant data in the database.
 _FULL_TEAM_PERMISSIONS = [
     'team.admin',
-    'read',
-    'write',
-    'execute',
     'task.control',
     'task.data',
     'task.monitor',

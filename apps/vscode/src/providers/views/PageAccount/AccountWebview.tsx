@@ -236,6 +236,14 @@ const AccountWebview: React.FC = () => {
 			members={members}
 			teams={teams}
 			teamDetail={teamDetail}
+			subscriptions={[]}
+			billingLoading={false}
+			billingError={null}
+			creditBalance={null}
+			creditPacks={[]}
+			onCancelSubscription={async () => {}}
+			onOpenPortal={async () => {}}
+			onBuyCredits={async () => {}}
 			section={section}
 			onSectionChange={(s) => {
 				setSection(s);

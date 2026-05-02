@@ -15,7 +15,7 @@
  * VS Code) is responsible for fetching data and executing API calls.
  */
 
-import React, { useState, type CSSProperties } from 'react';
+import React, { useState, useCallback, type CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import type { BillingDetail, CreditBalance, CreditPack } from './types';
 import { CreditsPanel } from './components/CreditsPanel';
@@ -124,11 +124,101 @@ const S = {
 		marginTop: 8,
 		textAlign: 'right' as const,
 	} as CSSProperties,
+
+	/** Section label between credits panel and subscription list. */
+	sectionLabel: {
+		fontSize: 11,
+		fontWeight: 600,
+		textTransform: 'uppercase' as const,
+		letterSpacing: '0.5px',
+		color: 'var(--rr-text-secondary)',
+		marginTop: 28,
+		marginBottom: 12,
+	} as CSSProperties,
+
+	/** Detail row inside a subscription card (label + value pairs). */
+	detailGrid: {
+		display: 'grid',
+		gridTemplateColumns: '1fr 1fr',
+		gap: '6px 24px',
+		marginTop: 12,
+	} as CSSProperties,
+
+	/** Detail label (left column). */
+	detailLabel: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Detail value (right column). */
+	detailValue: {
+		fontSize: 12,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+		textAlign: 'right' as const,
+	} as CSSProperties,
+
+	/** Confirmation dialog content box. */
+	confirmDialog: {
+		...commonStyles.dialog,
+		width: 420,
+		padding: 24,
+	} as CSSProperties,
+
+	/** Confirmation dialog title. */
+	confirmTitle: {
+		fontSize: 16,
+		fontWeight: 700,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 8,
+	} as CSSProperties,
+
+	/** Confirmation dialog body text. */
+	confirmBody: {
+		fontSize: 13,
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 20,
+		lineHeight: 1.5,
+	} as CSSProperties,
+
+	/** Confirmation dialog button row. */
+	confirmActions: {
+		display: 'flex',
+		justifyContent: 'flex-end',
+		gap: 10,
+	} as CSSProperties,
 };
 
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/**
+ * Converts USD cents to a display string (e.g. 2900 → "$29.00", 1599 → "$15.99").
+ *
+ * @param cents - Price in USD cents.
+ * @returns Formatted dollar string.
+ */
+function formatUsd(cents: number): string {
+	return `$${(cents / 100).toFixed(2)}`;
+}
+
+/**
+ * Formats a billing interval string for display (e.g. "month" → "Monthly").
+ *
+ * @param interval - Stripe billing interval string.
+ * @returns Human-readable interval label.
+ */
+function formatInterval(interval: string): string {
+	switch (interval) {
+		case 'month':
+			return 'Monthly';
+		case 'year':
+			return 'Yearly';
+		default:
+			return interval;
+	}
+}
 
 /**
  * Returns a human-readable label and colour for a Stripe subscription status.
@@ -192,15 +282,34 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 	const [actionError, setActionError] = useState<string | null>(null);
 	const displayError = actionError || externalError;
 
-	/** Wraps the cancel callback with local error handling. */
-	const handleCancel = async (appId: string) => {
+	// ── Cancel confirmation state ───────────────────────────────────────────
+	const [confirmAppId, setConfirmAppId] = useState<string | null>(null);
+	const [cancelling, setCancelling] = useState(false);
+
+	/** Opens the cancel confirmation dialog. */
+	const requestCancel = useCallback((appId: string) => {
+		setConfirmAppId(appId);
+	}, []);
+
+	/** Closes the cancel confirmation dialog without acting. */
+	const dismissCancel = useCallback(() => {
+		if (!cancelling) setConfirmAppId(null);
+	}, [cancelling]);
+
+	/** Confirms the cancellation and delegates to the host callback. */
+	const confirmCancel = useCallback(async () => {
+		if (!confirmAppId) return;
 		setActionError(null);
+		setCancelling(true);
 		try {
-			await onCancelSubscription(appId);
+			await onCancelSubscription(confirmAppId);
+			setConfirmAppId(null);
 		} catch (err: any) {
 			setActionError(err.message ?? 'Failed to cancel subscription');
+		} finally {
+			setCancelling(false);
 		}
-	};
+	}, [confirmAppId, onCancelSubscription]);
 
 	/** Wraps the portal callback with local error handling. */
 	const handlePortal = async () => {
@@ -231,6 +340,9 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 				<p style={S.empty}>No active subscriptions. Subscribe to an app from the app store.</p>
 			) : (
 				<>
+					{/* Section separator between credits and subscriptions */}
+					<div style={S.sectionLabel}>Subscriptions</div>
+
 					{subscriptions.map((sub) => {
 						const badge = statusBadge(sub.status);
 						const isCancelable = ['active', 'trialing', 'past_due'].includes(sub.status) && !sub.cancelAtPeriodEnd;
@@ -249,10 +361,46 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 									</div>
 								</div>
 
+								{/* Subscription details grid */}
+								<div style={S.detailGrid}>
+									{sub.planNickname && (
+										<>
+											<span style={S.detailLabel}>Plan</span>
+											<span style={S.detailValue}>{sub.planNickname}</span>
+										</>
+									)}
+									{sub.unitAmount != null && sub.billingInterval && (
+										<>
+											<span style={S.detailLabel}>Price</span>
+											<span style={S.detailValue}>
+												{formatUsd(sub.unitAmount)} / {sub.billingInterval}
+											</span>
+										</>
+									)}
+									{sub.billingInterval && (
+										<>
+											<span style={S.detailLabel}>Billing Cycle</span>
+											<span style={S.detailValue}>{formatInterval(sub.billingInterval)}</span>
+										</>
+									)}
+									{sub.currentPeriodStart && (
+										<>
+											<span style={S.detailLabel}>Period Start</span>
+											<span style={S.detailValue}>{new Date(sub.currentPeriodStart).toLocaleDateString()}</span>
+										</>
+									)}
+									{sub.currentPeriodEnd && (
+										<>
+											<span style={S.detailLabel}>Period End</span>
+											<span style={S.detailValue}>{new Date(sub.currentPeriodEnd).toLocaleDateString()}</span>
+										</>
+									)}
+								</div>
+
 								{/* Action buttons */}
 								<div style={S.actions}>
 									{isCancelable && (
-										<button style={commonStyles.buttonDanger as CSSProperties} onClick={() => handleCancel(sub.appId)}>
+										<button style={commonStyles.buttonDangerOutline as CSSProperties} onClick={() => requestCancel(sub.appId)}>
 											Cancel Subscription
 										</button>
 									)}
@@ -269,6 +417,26 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 						</button>
 					</div>
 				</>
+			)}
+
+			{/* ── Cancel confirmation dialog ──────────────────────────────────── */}
+			{confirmAppId && (
+				<div style={commonStyles.modalOverlay as CSSProperties} onClick={dismissCancel}>
+					<div style={S.confirmDialog} onClick={(e) => e.stopPropagation()}>
+						<div style={S.confirmTitle}>Cancel Subscription</div>
+						<div style={S.confirmBody}>
+							Are you sure you want to cancel <strong>{confirmAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
+						</div>
+						<div style={S.confirmActions}>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={dismissCancel} disabled={cancelling}>
+								Keep Subscription
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(cancelling ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={confirmCancel} disabled={cancelling}>
+								{cancelling ? 'Cancelling…' : 'Yes, Cancel'}
+							</button>
+						</div>
+					</div>
+				</div>
 			)}
 		</div>
 	);

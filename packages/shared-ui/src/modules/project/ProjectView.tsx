@@ -105,12 +105,7 @@ const styles = {
 		backgroundColor: 'var(--rr-bg-default)',
 	} as CSSProperties,
 	disconnectOverlay: {
-		position: 'absolute',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		...commonStyles.modalOverlay,
 		backdropFilter: 'blur(8px)',
 		WebkitBackdropFilter: 'blur(8px)',
 		zIndex: 1000,

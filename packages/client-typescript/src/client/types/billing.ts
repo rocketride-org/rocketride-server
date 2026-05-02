@@ -51,6 +51,18 @@ export interface BillingDetail {
 	/** One of: active, trialing, past_due, canceled. */
 	status: string;
 
+	/** Human-readable plan name from Stripe price nickname (e.g. "Pro Monthly"), or null. */
+	planNickname: string | null;
+
+	/** Price in USD cents for the subscribed plan, or null. */
+	unitAmount: number | null;
+
+	/** Billing interval: "month" or "year", or null. */
+	billingInterval: string | null;
+
+	/** ISO 8601 datetime when the current billing period started, or null. */
+	currentPeriodStart: string | null;
+
 	/** ISO 8601 datetime when the current billing period ends, or null. */
 	currentPeriodEnd: string | null;
 

@@ -260,7 +260,7 @@ class AccountApi:
         """
         await self._client.call(
             'rrext_account_members',
-            subcommand='remove',
+            subcommand='delete',
             orgId=org_id,
             userId=user_id,
         )
@@ -394,7 +394,7 @@ class AccountApi:
         """
         await self._client.call(
             'rrext_account_teams',
-            subcommand='remove_member',
+            subcommand='delete_member',
             orgId=org_id,
             teamId=team_id,
             userId=user_id,

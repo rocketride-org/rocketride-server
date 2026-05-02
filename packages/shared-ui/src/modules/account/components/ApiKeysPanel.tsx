@@ -13,9 +13,10 @@
  */
 
 import React from 'react';
+import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ApiKeyRecord } from '../types';
-import { S, Btn, Badge, PermPill, RowIcon, avatarColor, relativeTime } from './shared';
+import { S, Badge, PermPill, RowIcon, avatarColor, relativeTime } from './shared';
 
 // =============================================================================
 // PROPS
@@ -44,18 +45,14 @@ export interface ApiKeysPanelProps {
  */
 export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, onRevokeKey }) => (
 	<section>
-		<div style={commonStyles.sectionHeader}>
-			<span style={commonStyles.sectionHeaderLabel}>API Keys</span>
-		</div>
-
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 			<div style={commonStyles.cardHeader}>
 				<span>
-					{keys.length} key{keys.length !== 1 ? 's' : ''}
+					API Keys — {keys.length} key{keys.length !== 1 ? 's' : ''}
 				</span>
-				<Btn variant="primary" onClick={onCreateKey} small>
+				<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onCreateKey}>
 					+ New Key
-				</Btn>
+				</button>
 			</div>
 			<div style={S.rowList}>
 				{keys.map((k, i) => (
@@ -66,7 +63,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 							<div style={S.rowName}>{k.name}</div>
 							<div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
 								{k.teamName && (
-									<span style={S.teamTag}>
+									<span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--rr-text-secondary)', background: 'var(--rr-bg-surface-alt)', border: '1px solid var(--rr-border)', borderRadius: 3, padding: '1px 5px' }}>
 										<span style={{ width: 5, height: 5, borderRadius: '50%', background: avatarColor(k.teamName) }} />
 										{k.teamName}
 									</span>
@@ -79,16 +76,16 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 								))}
 							</div>
 						</div>
-						<div style={S.rowTs}>
+						<div style={{ fontSize: 10, color: 'var(--rr-text-disabled)', textAlign: 'right' as const, flexShrink: 0, lineHeight: 1.6 }}>
 							{k.lastUsedAt ? `Used ${relativeTime(k.lastUsedAt)}` : 'Never used'}
 							<br />
 							{k.expiresAt ? `Exp. ${new Date(k.expiresAt).toLocaleDateString()}` : 'No expiry'}
 						</div>
 						{k.active && (
 							<div style={S.rowActions}>
-								<Btn variant="danger" small onClick={() => onRevokeKey(k)}>
+								<button style={commonStyles.buttonDangerSmall as CSSProperties} onClick={() => onRevokeKey(k)}>
 									Revoke
-								</Btn>
+								</button>
 							</div>
 						)}
 					</div>
