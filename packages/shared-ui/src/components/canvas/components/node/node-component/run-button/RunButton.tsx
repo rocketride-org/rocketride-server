@@ -18,6 +18,7 @@
 
 import React, { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Square, RefreshCw } from 'lucide-react';
+import PadlockIcon from '../../../../../../assets/icons/PadlockIcon';
 import { useFlowProject } from '../../../../context/FlowProjectContext';
 import { useFlowGraph } from '../../../../context/FlowGraphContext';
 import { ITaskState, IProject, INode, PIPELINE_SCHEMA_VERSION } from '../../../../types';
@@ -56,7 +57,7 @@ const styles = {
 export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const [isStopping, setIsStopping] = useState(false);
 
-	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected } = useFlowProject();
+	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected, isSubscribed } = useFlowProject();
 	const { nodes } = useFlowGraph();
 
 	// ── Running state ──────────────────────────────────────────────────────
@@ -72,6 +73,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const handleRun = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
+			console.log(`[RunButton] clicked nodeId=${nodeId} isRunning=${isRunning} isSubscribed=${isSubscribed} onRunPipeline=${!!onRunPipeline}`);
 			if (isRunning || !onRunPipeline) return;
 
 			const components = getProjectComponents(nodes as INode[]);
@@ -81,9 +83,10 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				version: PIPELINE_SCHEMA_VERSION,
 			};
 
+			console.log('[RunButton] calling onRunPipeline');
 			onRunPipeline(nodeId, project);
 		},
-		[isRunning, onRunPipeline, nodeId, nodes, currentProject]
+		[isRunning, onRunPipeline, nodeId, nodes, currentProject, isSubscribed]
 	);
 
 	const handleStop = useCallback(
@@ -124,7 +127,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 					}}
 				>
 					<span style={styles.button}>
-						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning)' }} className="rotate" />
+						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-color-warning)' }} className="rotate" />
 					</span>
 				</div>
 			);
@@ -141,6 +144,28 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			>
 				<span style={styles.button}>
 					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-color-error)', strokeWidth: 2.5 }} />
+				</span>
+			</div>
+		);
+	}
+
+	// Not subscribed — show locked play icon
+	if (isSubscribed === false) {
+		return (
+			<div
+				className="rr-run-button-wrapper"
+				onClick={handleRun}
+				onDoubleClick={(e) => {
+					e.stopPropagation();
+					e.preventDefault();
+				}}
+				title="Subscription required"
+			>
+				<span style={{ ...styles.button, position: 'relative' as const }}>
+					<Play size={16} style={{ ...styles.icon, color: 'var(--rr-text-disabled)' }} />
+					<span style={{ position: 'absolute' as const, top: -5, right: -5 }}>
+						<PadlockIcon size={10} />
+					</span>
 				</span>
 			</div>
 		);

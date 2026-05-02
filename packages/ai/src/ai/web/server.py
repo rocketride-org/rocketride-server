@@ -42,7 +42,7 @@ Usage::
 
 
     server = WebServer(
-        config={'port': 8080, 'host': '0.0.0.0'},
+        config={'port': 8080, 'host': 'localhost'},
         on_startup=startup,
     )
     server.run()  # blocking — use server.serve() inside an async context

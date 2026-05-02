@@ -84,8 +84,8 @@ function parseArgs(args) {
 			options.pytestPattern = arg.substring('--pytest-pattern='.length);
 		} else if (arg.startsWith('--pytest-preinstall=')) {
 			options.pytestPreinstall = arg.substring('--pytest-preinstall='.length);
-        } else if (arg.startsWith('--pytest-parallel=')) {
-            options.pytestParallel = arg.substring('--pytest-parallel='.length);
+		} else if (arg.startsWith('--pytest-parallel=')) {
+			options.pytestParallel = arg.substring('--pytest-parallel='.length);
 		} else if (arg.startsWith('--jest=')) {
 			options.jest = options.jest || [];
 			options.jest.push(arg.substring('--jest='.length));

@@ -232,6 +232,19 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 		setFlyoutId(null);
 	}, []);
 
+	// ── Dismiss-on-leave: close popup when mouse leaves all menu elements ──
+	const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const cancelLeaveTimer = () => {
+		if (leaveTimer.current) {
+			clearTimeout(leaveTimer.current);
+			leaveTimer.current = null;
+		}
+	};
+	const startLeaveTimer = () => {
+		cancelLeaveTimer();
+		leaveTimer.current = setTimeout(handleClose, 150);
+	};
+
 	/**
 	 * Opens a flyout submenu shifted 1/3 right of the main popup.
 	 *
@@ -268,7 +281,10 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 			handleClose();
 		};
 		document.addEventListener('mousedown', handler);
-		return () => document.removeEventListener('mousedown', handler);
+		return () => {
+			document.removeEventListener('mousedown', handler);
+			cancelLeaveTimer();
+		};
 	}, [menuOpen, handleClose]);
 
 	// Snapshot trigger width when popup opens (used for popup/flyout sizing)
@@ -320,6 +336,8 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				createPortal(
 					<div
 						ref={popupRef}
+						onMouseEnter={cancelLeaveTimer}
+						onMouseLeave={startLeaveTimer}
 						style={{
 							...commonStyles.popupMenu,
 							position: 'fixed',
@@ -428,6 +446,8 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				createPortal(
 					<div
 						ref={flyoutRef}
+						onMouseEnter={cancelLeaveTimer}
+						onMouseLeave={startLeaveTimer}
 						style={{
 							...commonStyles.popupMenu,
 							position: 'fixed',
