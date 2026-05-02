@@ -51,6 +51,9 @@ export enum ConnectionState {
 	/** Connection attempt failed, cleanup required */
 	FAILED = 'failed',
 
+	/** Authentication was rejected by the server (bad/expired/revoked key) */
+	AUTH_FAILED = 'auth-failed',
+
 	/** Local mode: engine process is shutting down */
 	STOPPING_ENGINE = 'stopping-engine',
 }

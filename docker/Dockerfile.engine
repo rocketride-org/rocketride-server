@@ -29,4 +29,4 @@ EXPOSE 5565
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:5565/ping || exit 1
 
-ENTRYPOINT ["./engine", "./ai/eaas.py"]
+ENTRYPOINT ["./engine", "./ai/eaas.py", "--host=0.0.0.0"]

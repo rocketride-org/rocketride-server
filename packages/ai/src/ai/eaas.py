@@ -70,8 +70,8 @@ Examples:
     # Server configuration
     parser.add_argument(
         '--host',
-        default='0.0.0.0',
-        help='Server host/interface to bind (default: 0.0.0.0)',
+        default='localhost',
+        help='Server host/interface to bind (default: localhost). Use 0.0.0.0 for all interfaces.',
     )
     parser.add_argument(
         '--port',

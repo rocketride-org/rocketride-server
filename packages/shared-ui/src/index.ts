@@ -45,6 +45,10 @@ export type { DashboardResponse, DashboardOverview, DashboardConnection, Dashboa
 export { SidebarView } from './modules/sidebar/SidebarView';
 export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
 
+// --- Explorer module (generic file tree panel) -------------------------------
+export { Explorer } from './modules/explorer';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
@@ -73,6 +77,10 @@ export type { IAccountViewProps } from './modules/account/AccountView';
 export { BillingView } from './modules/billing';
 export type { IBillingViewProps } from './modules/billing';
 export { CreditsPanel } from './modules/billing';
+
+// --- Checkout module (subscription checkout flow) ----------------------------
+export { CheckoutModal } from './modules/checkout';
+export type { CheckoutModalProps, CheckoutPlan } from './modules/checkout';
 
 // --- Chat module (conversational chat surface) --------------------------------
 export { ChatView } from './modules/chat';
