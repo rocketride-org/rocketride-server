@@ -61,6 +61,10 @@ from .dbg_stdio import DbgStdio
 from .types import LAUNCH_TYPE
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
+from .task_logger import get_task_logger
+
+# Module-level structured logger for task lifecycle events
+_logger = get_task_logger(__name__)
 
 
 if TYPE_CHECKING:
@@ -843,6 +847,15 @@ class Task(DAPBase):
                         apikey=task_apikey,
                     )
 
+        _logger.info(
+            'Task terminated',
+            extra={
+                'task_id': self.id,
+                'step': 'termination',
+                'exit_code': self._status.exitCode,
+                'final_state': self._status.state,
+            },
+        )
         self.debug_message('Resource cleanup completed successfully')
 
     def _on_metrics_updated(self) -> None:
@@ -1470,6 +1483,10 @@ class Task(DAPBase):
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
+            _logger.info(
+                'Task starting',
+                extra={'task_id': self.id, 'step': 'start'},
+            )
 
             # Resolve any ${...} in the pipeline
             self._pipeline = self._resolve_pipeline(self._pipeline)
@@ -1586,6 +1603,15 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
+            _logger.info(
+                'Subprocess created',
+                extra={
+                    'task_id': self.id,
+                    'step': 'subprocess',
+                    'pid': self._engine_process.pid,
+                },
+            )
+
             # Initialize stdio interface
             try:
                 self._debug_stdio = Task.TaskDbgStdio(
@@ -1661,6 +1687,11 @@ class Task(DAPBase):
 
         except Exception as e:
             await self._terminated()
+            _logger.error(
+                'Task startup failed',
+                extra={'task_id': self.id, 'step': 'error', 'error': str(e)},
+                exc_info=True,
+            )
             self.debug_message(f'Task startup failed: {e}')
             raise
 
