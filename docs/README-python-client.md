@@ -527,7 +527,8 @@ asyncio.run(main())
 The `rocketride` command is installed automatically with the package.
 
 ```bash
-rocketride start pipeline.json              # Start a pipeline
+rocketride init                              # Scaffold .rocketride/ in the current directory
+rocketride start pipeline.json               # Start a pipeline
 rocketride upload *.pdf --token <token>      # Upload files to a running pipeline
 rocketride status --token <token>            # Monitor task progress
 rocketride stop --token <token>              # Terminate a running task
@@ -536,7 +537,9 @@ rocketride events ALL --token <token>        # Stream task events
 rocketride rrext_store get_all_projects      # List stored projects
 ```
 
-All commands accept `--uri` and `--apikey` flags, or read from environment variables.
+`rocketride init` scaffolds `.rocketride/docs/` and installs a stub for the coding agent it detects (Cursor, Claude Code, Windsurf, Copilot, `CLAUDE.md`, or `AGENTS.md`). Re-runs are idempotent — stubs use `<!-- ROCKETRIDE:BEGIN/END -->` markers, so content outside is preserved. Flags: `--agent <name>` (repeatable; `all` for every stub), `--no-agents` (docs only), `--force` / `--no-overwrite` (mutually exclusive; default is to prompt).
+
+All other commands accept `--uri` and `--apikey` flags, or read from environment variables.
 
 ## Configuration
 
