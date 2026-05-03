@@ -187,7 +187,11 @@ class MockCollection:
             if count < offset:
                 count += 1
                 continue
-            
+
+            # Apply limit (must be checked before append so limit=0 returns zero items)
+            if limit is not None and len(results["ids"]) >= limit:
+                break
+
             results["ids"].append(id)
             if "metadatas" in include:
                 results["metadatas"].append(self._serialize_metadata(metadata))
@@ -197,11 +201,7 @@ class MockCollection:
                 results["embeddings"].append(data.get("embedding"))
             
             count += 1
-            
-            # Apply limit
-            if limit is not None and len(results["ids"]) >= limit:
-                break
-        
+
         return results
     
     def upsert(
