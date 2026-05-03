@@ -133,7 +133,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 - Follow PEP 8 style guidelines
 - Use type hints where appropriate
-- Use single quotes for strings (as configured in ruff)
+- Use single quotes for strings (as configured in ruff — see [Formatting](#formatting) below)
 - Add docstrings to all public functions and classes
 - Include MIT license header in new files
 
@@ -144,6 +144,34 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 - Prefer interfaces over type aliases for objects
 - Add JSDoc comments to public APIs
 - Include MIT license header in new files
+
+## Formatting
+
+Python files in this repo are formatted with [ruff](https://docs.astral.sh/ruff/). The configuration lives in `[tool.ruff]` in `pyproject.toml`.
+
+### Install ruff
+
+```bash
+pip install ruff==0.15.12
+```
+
+The version is pinned to match what CI runs — using a different version may produce different formatting and fail the format check.
+
+### Format and check
+
+```bash
+# Reformat all Python files in place
+ruff format .
+
+# Check formatting without modifying files (what CI runs)
+ruff format --check .
+```
+
+### CI enforcement
+
+The `lint-python` job in `.github/workflows/ci.yml` runs `ruff format --check` on every PR. If it fails, run `ruff format .` locally, commit the result, and push.
+
+> Ruff is the formatter only at this point — full lint enforcement (`ruff check`) is tracked separately while existing violations are addressed.
 
 ## Testing
 
