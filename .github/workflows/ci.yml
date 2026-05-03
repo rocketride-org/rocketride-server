@@ -101,6 +101,25 @@ jobs:
       - run: echo "Build skipped — no code changes detected"
 
   # ---------------------------------------------------------------------------
+  #  Python lint — pinned ruff format check on every PR/push.
+  #  Lightweight (~1 min); does not depend on init/build.
+  # ---------------------------------------------------------------------------
+  lint-python:
+    name: Lint Python (ruff format)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install ruff
+        run: pip install ruff==0.15.12
+
+      - name: Check formatting
+        run: ruff format --check .
+
+  # ---------------------------------------------------------------------------
   #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
   # ---------------------------------------------------------------------------
   codeql:
@@ -201,7 +220,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build]
+    needs: [init, changes, build, lint-python]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -209,11 +228,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, lint-python=${{ needs.lint-python.result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, lint-python=${{ needs.lint-python.result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.
