@@ -79,6 +79,7 @@ class VisionLoader(BaseLoader):
 
         if variant == 'clip':
             from transformers import CLIPModel as HFCLIPModel, AutoProcessor
+
             model = HFCLIPModel.from_pretrained(model_name, **kwargs)
             processor = AutoProcessor.from_pretrained(model_name)
             bundle = {'model': model, 'processor': processor, 'variant': 'clip'}
@@ -87,6 +88,7 @@ class VisionLoader(BaseLoader):
                 output_spec = [('image_features', None, None, None, True)]
         else:
             from transformers import ViTModel as HFViTModel, AutoImageProcessor
+
             model = HFViTModel.from_pretrained(model_name, **kwargs)
             processor = AutoImageProcessor.from_pretrained(model_name)
             bundle = {'model': model, 'processor': processor, 'variant': 'vit'}

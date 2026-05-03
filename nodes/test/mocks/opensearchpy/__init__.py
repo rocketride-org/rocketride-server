@@ -9,6 +9,7 @@ When ROCKETRIDE_MOCK is set, this module shadows the real opensearchpy package
 so the OpenSearch client uses in-memory storage. Supports indices.exists/create/
 delete/get_mapping, index(), search(), helpers.scan(), ping(), and close().
 """
+
 from typing import Any, Dict, List, Optional
 
 from . import _store_data
@@ -57,12 +58,14 @@ class OpenSearch:
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
-            hits.append({
-                '_index': index,
-                '_id': d.get('_id', str(i)),
-                '_score': 0.9,
-                '_source': src,
-            })
+            hits.append(
+                {
+                    '_index': index,
+                    '_id': d.get('_id', str(i)),
+                    '_score': 0.9,
+                    '_source': src,
+                }
+            )
         return {'hits': {'total': {'value': len(hits)}, 'hits': hits}}
 
     def close(self) -> None:

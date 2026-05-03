@@ -36,7 +36,7 @@ class GliNERRecognizer:
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the GLiNER Recognizer.
-        
+
         Uses ai.common.models.GLiNER which automatically routes to model server
         if --modelserver flag is present, otherwise runs locally.
         """
@@ -50,7 +50,7 @@ class GliNERRecognizer:
         enginePath = expand('%execPath%')
         rule_file_path = os.path.join(enginePath, 'nucleuz', 'rulePack.dat')
         self.ruleParser = RuleParser(rule_file_path)
-        
+
         # Use ai.common.models.GLiNER - auto-detects local vs model server mode
         self.model = GLiNER(self.model_name)
 
@@ -182,34 +182,34 @@ class GliNERRecognizer:
     def process(self, text: str, labels: list, existing_matches: list = None) -> str:
         """
         Core anonymization method - detects entities using GLiNER and masks them.
-        
+
         Args:
             text: The text to anonymize
             labels: Entity labels to detect
             existing_matches: Optional list of (offset, length) tuples from classifications
-            
+
         Returns:
             Anonymized text with detected entities replaced by anonymize_char
         """
         if not text:
             return text
-        
+
         # Run NER prediction
         ner_results = self.predict(text, labels)
         ner_matches = self.convert_ner_results_to_matches(ner_results)
-        
+
         debug(f'Anonymize: Detected {len(ner_results)} entities')
-        
+
         # Combine with existing matches (from classifications)
         all_matches = list(existing_matches or []) + ner_matches
-        
+
         if not all_matches:
             debug('Anonymize: No entities to mask')
             return text
-        
+
         # Sort by offset and apply masking
         all_matches_sorted = sorted(all_matches, key=lambda x: x[0])
-        
+
         return _anonymize(text, all_matches_sorted, self.anonymize_char)
 
     def handleClassifications(self, classifications: dict, target_object_text: str, classificationPolicy: any, classificationRules: any):
@@ -234,9 +234,6 @@ class GliNERRecognizer:
         labels = self.ruleParser.get_rules_names(unique_id_refs) + rules
 
         # Extract existing matches from classifications (offset, length tuples)
-        existing_matches = list(
-            (m['offset'], m['length']) 
-            for m in ((m.get('location', {}).get('inChars') or m) for m in text_matches)
-        )
+        existing_matches = list((m['offset'], m['length']) for m in ((m.get('location', {}).get('inChars') or m) for m in text_matches))
 
         return self.process(target_object_text, labels, existing_matches)

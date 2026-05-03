@@ -9,6 +9,7 @@ When ROCKETRIDE_MOCK is set, this module shadows the real elasticsearch package
 so the Elasticsearch store uses in-memory storage. Supports indices.exists/create/
 delete, index(), search(), bulk(), scan(), cluster.health(), and close().
 """
+
 from typing import Any, Dict, List, Optional
 
 from . import _store_data
@@ -56,12 +57,14 @@ class Elasticsearch:
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
-            hits.append({
-                '_index': index,
-                '_id': d.get('_id', str(i)),
-                '_score': 0.9,
-                '_source': src,
-            })
+            hits.append(
+                {
+                    '_index': index,
+                    '_id': d.get('_id', str(i)),
+                    '_score': 0.9,
+                    '_source': src,
+                }
+            )
         return {'hits': {'total': {'value': len(hits)}, 'hits': hits}}
 
     def delete_by_query(self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any) -> Dict[str, Any]:

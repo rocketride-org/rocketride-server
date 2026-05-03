@@ -158,16 +158,7 @@ class StatusMonitor(BoxMonitor):
             - Processing rate information (items/size per second)
             - Any non-zero statistical values
         """
-        return (
-            status.get('totalSize', 0) > 0
-            or status.get('totalCount', 0) > 0
-            or status.get('completedSize', 0) > 0
-            or status.get('completedCount', 0) > 0
-            or status.get('failedSize', 0) > 0
-            or status.get('failedCount', 0) > 0
-            or status.get('rateSize', 0) > 0
-            or status.get('rateCount', 0) > 0
-        )
+        return status.get('totalSize', 0) > 0 or status.get('totalCount', 0) > 0 or status.get('completedSize', 0) > 0 or status.get('completedCount', 0) > 0 or status.get('failedSize', 0) > 0 or status.get('failedCount', 0) > 0 or status.get('rateSize', 0) > 0 or status.get('rateCount', 0) > 0
 
     def _has_metrics_data(self, status: Dict[str, Any]) -> bool:
         """

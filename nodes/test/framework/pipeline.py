@@ -85,7 +85,7 @@ def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
     """
     if not env_var.startswith('ROCKETRIDE_'):
         return None
-    suffix = env_var[len('ROCKETRIDE_'):]  # e.g. 'OPENAI_KEY'
+    suffix = env_var[len('ROCKETRIDE_') :]  # e.g. 'OPENAI_KEY'
 
     # Accept both full provider name ('LLM_OPENAI') and short form
     # ('OPENAI'). Full form is tried first so that an exact directory
@@ -93,14 +93,14 @@ def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
     candidates = [provider.upper()]
     for pfx in ('llm_', 'tool_'):
         if provider.startswith(pfx):
-            candidates.append(provider[len(pfx):].upper())
+            candidates.append(provider[len(pfx) :].upper())
             break
 
     suffix_upper = suffix.upper()
     for candidate in candidates:
         token = candidate + '_'
         if suffix_upper.startswith(token):
-            attr = suffix[len(token):]
+            attr = suffix[len(token) :]
             if not attr:
                 return None
             return _ENV_ATTR_MAP.get(attr.upper(), attr.lower())

@@ -25,14 +25,7 @@ def main():  # noqa: D103
     task('0200-scan')
     scn_out = batch_stats('scn-out', ['flags'], True)
 
-    expected_flags = (
-        (EntryFlags.PERMISSIONS if args.permissions else 0)
-        | (EntryFlags.SIGNING if args.signing else 0)
-        | (EntryFlags.INDEX if args.index else 0)
-        | (EntryFlags.VECTORIZE if args.vectorize else 0)
-        | (EntryFlags.OCR if args.ocr else 0)
-        | (EntryFlags.CLASSIFY if args.classify else 0)
-    )
+    expected_flags = (EntryFlags.PERMISSIONS if args.permissions else 0) | (EntryFlags.SIGNING if args.signing else 0) | (EntryFlags.INDEX if args.index else 0) | (EntryFlags.VECTORIZE if args.vectorize else 0) | (EntryFlags.OCR if args.ocr else 0) | (EntryFlags.CLASSIFY if args.classify else 0)
 
     assert scn_out.exists, f'{scn_out.file_name}: not exists'
     assert scn_out.count > 0, f'{scn_out.file_name}: no entries'

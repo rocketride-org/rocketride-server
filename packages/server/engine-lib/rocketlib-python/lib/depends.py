@@ -119,7 +119,6 @@ def _get_cache_dir() -> str:
     return os.path.join(_get_executable_dir(), 'cache')
 
 
-
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
     Run a subprocess command, keeping stdin open until process exits.
@@ -213,8 +212,7 @@ def _ensure_pip():
 def _uv_abs_path() -> str:
     """Get the absolute path to the uv executable based on platform."""
     exe_dir = _get_executable_dir()
-    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else \
-           os.path.join(exe_dir, 'bin', 'uv')
+    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else os.path.join(exe_dir, 'bin', 'uv')
 
 
 def _uv_available() -> bool:

@@ -51,11 +51,7 @@ class ApplicationPermissions:
         '5b567255-7703-4780-807c-7be8301ae99b': {
             'roleName': 'Group.Read.All',
             'Display Name': 'Read all groups',
-            'Description': (
-                'Allows the app to create groups, read all group properties and memberships, update group properties '
-                'and memberships, and delete groups. Also allows the app to read and write conversations. '
-                'All of these operations can be performed by the app without a signed-in user.'
-            ),
+            'Description': ('Allows the app to create groups, read all group properties and memberships, update group properties and memberships, and delete groups. Also allows the app to read and write conversations. All of these operations can be performed by the app without a signed-in user.'),
         },
         '62a82d76-70ea-41e2-9197-370581804d09': {'roleName': 'Group.ReadWrite.All', 'Display Name': 'Read and write all groups', 'Description': 'Allows the app to read and update user profiles without a signed in user.'},
         '332a536c-c7ef-4017-ab91-336970924f0d': {

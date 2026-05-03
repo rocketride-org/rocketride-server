@@ -522,25 +522,26 @@ class Question(BaseModel):
 
         # JSON formatting
         if self.expectJson:
-            all_instructions.append(QuestionInstruction(
-                subtitle='JSON Response Format',
-                instructions=(
-                    '- Respond **only** with a fenced, valid JSON structure.\r\n'
-                    '- Properly escape all quotes within content strings.\r\n'
-                    '- No additional text, comments, or explanations.\r\n'
-                    '- Ensure your answer is strictly valid JSON format.\r\n'
-                    '- Double check the JSON response to ensure it is valid.\r\n'
-                    '- Enclose the json with ```json and ``` tags.'
-                ),
-            ))
-            if has_previous_json_failed:
-                all_instructions.append(QuestionInstruction(
-                    subtitle='CRITICAL',
+            all_instructions.append(
+                QuestionInstruction(
+                    subtitle='JSON Response Format',
                     instructions=(
-                        '- Your previous response returned invalid JSON.\r\n'
-                        '- Examine your JSON and ensure it is complete and follows the JSON standards.'
+                        '- Respond **only** with a fenced, valid JSON structure.\r\n'
+                        '- Properly escape all quotes within content strings.\r\n'
+                        '- No additional text, comments, or explanations.\r\n'
+                        '- Ensure your answer is strictly valid JSON format.\r\n'
+                        '- Double check the JSON response to ensure it is valid.\r\n'
+                        '- Enclose the json with ```json and ``` tags.'
                     ),
-                ))
+                )
+            )
+            if has_previous_json_failed:
+                all_instructions.append(
+                    QuestionInstruction(
+                        subtitle='CRITICAL',
+                        instructions=('- Your previous response returned invalid JSON.\r\n- Examine your JSON and ensure it is complete and follows the JSON standards.'),
+                    )
+                )
 
         # User-provided instructions
         all_instructions.extend(self.instructions)

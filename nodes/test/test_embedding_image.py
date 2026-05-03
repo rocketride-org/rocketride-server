@@ -15,6 +15,7 @@ def _vision_available():
     """Check if ai.common.models.vision is available."""
     try:
         from ai.common.models.vision import CLIPModel, ViTModel  # noqa: F401
+
         return True
     except ImportError:
         return False

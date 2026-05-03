@@ -59,9 +59,11 @@ async def test_get_tools_success(mock_rocketride_client: MagicMock) -> None:
 
 
 async def test_get_tools_filters_non_dicts(mock_rocketride_client: MagicMock) -> None:
-    mock_rocketride_client.request = AsyncMock(return_value={
-        'body': {'tasks': [{'name': 'A'}, None, 'string', {'name': 'B'}]},
-    })
+    mock_rocketride_client.request = AsyncMock(
+        return_value={
+            'body': {'tasks': [{'name': 'A'}, None, 'string', {'name': 'B'}]},
+        }
+    )
     result = await tools_mod.get_tools(mock_rocketride_client)
     assert len(result) == 2
     assert result[0]['name'] == 'A'
@@ -152,6 +154,7 @@ def test_load_convenience_pipeline_known_tool() -> None:
 # -----------------------------------------------------------------------------
 # Integration tests (run when server is available; use real RocketRideClient)
 # -----------------------------------------------------------------------------
+
 
 @pytest.mark.requires_server
 async def test_get_tools_live_client(client: Any) -> None:
