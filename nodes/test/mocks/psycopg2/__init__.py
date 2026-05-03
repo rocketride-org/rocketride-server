@@ -181,7 +181,7 @@ class MockCursor:
                     query_vector = p.tolist()
                 elif isinstance(p, (list, tuple)) and len(p) > 3:
                     query_vector = list(p)
-                elif isinstance(p, int) and p < 1000:
+                elif isinstance(p, int) and not isinstance(p, bool) and p < 1000:
                     limit = p
                 else:
                     filter_params.append(p)
@@ -305,7 +305,7 @@ class MockCursor:
         if "limit" in query.lower() and params:
             # Last param is often the limit
             for p in reversed(params):
-                if isinstance(p, int) and p < 10000:
+                if isinstance(p, int) and not isinstance(p, bool) and p < 10000:
                     return p
         return None
     
