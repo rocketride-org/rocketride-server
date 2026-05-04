@@ -138,23 +138,23 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const base = response.message || 'Failed to open a data pipe.';
-			const msg =
-				`${base}\n\n` +
-				'Common causes:\n' +
-				"- Pipeline isn't running (wrong token or task terminated)\n" +
-				"- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" +
-				"- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
 			throw new PipeException({ ...response, message: msg });
 		}
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
-		this._opened = true;
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
 			try {
 				await this._client.setEvents(this._token, ['SSE'], this._pipeId);
 			} catch (err) {
+				// Roll back: don't leave the pipe half-open on the server.
+				try {
+					await this.close();
+				} catch {
+					// Best-effort cleanup
+				}
 				const errMsg = err instanceof Error ? err.message : String(err);
 				const msg = `Failed to subscribe to SSE events for this data pipe.\n\n${errMsg}`;
 				throw new PipeException({ message: msg });
@@ -162,6 +162,9 @@ export class DataPipe {
 
 			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
 		}
+
+		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
+		this._opened = true;
 
 		return this;
 	}
@@ -213,7 +216,9 @@ export class DataPipe {
 	 * @throws PipeException if the server reports a failure while finalizing the pipe
 	 */
 	async close(): Promise<PIPELINE_RESULT | undefined> {
-		if (!this._opened || this._closed) {
+		// Allow closing after a failed open() path where the server assigned a pipe_id
+		// but we never flipped _opened=true (e.g., SSE subscription failure).
+		if (this._closed || (this._pipeId === undefined && !this._opened)) {
 			return;
 		}
 
@@ -236,6 +241,7 @@ export class DataPipe {
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+			this._opened = false;
 
 			// Unregister SSE callback and scoped monitor subscription
 			if (this._onSSE !== undefined && this._pipeId !== undefined) {
@@ -591,7 +597,8 @@ export class RocketRideClient extends DAPClient {
 	 * Sends the credential as the first DAP message and returns the full
 	 * ConnectResult (user identity + organizations + teams) on success.
 	 *
-	 * If `credential` is omitted, falls back to the `ROCKETRIDE_APIKEY` env var.
+	 * If `credential` is omitted, falls back to the `ROCKETRIDE_APIKEY` env var (non-empty
+	 * string only; whitespace-only values are ignored so constructor auth is not wiped).
 	 *
 	 * In persist mode, enables automatic reconnection on disconnect. After the
 	 * first successful connect the stored `userToken` is replayed automatically.
@@ -1037,12 +1044,20 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Get the current status of a running pipeline.
+	 *
+	 * By default this call is bounded to 15s so callers/tests don't hang forever if the engine
+	 * stops responding mid-request (especially important in CI). Pass `{ timeout: false }` to
+	 * restore the previous behavior of using only the client-level request timeout (if any).
 	 */
-	async getTaskStatus(token: string): Promise<TASK_STATUS> {
+	async getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS> {
 		try {
-			// Task status should return quickly; bound the wait so callers/tests can't hang forever
-			// if the engine stops responding mid-request (especially important in CI).
-			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, { token, timeout: 15000 });
+			const callOptions: { token: string; timeout?: number } = { token };
+			if (options?.timeout === false) {
+				// Intentionally omit per-call timeout override.
+			} else {
+				callOptions.timeout = options?.timeout ?? 15000;
+			}
+			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, callOptions);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
