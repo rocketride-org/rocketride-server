@@ -317,7 +317,7 @@ export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({ sett
 												<>
 													<code style={styles.envVariableValueCode}>{displayValue}</code>
 													<button type="button" onClick={() => toggleValueVisibility(key)} title={isVisible ? 'Hide value' : 'Show value'} style={{ padding: '2px 6px', minWidth: 30, fontSize: 12 }}>
-														{isVisible ? '\u{1F648}' : '\u{1F50D}'}
+														{isVisible ? 'Hide' : 'Show'}
 													</button>
 												</>
 											)}

@@ -186,7 +186,7 @@
 	},
 	//
 	//	Full test configuration - tests all embedding_image model profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

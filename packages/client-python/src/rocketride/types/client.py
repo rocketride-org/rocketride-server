@@ -258,3 +258,24 @@ class ConnectResult(TypedDict, total=False):
     locale: str
     defaultTeam: str
     organizations: list[OrgInfo]
+    capabilities: list[str]
+
+
+class ServerInfoResult(TypedDict, total=False):
+    """
+    Server metadata returned by the pre-auth info probe.
+
+    Obtained via :meth:`RocketRideClient.get_server_info` which sends an
+    ``auth`` request with ``infoOnly: True``. The server responds without
+    requiring credentials.
+
+    Attributes:
+        version (str): Server engine version string.
+        capabilities (list[str]): Capability tags — ``['oss']`` for open-source,
+            ``['saas']`` for cloud.
+        platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
+    """
+
+    version: str
+    capabilities: list[str]
+    platform: str

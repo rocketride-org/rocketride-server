@@ -185,8 +185,8 @@ export class PageDeployProvider {
 		if (!configMgr) return;
 
 		this.postMessage({ type: 'serviceProgress', message: 'Connecting to service...' });
-		await configMgr.updateHostUrl(`http://localhost:${SERVICE_PORT}`);
-		await configMgr.updateConnectionMode('onprem');
+		await configMgr.updateHostUrl('development', `http://localhost:${SERVICE_PORT}`);
+		await configMgr.updateConnectionMode('development', 'onprem');
 		// ConnectionManager picks up the config change automatically and reconnects
 	}
 

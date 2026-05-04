@@ -19,7 +19,7 @@
 
 import { RocketRideClient } from 'rocketride';
 import { BaseManager, ManagerInfo } from './base-manager';
-import { ConfigManagerInfo } from '../config';
+import { ConnectionGroupConfig } from '../config';
 import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
@@ -32,24 +32,26 @@ export class RemoteManager extends BaseManager {
 	// LIFECYCLE
 	// =========================================================================
 
-	async connect(client: RocketRideClient, config: ConfigManagerInfo): Promise<void> {
+	async connect(client: RocketRideClient, config: ConnectionGroupConfig): Promise<void> {
+		const mode = config.connectionMode ?? 'local';
+
 		if (!config.hostUrl) {
 			throw new Error('Host URL is required for remote connections. Configure it in Settings.');
 		}
 
 		// Cloud mode: use the stored cloud token (rr_* persistent key)
-		if (connectionModeUsesOAuth(config.connectionMode)) {
+		if (connectionModeUsesOAuth(mode)) {
 			const cloudAuth = CloudAuthProvider.getInstance();
 			const token = await cloudAuth.getToken();
 			if (!token) {
-				throw new Error('Not signed in to RocketRide Cloud. Open Settings and click Sign In.');
+				throw new Error('Please sign in to RocketRide Cloud to connect.');
 			}
 			await client.connect(token, { uri: config.hostUrl });
 			return;
 		}
 
 		// On-prem: user-provided API key
-		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
+		if (connectionModeRequiresApiKey(mode) && !config.apiKey) {
 			throw new Error('API key is required for on-prem connections. Configure it in Settings.');
 		}
 

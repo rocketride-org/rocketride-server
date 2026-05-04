@@ -41,12 +41,13 @@ import { PageSidebarProvider } from './providers/PageSidebarProvider';
 import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageMonitorProvider } from './providers/PageMonitorProvider';
-import { PageDeployProvider } from './providers/PageDeployProvider';
+// PageDeployProvider removed — Docker/Service operations now live in Settings panels
 import { PageStatusProvider } from './providers/PageStatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { PageAccountProvider } from './providers/PageAccountProvider';
 import { PageBillingProvider } from './providers/PageBillingProvider';
+import { PageAuthProvider } from './providers/PageAuthProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
@@ -60,7 +61,7 @@ let pageSidebar: PageSidebarProvider | undefined;
 let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let _pageMonitor: PageMonitorProvider | undefined;
-let pageDeploy: PageDeployProvider | undefined;
+// pageDeploy removed — functionality moved to Settings panels
 let pageStatus: PageStatusProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -93,6 +94,66 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 		logger.output(`${icons.info} Removed legacy engine directory: ${oldEngineDir}`);
 	} catch {
 		// Directory doesn't exist or couldn't be removed — nothing to do
+	}
+
+	// Migration 3: Flat settings keys → grouped development.* / deployment.* keys
+	if (!context.globalState.get('settingsMigrationV2Done')) {
+		const keyMap: Array<[string, string]> = [
+			// Development
+			['connectionMode', 'development.connectionMode'],
+			['hostUrl', 'development.hostUrl'],
+			['developmentTeamId', 'development.teamId'],
+			['local.engineVersion', 'development.local.engineVersion'],
+			['local.debugOutput', 'development.local.debugOutput'],
+			['engineArgs', 'development.local.engineArgs'],
+			// Deployment
+			['deployTargetMode', 'deployment.connectionMode'],
+			['deployHostUrl', 'deployment.hostUrl'],
+			['deployTargetTeamId', 'deployment.teamId'],
+			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
+			['deploy.local.debugOutput', 'deployment.local.debugOutput'],
+			['deployEngineArgs', 'deployment.local.engineArgs'],
+		];
+
+		for (const [oldKey, newKey] of keyMap) {
+			const inspected = config.inspect<unknown>(oldKey);
+			const migrated = config.inspect<unknown>(newKey);
+			if (inspected?.globalValue !== undefined) {
+				if (migrated?.globalValue === undefined) {
+					await config.update(newKey, inspected.globalValue, vscode.ConfigurationTarget.Global);
+				}
+				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Global);
+			}
+			if (inspected?.workspaceValue !== undefined) {
+				if (migrated?.workspaceValue === undefined) {
+					await config.update(newKey, inspected.workspaceValue, vscode.ConfigurationTarget.Workspace);
+				}
+				await config.update(oldKey, undefined, vscode.ConfigurationTarget.Workspace);
+			}
+		}
+
+		// Migrate secret storage keys
+		const secretMap: Array<[string, string]> = [
+			['rocketride.apiKey', 'rocketride.development.apiKey'],
+			['rocketride.deployApiKey', 'rocketride.deployment.apiKey'],
+		];
+		for (const [oldSecret, newSecret] of secretMap) {
+			try {
+				const value = await context.secrets.get(oldSecret);
+				if (value) {
+					const existing = await context.secrets.get(newSecret);
+					if (!existing) {
+						await context.secrets.store(newSecret, value);
+					}
+					await context.secrets.delete(oldSecret);
+				}
+			} catch {
+				// Ignore — secret may not exist
+			}
+		}
+
+		await context.globalState.update('settingsMigrationV2Done', true);
+		logger.output(`${icons.success} Migrated settings to development/deployment groups`);
 	}
 }
 
@@ -181,11 +242,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				_pageMonitor = new PageMonitorProvider(context);
-				pageDeploy = new PageDeployProvider(context);
+				// pageDeploy removed — register redirect command so sidebar "Deploy" opens Settings
+				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				pageStatus = new PageStatusProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 				new PageAccountProvider(context);
 				new PageBillingProvider(context);
+				new PageAuthProvider(context, context.extensionUri);
 
 				// Register unified project editor (canvas + status + trace)
 				pageProject = new PageProjectProvider(context);
@@ -450,16 +513,6 @@ export async function deactivate(): Promise<void> {
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
 				console.error('[ROCKETRIDE] Error disposing monitor page:', error);
-			}
-		}
-	}
-
-	if (pageDeploy) {
-		try {
-			pageDeploy.dispose();
-		} catch (error: unknown) {
-			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing deploy page:', error);
 			}
 		}
 	}

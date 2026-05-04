@@ -245,7 +245,7 @@ def pytest_generate_tests(metafunc):
 
     if 'node_fulltest_config' in metafunc.fixturenames:
         # Fulltest: discovers 'fulltest' key in service*.json — no skip_nodes filter,
-        # these are run explicitly via model_server:fulltest.
+        # these are run explicitly via nodes:test-full
         configs = discover_testable_nodes(test_key='fulltest')
         available_configs, ids = _build_parametrize_list(configs)
         metafunc.parametrize('node_fulltest_config', available_configs, ids=ids)
