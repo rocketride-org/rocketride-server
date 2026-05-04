@@ -277,33 +277,35 @@ pip install fastapi uvicorn rocketride python-dotenv
 
 ```python
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
-import asyncio
-from rocketride import RocketRideClient
 import os
 from dotenv import load_dotenv
+from rocketride import RocketRideClient
 
 load_dotenv()
 
-app = FastAPI()
-client = RocketRideClient(
-    uri=os.getenv("ROCKETRIDE_URI"),
-    auth=os.getenv("ROCKETRIDE_APIKEY")
-)
+uri = os.getenv("ROCKETRIDE_URI")
+auth = os.getenv("ROCKETRIDE_APIKEY")
+
+if not uri or not auth:
+    raise ValueError("ROCKETRIDE_URI and ROCKETRIDE_APIKEY must be set in .env")
+
+client = RocketRideClient(uri=uri, auth=auth)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await client.connect()
+    yield
+    await client.disconnect()
+
+app = FastAPI(lifespan=lifespan)
 
 class Question(BaseModel):
     text: str
 
 class AnswerResponse(BaseModel):
     answer: str
-
-@app.on_event("startup")
-async def startup():
-    await client.connect()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await client.disconnect()
 
 @app.post("/ask", response_model=AnswerResponse)
 async def ask_llm(question: Question):
