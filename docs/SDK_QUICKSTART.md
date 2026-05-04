@@ -291,8 +291,11 @@ from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import os
+import logging
 from dotenv import load_dotenv
 from rocketride import RocketRideClient
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -337,8 +340,9 @@ async def ask_llm(question: Question):
         raise HTTPException(status_code=500, detail="Pipeline file not found")
     except ConnectionRefusedError:
         raise HTTPException(status_code=503, detail="Cannot connect to RocketRide engine")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Unexpected error in /ask")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:
         if token:
@@ -450,16 +454,17 @@ app.post('/ask', async (req: Request, res: Response): Promise<void> => {
 			res.status(500).json({ error: 'No answer received from pipeline' });
 		}
 	} catch (error) {
+		console.error('Error in /ask:', error);
 		if (error instanceof Error) {
 			if (error.message.includes('ECONNREFUSED')) {
 				res.status(503).json({ error: 'Cannot connect to RocketRide engine' });
 			} else if (error.message.includes('ENOENT')) {
 				res.status(500).json({ error: 'Pipeline file not found' });
 			} else {
-				res.status(500).json({ error: error.message });
+				res.status(500).json({ error: 'Internal server error' });
 			}
 		} else {
-			res.status(500).json({ error: 'Unknown error' });
+			res.status(500).json({ error: 'Internal server error' });
 		}
 	} finally {
 		if (token) {
