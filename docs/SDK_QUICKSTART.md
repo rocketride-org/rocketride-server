@@ -1,3 +1,5 @@
+# RocketRide SDK Quick Start
+
 <p align="center">
   <strong>RocketRide SDK Quick Start</strong><br/>
   Invoke pipelines from your Python or TypeScript applications in 5 minutes.
@@ -476,5 +478,5 @@ curl -X POST http://localhost:3000/ask \
 
 - **Build your own pipeline:** Open a `.pipe` file in VS Code with the RocketRide extension
 - **More examples:** See `/examples/` directory for RAG, agent workflows, and more
-- **API reference:** See [Python API docs](./agents/ROCKETRIDGE_python_API.md) or [TypeScript API docs](./agents/ROCKETRIDGE_typescript_API.md)
+- **API reference:** See [Python API docs](./agents/ROCKETRIDE_python_API.md) or [TypeScript API docs](./agents/ROCKETRIDE_typescript_API.md)
 - **Component reference:** [All 50+ pipeline nodes](./agents/ROCKETRIDE_COMPONENT_REFERENCE.md)
