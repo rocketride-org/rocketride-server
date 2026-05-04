@@ -101,6 +101,17 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 
+## Invoking Pipelines from External Applications
+
+New to RocketRide SDKs? Start with the **[SDK Quick Start Guide](docs/SDK_QUICKSTART.md)** — 5 minutes to your first pipeline call.
+
+The guide includes:
+
+- SDK installation and engine setup
+- Python and TypeScript examples with error handling
+- Web framework integration (FastAPI, Express.js)
+- Configuration, troubleshooting, and best practices
+
 ## Observability
 
 Selecting running pipelines allows for in-depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
