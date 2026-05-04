@@ -48,7 +48,7 @@ class BillingDetail(TypedDict):
     ``list`` subcommand. One row per subscribed app.
 
     Attributes:
-        appId: App identifier matching AppManifestEntry.id (e.g. "brandi").
+        appId: App identifier matching AppManifestEntry.appId (e.g. "rocketride.brandy").
         stripeSubscriptionId: Stripe sub_* subscription identifier.
         stripePriceId: Stripe price_* for the subscribed plan.
         status: One of: active, trialing, past_due, canceled.

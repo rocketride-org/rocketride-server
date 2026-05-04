@@ -43,7 +43,7 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { RocketRideClient } from 'rocketride';
-import { ConfigManagerInfo } from '../config';
+import { ConnectionGroupConfig } from '../config';
 
 export interface ManagerInfo {
 	version: string;
@@ -56,7 +56,7 @@ export abstract class BaseManager extends EventEmitter {
 	 * - LocalManager: install engine if needed, start if not running, connect client with retries
 	 * - RemoteManager: validate credentials, connect client
 	 */
-	abstract connect(client: RocketRideClient, config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void>;
+	abstract connect(client: RocketRideClient, config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void>;
 
 	/**
 	 * Do everything needed to tear down.

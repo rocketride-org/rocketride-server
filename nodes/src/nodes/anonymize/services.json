@@ -94,7 +94,7 @@
 	},
 	//
 	//	Full test configuration - tests all available profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

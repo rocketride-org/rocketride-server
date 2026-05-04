@@ -138,6 +138,12 @@ export class BarStatus {
 			this.statusBarItem.tooltip = 'Connecting to RocketRide server...';
 			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
+		} else if (status.state === ConnectionState.AUTH_FAILED) {
+			this.statusBarItem.text = '$(key) RocketRide: Sign In Required';
+			this.statusBarItem.command = 'rocketride.page.auth.open';
+			this.statusBarItem.tooltip = status.lastError || 'Authentication failed — click to sign in';
+			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 		} else if (!status.hasCredentials && (status.connectionMode === 'cloud' || status.connectionMode === 'onprem')) {
 			this.statusBarItem.text = '$(key) RocketRide: Setup Required';
 			this.statusBarItem.command = 'rocketride.page.settings.open';

@@ -87,7 +87,7 @@ type IncomingMessage =
 				teams?: TeamDTO[];
 				deployTeams?: TeamDTO[];
 				// Shared auth
-				cloudSignedIn?: boolean;
+				cloudConnected?: boolean;
 				userName?: string;
 				userEmail?: string;
 				// Pipeline data
@@ -112,6 +112,9 @@ const SidebarViewWebview: React.FC = () => {
 	const [devProgressMessage, setDevProgressMessage] = useState<string | undefined>();
 	const [teams, setTeams] = useState<TeamDTO[]>([]);
 
+	// ── Subscription state ─────────────────────────────────────────────────
+	const [subscribed, setSubscribed] = useState(true);
+
 	// ── Deploy connection state ─────────────────────────────────────────────
 	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
 	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
@@ -127,7 +130,7 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Shared auth + identity ──────────────────────────────────────────────
 	const [userName, setUserName] = useState<string | undefined>();
 	const [userEmail, setUserEmail] = useState<string | undefined>();
-	const [cloudSignedIn, setCloudSignedIn] = useState(false);
+	const [cloudConnected, setCloudSignedIn] = useState(false);
 
 	// ── Stable ref for entries (used by task event handler to check known tasks)
 	const entriesRef = useRef(entries);
@@ -238,7 +241,7 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.userName !== undefined) setUserName(msg.data.userName || undefined);
 					if (msg.data.userEmail !== undefined) setUserEmail(msg.data.userEmail || undefined);
 					// Shared auth
-					if (msg.data.cloudSignedIn !== undefined) setCloudSignedIn(msg.data.cloudSignedIn);
+					if (msg.data.cloudConnected !== undefined) setCloudSignedIn(msg.data.cloudConnected);
 
 					// Dev connection state
 					if (msg.data.teams) setTeams(msg.data.teams);
@@ -252,6 +255,8 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
 					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					setDeployProgressMessage(msg.data.deployProgressMessage);
+					// Subscription status
+					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
 					break;
 
 				case 'entriesUpdate':
@@ -361,7 +366,7 @@ const SidebarViewWebview: React.FC = () => {
 	/** Builds a mode display label like "Local" or "Cloud". */
 	const modeLabel = (mode: string | null): string => {
 		if (!mode) return 'Not configured';
-		const labels: Record<string, string> = { local: 'Local', cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'On-prem' };
+		const labels: Record<string, string> = { local: 'Local', cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'Direct' };
 		return labels[mode] ?? mode;
 	};
 
@@ -381,6 +386,8 @@ const SidebarViewWebview: React.FC = () => {
 				return 'Starting engine...';
 			case 'stopping-engine':
 				return 'Stopping engine...';
+			case 'auth-failed':
+				return 'Sign-in required';
 			default:
 				return 'Disconnected';
 		}
@@ -422,25 +429,26 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		// ── Account / Billing / Settings / Log out ──────────────────────────
-		if (cloudSignedIn) {
+		// cloudConnected is computed by the extension host via isCloudConnected()
+		if (cloudConnected) {
 			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) }, { id: 'billing', label: 'Billing', icon: BxCog, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.billing.open' }) });
 		}
 
-		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudSignedIn, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
+		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
 
-		if (cloudSignedIn) {
+		if (cloudConnected) {
 			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.cloud.logout' }) });
 		}
 
 		return items;
-	}, [sendMessage, cloudSignedIn, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
+	}, [sendMessage, cloudConnected, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
 	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;
