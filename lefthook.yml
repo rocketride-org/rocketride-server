@@ -1,3 +1,4 @@
+colors: false
 pre-commit:
   parallel: true
   commands:
