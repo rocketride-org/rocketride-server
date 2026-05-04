@@ -230,7 +230,9 @@ jobs:
             | sudo tar -xz -C /usr/local/bin gitleaks
           gitleaks version
       - name: Run gitleaks
-        run: gitleaks detect --config .gitleaks.toml --verbose --redact
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          gitleaks detect --config .gitleaks.toml --verbose --redact --log-opts="${BASE}..HEAD"
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
