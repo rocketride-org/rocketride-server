@@ -51,7 +51,7 @@ _DOC_FILE_NAMES = (
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
+    return asyncio.run(coro)
 
 
 def _make_args(path, **overrides):

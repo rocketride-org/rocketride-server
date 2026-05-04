@@ -90,10 +90,6 @@ _FALLBACK_AGENTS = ('claude-md', 'agents-md')
 class InitCommand(BaseCommand):
     """Scaffold a RocketRide workspace from the terminal."""
 
-    def __init__(self, cli, args):
-        """Initialize InitCommand with CLI context and parsed arguments."""
-        super().__init__(cli, args)
-
     async def execute(self, client: 'RocketRideClient') -> int:
         """Scaffold the .rocketride workspace and any agent stub files."""
         target_root = Path(self.args.path).resolve() if self.args.path else Path.cwd()
@@ -167,9 +163,6 @@ class InitCommand(BaseCommand):
         if chosen:
             if 'all' in chosen:
                 return _AGENT_ORDER
-            unknown = [a for a in chosen if a not in _AGENTS]
-            if unknown:
-                raise SystemExit(f'Unknown agent(s): {", ".join(unknown)}. Valid: {", ".join(_AGENTS)} or "all".')
             # Preserve canonical order for deterministic output.
             return tuple(a for a in _AGENT_ORDER if a in chosen)
 
@@ -193,7 +186,8 @@ class InitCommand(BaseCommand):
 
             if dest.exists():
                 existing = dest.read_bytes()
-                if _normalized(existing) == _normalized(new_content):
+                # Strip CR so \r\n vs \n doesn't trigger a false rewrite.
+                if existing.replace(b'\r\n', b'\n') == new_content.replace(b'\r\n', b'\n'):
                     continue  # already up to date
                 if no_overwrite:
                     print(f'  - kept   .rocketride/docs/{name} (--no-overwrite)')
@@ -203,6 +197,18 @@ class InitCommand(BaseCommand):
 
             dest.write_bytes(new_content)
             print(f'  + wrote  .rocketride/docs/{name}')
+
+        # Prune obsolete docs that aren't in the canonical list, matching the
+        # VS Code installer (apps/vscode/src/agents/agent-manager.ts) so a CLI
+        # re-init produces the same .rocketride/docs/ contents as an IDE re-init.
+        expected = set(_DOC_FILES)
+        try:
+            for entry in target_dir.iterdir():
+                if entry.is_file() and entry.name not in expected:
+                    entry.unlink()
+                    print(f'  - removed .rocketride/docs/{entry.name} (obsolete)')
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # Stubs (marker-merged)
@@ -278,12 +284,8 @@ def _missing_templates(templates, agents: tuple[str, ...]) -> list[str]:
     return missing
 
 
-def _normalized(b: bytes) -> bytes:
-    r"""Strip CR so \r\n vs \n doesn't trigger a false rewrite."""
-    return b.replace(b'\r\n', b'\n')
-
-
 def _normalize_text(s: str) -> str:
+    """Strip CR so \\r\\n vs \\n doesn't trigger a false rewrite."""
     return s.replace('\r\n', '\n')
 
 

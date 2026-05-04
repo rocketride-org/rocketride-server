@@ -649,7 +649,6 @@ class RocketRideCLI:
                 'events': EventsCommand,
                 'list': ListCommand,
                 'store': StoreCommand,
-                'init': InitCommand,
             }
 
             if self.args.command in command_map:
