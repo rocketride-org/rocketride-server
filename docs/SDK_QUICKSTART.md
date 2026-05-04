@@ -198,9 +198,20 @@ npx tsx quickstart.ts
 import 'dotenv/config'; // Load .env variables
 import { RocketRideClient } from 'rocketride';
 
+const uri = process.env.ROCKETRIDE_URI;
+const auth = process.env.ROCKETRIDE_APIKEY;
+
+if (!uri || !auth) {
+	const missing = [];
+	if (!uri) missing.push('ROCKETRIDE_URI');
+	if (!auth) missing.push('ROCKETRIDE_APIKEY');
+	console.error(`❌ Error: ${missing.join(' and ')} must be set in .env`);
+	process.exit(1);
+}
+
 const client = new RocketRideClient({
-	uri: process.env.ROCKETRIDE_URI || 'ws://localhost:5565',
-	auth: process.env.ROCKETRIDE_APIKEY || 'dev-key-local',
+	uri,
+	auth,
 });
 
 async function main() {
@@ -370,12 +381,23 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import { RocketRideClient } from 'rocketride';
 
+const uri = process.env.ROCKETRIDE_URI;
+const auth = process.env.ROCKETRIDE_APIKEY;
+
+if (!uri || !auth) {
+	const missing = [];
+	if (!uri) missing.push('ROCKETRIDE_URI');
+	if (!auth) missing.push('ROCKETRIDE_APIKEY');
+	console.error(`❌ Error: ${missing.join(' and ')} must be set in .env`);
+	process.exit(1);
+}
+
 const app = express();
 app.use(express.json());
 
 const client = new RocketRideClient({
-	uri: process.env.ROCKETRIDE_URI || 'ws://localhost:5565',
-	auth: process.env.ROCKETRIDE_APIKEY || 'dev-key-local',
+	uri,
+	auth,
 });
 
 let isConnected = false;
