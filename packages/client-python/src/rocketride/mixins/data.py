@@ -185,11 +185,11 @@ class DataMixin(DAPClient):
             if self._client.did_fail(response):
                 msg = response.get('message') or 'Failed to open a data pipe.'
                 msg = (
-                    f"{msg}\n\n"
-                    "Common causes:\n"
+                    f'{msg}\n\n'
+                    'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"
-                    "- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n"
-                    "- MIME type doesn't match the source lane (try `mimetype=\"text/plain\"`)\n"
+                    '- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n'
+                    '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
                 )
                 response = dict(response)
                 response['message'] = msg
