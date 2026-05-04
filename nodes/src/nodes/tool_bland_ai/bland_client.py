@@ -109,7 +109,9 @@ def get_call_when_complete(
         if result.get('completed'):
             return result
         if time.monotonic() >= deadline:
-            raise TimeoutError(f'Call {call_id} did not complete within {timeout}s. Last status: {result.get("status")}')
+            raise TimeoutError(
+                f'Call {call_id} did not complete within {timeout}s. Last status: {result.get("status")}'
+            )
         time.sleep(poll_interval)
 
 

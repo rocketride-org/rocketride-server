@@ -48,7 +48,12 @@ class IInstance(IInstanceBase):
             'required': ['url'],
             'properties': {
                 'url': {'type': 'string', 'description': 'The URL of the web page to scrape.'},
-                'format': {'type': 'string', 'enum': ['markdown', 'html'], 'description': 'Output format (default: "markdown").', 'default': 'markdown'},
+                'format': {
+                    'type': 'string',
+                    'enum': ['markdown', 'html'],
+                    'description': 'Output format (default: "markdown").',
+                    'default': 'markdown',
+                },
             },
         },
         output_schema={

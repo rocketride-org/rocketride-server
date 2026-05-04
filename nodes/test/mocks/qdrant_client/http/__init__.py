@@ -54,7 +54,7 @@ the high-level QdrantClient which abstracts away the HTTP layer.
 """
 
 # Re-export models for code that imports from qdrant_client.http
-from .. import models
+from .. import models as models
 
 # If specific http-only types are needed, define them here:
 # class SomeHttpOnlyType:

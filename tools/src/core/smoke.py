@@ -95,7 +95,12 @@ def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
                 # If this parameter variant was rejected, try the next one.
                 # OpenAI old models: 400 "unsupported_parameter: max_completion_tokens"
                 # Mistral / others:  422 "extra_forbidden: max_completion_tokens not permitted"
-                if 'max_completion_tokens' in error_str and ('unsupported' in error_str or 'extra_forbidden' in error_str or 'not permitted' in error_str or 'extra inputs' in error_str):
+                if 'max_completion_tokens' in error_str and (
+                    'unsupported' in error_str
+                    or 'extra_forbidden' in error_str
+                    or 'not permitted' in error_str
+                    or 'extra inputs' in error_str
+                ):
                     break  # move to next token_params variant
 
                 if is_retryable_error(e) and attempt < _MAX_RETRIES - 1:

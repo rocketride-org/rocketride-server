@@ -40,7 +40,7 @@ Implementing Common Types:
 4. Use field(default_factory=...) for mutable defaults (lists, dicts)
 """
 
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from dataclasses import dataclass, field
 
 
@@ -48,20 +48,21 @@ from dataclasses import dataclass, field
 class VectorParams:
     """
     Vector configuration for a collection.
-    
+
     Specifies the dimensions and distance metric for vectors in a collection.
     Must be provided when creating a new collection.
-    
+
     Attributes:
         size: Vector dimensionality (e.g., 1536 for OpenAI text-embedding-3-small)
         distance: Distance metric - "Cosine", "Euclidean", or "Dot"
-    
+
     Example:
         VectorParams(size=1536, distance="Cosine")
-    
+
     Note: The RocketRide store dynamically determines the size from the first
     document's embedding and stores it in the schema document.
     """
+
     size: int
     distance: str
 
@@ -70,16 +71,17 @@ class VectorParams:
 class CollectionInfo:
     """
     Information about a collection.
-    
+
     Returned by get_collection() to provide metadata about the collection.
-    
+
     Attributes:
         vectors_count: Number of vectors (points) in the collection
         payload_schema: Dict mapping field names to their indexed types
-    
+
     Note: The real CollectionInfo has many more fields (status, config,
     optimizer_status, etc.) but the RocketRide store only uses these.
     """
+
     vectors_count: int = 0
     payload_schema: Dict[str, Any] = field(default_factory=dict)
 

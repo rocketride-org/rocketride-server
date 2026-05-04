@@ -94,7 +94,9 @@ class Store(DocumentStoreBase):
         if similarity in ['cosine', 'euclidean', 'dotproduct']:
             self.similarity = similarity
         else:
-            raise Exception('The metric you provided in the config.json does not match required pinecone configurations')
+            raise Exception(
+                'The metric you provided in the config.json does not match required pinecone configurations'
+            )
 
         # Init the store
         self.client = Pinecone(api_key=self.apikey)
@@ -160,7 +162,12 @@ class Store(DocumentStoreBase):
         # Declare the filters we could be filtering the collection on and how we filter them
         filters = {
             '$eq': {'nodeId': docFilter.nodeId, 'isTable': docFilter.isTable, 'parent': docFilter.parent},
-            '$in': {'tableId': docFilter.tableIds, 'permissionId': docFilter.permissions, 'objectId': docFilter.objectIds, 'chunkId': docFilter.chunkIds},
+            '$in': {
+                'tableId': docFilter.tableIds,
+                'permissionId': docFilter.permissions,
+                'objectId': docFilter.objectIds,
+                'chunkId': docFilter.chunkIds,
+            },
             '$gte': {'chunkId': docFilter.minChunkId},
             '$lte': {'chunkId': docFilter.maxChunkId},
         }
@@ -169,7 +176,9 @@ class Store(DocumentStoreBase):
         for filter_type in filters:
             for doc_filter_attribute in filters[filter_type]:
                 if filters[filter_type][doc_filter_attribute] is not None:
-                    finalFilterList.append({doc_filter_attribute: {filter_type: filters[filter_type][doc_filter_attribute]}})
+                    finalFilterList.append(
+                        {doc_filter_attribute: {filter_type: filters[filter_type][doc_filter_attribute]}}
+                    )
 
         # Return full filter
         return {'$and': finalFilterList}
@@ -302,7 +311,9 @@ class Store(DocumentStoreBase):
         vector_size = int(index.describe_index_stats()['dimension'])
 
         # Perform the search
-        records = index.query(vector=[1] * vector_size, top_k=10000, filter=filter, include_metadata=True, include_values=False)['matches']
+        records = index.query(
+            vector=[1] * vector_size, top_k=10000, filter=filter, include_metadata=True, include_values=False
+        )['matches']
 
         # Convert the points into documents
         docs = self._convertToDocs(records)
@@ -456,7 +467,9 @@ class Store(DocumentStoreBase):
 
         flush()
 
-    def updateRecords(self, objectIds: List[str], metadataUpdates: Dict[str, Any] = None, isDeleteOperation: bool = False) -> None:
+    def updateRecords(
+        self, objectIds: List[str], metadataUpdates: Dict[str, Any] = None, isDeleteOperation: bool = False
+    ) -> None:
         """
         Collect the ids of records in a list of objectIds to update or delete the records.
         """
@@ -496,7 +509,13 @@ class Store(DocumentStoreBase):
 
         # Updating the metadata fields we want changed for the batch update
         while True:
-            records = index.query(vector=[1] * vector_size, top_k=batch_size, filter=pending_filter, include_metadata=False, include_values=False)['matches']
+            records = index.query(
+                vector=[1] * vector_size,
+                top_k=batch_size,
+                filter=pending_filter,
+                include_metadata=False,
+                include_values=False,
+            )['matches']
             if not records:
                 break
 

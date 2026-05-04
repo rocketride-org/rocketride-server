@@ -106,7 +106,15 @@ class DataMixin(DAPClient):
             # Results available after pipe closes
         """
 
-        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None):
+        def __init__(
+            self,
+            client,
+            token: str,
+            objinfo: Dict[str, Any] = None,
+            mime_type: str = None,
+            provider: str = None,
+            on_sse=None,
+        ):
             """
             Create a new data pipe (usually called via client.pipe()).
 
@@ -293,7 +301,9 @@ class DataMixin(DAPClient):
         out['size'] = size if size else 1
         return out
 
-    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe:
+    async def pipe(
+        self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None
+    ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
 
@@ -642,7 +652,10 @@ class DataMixin(DAPClient):
         # Create a coroutine for every file - let server handle queuing
         self.debug_message(f'Starting upload of {len(normalized_files)} files (token={token})')
 
-        upload_tasks = [upload_file(index, filepath, objinfo, mimetype) for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)]
+        upload_tasks = [
+            upload_file(index, filepath, objinfo, mimetype)
+            for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)
+        ]
 
         # Wait for all uploads to complete
         await asyncio.gather(*upload_tasks, return_exceptions=True)
@@ -652,6 +665,8 @@ class DataMixin(DAPClient):
         failed_uploads = len(results) - successful_uploads
         total_bytes = sum(r.get('bytes_sent', 0) for r in results if r and r.get('action') == 'complete')
 
-        self.debug_message(f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred (token={token})')
+        self.debug_message(
+            f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred (token={token})'
+        )
 
         return results

@@ -67,7 +67,10 @@ class IInstance(IInstanceBase):
             Question: Configured question object for chunking operations.
         """
         # Setup a question to ask the LLM
-        question: Question = Question(type=QuestionType.QUESTION, role='You are a document processing assistant that prepares content for vector embedding storage.')
+        question: Question = Question(
+            type=QuestionType.QUESTION,
+            role='You are a document processing assistant that prepares content for vector embedding storage.',
+        )
 
         # Get the number of tokens per chunk
         tokens = self.IGlobal.numberOfTokens
@@ -350,7 +353,10 @@ class IInstance(IInstanceBase):
             total_len_needed = curr_len + separator_len
 
             # Check if adding this text would exceed either limit
-            if control.current_token_accumulator + total_tokens_needed >= max_tokens_per_chunk or control.current_length_accumulator + total_len_needed >= max_text_per_chunk:
+            if (
+                control.current_token_accumulator + total_tokens_needed >= max_tokens_per_chunk
+                or control.current_length_accumulator + total_len_needed >= max_text_per_chunk
+            ):
                 # If current chunk has content, push it first
                 if control.current_text_chunk:
                     _push_chunk(control)

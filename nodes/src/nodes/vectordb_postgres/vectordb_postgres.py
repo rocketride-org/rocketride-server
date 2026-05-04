@@ -50,7 +50,6 @@ MIN_SIMILARITY_SCORE = 0.20
 # SQL Queries
 SQL_QUERIES = {
     'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
-    # fmt: off
     'create_collection': (
         'CREATE TABLE IF NOT EXISTS {collection} ('
         'id bigserial PRIMARY KEY, '
@@ -68,7 +67,6 @@ SQL_QUERIES = {
         'embedding vector({vector_size})'
         ');'
     ),
-    # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
     'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
@@ -111,7 +109,9 @@ class Store(DocumentStoreBase):
         # Save our parameters — validate to prevent SQL injection via .format()
         self.collection = ((config.get('table') or config.get('collection')) or '').strip()
         if not self.collection or not VALID_TABLE.fullmatch(self.collection):
-            raise ValueError(f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).')
+            raise ValueError(
+                f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).'
+            )
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = config.get('host').strip()
@@ -128,9 +128,13 @@ class Store(DocumentStoreBase):
         if similarity in ['cosine', 'l2', 'inner_product']:
             self.similarity = self.similarityDict[similarity]
         else:
-            raise Exception('The metric you provided in the config.json does not match required postgres configurations')
+            raise Exception(
+                'The metric you provided in the config.json does not match required postgres configurations'
+            )
 
-        self.client = psycopg2.connect(dbname=self.database, user=self.user, password=self.password, host=self.host, port=self.port)
+        self.client = psycopg2.connect(
+            dbname=self.database, user=self.user, password=self.password, host=self.host, port=self.port
+        )
 
         register_vector(self.client)
 
@@ -242,12 +246,34 @@ class Store(DocumentStoreBase):
             # Get the payload content and metadata
             metadata_dict = {k: v for k, v in point.items() if k not in {'content', 'embedding', 'distance'}}
 
-            key_map = {'objectid': 'objectId', 'nodeid': 'nodeId', 'permissionid': 'permissionId', 'isdeleted': 'isDeleted', 'chunkid': 'chunkId', 'istable': 'isTable', 'tableid': 'tableId', 'modelname': 'modelName', 'vectorsize': 'vectorSize'}
+            key_map = {
+                'objectid': 'objectId',
+                'nodeid': 'nodeId',
+                'permissionid': 'permissionId',
+                'isdeleted': 'isDeleted',
+                'chunkid': 'chunkId',
+                'istable': 'isTable',
+                'tableid': 'tableId',
+                'modelname': 'modelName',
+                'vectorsize': 'vectorSize',
+            }
 
             renamed_metadata = {key_map.get(k, k): v for k, v in metadata_dict.items()}
 
             # Create a new dictionary with only the expected keys
-            expected_keys = ['objectId', 'nodeId', 'parent', 'permissionId', 'isDeleted', 'chunkId', 'isTable', 'tableId', 'modelName', 'vectorSize', 'id']
+            expected_keys = [
+                'objectId',
+                'nodeId',
+                'parent',
+                'permissionId',
+                'isDeleted',
+                'chunkId',
+                'isTable',
+                'tableId',
+                'modelName',
+                'vectorSize',
+                'id',
+            ]
             filtered_metadata = {k: v for k, v in renamed_metadata.items() if k in expected_keys}
 
             # Ensure modelName and vectorSize have default values if not present or None
@@ -327,7 +353,10 @@ class Store(DocumentStoreBase):
 
         with self.client.cursor() as cur:
             where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''
-            cur.execute(SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause), query_params + [docFilter.limit])
+            cur.execute(
+                SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause),
+                query_params + [docFilter.limit],
+            )
             results = cur.fetchall()
 
         # Convert results to dictionary
@@ -348,7 +377,10 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql), params + [docFilter.limit])
+            cur.execute(
+                SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
+                params + [docFilter.limit],
+            )
             results = cur.fetchall()
 
         points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
@@ -376,7 +408,10 @@ class Store(DocumentStoreBase):
         where_sql = ' AND '.join(where_clauses)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql), params + [offset, limit])
+            cur.execute(
+                SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql),
+                params + [offset, limit],
+            )
             results = cur.fetchall()
 
         paths = {row[0]: row[1] for row in results}
@@ -407,7 +442,12 @@ class Store(DocumentStoreBase):
                     data['modelName'] = ''
                 columns = ', '.join(data.keys())
                 placeholders = ', '.join(['%s'] * len(data))
-                cur.execute(SQL_QUERIES['insert_chunk'].format(collection=self.collection, columns=columns, placeholders=placeholders), list(data.values()))
+                cur.execute(
+                    SQL_QUERIES['insert_chunk'].format(
+                        collection=self.collection, columns=columns, placeholders=placeholders
+                    ),
+                    list(data.values()),
+                )
             self.client.commit()
 
     def remove(self, objectIds: List[str]) -> None:
@@ -462,7 +502,10 @@ class Store(DocumentStoreBase):
         offset = 0
         while True:
             with self.client.cursor() as cur:
-                cur.execute(SQL_QUERIES['render_document'].format(collection=self.collection), (objectId, offset, offset + self.renderChunkSize))
+                cur.execute(
+                    SQL_QUERIES['render_document'].format(collection=self.collection),
+                    (objectId, offset, offset + self.renderChunkSize),
+                )
                 results = cur.fetchall()
 
             if not results:
@@ -507,7 +550,12 @@ class Store(DocumentStoreBase):
         embedding_arr = np.array(query.embedding)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['semantic_search'].format(collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql), (embedding_arr, *params, docFilter.limit))
+            cur.execute(
+                SQL_QUERIES['semantic_search'].format(
+                    collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
+                ),
+                (embedding_arr, *params, docFilter.limit),
+            )
             results = cur.fetchall()
 
         # Convert results to dictionary

@@ -92,9 +92,19 @@ class IInstance(IInstanceBase):
                     'description': 'Advanced auth config. Prefer bearer_token or basic_auth shortcuts instead.',
                     'properties': {
                         'type': {'type': 'string', 'enum': ['api_key', 'basic', 'bearer', 'none']},
-                        'basic': {'type': 'object', 'properties': {'username': {'type': 'string'}, 'password': {'type': 'string'}}},
+                        'basic': {
+                            'type': 'object',
+                            'properties': {'username': {'type': 'string'}, 'password': {'type': 'string'}},
+                        },
                         'bearer': {'type': 'object', 'properties': {'token': {'type': 'string'}}},
-                        'api_key': {'type': 'object', 'properties': {'key': {'type': 'string'}, 'value': {'type': 'string'}, 'add_to': {'type': 'string', 'enum': ['header', 'query_param']}}},
+                        'api_key': {
+                            'type': 'object',
+                            'properties': {
+                                'key': {'type': 'string'},
+                                'value': {'type': 'string'},
+                                'add_to': {'type': 'string', 'enum': ['header', 'query_param']},
+                            },
+                        },
                     },
                 },
                 'body': {
@@ -102,7 +112,22 @@ class IInstance(IInstanceBase):
                     'description': 'Advanced body config. Prefer body_json shortcut for JSON payloads.',
                     'properties': {
                         'type': {'type': 'string', 'enum': ['form_data', 'none', 'raw', 'x_www_form_urlencoded']},
-                        'raw': {'type': 'object', 'properties': {'content': {'type': 'string'}, 'content_type': {'type': 'string', 'enum': ['application/json', 'application/xml', 'text/html', 'text/javascript', 'text/plain']}}},
+                        'raw': {
+                            'type': 'object',
+                            'properties': {
+                                'content': {'type': 'string'},
+                                'content_type': {
+                                    'type': 'string',
+                                    'enum': [
+                                        'application/json',
+                                        'application/xml',
+                                        'text/html',
+                                        'text/javascript',
+                                        'text/plain',
+                                    ],
+                                },
+                            },
+                        },
                         'form_data': {'type': 'object', 'additionalProperties': {'type': 'string'}},
                         'urlencoded': {'type': 'object', 'additionalProperties': {'type': 'string'}},
                     },
@@ -161,7 +186,9 @@ class IInstance(IInstanceBase):
         if method.upper() not in valid_methods:
             raise ValueError(f'method must be one of {sorted(valid_methods)}; got {method!r}')
         if method.upper() not in self.IGlobal.enabled_methods:
-            raise ValueError(f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(self.IGlobal.enabled_methods))}')
+            raise ValueError(
+                f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(self.IGlobal.enabled_methods))}'
+            )
 
         url = args.get('url')
         if not url or not isinstance(url, str):
@@ -203,14 +230,22 @@ class IInstance(IInstanceBase):
                     raise ValueError('body.raw.content_type must be a string')
                 ct = ct_val.strip().lower()
                 if ct not in valid_raw_content_types:
-                    raise ValueError(f'body.raw.content_type must be one of {sorted(valid_raw_content_types)}; got {ct!r}')
+                    raise ValueError(
+                        f'body.raw.content_type must be one of {sorted(valid_raw_content_types)}; got {ct!r}'
+                    )
 
 
 def _normalize_shortcuts(args):
     """Expand convenience shortcuts (body_json, bearer_token, basic_auth) into canonical form."""
     body_json = args.pop('body_json', None)
     if body_json is not None and not args.get('body'):
-        content_str = json.dumps(body_json) if isinstance(body_json, (dict, list)) else body_json if isinstance(body_json, str) else json.dumps(body_json)
+        content_str = (
+            json.dumps(body_json)
+            if isinstance(body_json, (dict, list))
+            else body_json
+            if isinstance(body_json, str)
+            else json.dumps(body_json)
+        )
         args['body'] = {'type': 'raw', 'raw': {'content': content_str, 'content_type': 'application/json'}}
 
     bearer_token = args.pop('bearer_token', None)

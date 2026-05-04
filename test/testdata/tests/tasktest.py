@@ -83,7 +83,9 @@ def main():  # noqa: D103
 
     if args.signing:
         assert ins_out.field_count['componentId'] == ins_inp.count, f'{ins_out.file_name}: no hashes'
-        assert all(re.match(r'^[0-9a-fA-F]{128}$', componentId) for componentId in ins_out.field_values['componentId']), f'{ins_out.file_name}: wrong hashes'
+        assert all(
+            re.match(r'^[0-9a-fA-F]{128}$', componentId) for componentId in ins_out.field_values['componentId']
+        ), f'{ins_out.file_name}: wrong hashes'
     else:
         assert ins_out.field_count['componentId'] == 0, f'{ins_out.file_name}: unexpected hashes'
 
@@ -94,7 +96,9 @@ def main():  # noqa: D103
         assert ins_out.objects['I'].field_count['wordBatchId'] == 0, f'{ins_out.file_name}: unexpected word batches'
 
     if args.vectorize:
-        assert ins_out.objects['I'].field_count['vectorBatchId'] == ins_inp.count, f'{ins_out.file_name}: no vector batches'
+        assert ins_out.objects['I'].field_count['vectorBatchId'] == ins_inp.count, (
+            f'{ins_out.file_name}: no vector batches'
+        )
     else:
         assert ins_out.objects['I'].field_count['vectorBatchId'] == 0, f'{ins_out.file_name}: unexpected vector batches'
 
@@ -113,7 +117,9 @@ def main():  # noqa: D103
 
     if args.classify:
         assert cls_out.count == cls_inp.count, f'{cls_out.file_name}: no entries'
-        assert cls_out.objects['C'].count + cls_out.objects['E'].count == cls_out.count, f'{cls_out.file_name}: unexpected entries'
+        assert cls_out.objects['C'].count + cls_out.objects['E'].count == cls_out.count, (
+            f'{cls_out.file_name}: unexpected entries'
+        )
         assert cls_out.field_count['classifications'] > 0, f'{cls_out.file_name}: no classifications'
     else:
         assert cls_out.count == 0, f'{cls_out.file_name}: unexpected entries'
@@ -294,16 +300,16 @@ def reset_workdir():
 
 def configure_source(args):
     """Configure user.json file, set specified service as scan service and update appropiate scan flags."""
-    # fmt: off
-    service_flags = ''.join((
-        '[sign]' if args.signing else '',
-        '[perms]' if args.permissions else '',
-        '[index]' if args.index else '',
-        '[ai]' if args.vectorize else '',
-        '[ocr]' if args.ocr else '',
-        '[classify]' if args.classify else ''
-    ))
-    # fmt: on
+    service_flags = ''.join(
+        (
+            '[sign]' if args.signing else '',
+            '[perms]' if args.permissions else '',
+            '[index]' if args.index else '',
+            '[ai]' if args.vectorize else '',
+            '[ocr]' if args.ocr else '',
+            '[classify]' if args.classify else '',
+        )
+    )
     if not service_flags:
         service_flags = '[core]'
     print(f'Configure: {args.service_type} {service_flags}')
@@ -314,13 +320,15 @@ def configure_source(args):
 
     service_key = None
     for service_key_, service_config in config['services'].items():
-        if service_config.get('type', '').casefold() == args.service_type.casefold() and service_config.get('mode', '').casefold() == 'source':
+        if (
+            service_config.get('type', '').casefold() == args.service_type.casefold()
+            and service_config.get('mode', '').casefold() == 'source'
+        ):
             service_key = service_key_
             break
     else:
         raise Exception(f'source service configuration not found: {args.service_type}')
 
-    # fmt: off
     config_update = {
         'variables': {'sourceService': service_key},
         'services': {
@@ -332,13 +340,12 @@ def configure_source(args):
                         'index': args.index,
                         'ocr': args.ocr,
                         'vectorize': args.vectorize,
-                        'classify': args.classify
+                        'classify': args.classify,
                     }
                 ],
             }
         },
     }
-    # fmt: on
 
     if args.include_path:
         config_update['services'][service_key]['include'][0]['path'] = args.include_path
@@ -356,7 +363,6 @@ def engine(*args):
 
 def task(task_name: str):
     """Execute specified test tasks."""
-    # fmt: off
     tasks = sorted(
         (
             (path, name, int(m.group(1)))
@@ -366,9 +372,8 @@ def task(task_name: str):
             )
             if m and name != '05-scanConsole.json'
         ),
-        key=lambda x: x[2]
+        key=lambda x: x[2],
     )
-    # fmt: on
 
     # engine(join(TESTDATA_DIR, 'tasks', task_name))
 

@@ -486,7 +486,9 @@ class TestCombinedEvaluation:
 
     def test_output_evaluation_runs_all_enabled(self):
         engine = _make_engine()
-        result = engine.evaluate('The answer is 42.', mode='output', context={'source_documents': ['The answer is 42.']})
+        result = engine.evaluate(
+            'The answer is 42.', mode='output', context={'source_documents': ['The answer is 42.']}
+        )
         assert result['passed']
         assert 'content_safety' in result['scores']
         assert 'pii_leak' in result['scores']

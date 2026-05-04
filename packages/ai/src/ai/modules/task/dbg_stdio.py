@@ -91,7 +91,13 @@ class DbgStdio(DAPClient):
     Example Usage:
         ```python
         # Create subprocess
-        process = await asyncio.create_subprocess_exec('python', 'task_engine.py', stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(
+            'python',
+            'task_engine.py',
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
 
         # Create DAP client with transport
         client = DbgStdio(process=process, token='TASK1')

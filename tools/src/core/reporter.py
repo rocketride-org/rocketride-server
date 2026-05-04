@@ -172,7 +172,13 @@ def format_pr_body(report: SyncReport) -> str:
     lines.append('Automated sync of provider model lists against `services.json` profiles.')
     lines.append('')
 
-    if not report.has_any_changes() and not any(p.skipped for p in report.providers) and not any(p.warning for p in report.providers) and not any(p.error for p in report.providers) and not any(p.discovery_skipped for p in report.providers):
+    if (
+        not report.has_any_changes()
+        and not any(p.skipped for p in report.providers)
+        and not any(p.warning for p in report.providers)
+        and not any(p.error for p in report.providers)
+        and not any(p.discovery_skipped for p in report.providers)
+    ):
         lines.append('_No changes detected._')
         return '\n'.join(lines)
 
@@ -201,7 +207,9 @@ def format_pr_body(report: SyncReport) -> str:
             lines.append('')
 
         if pr.discovery_skipped:
-            lines.append('_Discovery skipped — set the provider API key or pass `--allow-fallback-discovery` to enable discovery via OpenRouter/LiteLLM._')
+            lines.append(
+                '_Discovery skipped — set the provider API key or pass `--allow-fallback-discovery` to enable discovery via OpenRouter/LiteLLM._'
+            )
             lines.append('')
 
         if pr.added:

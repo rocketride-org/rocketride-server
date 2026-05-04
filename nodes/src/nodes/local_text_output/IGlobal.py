@@ -88,10 +88,19 @@ class IGlobal(IGlobalBase):
             if platform == 'win32':
                 invalid_characters = ['<', '>', ':', '"', '/', '|', '?', '*']
 
-                if storePath is not None and isinstance(storePath, str) and any(char in storePath for char in invalid_characters):
+                if (
+                    storePath is not None
+                    and isinstance(storePath, str)
+                    and any(char in storePath for char in invalid_characters)
+                ):
                     raise Exception(f'Invalid output path: {storePath}')
 
-                if excludePath is not None and isinstance(excludePath, str) and excludePath != 'N/A' and any(char in excludePath for char in invalid_characters):
+                if (
+                    excludePath is not None
+                    and isinstance(excludePath, str)
+                    and excludePath != 'N/A'
+                    and any(char in excludePath for char in invalid_characters)
+                ):
                     raise Exception(f'Invalid exclude path: {excludePath}')
 
         except Exception as e:

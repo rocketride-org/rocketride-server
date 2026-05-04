@@ -269,7 +269,9 @@ class ExecutionMixin(DAPClient):
                     loop = asyncio.get_running_loop()
                     pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
             except FileNotFoundError as err:
-                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
+                raise FileNotFoundError(
+                    f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration."
+                ) from err
         else:
             # Keep behavior consistent with filepath-based loading
             pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
