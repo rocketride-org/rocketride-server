@@ -202,7 +202,7 @@ const uri = process.env.ROCKETRIDE_URI;
 const auth = process.env.ROCKETRIDE_APIKEY;
 
 if (!uri || !auth) {
-	const missing = [];
+	const missing: string[] = [];
 	if (!uri) missing.push('ROCKETRIDE_URI');
 	if (!auth) missing.push('ROCKETRIDE_APIKEY');
 	console.error(`❌ Error: ${missing.join(' and ')} must be set in .env`);
@@ -385,7 +385,7 @@ const uri = process.env.ROCKETRIDE_URI;
 const auth = process.env.ROCKETRIDE_APIKEY;
 
 if (!uri || !auth) {
-	const missing = [];
+	const missing: string[] = [];
 	if (!uri) missing.push('ROCKETRIDE_URI');
 	if (!auth) missing.push('ROCKETRIDE_APIKEY');
 	console.error(`❌ Error: ${missing.join(' and ')} must be set in .env`);
@@ -402,16 +402,20 @@ const client = new RocketRideClient({
 
 let isConnected = false;
 
-app.listen(3000, async () => {
+async function start() {
 	try {
 		await client.connect();
 		isConnected = true;
-		console.log('Server running on http://localhost:3000');
+		app.listen(3000, () => {
+			console.log('Server running on http://localhost:3000');
+		});
 	} catch (error) {
 		console.error('Failed to connect to RocketRide:', error);
 		process.exit(1);
 	}
-});
+}
+
+void start();
 
 process.on('SIGTERM', async () => {
 	if (isConnected) {
@@ -423,6 +427,11 @@ process.on('SIGTERM', async () => {
 app.post('/ask', async (req: Request, res: Response): Promise<void> => {
 	const { text } = req.body;
 	let token: string | undefined;
+
+	if (!isConnected) {
+		res.status(503).json({ error: 'RocketRide client is not connected yet' });
+		return;
+	}
 
 	if (!text) {
 		res.status(400).json({ error: 'text field is required' });
