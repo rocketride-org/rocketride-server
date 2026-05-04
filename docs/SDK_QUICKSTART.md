@@ -465,18 +465,18 @@ curl -X POST http://localhost:3000/ask \
 
 ## Troubleshooting
 
-| Error                       | Solution                                                                     |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| `Connection refused`        | Is the engine running? Check `curl http://localhost:5565/health`             |
-| `simple_llm.pipe not found` | Copy the pipeline file to your project directory                             |
-| `No answer received`        | Check the LLM API key in the pipeline config (`ROCKETRIDE_OPENAI_KEY`, etc.) |
-| `Task token is required`    | Ensure you're using `mimetype='text/plain'` when sending data                |
+| Error                       | Solution                                                                                                                                                  |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Connection refused`        | Is the engine running? Check `curl http://localhost:5565/health`                                                                                          |
+| `simple_llm.pipe not found` | Copy the pipeline file to your project directory                                                                                                          |
+| `No answer received`        | Check the LLM API key in the pipeline config (`ROCKETRIDE_OPENAI_KEY`, etc.)                                                                              |
+| `Task token is required`    | Verify you're passing a valid token argument to `send()` (e.g., `send(token, ...)`) — check token variable is populated and not lost during serialization |
 
 ---
 
 ## Next Steps
 
 - **Build your own pipeline:** Open a `.pipe` file in VS Code with the RocketRide extension
-- **More examples:** See `/examples/` directory for RAG, agent workflows, and more
+- **More examples:** See `../examples/` directory for RAG, agent workflows, and more
 - **API reference:** See [Python API docs](./agents/ROCKETRIDE_python_API.md) or [TypeScript API docs](./agents/ROCKETRIDE_typescript_API.md)
 - **Component reference:** [All 50+ pipeline nodes](./agents/ROCKETRIDE_COMPONENT_REFERENCE.md)
