@@ -1,0 +1,220 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM Translate",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "translate_llm://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Python module path for this node.
+	//
+	"path": "nodes.translate_llm",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths.
+	//
+	"prefix": "translate_llm",
+	//
+	// Optional:
+	//		Description of this driver.
+	//
+	"description": ["Translates text between languages using any connected LLM. ", "Accepts plain text or document segments (preserving per-segment timestamps) and emits ", "the translated content on the matching lane. Wire any LLM node (OpenAI, Anthropic, Gemini, etc.) ", "to the llm invoke channel. Use in subtitle pipelines to translate transcripts produced by the ", "Transcribe component while retaining timing for video playback."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node.
+	//
+	"icon": "translate-llm.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		Invoke channels — the LLM is connected here rather than embedded in the node.
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM used for translation",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces.
+	//
+	"lanes": {
+		"text": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Plain text to translate",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Translated text"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Timed document segments (e.g., transcript chunks) to translate",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Translated segments with timestamps preserved"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section - configuration values for the driver.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"targetLanguage": "en",
+				"sourceLanguage": "",
+				"style": "standard",
+				"customPrompt": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions.
+	//
+	"fields": {
+		"translate_llm.sourceLanguage": {
+			"type": "string",
+			"title": "Source language",
+			"description": "BCP-47 code of the input language. Leave blank to auto-detect.",
+			"default": "",
+			"enum": [
+				["", "Auto-detect"],
+				["en", "English"],
+				["es", "Spanish"],
+				["fr", "French"],
+				["de", "German"],
+				["it", "Italian"],
+				["pt", "Portuguese"],
+				["ru", "Russian"],
+				["zh", "Chinese (Simplified)"],
+				["zh-TW", "Chinese (Traditional)"],
+				["ja", "Japanese"],
+				["ko", "Korean"],
+				["ar", "Arabic"],
+				["hi", "Hindi"],
+				["nl", "Dutch"],
+				["pl", "Polish"],
+				["tr", "Turkish"],
+				["uk", "Ukrainian"],
+				["vi", "Vietnamese"],
+				["ro", "Romanian"]
+			]
+		},
+		"translate_llm.targetLanguage": {
+			"type": "string",
+			"title": "Target language",
+			"description": "BCP-47 code of the output language.",
+			"default": "en",
+			"minLength": 2,
+			"enum": [
+				["en", "English"],
+				["es", "Spanish"],
+				["fr", "French"],
+				["de", "German"],
+				["it", "Italian"],
+				["pt", "Portuguese"],
+				["ru", "Russian"],
+				["zh", "Chinese (Simplified)"],
+				["zh-TW", "Chinese (Traditional)"],
+				["ja", "Japanese"],
+				["ko", "Korean"],
+				["ar", "Arabic"],
+				["hi", "Hindi"],
+				["nl", "Dutch"],
+				["pl", "Polish"],
+				["tr", "Turkish"],
+				["uk", "Ukrainian"],
+				["vi", "Vietnamese"],
+				["ro", "Romanian"]
+			]
+		},
+		"translate_llm.style": {
+			"type": "string",
+			"title": "Translation style",
+			"description": "Controls the register and terminology emphasis of the translation.",
+			"default": "standard",
+			"enum": [
+				["standard", "Standard"],
+				["technical", "Technical"],
+				["formal", "Formal"],
+				["casual", "Casual"],
+				["literary", "Literary"],
+				["custom", "Custom"]
+			]
+		},
+		"translate_llm.customPrompt": {
+			"optional": true,
+			"type": "string",
+			"title": "Custom instructions",
+			"description": "Full translation instruction passed to the LLM. Used only when Translation style is set to Custom.",
+			"default": ""
+		},
+		"translate_llm.default": {
+			"object": "default",
+			"properties": ["translate_llm.sourceLanguage", "translate_llm.targetLanguage", "translate_llm.style", "translate_llm.customPrompt"]
+		},
+		"translate_llm.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["translate_llm.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		UI shape definition.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM Translate",
+			"properties": ["translate_llm.profile"]
+		}
+	]
+}
