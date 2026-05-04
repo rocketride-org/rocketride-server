@@ -59,9 +59,11 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import sys
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
+from rocketlib import getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
@@ -270,6 +272,19 @@ class TaskConn(
         the connection is scheduled for disconnect. Successful auth does not reset
         the counter: the cap is a per-connection lifetime limit.
         """
+        args = request.get('arguments') or {}
+
+        # Info-only probe: return server metadata without authenticating.
+        # Does not count toward auth attempts or change connection state.
+        if args.get('infoOnly'):
+            account = self._server._server.account
+            info = {
+                'version': getVersion(),
+                'capabilities': account.capabilities,
+                'platform': sys.platform,
+            }
+            return self.build_response(request, body=info)
+
         # Count every call (including empty/deauth and re-auth) toward the cap.
         self._auth_attempts += 1
         if self._auth_attempts > CONST_AUTH_MAX_ATTEMPTS_PER_CONN:
@@ -278,7 +293,6 @@ class TaskConn(
             self._transport.disconnect()
             return
 
-        args = request.get('arguments') or {}
         credential = args.get('auth') or ''
 
         if not credential:

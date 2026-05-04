@@ -202,7 +202,7 @@
 	},
 	//
 	//	Full test configuration - tests all sentence-transformer profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

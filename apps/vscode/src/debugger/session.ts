@@ -80,8 +80,8 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		const uri = this.configManager.getHttpUrl();
 
 		let apiKey: string | undefined;
-		if (rocketrideConfig.connectionMode === 'cloud' || rocketrideConfig.connectionMode === 'onprem') {
-			apiKey = rocketrideConfig.apiKey;
+		if (rocketrideConfig.development.connectionMode === 'cloud' || rocketrideConfig.development.connectionMode === 'onprem') {
+			apiKey = rocketrideConfig.development.apiKey;
 		} else {
 			apiKey = 'MYAPIKEY';
 		}
@@ -256,7 +256,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		try {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
-				message.arguments.args = this.configManager.getEffectiveEngineArgs();
+				message.arguments.args = this.configManager.getEngineArgs('development');
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;
 			}

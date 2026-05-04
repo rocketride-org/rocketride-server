@@ -4,49 +4,51 @@
 // =============================================================================
 
 /**
- * OnPremModeFields — shared config fields for "On-prem" connection mode.
+ * OnPremPanel — target panel for On-prem connection mode.
  *
- * Renders: host URL, API key with show/hide toggle, auto-connect, optional
- * test-connection button, debug output checkbox.
- * Used by both ConnectionSettings (dev) and DeployTargetSettings (deploy).
+ * Renders: host URL, API key with show/hide toggle, optional test-connection
+ * button, debug output checkbox.
+ * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
 import React, { useState } from 'react';
-import { MessageData, settingsStyles as S } from '../PageSettings/SettingsWebview';
-import { MessageDisplay } from '../PageSettings/MessageDisplay';
+import onpremIcon from '../../../../assets/onprem.svg';
+import { MessageData, settingsStyles as S } from '../../PageSettings/SettingsWebview';
+import { MessageDisplay } from '../../PageSettings/MessageDisplay';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface OnPremModeFieldsProps {
+export interface OnPremPanelProps {
 	hostUrl: string;
 	onHostUrlChange: (url: string) => void;
 	apiKey: string;
 	onApiKeyChange: (key: string) => void;
 	onClearApiKey?: () => void;
-	autoConnect: boolean;
-	onAutoConnectChange: (checked: boolean) => void;
 	debugOutput: boolean;
 	onDebugOutputChange: (checked: boolean) => void;
-	onTestConnection?: () => void;
+	onTestConnection?: (hostUrl: string, apiKey: string) => void;
 	testMessage?: MessageData | null;
-	/** HTML id prefix to avoid duplicate ids when mounted in multiple panels. */
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, autoConnect, onAutoConnectChange, debugOutput, onDebugOutputChange, onTestConnection, testMessage, idPrefix }) => {
+export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, debugOutput, onDebugOutputChange, onTestConnection, testMessage, idPrefix, simplified }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 	const id = (name: string) => `${idPrefix}-${name}`;
 
 	return (
 		<>
-			<div style={S.modeConfigDesc}>Connect to your own hosted RocketRide server.</div>
+			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+				<img src={onpremIcon} alt="On-prem" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Connect directly to a RocketRide server using a host address and API key.</div>
+			</div>
 
 			{/* Host URL */}
 			<div style={S.formGroup}>
@@ -77,7 +79,7 @@ export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onH
 							padding: '8px 12px',
 							borderRadius: 4,
 							cursor: 'pointer',
-							fontSize: 20,
+							fontSize: 12,
 							minWidth: 44,
 							display: 'flex',
 							alignItems: 'center',
@@ -91,7 +93,7 @@ export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onH
 								: {}),
 						}}
 					>
-						{showApiKey ? '\u{1F648}' : '\u{1F50D}'}
+						{showApiKey ? 'Hide' : 'Show'}
 					</button>
 					{apiKey.trim() && onClearApiKey && (
 						<button type="button" onClick={onClearApiKey} title="Clear stored API key" style={{ padding: '6px 12px', fontSize: 12 }}>
@@ -102,37 +104,25 @@ export const OnPremModeFields: React.FC<OnPremModeFieldsProps> = ({ hostUrl, onH
 				<div style={S.helpText}>API key is saved securely when you save settings.</div>
 			</div>
 
-			{/* Debug output */}
-			<div style={S.formGroup}>
-				<div>
-					<input type="checkbox" id={id('debugOutput')} checked={debugOutput} onChange={(e) => onDebugOutputChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-					<label htmlFor={id('debugOutput')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-						Full debug output
-					</label>
+			{/* Debug output (hidden in simplified/welcome mode) */}
+			{!simplified && (
+				<div style={S.formGroup}>
+					<div>
+						<input type="checkbox" id={id('debugOutput')} checked={debugOutput} onChange={(e) => onDebugOutputChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+						<label htmlFor={id('debugOutput')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
+							Full debug output
+						</label>
+					</div>
+					<div style={S.helpText}>Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
 				</div>
-				<div style={S.helpText}>Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
-			</div>
-
-			{/* Auto-connect */}
-			<div style={S.formGroup}>
-				<label htmlFor={id('autoConnect')} style={S.label}>
-					Auto-connect on startup
-				</label>
-				<div>
-					<input type="checkbox" id={id('autoConnect')} checked={autoConnect} onChange={(e) => onAutoConnectChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-					<label htmlFor={id('autoConnect')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-						Automatically connect when extension starts
-					</label>
-				</div>
-				<div style={S.helpText}>Enable to connect automatically on startup</div>
-			</div>
+			)}
 
 			{/* Test connection */}
 			{onTestConnection && (
 				<div style={{ ...S.formGroup, alignItems: 'flex-end' }}>
 					<button
 						type="button"
-						onClick={onTestConnection}
+						onClick={() => onTestConnection(hostUrl, apiKey)}
 						title="Test connection to the server"
 						style={{
 							width: 'auto',

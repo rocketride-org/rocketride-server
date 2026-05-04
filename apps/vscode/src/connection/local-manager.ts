@@ -35,7 +35,7 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { BaseManager, ManagerInfo } from './base-manager';
 import { EngineManager } from './engine-manager';
-import { ConfigManagerInfo } from '../config';
+import { ConnectionGroupConfig } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
@@ -69,7 +69,7 @@ export class LocalManager extends BaseManager {
 	// LIFECYCLE
 	// =========================================================================
 
-	async connect(client: RocketRideClient, config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void> {
+	async connect(client: RocketRideClient, config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
 		// Install engine if needed and start the process
 		await this.engine.start(config, token);
 
