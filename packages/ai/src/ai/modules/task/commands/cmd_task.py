@@ -296,7 +296,9 @@ class TaskCommands(DAPConn):
             source = args.get('source', None)
 
             # Get the task control (ownership + permission check inside)
-            control = self._server.get_task_control_by_project(project_id, source, self._account_info, require='task.monitor')
+            control = self._server.get_task_control_by_project(
+                project_id, source, self._account_info, require='task.monitor'
+            )
 
             # Return successful response with status data
             return self.build_response(
@@ -348,7 +350,11 @@ class TaskCommands(DAPConn):
                 # Read name and description from the flat project
                 project = control.pipeline or {}
                 pipeline_name = project.get('name') if isinstance(project, dict) else None
-                pipeline_desc = project.get('description') if isinstance(project, dict) and isinstance(project.get('description'), str) else None
+                pipeline_desc = (
+                    project.get('description')
+                    if isinstance(project, dict) and isinstance(project.get('description'), str)
+                    else None
+                )
 
                 # Build the name and description; fall back to source/default if not present.
                 name = pipeline_name or control.source

@@ -327,7 +327,11 @@ class UploadProgressMonitor(BoxMonitor):
         for failed_file in failed_files[:10]:
             error_width = self.width - 34  # Reserve space for formatting
             filename = failed_file['name'][:25] + '...' if len(failed_file['name']) > 25 else failed_file['name']
-            error_msg = failed_file['error'][:error_width] + '...' if len(failed_file['error']) > error_width else failed_file['error']
+            error_msg = (
+                failed_file['error'][:error_width] + '...'
+                if len(failed_file['error']) > error_width
+                else failed_file['error']
+            )
             failure_lines.append(f'{ANSI_RED}{CHR_CROSS}{ANSI_RESET} {filename} - {error_msg}')
 
         # Add truncation message if there are more failures
@@ -355,7 +359,9 @@ class UploadProgressMonitor(BoxMonitor):
 
         # Show the 5 most recent successful uploads
         for success_file in successful_files[-5:]:
-            truncated_name = success_file['name'][:35] + '...' if len(success_file['name']) > 35 else success_file['name']
+            truncated_name = (
+                success_file['name'][:35] + '...' if len(success_file['name']) > 35 else success_file['name']
+            )
             size_str = format_size(success_file['size'])
             time_str = f'{success_file["time"]:.1f}s'
             success_lines.append(f'{ANSI_GREEN}{CHR_CHECK}{ANSI_RESET} {truncated_name} ({size_str}, {time_str})')

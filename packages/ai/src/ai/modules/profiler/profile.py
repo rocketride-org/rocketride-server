@@ -45,7 +45,12 @@ class WebServerProfiler:
 
         self.profiler.enable()
 
-        return {'message': f'Started profiling session: {self.session_name}', 'status': 'started', 'session': self.session_name, 'start_time': self.start_time}
+        return {
+            'message': f'Started profiling session: {self.session_name}',
+            'status': 'started',
+            'session': self.session_name,
+            'start_time': self.start_time,
+        }
 
     def stop_profiling(self) -> Dict[str, Any]:
         """Stop the current profiling session and generate report."""
@@ -99,7 +104,14 @@ class WebServerProfiler:
         s.truncate(0)
 
         # Store in history
-        profile_record = {'session': self.session_name, 'start_time': self.start_time, 'end_time': end_time, 'runtime': runtime, 'timestamp': int(time.time()), 'summary': top_functions}
+        profile_record = {
+            'session': self.session_name,
+            'start_time': self.start_time,
+            'end_time': end_time,
+            'runtime': runtime,
+            'timestamp': int(time.time()),
+            'summary': top_functions,
+        }
         self.profiles_history.append(profile_record)
 
         # Keep only last 10 profiles in history

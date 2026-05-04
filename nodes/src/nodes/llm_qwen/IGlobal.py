@@ -58,7 +58,14 @@ class IGlobal(IGlobalBase):
             depends(requirements)
 
             # Prefer provider-driven exceptions vs string parsing
-            from openai import OpenAI, APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                OpenAIError,
+                AuthenticationError,
+                RateLimitError,
+                APIConnectionError,
+            )
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)

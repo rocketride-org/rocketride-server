@@ -23,11 +23,12 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { ConfigManager } from '../config';
-import { ConnectionManager } from '../connection/connection';
+import { ConnectionManager, isCloudConnected } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
-import { GenericEvent } from '../shared/types';
+import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
+import { isSubscribed } from '../shared/util/subscriptionGate';
 import { getPageProjectProvider } from '../extension';
 
 // =============================================================================
@@ -125,25 +126,25 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
 						break;
 					case 'setDevelopmentMode':
-						await this.configManager.updateConnectionMode(message.mode);
+						await this.configManager.updateConnectionMode('development', message.mode);
 						break;
 					case 'setDevelopmentTeam':
-						this.configManager.setDevelopmentTeamId(message.teamId);
+						this.configManager.setTeamId('development', message.teamId);
 						this.sendFullUpdate();
 						break;
 					case 'setDeployTargetMode':
-						await this.configManager.updateDeployTargetMode(message.mode);
+						await this.configManager.updateConnectionMode('deployment', message.mode);
 						// Reconnect the DEPLOY manager (not dev) when deploy mode changes
 						await this.deployManager.disconnect();
 						await this.deployManager.initialize();
 						break;
 					case 'setDeployTargetTeam':
-						this.configManager.setDeployTargetTeamId(message.teamId);
+						this.configManager.setTeamId('deployment', message.teamId);
 						this.sendFullUpdate();
 						break;
 					case 'cloudSignIn': {
 						const auth = CloudAuthProvider.getInstance();
-						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_CLIENT_ID || '');
+						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
 						break;
 					}
 				}
@@ -374,16 +375,16 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
 
-		// Resolve user identity: dev client → deploy client → CloudAuth fallback
+		// Resolve user identity from whichever connection is cloud-connected.
+		// Dev takes priority; local/docker/service connections don't have real user identity.
 		const devAccount = this.connectionManager.getClient()?.getAccountInfo();
 		const deployAccount = this.deployManager.getClient()?.getAccountInfo();
-		const account = (devAccount?.displayName ? devAccount : null) ?? (deployAccount?.displayName ? deployAccount : null);
+		const account = (config.development.connectionMode === 'cloud' ? devAccount : null) ?? (config.deployment.connectionMode === 'cloud' ? deployAccount : null);
 
 		const cloudAuth = CloudAuthProvider.getInstance();
-		const cloudSignedIn = await cloudAuth.isSignedIn();
+		const cloudConnected = isCloudConnected();
 
-		// Use connected client identity, fall back to CloudAuth name (no email)
-		const userName = account?.displayName || (cloudSignedIn ? await cloudAuth.getUserName() : undefined) || undefined;
+		const userName = account?.displayName || (cloudConnected ? await cloudAuth.getUserName() : undefined) || undefined;
 		const userEmail = account?.email || undefined;
 
 		const deployStatus = this.deployManager.getConnectionStatus();
@@ -393,21 +394,23 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 			data: {
 				// Dev connection
 				connectionState: status.state,
-				connectionMode: config.connectionMode,
-				developmentTeamId: config.developmentTeamId,
+				connectionMode: config.development.connectionMode,
+				developmentTeamId: config.development.teamId,
 				devProgressMessage: status.progressMessage,
 				// Deploy connection
 				deployConnectionState: deployStatus.state,
-				deployConnectionMode: config.deployTargetMode,
-				deployTargetTeamId: config.deployTargetTeamId,
+				deployConnectionMode: config.deployment.connectionMode,
+				deployTargetTeamId: config.deployment.teamId,
 				deployProgressMessage: deployStatus.progressMessage,
 				// Teams (from respective servers)
 				teams: this.getTeamsFromClient(this.connectionManager.getClient()),
 				deployTeams: this.getTeamsFromClient(this.deployManager.getClient()),
 				// Shared
-				cloudSignedIn,
+				cloudConnected,
 				userName: userName || undefined,
 				userEmail: userEmail || undefined,
+				// Subscription
+				isSubscribed: isSubscribed(this.connectionManager.getClient(), PIPE_BUILDER_APP_ID),
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
@@ -519,7 +522,7 @@ export class PageSidebarProvider implements vscode.WebviewViewProvider {
 			await client.use({
 				pipeline: pipelineJson,
 				source: sourceId ?? '',
-				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name: pipeName,
 			});
 		} catch (error) {

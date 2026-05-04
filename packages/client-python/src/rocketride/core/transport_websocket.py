@@ -316,7 +316,11 @@ class TransportWebSocket(TransportBase):
             has_error = False
 
         except Exception as e:
-            if websockets and hasattr(websockets.exceptions, 'ConnectionClosed') and isinstance(e, websockets.exceptions.ConnectionClosed):
+            if (
+                websockets
+                and hasattr(websockets.exceptions, 'ConnectionClosed')
+                and isinstance(e, websockets.exceptions.ConnectionClosed)
+            ):
                 reason = 'Connection closed'
                 has_error = False
             elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
@@ -431,7 +435,9 @@ class TransportWebSocket(TransportBase):
             self._connected = True
             self._draining = False
 
-            client_info = f'ws://{websocket.client.host}:{websocket.client.port}' if websocket.client else 'ws://unknown'
+            client_info = (
+                f'ws://{websocket.client.host}:{websocket.client.port}' if websocket.client else 'ws://unknown'
+            )
             await self._transport_connected(client_info)
 
             # Block in receive loop — propagates exceptions for us to handle below

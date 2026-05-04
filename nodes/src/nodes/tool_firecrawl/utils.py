@@ -56,7 +56,9 @@ def firecrawl_wrapper(fn: Callable[..., Any]) -> Any:
                 elif re.search(r'Status code:?\s*5\d{2}', msg):
                     retry_count += 1
                     if retry_count <= max_retries:
-                        debug(f'Error `{msg}` encountered (attempt {retry_count} from {max_retries}), retrying after sleep')
+                        debug(
+                            f'Error `{msg}` encountered (attempt {retry_count} from {max_retries}), retrying after sleep'
+                        )
                         time.sleep(base_delay)
                         continue
                     else:

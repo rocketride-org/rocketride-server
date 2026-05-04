@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
@@ -342,8 +345,6 @@ class SentenceTransformer:
         Returns:
             numpy array of embeddings
         """
-        import numpy as np
-
         if isinstance(sentences, str):
             sentences = [sentences]
 

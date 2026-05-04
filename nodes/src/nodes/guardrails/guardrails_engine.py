@@ -47,15 +47,35 @@ class GuardrailsEngine:
     # -------------------------------------------------------------------------
     INJECTION_PATTERNS: List[re.Pattern] = [
         # Direct instruction override attempts
-        re.compile(r'ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)', re.IGNORECASE),
-        re.compile(r'disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)', re.IGNORECASE),
-        re.compile(r'forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)', re.IGNORECASE),
-        re.compile(r'override\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)', re.IGNORECASE),
+        re.compile(
+            r'ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'override\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions|prompts|rules|directions|guidelines)',
+            re.IGNORECASE,
+        ),
         # System prompt extraction
-        re.compile(r'(show|reveal|display|print|output|repeat|tell\s+me)\s+(\w+\s+)*(your|the)\s+(system\s+prompt|instructions|rules|initial\s+prompt|original\s+prompt)', re.IGNORECASE),
-        re.compile(r'what\s+(are|were)\s+your\s+(system|original|initial)\s+(instructions|prompt|rules)', re.IGNORECASE),
+        re.compile(
+            r'(show|reveal|display|print|output|repeat|tell\s+me)\s+(\w+\s+)*(your|the)\s+(system\s+prompt|instructions|rules|initial\s+prompt|original\s+prompt)',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'what\s+(are|were)\s+your\s+(system|original|initial)\s+(instructions|prompt|rules)', re.IGNORECASE
+        ),
         # Role-play attacks
-        re.compile(r'(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as|behave\s+as)\s+(a\s+)?(DAN|unrestricted|unfiltered|jailbroken|evil)', re.IGNORECASE),
+        re.compile(
+            r'(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as|behave\s+as)\s+(a\s+)?(DAN|unrestricted|unfiltered|jailbroken|evil)',
+            re.IGNORECASE,
+        ),
         re.compile(r'(enter|switch\s+to|activate)\s+(DAN|developer|god|admin|sudo|unrestricted)\s+mode', re.IGNORECASE),
         # Delimiter injection / context manipulation
         re.compile(r'<\|?(system|endoftext|im_start|im_end|end_of_turn)\|?>', re.IGNORECASE),
@@ -139,15 +159,29 @@ class GuardrailsEngine:
     # -------------------------------------------------------------------------
     CONTENT_SAFETY_PATTERNS: Dict[str, List[re.Pattern]] = {
         'self_harm': [
-            re.compile(r'\b(how\s+to\s+)?(commit\s+suicide|kill\s+(myself|yourself|oneself)|end\s+my\s+life|self[- ]?harm)\b', re.IGNORECASE),
-            re.compile(r'\b(methods?\s+(of|for)\s+)(suicide|self[- ]?harm|ending\s+(my|your|one\'?s)\s+life)\b', re.IGNORECASE),
+            re.compile(
+                r'\b(how\s+to\s+)?(commit\s+suicide|kill\s+(myself|yourself|oneself)|end\s+my\s+life|self[- ]?harm)\b',
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r'\b(methods?\s+(of|for)\s+)(suicide|self[- ]?harm|ending\s+(my|your|one\'?s)\s+life)\b', re.IGNORECASE
+            ),
         ],
         'violence': [
-            re.compile(r'\b(how\s+to\s+)(make|build|create|construct)\s+(a\s+)?(bomb|explosive|weapon|poison|toxic\s+(gas|substance))\b', re.IGNORECASE),
-            re.compile(r'\b(instructions?\s+for|guide\s+to|steps?\s+to)\s+(making|building|creating|assembling)\s+(a[n]?\s+)?(bomb|explosive\s*(device)?|weapon)\b', re.IGNORECASE),
+            re.compile(
+                r'\b(how\s+to\s+)(make|build|create|construct)\s+(a\s+)?(bomb|explosive|weapon|poison|toxic\s+(gas|substance))\b',
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r'\b(instructions?\s+for|guide\s+to|steps?\s+to)\s+(making|building|creating|assembling)\s+(a[n]?\s+)?(bomb|explosive\s*(device)?|weapon)\b',
+                re.IGNORECASE,
+            ),
         ],
         'illegal_activity': [
-            re.compile(r'\b(how\s+to\s+)(hack|crack|break\s+into|exploit)\s+(a\s+)?(computer|server|network|system|account|password)\b', re.IGNORECASE),
+            re.compile(
+                r'\b(how\s+to\s+)(hack|crack|break\s+into|exploit)\s+(a\s+)?(computer|server|network|system|account|password)\b',
+                re.IGNORECASE,
+            ),
             re.compile(r'\b(how\s+to\s+)(steal|forge|counterfeit|launder)\b', re.IGNORECASE),
         ],
     }
@@ -159,7 +193,9 @@ class GuardrailsEngine:
         'email': re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
         'phone_us': re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
         'ssn': re.compile(r'\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b'),
-        'credit_card': re.compile(r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'),
+        'credit_card': re.compile(
+            r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
+        ),
         'ip_address': re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'),
     }
 
@@ -229,7 +265,9 @@ class GuardrailsEngine:
             'details': 'No prompt injection detected',
         }
 
-    def check_topic_restriction(self, text: str, allowed_topics: Optional[List[str]] = None, blocked_topics: Optional[List[str]] = None) -> Dict[str, Any]:
+    def check_topic_restriction(
+        self, text: str, allowed_topics: Optional[List[str]] = None, blocked_topics: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Check text against allowed and blocked topic lists.
 
         Args:
@@ -576,7 +614,12 @@ class GuardrailsEngine:
             if self.enable_prompt_injection:
                 results.append(self.check_prompt_injection(text))
 
-            if self.blocked_topics or self.allowed_topics or context.get('blocked_topics') or context.get('allowed_topics'):
+            if (
+                self.blocked_topics
+                or self.allowed_topics
+                or context.get('blocked_topics')
+                or context.get('allowed_topics')
+            ):
                 results.append(
                     self.check_topic_restriction(
                         text,

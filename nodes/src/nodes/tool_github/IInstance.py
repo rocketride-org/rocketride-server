@@ -88,8 +88,14 @@ class IInstance(IInstanceBase):
             'required': ['path'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'path': {'type': 'string', 'description': 'File path in the repository, e.g. "src/nodes/llm_openai/services.json"'},
-                'ref': {'type': 'string', 'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)'},
+                'path': {
+                    'type': 'string',
+                    'description': 'File path in the repository, e.g. "src/nodes/llm_openai/services.json"',
+                },
+                'ref': {
+                    'type': 'string',
+                    'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)',
+                },
             },
         },
         description='Get the decoded content and metadata of a single file from a GitHub repository.',
@@ -142,7 +148,10 @@ class IInstance(IInstanceBase):
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'path': {'type': 'string', 'description': 'File path to create, e.g. "docs/nodes/llm_openai.md"'},
-                'content': {'type': 'string', 'description': 'Plain text file content (will be base64-encoded automatically)'},
+                'content': {
+                    'type': 'string',
+                    'description': 'Plain text file content (will be base64-encoded automatically)',
+                },
                 'message': {'type': 'string', 'description': 'Commit message'},
                 'branch': {'type': 'string', 'description': 'Branch to commit to (default: repo default branch)'},
             },
@@ -165,7 +174,11 @@ class IInstance(IInstanceBase):
         if args.get('branch'):
             body['branch'] = args['branch']
         data = call(self._token(), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
-        return {'path': path, 'sha': (data.get('content') or {}).get('sha'), 'commit_sha': (data.get('commit') or {}).get('sha')}
+        return {
+            'path': path,
+            'sha': (data.get('content') or {}).get('sha'),
+            'commit_sha': (data.get('commit') or {}).get('sha'),
+        }
 
     @tool_function(
         input_schema={
@@ -200,7 +213,11 @@ class IInstance(IInstanceBase):
         if args.get('branch'):
             body['branch'] = args['branch']
         data = call(self._token(), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
-        return {'path': path, 'sha': (data.get('content') or {}).get('sha'), 'commit_sha': (data.get('commit') or {}).get('sha')}
+        return {
+            'path': path,
+            'sha': (data.get('content') or {}).get('sha'),
+            'commit_sha': (data.get('commit') or {}).get('sha'),
+        }
 
     @tool_function(
         input_schema={
@@ -258,7 +275,11 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'state': {'type': 'string', 'enum': ['open', 'closed', 'all'], 'description': 'Filter by state (default: open)'},
+                'state': {
+                    'type': 'string',
+                    'enum': ['open', 'closed', 'all'],
+                    'description': 'Filter by state (default: open)',
+                },
                 'labels': {'type': 'string', 'description': 'Comma-separated label names to filter by'},
                 'assignee': {'type': 'string', 'description': 'Filter by assignee login'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
@@ -340,8 +361,16 @@ class IInstance(IInstanceBase):
                 'title': {'type': 'string', 'description': 'New title'},
                 'body': {'type': 'string', 'description': 'New body (markdown)'},
                 'state': {'type': 'string', 'enum': ['open', 'closed'], 'description': 'New state'},
-                'labels': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Replace all labels with this list'},
-                'assignees': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Replace all assignees with this list'},
+                'labels': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Replace all labels with this list',
+                },
+                'assignees': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Replace all assignees with this list',
+                },
             },
         },
         description='Edit an existing GitHub issue (title, body, state, labels, assignees).',
@@ -364,7 +393,11 @@ class IInstance(IInstanceBase):
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'issue_number': {'type': 'integer', 'description': 'Issue number to lock'},
-                'lock_reason': {'type': 'string', 'enum': ['off-topic', 'too heated', 'resolved', 'spam'], 'description': 'Reason for locking'},
+                'lock_reason': {
+                    'type': 'string',
+                    'enum': ['off-topic', 'too heated', 'resolved', 'spam'],
+                    'description': 'Reason for locking',
+                },
             },
         },
         description='Lock a GitHub issue to prevent further comments.',
@@ -407,7 +440,11 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'state': {'type': 'string', 'enum': ['open', 'closed', 'all'], 'description': 'Filter by state (default: open)'},
+                'state': {
+                    'type': 'string',
+                    'enum': ['open', 'closed', 'all'],
+                    'description': 'Filter by state (default: open)',
+                },
                 'base': {'type': 'string', 'description': 'Filter by base branch name'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
@@ -470,7 +507,11 @@ class IInstance(IInstanceBase):
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'pr_number': {'type': 'integer', 'description': 'Pull request number'},
                 'body': {'type': 'string', 'description': 'Review summary comment'},
-                'event': {'type': 'string', 'enum': ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'], 'description': 'Review action'},
+                'event': {
+                    'type': 'string',
+                    'enum': ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'],
+                    'description': 'Review action',
+                },
             },
         },
         description='Submit a review on a pull request (approve, request changes, or comment).',
@@ -487,7 +528,12 @@ class IInstance(IInstanceBase):
         if args.get('body'):
             body['body'] = args['body']
         data = call(self._token(), 'POST', f'/repos/{repo}/pulls/{num}/reviews', body=body)
-        return {'id': data.get('id'), 'state': data.get('state'), 'submitted_at': data.get('submitted_at'), 'html_url': data.get('html_url')}
+        return {
+            'id': data.get('id'),
+            'state': data.get('state'),
+            'submitted_at': data.get('submitted_at'),
+            'html_url': data.get('html_url'),
+        }
 
     @tool_function(
         input_schema={
@@ -506,9 +552,21 @@ class IInstance(IInstanceBase):
         args = _normalize(args)
         repo = self._repo(args)
         num = _require_int(args, 'pr_number', 'review_list')
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}/reviews', params=params)
-        return [{'id': r.get('id'), 'state': r.get('state'), 'body': r.get('body'), 'user': clean_user(r.get('user')), 'submitted_at': r.get('submitted_at')} for r in data]
+        return [
+            {
+                'id': r.get('id'),
+                'state': r.get('state'),
+                'body': r.get('body'),
+                'user': clean_user(r.get('user')),
+                'submitted_at': r.get('submitted_at'),
+            }
+            for r in data
+        ]
 
     @tool_function(
         input_schema={
@@ -528,7 +586,13 @@ class IInstance(IInstanceBase):
         num = _require_int(args, 'pr_number', 'review_get')
         rid = _require_int(args, 'review_id', 'review_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}/reviews/{rid}')
-        return {'id': data.get('id'), 'state': data.get('state'), 'body': data.get('body'), 'user': clean_user(data.get('user')), 'submitted_at': data.get('submitted_at')}
+        return {
+            'id': data.get('id'),
+            'state': data.get('state'),
+            'body': data.get('body'),
+            'user': clean_user(data.get('user')),
+            'submitted_at': data.get('submitted_at'),
+        }
 
     @tool_function(
         input_schema={
@@ -590,7 +654,10 @@ class IInstance(IInstanceBase):
     def release_list(self, args):
         args = _normalize(args)
         repo = self._repo(args)
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/releases', params=params)
         return [clean_release(r) for r in data]
 
@@ -702,7 +769,10 @@ class IInstance(IInstanceBase):
     def workflow_list(self, args):
         args = _normalize(args)
         repo = self._repo(args)
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/actions/workflows', params=params)
         return [clean_workflow(w) for w in (data.get('workflows') or [])]
 
@@ -712,7 +782,10 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")'},
+                'workflow_id': {
+                    'type': ['string', 'integer'],
+                    'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")',
+                },
             },
         },
         description='Get a single workflow by ID or filename.',
@@ -729,9 +802,16 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id', 'ref'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename (e.g. "ci.yml")'},
+                'workflow_id': {
+                    'type': ['string', 'integer'],
+                    'description': 'Workflow ID or filename (e.g. "ci.yml")',
+                },
                 'ref': {'type': 'string', 'description': 'Branch or tag to run the workflow on'},
-                'inputs': {'type': 'object', 'description': 'Key-value inputs defined by the workflow', 'additionalProperties': {'type': 'string'}},
+                'inputs': {
+                    'type': 'object',
+                    'description': 'Key-value inputs defined by the workflow',
+                    'additionalProperties': {'type': 'string'},
+                },
             },
         },
         description='Trigger a workflow_dispatch event to manually run a workflow.',
@@ -813,7 +893,11 @@ class IInstance(IInstanceBase):
             'required': ['org'],
             'properties': {
                 'org': {'type': 'string', 'description': 'Organization login (e.g. "acme-corp")'},
-                'type': {'type': 'string', 'enum': ['all', 'public', 'private', 'forks', 'sources', 'member'], 'description': 'Repository type filter (default: all)'},
+                'type': {
+                    'type': 'string',
+                    'enum': ['all', 'public', 'private', 'forks', 'sources', 'member'],
+                    'description': 'Repository type filter (default: all)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -839,8 +923,15 @@ class IInstance(IInstanceBase):
         input_schema={
             'type': 'object',
             'properties': {
-                'username': {'type': 'string', 'description': 'GitHub username. Omit to list repos for the authenticated user.'},
-                'type': {'type': 'string', 'enum': ['all', 'owner', 'member'], 'description': 'Repository type filter (default: owner)'},
+                'username': {
+                    'type': 'string',
+                    'description': 'GitHub username. Omit to list repos for the authenticated user.',
+                },
+                'type': {
+                    'type': 'string',
+                    'enum': ['all', 'owner', 'member'],
+                    'description': 'Repository type filter (default: owner)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -866,7 +957,11 @@ class IInstance(IInstanceBase):
             'properties': {
                 'org': {'type': 'string', 'description': 'Organization login'},
                 'email': {'type': 'string', 'description': 'Email address to invite'},
-                'role': {'type': 'string', 'enum': ['admin', 'direct_member', 'billing_manager'], 'description': 'Role for the new member (default: direct_member)'},
+                'role': {
+                    'type': 'string',
+                    'enum': ['admin', 'direct_member', 'billing_manager'],
+                    'description': 'Role for the new member (default: direct_member)',
+                },
             },
         },
         description='Invite a user to a GitHub organization by email.',
@@ -878,7 +973,12 @@ class IInstance(IInstanceBase):
         email = _require_str(args, 'email', 'user_invite')
         body: dict = {'email': email, 'role': args.get('role', 'direct_member')}
         data = call(self._token(), 'POST', f'/orgs/{org}/invitations', body=body)
-        return {'id': data.get('id'), 'email': data.get('email'), 'role': data.get('role'), 'created_at': data.get('created_at')}
+        return {
+            'id': data.get('id'),
+            'email': data.get('email'),
+            'role': data.get('role'),
+            'created_at': data.get('created_at'),
+        }
 
     # =======================================================================
     # SEARCH & DISCOVERY
@@ -889,8 +989,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['query'],
             'properties': {
-                'query': {'type': 'string', 'description': 'Search query. Supports GitHub code search syntax (e.g. "mcp_client transport extension:py")'},
-                'repo': {'type': 'string', 'description': 'Scope search to a specific repo (owner/repo). Omit to search all accessible repos.'},
+                'query': {
+                    'type': 'string',
+                    'description': 'Search query. Supports GitHub code search syntax (e.g. "mcp_client transport extension:py")',
+                },
+                'repo': {
+                    'type': 'string',
+                    'description': 'Scope search to a specific repo (owner/repo). Omit to search all accessible repos.',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -903,7 +1009,11 @@ class IInstance(IInstanceBase):
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
-        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'q': q,
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', '/search/code', params=params)
         return [
             {
@@ -920,8 +1030,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['query'],
             'properties': {
-                'query': {'type': 'string', 'description': 'Search query. Supports GitHub issue search syntax (e.g. "mcp timeout is:issue is:open")'},
-                'repo': {'type': 'string', 'description': 'Scope search to a specific repo. Omit to search all accessible repos.'},
+                'query': {
+                    'type': 'string',
+                    'description': 'Search query. Supports GitHub issue search syntax (e.g. "mcp timeout is:issue is:open")',
+                },
+                'repo': {
+                    'type': 'string',
+                    'description': 'Scope search to a specific repo. Omit to search all accessible repos.',
+                },
                 'state': {'type': 'string', 'enum': ['open', 'closed'], 'description': 'Filter by issue state'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
@@ -937,7 +1053,11 @@ class IInstance(IInstanceBase):
             q = f'{q} repo:{repo}'
         if args.get('state'):
             q = f'{q} is:{args["state"]}'
-        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'q': q,
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', '/search/issues', params=params)
         results = []
         for i in data.get('items') or []:
@@ -952,8 +1072,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'path': {'type': 'string', 'description': 'Filter commits to those that touched this file or directory'},
-                'sha': {'type': 'string', 'description': 'Branch, tag, or commit SHA to start from (default: repo default branch)'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Filter commits to those that touched this file or directory',
+                },
+                'sha': {
+                    'type': 'string',
+                    'description': 'Branch, tag, or commit SHA to start from (default: repo default branch)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -990,8 +1116,21 @@ class IInstance(IInstanceBase):
         data = call(self._token(), 'GET', f'/repos/{repo}/commits/{sha}')
         result = clean_commit(data)
         stats = data.get('stats') or {}
-        result['stats'] = {'additions': stats.get('additions'), 'deletions': stats.get('deletions'), 'total': stats.get('total')}
-        result['files'] = [{'filename': f.get('filename'), 'status': f.get('status'), 'additions': f.get('additions'), 'deletions': f.get('deletions'), 'patch': f.get('patch')} for f in (data.get('files') or [])]
+        result['stats'] = {
+            'additions': stats.get('additions'),
+            'deletions': stats.get('deletions'),
+            'total': stats.get('total'),
+        }
+        result['files'] = [
+            {
+                'filename': f.get('filename'),
+                'status': f.get('status'),
+                'additions': f.get('additions'),
+                'deletions': f.get('deletions'),
+                'patch': f.get('patch'),
+            }
+            for f in (data.get('files') or [])
+        ]
         return result
 
 

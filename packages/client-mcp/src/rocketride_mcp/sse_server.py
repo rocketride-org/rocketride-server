@@ -135,8 +135,7 @@ def create_app() -> Starlette:
 def main():
     """Start the MCP SSE server."""
     parser = argparse.ArgumentParser(description='RocketRide MCP SSE Server')
-    # Bind to all interfaces — required for Docker container networking
-    parser.add_argument('--host', default='0.0.0.0', help='Bind host')  # noqa: S104
+    parser.add_argument('--host', default='localhost', help='Bind host (use 0.0.0.0 for all interfaces)')
     parser.add_argument('--port', type=int, default=8080, help='Bind port')
     args = parser.parse_args()
 

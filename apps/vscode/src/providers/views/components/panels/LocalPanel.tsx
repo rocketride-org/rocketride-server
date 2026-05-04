@@ -4,20 +4,21 @@
 // =============================================================================
 
 /**
- * LocalModeFields — shared config fields for "Local" connection mode.
+ * LocalPanel — target panel for Local connection mode.
  *
  * Renders: server version dropdown, debug output checkbox, server arguments input.
- * Used by both ConnectionSettings (dev) and DeployTargetSettings (deploy).
+ * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
 import React from 'react';
-import { settingsStyles as S, EngineVersionItem } from '../PageSettings/SettingsWebview';
+import localIcon from '../../../../assets/local.svg';
+import { settingsStyles as S, EngineVersionItem } from '../../PageSettings/SettingsWebview';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface LocalModeFieldsProps {
+export interface LocalPanelProps {
 	engineVersion: string;
 	onVersionChange: (version: string) => void;
 	engineVersions: EngineVersionItem[];
@@ -26,8 +27,8 @@ export interface LocalModeFieldsProps {
 	onDebugOutputChange: (checked: boolean) => void;
 	engineArgs: string;
 	onEngineArgsChange: (args: string) => void;
-	/** HTML id prefix to avoid duplicate ids when mounted in multiple panels. */
 	idPrefix: string;
+	simplified?: boolean;
 }
 
 // =============================================================================
@@ -40,12 +41,25 @@ const displayVersion = (tagName: string): string => tagName.replace(/^server-/, 
 // COMPONENT
 // =============================================================================
 
-export const LocalModeFields: React.FC<LocalModeFieldsProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, debugOutput, onDebugOutputChange, engineArgs, onEngineArgsChange, idPrefix }) => {
+export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, debugOutput, onDebugOutputChange, engineArgs, onEngineArgsChange, idPrefix, simplified }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
+
+	// Simplified: just the description, no config fields
+	if (simplified) {
+		return (
+			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+				<img src={localIcon} alt="Local" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the server locally on your machine. The extension will download and manage the server for you.</div>
+			</div>
+		);
+	}
 
 	return (
 		<>
-			<div style={S.modeConfigDesc}>Run the server locally on your machine. The extension will download and manage the server for you.</div>
+			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+				<img src={localIcon} alt="Local" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the server locally on your machine. The extension will download and manage the server for you.</div>
+			</div>
 
 			{/* Server version */}
 			<div style={S.formGroup}>
