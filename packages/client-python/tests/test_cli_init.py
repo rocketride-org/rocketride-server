@@ -36,17 +36,7 @@ from rocketride.cli.commands.init import (
     _merge_marked_content,
     _MARKER_BEGIN,
     _MARKER_END,
-)
-
-
-_DOC_FILE_NAMES = (
-    'ROCKETRIDE_README.md',
-    'ROCKETRIDE_QUICKSTART.md',
-    'ROCKETRIDE_PIPELINE_RULES.md',
-    'ROCKETRIDE_COMPONENT_REFERENCE.md',
-    'ROCKETRIDE_COMMON_MISTAKES.md',
-    'ROCKETRIDE_python_API.md',
-    'ROCKETRIDE_typescript_API.md',
+    _DOC_FILES as _DOC_FILE_NAMES,
 )
 
 
