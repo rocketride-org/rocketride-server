@@ -1,67 +1,64 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 # =============================================================================
 
-from __future__ import annotations
-
-import os
-from typing import Any
-
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 from ai.common.config import Config
 
 
-_ALL_METRICS = ['faithfulness', 'answer_relevancy', 'context_precision', 'context_recall', 'factual_correctness']
-
-
 class IGlobal(IGlobalBase):
-    driver: Any = None
-    threshold: float = 0.7
+    # Faithfulness: are all claims in the answer grounded in the context?
     faithfulness: bool = True
-    answer_relevancy: bool = False
+    faithfulness_threshold: float = 0.7
+
+    # Answer Relevancy: does the answer address the question?
+    answer_relevancy: bool = True
+    answer_relevancy_threshold: float = 0.7
+
+    # Context Precision: is the retrieved context precisely relevant?
     context_precision: bool = False
+    context_precision_threshold: float = 0.7
+
+    # Context Recall: does the context contain everything needed?
     context_recall: bool = False
+    context_recall_threshold: float = 0.7
+
+    # Factual Correctness: is the answer factually correct vs ground truth?
     factual_correctness: bool = False
+    factual_correctness_threshold: float = 0.7
+
+    # Static ground truth for metrics that require it
+    ground_truth: str = ''
+
+    @staticmethod
+    def _to_bool(value, default: bool) -> bool:
+        # Config stores booleans as "true"/"false" strings (from the string enum field type)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() == 'true'
+        return default
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        from depends import depends
-
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
-
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.threshold = float(config.get('threshold', 0.7))
-        for m in _ALL_METRICS:
-            setattr(self, m, bool(config.get(m, m == 'faithfulness')))
 
-        from .eval_ragas import RagasEvalDriver
+        self.faithfulness = self._to_bool(config.get('faithfulness'), True)
+        self.faithfulness_threshold = float(config.get('faithfulness_threshold', 0.7))
 
-        self.driver = RagasEvalDriver(self)
+        self.answer_relevancy = self._to_bool(config.get('answer_relevancy'), True)
+        self.answer_relevancy_threshold = float(config.get('answer_relevancy_threshold', 0.7))
 
-    def enabled_metrics(self) -> list:
-        return [m for m in _ALL_METRICS if getattr(self, m, False)]
+        self.context_precision = self._to_bool(config.get('context_precision'), False)
+        self.context_precision_threshold = float(config.get('context_precision_threshold', 0.7))
+
+        self.context_recall = self._to_bool(config.get('context_recall'), False)
+        self.context_recall_threshold = float(config.get('context_recall_threshold', 0.7))
+
+        self.factual_correctness = self._to_bool(config.get('factual_correctness'), False)
+        self.factual_correctness_threshold = float(config.get('factual_correctness_threshold', 0.7))
+
+        self.ground_truth = config.get('ground_truth', '') or ''
 
     def endGlobal(self) -> None:
-        self.driver = None
+        pass

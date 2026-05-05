@@ -1,110 +1,251 @@
 {
-	"title": "RAGAS Eval",
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "RAGAS Evaluator",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "eval_ragas://",
-	"classType": ["eval"],
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
 	"path": "nodes.eval_ragas",
-	"prefix": "eval",
-	"description": ["RAG-specific evaluation metrics using the RAGAS framework. Enable any combination ", "of metrics — each enabled metric emits its own score on the answers lane. ", "Requires a connected LLM node (via the LLM control channel) for judge calls. ", "Wire: answers (LLM output), questions (original query), documents (retrieved context), ", "text (expected answer, optional — enables context_recall and factual_correctness)."],
-	"icon": "eval.svg",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "eval_ragas",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["An evaluation node that scores LLM pipeline outputs using the RAGAS framework. ", "Connect it to the answers lane of any LLM node to get real-time quality scores. ", "Optionally connect the retrieved context (text lane from a vector DB) and the ", "original question (questions lane from a chat node) to enable faithfulness, ", "answer relevancy, context precision, context recall, and factual correctness. ", "The pipeline's own connected LLM is used as the evaluation judge."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "classification.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	//
 	"invoke": {
 		"llm": {
-			"description": "LLM used as the RAGAS evaluator judge.",
-			"min": 0
+			"description": "LLM to use as the evaluation judge",
+			"min": 1
 		}
 	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
-		"questions": [],
 		"answers": ["answers"],
-		"documents": [],
-		"text": []
+		"text": ["answers"],
+		"questions": ["answers"]
 	},
 	"input": [
 		{
+			"description": "LLM response to evaluate (required)",
 			"lane": "answers",
-			"description": "The generated answer to evaluate",
 			"output": [
 				{
 					"lane": "answers",
-					"description": "One score object per enabled metric: {score, passed, metric, threshold, reason}"
+					"description": "One score object per enabled metric"
 				}
 			]
 		},
 		{
-			"lane": "questions",
-			"description": "Original user query",
-			"output": []
-		},
-		{
-			"lane": "documents",
-			"description": "Retrieved context chunks (required for faithfulness, context_precision, context_recall)",
-			"output": []
-		},
-		{
+			"description": "Retrieved context from a vector DB — enables faithfulness, context precision, context recall",
 			"lane": "text",
-			"description": "Expected / ground-truth answer (required for context_recall, factual_correctness)",
-			"output": []
+			"output": [
+				{
+					"lane": "answers",
+					"description": "One score object per enabled metric"
+				}
+			]
+		},
+		{
+			"description": "Original user question — enables answer relevancy, context precision, context recall",
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "One score object per enabled metric"
+				}
+			]
 		}
 	],
+	//
+	//	Optional:
+	//		Profile section — configuration options used by the driver
+	//
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {
-				"threshold": 0.7,
-				"faithfulness": true,
-				"answer_relevancy": false,
-				"context_precision": false,
-				"context_recall": false,
-				"factual_correctness": false
+				"faithfulness": "true",
+				"faithfulness_threshold": 0.7,
+				"answer_relevancy": "true",
+				"answer_relevancy_threshold": 0.7,
+				"context_precision": "false",
+				"context_precision_threshold": 0.7,
+				"context_recall": "false",
+				"context_recall_threshold": 0.7,
+				"factual_correctness": "false",
+				"factual_correctness_threshold": 0.7,
+				"ground_truth": ""
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local fields definitions
+	//
 	"fields": {
-		"threshold": {
-			"type": "number",
-			"title": "Pass Threshold",
-			"description": "Minimum score to pass (0.0 – 1.0), applied to all enabled metrics.",
-			"minimum": 0,
-			"maximum": 1
-		},
-		"faithfulness": {
-			"type": "boolean",
+		"eval_ragas.faithfulness": {
+			"type": "string",
 			"title": "Faithfulness",
-			"description": "Are all claims in the answer grounded in the retrieved context? (LLM-only, no embeddings)"
+			"default": "true",
+			"enum": [
+				["true", "Enabled"],
+				["false", "Disabled"]
+			],
+			"description": "Score whether all claims in the answer are grounded in the retrieved context. Requires context (text lane)."
 		},
-		"answer_relevancy": {
-			"type": "boolean",
+		"eval_ragas.faithfulness_threshold": {
+			"type": "number",
+			"title": "Faithfulness Threshold",
+			"default": 0.7,
+			"description": "Minimum score to pass (0.0 – 1.0)."
+		},
+		"eval_ragas.answer_relevancy": {
+			"type": "string",
 			"title": "Answer Relevancy",
-			"description": "Is the answer relevant to the original query? (Requires OPENAI_API_KEY env var for embeddings)"
+			"default": "true",
+			"enum": [
+				["true", "Enabled"],
+				["false", "Disabled"]
+			],
+			"description": "Score whether the answer directly addresses the question. Requires question (questions lane)."
 		},
-		"context_precision": {
-			"type": "boolean",
+		"eval_ragas.answer_relevancy_threshold": {
+			"type": "number",
+			"title": "Answer Relevancy Threshold",
+			"default": 0.7,
+			"description": "Minimum score to pass (0.0 – 1.0)."
+		},
+		"eval_ragas.context_precision": {
+			"type": "string",
 			"title": "Context Precision",
-			"description": "Of the retrieved chunks, what fraction is actually relevant? (LLM-only)"
+			"default": "false",
+			"enum": [
+				["true", "Enabled"],
+				["false", "Disabled"]
+			],
+			"description": "Score whether retrieved context is precisely relevant. Requires context and question."
 		},
-		"context_recall": {
-			"type": "boolean",
+		"eval_ragas.context_precision_threshold": {
+			"type": "number",
+			"title": "Context Precision Threshold",
+			"default": 0.7,
+			"description": "Minimum score to pass (0.0 – 1.0)."
+		},
+		"eval_ragas.context_recall": {
+			"type": "string",
 			"title": "Context Recall",
-			"description": "Does the context contain all information needed to answer? (Requires ground-truth — wire text lane)"
+			"default": "false",
+			"enum": [
+				["true", "Enabled"],
+				["false", "Disabled"]
+			],
+			"description": "Score whether the context contains everything needed. Requires context, question, and ground truth."
 		},
-		"factual_correctness": {
-			"type": "boolean",
+		"eval_ragas.context_recall_threshold": {
+			"type": "number",
+			"title": "Context Recall Threshold",
+			"default": 0.7,
+			"description": "Minimum score to pass (0.0 – 1.0)."
+		},
+		"eval_ragas.factual_correctness": {
+			"type": "string",
 			"title": "Factual Correctness",
-			"description": "Does the answer match the ground-truth? (Requires ground-truth — wire text lane)"
+			"default": "false",
+			"enum": [
+				["true", "Enabled"],
+				["false", "Disabled"]
+			],
+			"description": "Score whether the answer is factually correct against the ground truth. Requires ground truth."
+		},
+		"eval_ragas.factual_correctness_threshold": {
+			"type": "number",
+			"title": "Factual Correctness Threshold",
+			"default": 0.7,
+			"description": "Minimum score to pass (0.0 – 1.0)."
+		},
+		"eval_ragas.ground_truth": {
+			"optional": true,
+			"type": "string",
+			"title": "Ground Truth",
+			"default": "",
+			"description": "Expected correct answer. Required for Context Recall and Factual Correctness."
+		},
+		"eval_ragas.default": {
+			"object": "default",
+			"properties": ["eval_ragas.faithfulness", "eval_ragas.faithfulness_threshold", "eval_ragas.answer_relevancy", "eval_ragas.answer_relevancy_threshold", "eval_ragas.context_precision", "eval_ragas.context_precision_threshold", "eval_ragas.context_recall", "eval_ragas.context_recall_threshold", "eval_ragas.factual_correctness", "eval_ragas.factual_correctness_threshold", "eval_ragas.ground_truth"]
+		},
+		"eval_ragas.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["eval_ragas.default"]
+				}
+			]
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Threshold",
-			"properties": ["threshold"]
-		},
-		{
-			"section": "Pipe",
-			"title": "Metrics",
-			"properties": ["faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness"]
+			"title": "RAGAS Evaluation",
+			"properties": ["eval_ragas.profile"]
 		}
 	]
 }
