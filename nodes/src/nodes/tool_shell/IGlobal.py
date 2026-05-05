@@ -81,7 +81,9 @@ class IGlobal(IGlobalBase):
 
         compiled_patterns = parse_command_patterns(cfg, on_invalid=_on_invalid_pattern)
         if invalid_pattern_errors and not compiled_patterns:
-            raise ValueError(f'commandAllowlist is configured but every pattern failed to compile; refusing to start with a non-functional allowlist (would silently allow all commands). First error: {invalid_pattern_errors[0]}')
+            raise ValueError(
+                f'commandAllowlist is configured but every pattern failed to compile; refusing to start with a non-functional allowlist (would silently allow all commands). First error: {invalid_pattern_errors[0]}'
+            )
         self.command_patterns = compiled_patterns
 
     def endGlobal(self) -> None:

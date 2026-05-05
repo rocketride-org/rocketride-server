@@ -73,9 +73,15 @@ class IInstance(IInstanceBase):
             'properties': {
                 'stdout': {'type': 'string', 'description': 'Captured stdout (UTF-8, possibly truncated).'},
                 'stderr': {'type': 'string', 'description': 'Captured stderr (UTF-8, possibly truncated).'},
-                'exit_code': {'type': 'integer', 'description': 'Process exit code. -1 indicates a timeout, 127 indicates the shell could not be launched.'},
+                'exit_code': {
+                    'type': 'integer',
+                    'description': 'Process exit code. -1 indicates a timeout, 127 indicates the shell could not be launched.',
+                },
                 'timed_out': {'type': 'boolean', 'description': 'True if the command was killed due to timeout.'},
-                'truncated': {'type': 'boolean', 'description': 'True if stdout or stderr was truncated to fit the size cap.'},
+                'truncated': {
+                    'type': 'boolean',
+                    'description': 'True if stdout or stderr was truncated to fit the size cap.',
+                },
             },
         },
         description=lambda self: (
