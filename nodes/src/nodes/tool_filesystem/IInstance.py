@@ -74,7 +74,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"). Returns: {path, content, size} where size is the byte length before decoding.'),
+        description=(
+            'Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"). Returns: {path, content, size} where size is the byte length before decoding.'
+        ),
     )
     def read_file(self, args):
         path, encoding, _ = self._prepare(args, 'read_file', needs_encoding=True)
@@ -107,7 +109,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('Write (or overwrite) a file in the account file store. Required: "path", "content". Optional: "encoding" (default "utf-8"). Returns: {path, bytesWritten}.'),
+        description=(
+            'Write (or overwrite) a file in the account file store. Required: "path", "content". Optional: "encoding" (default "utf-8"). Returns: {path, bytesWritten}.'
+        ),
     )
     def write_file(self, args):
         path, encoding, content = self._prepare(args, 'write_file', needs_encoding=True, needs_content=True)
@@ -132,7 +136,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('Delete a file from the account file store. Only available when the operator has enabled "allowDelete" on this node. Required: "path". Returns: {path, deleted: true}.'),
+        description=(
+            'Delete a file from the account file store. Only available when the operator has enabled "allowDelete" on this node. Required: "path". Returns: {path, deleted: true}.'
+        ),
     )
     def delete_file(self, args):
         path, _, _ = self._prepare(args, 'delete_file')
@@ -152,7 +158,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('List the immediate children of a directory in the account file store. Optional: "path" (defaults to the account root). Returns: {entries: [{name, type, size?, modified?}], count}.'),
+        description=(
+            'List the immediate children of a directory in the account file store. Optional: "path" (defaults to the account root). Returns: {entries: [{name, type, size?, modified?}], count}.'
+        ),
     )
     def list_directory(self, args):
         path, _, _ = self._prepare(args, 'list_directory', path_required=False)
@@ -172,7 +180,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('Create a directory in the account file store. Intermediate segments are created as needed. Required: "path". Returns: {path, created: true}.'),
+        description=(
+            'Create a directory in the account file store. Intermediate segments are created as needed. Required: "path". Returns: {path, created: true}.'
+        ),
     )
     def create_directory(self, args):
         path, _, _ = self._prepare(args, 'create_directory')
@@ -192,7 +202,9 @@ class IInstance(IInstanceBase):
             },
             'additionalProperties': False,
         },
-        description=('Get metadata for a file or directory in the account file store. Required: "path". Returns: {exists, type?, size?, modified?}.'),
+        description=(
+            'Get metadata for a file or directory in the account file store. Required: "path". Returns: {exists, type?, size?, modified?}.'
+        ),
     )
     def stat_file(self, args):
         path, _, _ = self._prepare(args, 'stat_file')
@@ -292,7 +304,9 @@ class IInstance(IInstanceBase):
     def _check_ready(self) -> None:
         """Verify the FileStore was successfully initialised in beginGlobal()."""
         if self.IGlobal.file_store is None:
-            raise ValueError('filesystem tool is not available: ROCKETRIDE_CLIENT_ID is missing or the account store failed to initialise (check pipeline logs)')
+            raise ValueError(
+                'filesystem tool is not available: ROCKETRIDE_CLIENT_ID is missing or the account store failed to initialise (check pipeline logs)'
+            )
 
     def _check_path(self, path: str) -> None:
         """Enforce the configured path whitelist (if any)."""
@@ -344,7 +358,9 @@ def _run_async(coro):
     except RuntimeError:
         pass
     else:
-        raise RuntimeError('_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.')
+        raise RuntimeError(
+            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
+        )
 
     loop = asyncio.new_event_loop()
     try:
