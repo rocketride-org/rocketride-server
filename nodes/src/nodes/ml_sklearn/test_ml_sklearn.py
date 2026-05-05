@@ -10,6 +10,7 @@ from sklearn.linear_model import LinearRegression
 
 # ---- Build a temp model ----
 import tempfile
+
 tmp = tempfile.mkdtemp()
 model_path = os.path.join(tmp, 'model.pkl')
 
@@ -21,11 +22,10 @@ joblib.dump(model, model_path)
 
 # ---- Import PreProcessor directly ----
 import importlib.util
+
 spec = importlib.util.spec_from_file_location(
     'mlcode',  # 'mlcode' use karo — 'code' nahi, clash hoga
-    os.path.join(os.path.dirname(__file__), 'code.py')
-    if '__file__' in dir()
-    else 'nodes/src/nodes/ml_sklearn/code.py'
+    os.path.join(os.path.dirname(__file__), 'code.py') if '__file__' in dir() else 'nodes/src/nodes/ml_sklearn/code.py',
 )
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
@@ -35,6 +35,7 @@ PreProcessor = mod.PreProcessor
 passed = 0
 failed = 0
 
+
 def check(name, condition):
     global passed, failed
     if condition:
@@ -43,6 +44,7 @@ def check(name, condition):
     else:
         print(f'  FAIL  {name}')
         failed += 1
+
 
 print('\nRunning ml_sklearn tests...\n')
 

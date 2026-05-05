@@ -14,6 +14,7 @@ model = LinearRegression()
 model.fit(X, y)
 
 import os
+
 save_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 joblib.dump(model, save_path)
 

@@ -16,6 +16,7 @@ class IGlobal(IGlobalBase):
         """Validate that scikit-learn and joblib are available."""
         try:
             from depends import depends
+
             requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
             depends(requirements)
         except Exception as e:
@@ -27,14 +28,13 @@ class IGlobal(IGlobalBase):
             pass
         else:
             from depends import depends
+
             requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
             depends(requirements)
 
             from .code import PreProcessor
-            config = Config.getNodeConfig(
-                self.glb.logicalType,
-                self.glb.connConfig
-            )
+
+            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             self.preprocessor = PreProcessor(config)
 
     def endGlobal(self):
