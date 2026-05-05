@@ -1,22 +1,90 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Git",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "tool_git://",
+	//
+	// Required:
+	//		Class type of the node — what it does. "tool" makes the node
+	//		invocable by an agent via the control-plane tool channel.
+	//
 	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "invoke" lets agents call this node's tools.
+	//
 	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//		If the type is specified, a factory is registered of that given
+	//		type.
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate — if not
+	//		specified, the protocol will be used.
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code — it is node dependent
+	//		and is optional for most nodes. For Python nodes this is the
+	//		import path to the package containing IGlobal/IInstance.
+	//
 	"path": "nodes.tool_git",
+	//
+	// Required:
+	//		The prefix mapped (added/removed) when converting URLs <=> paths.
+	//		Also used as the namespace for the node's tool names (git.clone,
+	//		git.status, …).
+	//
 	"prefix": "git",
+	//
+	// Optional:
+	//		Icon shown in the canvas / palette. Resolved against
+	//		packages/shared-ui/src/assets/nodes/.
+	//
 	"icon": "git.svg",
+	//
+	// Optional:
+	//		Link rendered behind the node's docs button.
+	//
 	"documentation": "https://docs.rocketride.org",
-	"description": [
-		"Exposes local Git repository operations as agent tools. ",
-		"Covers clone, init, status, log, show, diff, blame, stage, commit, stash, branch management, pull, push, and code search. ",
-		"Runs entirely in-process without requiring a host git installation. ",
-		"Supports secure authentication via personal access tokens and SSH keys."
-	],
+	//
+	// Optional:
+	//		Description shown in the node palette and node info pane.
+	//		Each array entry is concatenated with no separator — keep
+	//		trailing spaces to avoid words running together.
+	//
+	"description": ["Exposes local Git repository operations as agent tools. ", "Covers clone, init, status, log, show, diff, blame, stage, commit, stash, branch management, pull, push, and code search. ", "Runs entirely in-process without requiring a host git installation. ", "Supports secure authentication via personal access tokens and SSH keys."],
+	//
+	// Optional:
+	//		Canvas tile template — supports ${parameters.<field>}
+	//		interpolation. Rendered on the node card in the editor.
+	//
 	"tile": ["Git: ${parameters.git.repoPath || 'not configured'}"],
+	//
+	// Optional:
+	//		Defines what lanes this node consumes/produces. tool_git is
+	//		invoke-only (agents call its tools via the control plane), so
+	//		it has no pipe lanes.
+	//
 	"lanes": {},
+	//
+	// Optional:
+	//		Profile section — configuration options used by the driver
+	//		itself. The values under "default" are merged into any
+	//		user-supplied profile unless that profile is "absolute".
+	//
 	"preconfig": {
 		"default": "default",
 		"profiles": {
@@ -33,6 +101,13 @@
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local field definitions — schema rendered as the node's
+	//		config form. Field names are namespaced with the node's
+	//		"prefix" (git.<field>). Fields marked "secure": true are
+	//		stored encrypted and never echoed back to the UI.
+	//
 	"fields": {
 		"git.repoPath": {
 			"type": "string",
@@ -112,21 +187,16 @@
 			]
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service — which fields appear
+	//		in which section of the config dialog, and in what order.
+	//
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Git",
-			"properties": [
-				"type",
-				"git.repoPath",
-				"git.authType",
-				"git.username",
-				"git.token",
-				"git.sshKey",
-				"git.sshPassphrase",
-				"git.safeMode",
-				"git.readOnlyMode"
-			]
+			"properties": ["type", "git.repoPath", "git.authType", "git.username", "git.token", "git.sshKey", "git.sshPassphrase", "git.safeMode", "git.readOnlyMode"]
 		}
 	]
 }
