@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -80,7 +81,11 @@ with patch.dict(
 ):
     _src = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_git'
     sys.path.insert(0, str(_src.parent))
-    from tool_git.git_repo import GitError, GitRepo  # noqa: E402
+    from tool_git.git_repo import (  # noqa: E402
+        GitError,
+        GitRepo,
+        _filter_diff_by_path,
+    )
     from tool_git.IInstance import IInstance  # noqa: E402
 
 
@@ -548,6 +553,155 @@ class TestIInstanceErrors(unittest.TestCase):
         inst.invoke(param)
         result = _ok(param.output)
         self.assertEqual(result['branch'], 'main')
+
+
+# ---------------------------------------------------------------------------
+# Path-traversal guard tests for write_file / stage
+# ---------------------------------------------------------------------------
+
+
+def _repo_with_workdir(workdir: str) -> GitRepo:
+    """Build a GitRepo that reports *workdir* without opening a real pygit2 repo."""
+    repo = GitRepo.__new__(GitRepo)
+    repo._repo = MagicMock()
+    repo._repo.workdir = workdir
+    repo._repo_path = workdir
+    repo.safe_mode = True
+    return repo
+
+
+class TestPathTraversalGuards(unittest.TestCase):
+    """Verify write_file and stage reject paths that escape the working directory or target .git/."""
+
+    def setUp(self) -> None:
+        """Create a tmp directory to stand in for the repo working directory."""
+        self._tmp = tempfile.TemporaryDirectory()
+        # Resolve to match how GitRepo resolves workdir internally.
+        self._workdir = str(Path(self._tmp.name).resolve())
+        # Create a sibling file outside the workdir to confirm traversal would actually escape.
+        self._outside = Path(self._workdir).parent / 'outside.txt'
+        self._outside.write_text('do-not-overwrite', encoding='utf-8')
+
+    def tearDown(self) -> None:
+        """Remove the tmp directory."""
+        try:
+            self._outside.unlink()
+        except FileNotFoundError:
+            pass
+        self._tmp.cleanup()
+
+    # ----- write_file -----
+
+    def test_write_file_rejects_parent_traversal(self) -> None:
+        """write_file rejects ../ paths that resolve outside the repo working dir."""
+        repo = _repo_with_workdir(self._workdir)
+        with self.assertRaises(GitError) as ctx:
+            repo.write_file('../outside.txt', 'malicious')
+        self.assertIn('escapes the repository', str(ctx.exception))
+        # Confirm the file outside the workdir was NOT touched.
+        self.assertEqual(self._outside.read_text(encoding='utf-8'), 'do-not-overwrite')
+
+    def test_write_file_rejects_absolute_path_outside_workdir(self) -> None:
+        """write_file rejects an absolute path that points outside the workdir."""
+        repo = _repo_with_workdir(self._workdir)
+        with self.assertRaises(GitError):
+            repo.write_file(str(self._outside), 'malicious')
+
+    def test_write_file_rejects_dotgit_path(self) -> None:
+        """write_file rejects paths inside the .git directory."""
+        repo = _repo_with_workdir(self._workdir)
+        with self.assertRaises(GitError) as ctx:
+            repo.write_file('.git/config', '[core] hacked = true')
+        self.assertIn('.git directory', str(ctx.exception))
+
+    def test_write_file_accepts_normal_relative_path(self) -> None:
+        """write_file writes a normal repo-relative path successfully."""
+        repo = _repo_with_workdir(self._workdir)
+        result = repo.write_file('subdir/file.txt', 'hello')
+        self.assertEqual(result['status'], 'written')
+        self.assertEqual(
+            (Path(self._workdir) / 'subdir' / 'file.txt').read_text(encoding='utf-8'),
+            'hello',
+        )
+
+    # ----- stage -----
+
+    def test_stage_rejects_parent_traversal(self) -> None:
+        """Stage rejects ../ paths that resolve outside the repo working dir."""
+        repo = _repo_with_workdir(self._workdir)
+        with self.assertRaises(GitError) as ctx:
+            repo.stage(paths=['../outside.txt'])
+        self.assertIn('escapes the repository', str(ctx.exception))
+
+    def test_stage_rejects_dotgit_path(self) -> None:
+        """Stage rejects paths inside the .git directory."""
+        # Need an actual file at the path so the existence branch is taken,
+        # otherwise stage will hit the .git guard regardless of file presence.
+        dotgit = Path(self._workdir) / '.git'
+        dotgit.mkdir(exist_ok=True)
+        (dotgit / 'config').write_text('x', encoding='utf-8')
+        repo = _repo_with_workdir(self._workdir)
+        with self.assertRaises(GitError) as ctx:
+            repo.stage(paths=['.git/config'])
+        self.assertIn('.git directory', str(ctx.exception))
+
+
+# ---------------------------------------------------------------------------
+# _filter_diff_by_path
+# ---------------------------------------------------------------------------
+
+
+class TestFilterDiffByPath(unittest.TestCase):
+    """Tests for the diff-header parsing and per-line counting in _filter_diff_by_path."""
+
+    def test_prefix_collision_is_not_matched(self) -> None:
+        """Prefix 'src' must NOT match path 'srcfoo/bar.py'."""
+        patch_text = (
+            'diff --git a/srcfoo/bar.py b/srcfoo/bar.py\n'
+            '@@ -0,0 +1 @@\n'
+            '+x\n'
+            'diff --git a/src/foo.py b/src/foo.py\n'
+            '@@ -0,0 +1 @@\n'
+            '+y\n'
+        )
+        out = _filter_diff_by_path(patch_text, 'src')
+        self.assertNotIn('srcfoo', out['patch'])
+        self.assertIn('src/foo.py', out['patch'])
+        self.assertEqual(out['files_changed'], 1)
+        self.assertEqual(out['insertions'], 1)
+        self.assertEqual(out['deletions'], 0)
+
+    def test_exact_file_match(self) -> None:
+        """An exact file path matches only that file."""
+        patch_text = 'diff --git a/a.py b/a.py\n@@ -0,0 +1 @@\n+x\ndiff --git a/b.py b/b.py\n@@ -0,0 +1 @@\n+y\n'
+        out = _filter_diff_by_path(patch_text, 'a.py')
+        self.assertIn('a.py', out['patch'])
+        self.assertNotIn('b.py', out['patch'])
+        self.assertEqual(out['files_changed'], 1)
+
+    def test_filename_with_spaces(self) -> None:
+        """Diff header parsing captures filenames containing spaces."""
+        patch_text = 'diff --git a/dir/my file.txt b/dir/my file.txt\n@@ -1 +1 @@\n-old\n+new\n'
+        out = _filter_diff_by_path(patch_text, 'dir')
+        self.assertIn('my file.txt', out['patch'])
+        self.assertEqual(out['files_changed'], 1)
+        self.assertEqual(out['insertions'], 1)
+        self.assertEqual(out['deletions'], 1)
+
+    def test_empty_patch(self) -> None:
+        """An empty patch returns zero counts and an empty patch string."""
+        out = _filter_diff_by_path('', 'anything')
+        self.assertEqual(out['patch'], '')
+        self.assertEqual(out['files_changed'], 0)
+        self.assertEqual(out['insertions'], 0)
+        self.assertEqual(out['deletions'], 0)
+
+    def test_does_not_count_diff_marker_lines_as_changes(self) -> None:
+        """Lines starting with '+++' or '---' are diff markers, not insertions/deletions."""
+        patch_text = 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n'
+        out = _filter_diff_by_path(patch_text, 'x.py')
+        self.assertEqual(out['insertions'], 1)
+        self.assertEqual(out['deletions'], 1)
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,26 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
 """
@@ -61,6 +81,11 @@ _GIT_MERGE_ANALYSIS_NORMAL = _c('GIT_MERGE_ANALYSIS_NORMAL', 8)
 
 _GIT_RESET_HARD = _c('GIT_RESET_HARD', 3)
 
+# libgit2 credential type bitmask (passed as ``allowed_types`` to credential callbacks).
+# Names changed from GIT_CREDTYPE_* to GIT_CREDENTIAL_* in libgit2 1.0; try both.
+_GIT_CREDENTIAL_USERPASS_PLAINTEXT = _c('GIT_CREDENTIAL_USERPASS_PLAINTEXT', _c('GIT_CREDTYPE_USERPASS_PLAINTEXT', 1))
+_GIT_CREDENTIAL_SSH_KEY = _c('GIT_CREDENTIAL_SSH_KEY', _c('GIT_CREDTYPE_SSH_KEY', 2))
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -92,6 +117,10 @@ class _TokenCallbacks(pygit2.RemoteCallbacks):
         allowed_types: int,
     ) -> pygit2.credentials.UserPass:
         """Return a UserPass credential object for libgit2."""
+        if not (allowed_types & _GIT_CREDENTIAL_USERPASS_PLAINTEXT):
+            raise GitError(
+                'Server does not accept token/password authentication. Set authType="ssh" and configure sshKey instead.'
+            )
         return pygit2.UserPass(self._username, self._token)
 
 
@@ -112,6 +141,11 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
         allowed_types: int,
     ) -> pygit2.credentials.Keypair:
         """Write the SSH key to a temp file on first call and return a Keypair."""
+        if not (allowed_types & _GIT_CREDENTIAL_SSH_KEY):
+            raise GitError(
+                'Server does not accept SSH key authentication. '
+                'Set authType="token" and configure a personal access token instead.'
+            )
         # Write the private key to a temp file so libgit2 can read it.
         # The file is cleaned up in close().
         if self._tmp_path is None:
@@ -147,7 +181,7 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
 # ---------------------------------------------------------------------------
 
 
-def _scrub_exc(exc: Exception) -> str:
+def scrub_credentials(exc: Exception) -> str:
     """Scrub potential credentials from a libgit2 error message."""
     # Redacts 'https://user:pass@host' to 'https://<redacted>@host'
     # The [^/]+@ pattern matches up to the last @ before a path separator.
@@ -264,6 +298,21 @@ class GitRepo:
         except pygit2.GitError as exc:
             raise GitError(f'Not a git repository: {path!r} — {exc}') from exc
 
+    def open(self, path: str) -> None:
+        """Open an existing local repository at *path* and bind it to this wrapper.
+
+        Validates that *path* exists and is a directory before opening, then sets
+        ``self._repo`` and ``self._repo_path``. Raises GitError on any failure
+        (missing path, not a directory, or not a git repository).
+        """
+        p = Path(path)
+        if not p.exists():
+            raise GitError(f'repoPath {path!r} does not exist')
+        if not p.is_dir():
+            raise GitError(f'repoPath {path!r} is not a directory')
+        self._repo = self._open(path)
+        self._repo_path = path
+
     @contextmanager
     def _callbacks(self) -> Generator[Optional[pygit2.RemoteCallbacks], None, None]:
         """Context manager that yields the appropriate RemoteCallbacks."""
@@ -298,7 +347,8 @@ class GitRepo:
             if obj.type_str != 'commit':
                 raise GitError(f'{ref!r} does not resolve to a commit')
             return obj  # type: ignore[return-value]
-        except KeyError:
+        except (KeyError, pygit2.GitError):
+            # KeyError: missing ref. pygit2.GitError: malformed ref syntax.
             raise GitError(f'Ref {ref!r} not found') from None
 
     # ------------------------------------------------------------------
@@ -322,7 +372,7 @@ class GitRepo:
                     kwargs['callbacks'] = cb
                 repo = pygit2.clone_repository(url, path, **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'Clone failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'Clone failed: {scrub_credentials(exc)}') from exc
 
         self._repo = repo
         self._repo_path = path
@@ -629,7 +679,7 @@ class GitRepo:
             try:
                 oid = repo.stash(sig, msg)
             except pygit2.GitError as exc:
-                raise GitError(f'stash push failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'stash push failed: {scrub_credentials(exc)}') from exc
             return {'status': 'stashed', 'sha': str(oid)[:8], 'message': msg}
 
         if op == 'list':
@@ -648,14 +698,14 @@ class GitRepo:
             try:
                 repo.stash_pop(index)
             except pygit2.GitError as exc:
-                raise GitError(f'stash pop failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'stash pop failed: {scrub_credentials(exc)}') from exc
             return {'status': 'popped', 'index': index}
 
         if op == 'drop':
             try:
                 repo.stash_drop(index)
             except pygit2.GitError as exc:
-                raise GitError(f'stash drop failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'stash drop failed: {scrub_credentials(exc)}') from exc
             return {'status': 'dropped', 'index': index}
 
         raise GitError(f'Unknown stash op {op!r}. Use push, pop, list, or drop.')
@@ -815,7 +865,7 @@ class GitRepo:
             try:
                 stats = rem.fetch(refspecs or None, **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'fetch failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'fetch failed: {scrub_credentials(exc)}') from exc
         return {
             'remote': remote,
             'received_objects': stats.received_objects,
@@ -881,7 +931,7 @@ class GitRepo:
             try:
                 rem.push([refspec], **kwargs)
             except pygit2.GitError as exc:
-                raise GitError(f'push failed: {_scrub_exc(exc)}') from exc
+                raise GitError(f'push failed: {scrub_credentials(exc)}') from exc
 
         return {'remote': remote, 'branch': target, 'status': 'pushed'}
 
