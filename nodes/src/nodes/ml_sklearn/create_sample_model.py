@@ -14,9 +14,9 @@ model = LinearRegression()
 model.fit(X, y)
 
 import os
-save_path = os.path.join(os.path.dirname(__file__), "model.pkl")
+save_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 joblib.dump(model, save_path)
 
-print(f"✅ Model saved: {save_path}")
-print(f"✅ predict(4.0) = {model.predict([[4.0]])[0]:.1f}  (expected 9.0)")
-print(f"✅ predict(6.0) = {model.predict([[6.0]])[0]:.1f}  (expected 13.0)")
+print(f'✅ Model saved: {save_path}')
+print(f'✅ predict(4.0) = {model.predict([[4.0]])[0]:.1f}  (expected 9.0)')
+print(f'✅ predict(6.0) = {model.predict([[6.0]])[0]:.1f}  (expected 13.0)')
