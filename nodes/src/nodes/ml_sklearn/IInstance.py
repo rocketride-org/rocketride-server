@@ -15,22 +15,22 @@ class IInstance(IInstanceBase):
     def open(self, obj: Entry):
         pass
 
-    def writeAnswers(self, question):
-        """
-        Receive a question from upstream, run sklearn inference on its text,
-        and forward the result downstream.
-        If no model is loaded, forward input unchanged.
-        """
-        question = copy.deepcopy(question)
-
-        # Text extract karo
-        text = question.text if hasattr(question, 'text') else str(question)
-
-        # Inference — model nahi hai toh passthrough
+    def _process(self, text: str) -> str:
+        """Run inference or passthrough."""
         if self.IGlobal.preprocessor is not None:
-            result = self.IGlobal.preprocessor.process(text)
-        else:
-            result = text  # fallback — input unchanged forward karo
+            return self.IGlobal.preprocessor.process(text)
+        return text
 
-        question.text = result
+    def writeText(self, question):
+        """Called by engine when text lane input arrives."""
+        question = copy.deepcopy(question)
+        text = question.text if hasattr(question, 'text') else str(question)
+        question.text = self._process(text)
+        self.instance.writeAnswers(question)
+
+    def writeAnswers(self, question):
+        """Called by engine when answers lane input arrives."""
+        question = copy.deepcopy(question)
+        text = question.text if hasattr(question, 'text') else str(question)
+        question.text = self._process(text)
         self.instance.writeAnswers(question)
