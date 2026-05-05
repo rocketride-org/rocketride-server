@@ -19,19 +19,18 @@ class IInstance(IInstanceBase):
         """
         Receive a question from upstream, run sklearn inference on its text,
         and forward the result downstream.
+        If no model is loaded, forward input unchanged.
         """
-        if self.IGlobal.preprocessor is None:
-            raise RuntimeError('sklearn PreProcessor not initialized')
-
         question = copy.deepcopy(question)
 
         # Text extract karo
         text = question.text if hasattr(question, 'text') else str(question)
 
-        # Inference chalao — returns str directly
-        result = self.IGlobal.preprocessor.process(text)
+        # Inference — model nahi hai toh passthrough
+        if self.IGlobal.preprocessor is not None:
+            result = self.IGlobal.preprocessor.process(text)
+        else:
+            result = text  # fallback — input unchanged forward karo
 
-        # String result assign karo (list nahi!)
         question.text = result
-
         self.instance.writeAnswers(question)
