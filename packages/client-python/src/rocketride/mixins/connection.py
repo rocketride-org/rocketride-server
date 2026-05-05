@@ -314,8 +314,17 @@ class ConnectionMixin(DAPClient):
         parsed = urllib.parse.urlparse(normalized)
 
         ws_scheme = 'wss' if parsed.scheme in ('https', 'wss') else 'ws'
-        ws_uri = parsed._replace(scheme=ws_scheme)
-        return f'{ws_uri.geturl()}/task/service'
+        path = (parsed.path or '/').rstrip('/')
+        if path.endswith('/task/service'):
+            new_path = path
+        elif path == '':
+            new_path = '/task/service'
+        else:
+            new_path = f'{path}/task/service'
+
+        return urllib.parse.urlunparse(
+            (ws_scheme, parsed.netloc, new_path, parsed.params, parsed.query, parsed.fragment),
+        )
 
     def _set_uri(self, uri: str) -> None:
         """Update the server URI (internal)."""
