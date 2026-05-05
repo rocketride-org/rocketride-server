@@ -35,8 +35,14 @@ _TOOLS: List[Dict[str, Any]] = [
             'required': ['url', 'path'],
             'properties': {
                 'url': {'type': 'string', 'description': 'Remote URL to clone (HTTPS or SSH).'},
-                'path': {'type': 'string', 'description': 'Local filesystem path to clone into (must not already contain a repo).'},
-                'branch': {'type': 'string', 'description': 'Branch to check out after cloning (default: remote HEAD).'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Local filesystem path to clone into (must not already contain a repo).',
+                },
+                'branch': {
+                    'type': 'string',
+                    'description': 'Branch to check out after cloning (default: remote HEAD).',
+                },
             },
         },
     },
@@ -47,7 +53,10 @@ _TOOLS: List[Dict[str, Any]] = [
             'type': 'object',
             'required': ['path'],
             'properties': {
-                'path': {'type': 'string', 'description': 'Filesystem path where the new repository should be created.'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Filesystem path where the new repository should be created.',
+                },
                 'initial_branch': {'type': 'string', 'description': 'Name for the initial branch (default: "main").'},
             },
         },
@@ -65,7 +74,10 @@ _TOOLS: List[Dict[str, Any]] = [
             'type': 'object',
             'required': [],
             'properties': {
-                'max_count': {'type': 'integer', 'description': 'Maximum number of commits to return (1-200, default 20).'},
+                'max_count': {
+                    'type': 'integer',
+                    'description': 'Maximum number of commits to return (1-200, default 20).',
+                },
                 'branch': {'type': 'string', 'description': 'Branch name to walk (default: current branch).'},
                 'path': {'type': 'string', 'description': 'Filter commits to those that touch this path.'},
                 'author': {'type': 'string', 'description': 'Filter commits by author name (substring match).'},
@@ -94,7 +106,10 @@ _TOOLS: List[Dict[str, Any]] = [
             'required': [],
             'properties': {
                 'ref_a': {'type': 'string', 'description': 'First ref (branch, tag, SHA). Omit for working-tree diff.'},
-                'ref_b': {'type': 'string', 'description': 'Second ref. Only valid when ref_a is also set; omit for single-ref or working-tree diff.'},
+                'ref_b': {
+                    'type': 'string',
+                    'description': 'Second ref. Only valid when ref_a is also set; omit for single-ref or working-tree diff.',
+                },
                 'path': {'type': 'string', 'description': 'Limit diff output to this file or directory.'},
                 'staged': {'type': 'boolean', 'description': 'If true, diff the staged index against HEAD.'},
             },
@@ -127,7 +142,9 @@ _TOOLS: List[Dict[str, Any]] = [
     # Group 3b — Write file
     {
         'name': 'git.write_file',
-        'description': ('Write text content to a file in the working tree (creates or overwrites). Call git.stage then git.commit after writing to save the change.'),
+        'description': (
+            'Write text content to a file in the working tree (creates or overwrites). Call git.stage then git.commit after writing to save the change.'
+        ),
         'input_schema': {
             'type': 'object',
             'required': ['path', 'content'],
@@ -223,7 +240,10 @@ _TOOLS: List[Dict[str, Any]] = [
             'required': ['name'],
             'properties': {
                 'name': {'type': 'string', 'description': 'Branch name to delete.'},
-                'force': {'type': 'boolean', 'description': 'If true, force-delete the branch even if unmerged. Blocked when safeMode=true.'},
+                'force': {
+                    'type': 'boolean',
+                    'description': 'If true, force-delete the branch even if unmerged. Blocked when safeMode=true.',
+                },
             },
         },
     },
@@ -425,11 +445,7 @@ class IInstance(IInstanceBase):
             return git.write_file(path=a['path'], content=a['content'])
         if name == 'git.stage':
             paths = a.get('paths')
-            if (
-                not isinstance(paths, list)
-                or not paths
-                or any(not isinstance(p, str) or not p for p in paths)
-            ):
+            if not isinstance(paths, list) or not paths or any(not isinstance(p, str) or not p for p in paths):
                 raise ValueError('paths must be a non-empty list of non-empty strings')
             return git.stage(paths=paths)
         if name == 'git.commit':

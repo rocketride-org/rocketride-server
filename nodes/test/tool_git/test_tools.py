@@ -378,7 +378,12 @@ class TestIInstanceRemote(unittest.TestCase):
     def test_fetch_custom_remote(self) -> None:
         """git.fetch forwards a custom remote and branch."""
         inst = _make_instance()
-        inst.IGlobal.repo.fetch.return_value = {'remote': 'upstream', 'received_objects': 3, 'indexed_objects': 3, 'total_deltas': 0}
+        inst.IGlobal.repo.fetch.return_value = {
+            'remote': 'upstream',
+            'received_objects': 3,
+            'indexed_objects': 3,
+            'total_deltas': 0,
+        }
         _invoke(inst, 'git.fetch', {'remote': 'upstream', 'branch': 'main'})
         inst.IGlobal.repo.fetch.assert_called_once_with(remote='upstream', branch='main')
 
@@ -421,14 +426,21 @@ class TestIInstanceDiff(unittest.TestCase):
     def test_diff_two_refs(self) -> None:
         """git.diff forwards ref_a and ref_b when both are supplied."""
         inst = _make_instance()
-        inst.IGlobal.repo.diff.return_value = {'patch': '--- a\n+++ b\n', 'files_changed': 1, 'insertions': 1, 'deletions': 0}
+        inst.IGlobal.repo.diff.return_value = {
+            'patch': '--- a\n+++ b\n',
+            'files_changed': 1,
+            'insertions': 1,
+            'deletions': 0,
+        }
         _invoke(inst, 'git.diff', {'ref_a': 'main', 'ref_b': 'feat/x'})
         inst.IGlobal.repo.diff.assert_called_once_with(ref_a='main', ref_b='feat/x', path=None, staged=False)
 
     def test_blame_forwards_args(self) -> None:
         """git.blame forwards path and ref and returns per-line attribution."""
         inst = _make_instance()
-        inst.IGlobal.repo.blame.return_value = [{'line': 1, 'content': 'x = 1', 'sha': 'abc', 'author': 'Alice', 'date': '2026-01-01T00:00:00+00:00'}]
+        inst.IGlobal.repo.blame.return_value = [
+            {'line': 1, 'content': 'x = 1', 'sha': 'abc', 'author': 'Alice', 'date': '2026-01-01T00:00:00+00:00'}
+        ]
         result = _ok(_invoke(inst, 'git.blame', {'path': 'foo.py', 'ref': 'HEAD'}))
         self.assertEqual(result[0]['author'], 'Alice')
         inst.IGlobal.repo.blame.assert_called_once_with(path='foo.py', ref='HEAD')
@@ -436,7 +448,13 @@ class TestIInstanceDiff(unittest.TestCase):
     def test_file_at_forwards_args(self) -> None:
         """git.file_at returns file content at the specified ref."""
         inst = _make_instance()
-        inst.IGlobal.repo.file_at.return_value = {'path': 'README.md', 'ref': 'HEAD', 'sha': 'abc', 'size': 10, 'content': '# Hello'}
+        inst.IGlobal.repo.file_at.return_value = {
+            'path': 'README.md',
+            'ref': 'HEAD',
+            'sha': 'abc',
+            'size': 10,
+            'content': '# Hello',
+        }
         result = _ok(_invoke(inst, 'git.file_at', {'path': 'README.md', 'ref': 'HEAD'}))
         self.assertEqual(result['content'], '# Hello')
 
@@ -503,7 +521,13 @@ class TestIInstanceErrors(unittest.TestCase):
     def test_json_string_input_is_parsed(self) -> None:
         """A JSON string passed as param.input is parsed into a dict before dispatch."""
         inst = _make_instance()
-        inst.IGlobal.repo.status.return_value = {'branch': 'main', 'staged': [], 'unstaged': [], 'untracked': [], 'clean': True}
+        inst.IGlobal.repo.status.return_value = {
+            'branch': 'main',
+            'staged': [],
+            'unstaged': [],
+            'untracked': [],
+            'clean': True,
+        }
         param = MagicMock()
         param.op = 'tool.invoke'
         param.tool_name = 'git.status'

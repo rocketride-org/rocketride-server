@@ -355,8 +355,16 @@ class GitRepo:
         unstaged: List[str] = []
         untracked: List[str] = []
 
-        flags_staged = _GIT_STATUS_INDEX_NEW | _GIT_STATUS_INDEX_MODIFIED | _GIT_STATUS_INDEX_DELETED | _GIT_STATUS_INDEX_RENAMED | _GIT_STATUS_INDEX_TYPECHANGE
-        flags_unstaged = _GIT_STATUS_WT_MODIFIED | _GIT_STATUS_WT_DELETED | _GIT_STATUS_WT_TYPECHANGE | _GIT_STATUS_WT_RENAMED
+        flags_staged = (
+            _GIT_STATUS_INDEX_NEW
+            | _GIT_STATUS_INDEX_MODIFIED
+            | _GIT_STATUS_INDEX_DELETED
+            | _GIT_STATUS_INDEX_RENAMED
+            | _GIT_STATUS_INDEX_TYPECHANGE
+        )
+        flags_unstaged = (
+            _GIT_STATUS_WT_MODIFIED | _GIT_STATUS_WT_DELETED | _GIT_STATUS_WT_TYPECHANGE | _GIT_STATUS_WT_RENAMED
+        )
 
         for filepath, flags in repo.status().items():
             if flags & flags_staged:
@@ -911,7 +919,11 @@ class GitRepo:
         result: Dict[str, Any] = {'tracked': tracked, 'count': len(tracked)}
 
         if untracked:
-            untracked_files = [f for f, flags in repo.status().items() if flags & _GIT_STATUS_WT_NEW and (not path or _path_matches(f, path))]
+            untracked_files = [
+                f
+                for f, flags in repo.status().items()
+                if flags & _GIT_STATUS_WT_NEW and (not path or _path_matches(f, path))
+            ]
             result['untracked'] = untracked_files
 
         return result
@@ -955,10 +967,7 @@ def _commit_touches_path(
             return False
     parent = commit.parents[0]
     diff = repo.diff(parent.tree, commit.tree)
-    return any(
-        _path_matches(d.delta.new_file.path, path) or _path_matches(d.delta.old_file.path, path)
-        for d in diff
-    )
+    return any(_path_matches(d.delta.new_file.path, path) or _path_matches(d.delta.old_file.path, path) for d in diff)
 
 
 # Matches the header line of a per-file section in a unified diff.
