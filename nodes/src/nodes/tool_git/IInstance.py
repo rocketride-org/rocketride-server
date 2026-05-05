@@ -16,9 +16,11 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+import pygit2
+
 from rocketlib import IInstanceBase
 
-from .git_repo import GitError
+from .git_repo import GitError, _scrub_exc
 from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
@@ -406,6 +408,11 @@ class IInstance(IInstanceBase):
             return json.dumps({'error': str(exc)})
         except KeyError as exc:
             return json.dumps({'error': f'Missing required parameter: {exc}'})
+        except pygit2.GitError as exc:
+            # Catch any libgit2 error that wasn't wrapped by GitRepo (e.g. ref
+            # parsing inside _resolve_ref, conflict during checkout/create_commit).
+            # Without this, raw pygit2 exceptions leak out of tool.invoke as faults.
+            return json.dumps({'error': _scrub_exc(exc)})
 
     def _call(self, git: Any, name: str, a: Dict[str, Any]) -> Any:  # noqa: ANN401
         """Map a tool name and validated args dict to the corresponding GitRepo method call."""

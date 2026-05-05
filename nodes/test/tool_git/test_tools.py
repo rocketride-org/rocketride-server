@@ -45,7 +45,9 @@ _pygit2_stub.GIT_STATUS_WT_NEW = 128
 _pygit2_stub.GIT_MERGE_ANALYSIS_UP_TO_DATE = 2
 _pygit2_stub.GIT_MERGE_ANALYSIS_FASTFORWARD = 4
 _pygit2_stub.GIT_MERGE_ANALYSIS_NORMAL = 8
-_pygit2_stub.GitError = Exception
+# Distinct class — using bare Exception would make `except pygit2.GitError`
+# in IInstance._dispatch swallow KeyError/ValueError in tests.
+_pygit2_stub.GitError = type('GitError', (Exception,), {})
 _pygit2_stub.RemoteCallbacks = object
 _pygit2_stub.Signature = MagicMock()
 
@@ -511,6 +513,17 @@ class TestIInstanceErrors(unittest.TestCase):
         inst.IGlobal.repo.status.side_effect = GitError('repo locked')
         msg = _err(_invoke(inst, 'git.status'))
         self.assertIn('repo locked', msg)
+
+    def test_pygit2_error_is_caught_and_scrubbed(self) -> None:
+        """Raw pygit2.GitError leaking from GitRepo is caught and credentials scrubbed."""
+        inst = _make_instance()
+        inst.IGlobal.repo.show.side_effect = _pygit2_stub.GitError(
+            'failed to resolve ref at https://alice:secrettoken@github.com/foo/bar.git'
+        )
+        msg = _err(_invoke(inst, 'git.show', {'ref': 'HEAD'}))
+        self.assertIn('failed to resolve ref', msg)
+        self.assertNotIn('secrettoken', msg)
+        self.assertIn('<redacted>', msg)
 
     def test_unknown_tool_returns_error(self) -> None:
         """An unregistered tool name produces an 'Unknown tool' error response."""

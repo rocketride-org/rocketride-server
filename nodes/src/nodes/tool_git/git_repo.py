@@ -59,6 +59,8 @@ _GIT_MERGE_ANALYSIS_UP_TO_DATE = _c('GIT_MERGE_ANALYSIS_UP_TO_DATE', 2)
 _GIT_MERGE_ANALYSIS_FASTFORWARD = _c('GIT_MERGE_ANALYSIS_FASTFORWARD', 4)
 _GIT_MERGE_ANALYSIS_NORMAL = _c('GIT_MERGE_ANALYSIS_NORMAL', 8)
 
+_GIT_RESET_HARD = _c('GIT_RESET_HARD', 3)
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -761,7 +763,16 @@ class GitRepo:
             repo.merge(their_branch.target)
             if repo.index.conflicts:
                 conflicts = [c.our.path for c in repo.index.conflicts if c.our]
-                raise GitError(f'Merge conflict in: {", ".join(conflicts)}. Resolve conflicts manually then commit.')
+                # Abort cleanly: clear MERGE_HEAD/MERGE_MSG and reset the index
+                # and worktree to HEAD. Leaving the repo half-merged would
+                # silently corrupt the next git.commit (which would create a
+                # non-merge commit containing conflict markers).
+                repo.state_cleanup()
+                repo.reset(repo.head.target, _GIT_RESET_HARD)
+                raise GitError(
+                    f'Merge conflict in: {", ".join(conflicts)}. '
+                    'Merge aborted (state reset to HEAD); resolve conflicts manually outside the agent and retry.'
+                )
             tree = repo.index.write_tree()
             sig = _sig(repo)
             sha = repo.create_commit(
