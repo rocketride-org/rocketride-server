@@ -57,6 +57,7 @@ export default defineConfig({
 			'page-account': './src/providers/views/PageAccount/index.tsx',
 			'page-billing': './src/providers/views/PageBilling/index.tsx',
 			'page-auth': './src/providers/views/PageAuth/index.tsx',
+			'page-connection': './src/providers/views/PageConnection/index.tsx',
 		},
 	},
 

@@ -474,6 +474,11 @@
 			"rocketride": [
 				{
 					"type": "webview",
+					"id": "rocketride.provider.connection",
+					"name": "Connections"
+				},
+				{
+					"type": "webview",
 					"id": "rocketride.sidebar.main",
 					"name": "RocketRide"
 				}

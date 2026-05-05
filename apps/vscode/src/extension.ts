@@ -51,6 +51,7 @@ import { PageAuthProvider } from './providers/PageAuthProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
+import { PageConnectionProvider } from './providers/PageConnectionProvider';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
@@ -227,6 +228,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				//-------------------------------------
 				logger.output(`${icons.info} Creating tree providers...`);
 				progress.report({ increment: 50, message: 'Creating tree providers...' });
+
+				//-------------------------------------
+				//
+				//-------------------------------------
+				const connectionProvider = new PageConnectionProvider(context.extensionUri);
+				context.subscriptions.push(vscode.window.registerWebviewViewProvider(PageConnectionProvider.viewType, connectionProvider));
 
 				// Register unified sidebar webview
 				pageSidebar = new PageSidebarProvider(context.extensionUri);
