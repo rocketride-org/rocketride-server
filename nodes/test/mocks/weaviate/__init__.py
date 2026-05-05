@@ -278,7 +278,9 @@ class MockQuery:
             )
 
         # Sort by distance (lower is better for cosine distance)
-        results.sort(key=lambda x: x.metadata.distance if x.metadata.distance else 1.0)
+        results.sort(
+            key=lambda x: 1.0 if x.metadata.distance is None else x.metadata.distance,
+        )
 
         return QueryResult(objects=results[:limit])
 

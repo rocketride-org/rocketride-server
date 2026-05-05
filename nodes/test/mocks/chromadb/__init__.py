@@ -182,7 +182,8 @@ class MockCollection:
             count += 1
 
             # Apply limit
-            if limit and len(results['ids']) >= limit:
+            # `limit=0` should return zero rows (don't rely on truthiness).
+            if limit is not None and len(results['ids']) >= limit:
                 break
 
         return results
