@@ -29,13 +29,15 @@ GATEWAY_TOKEN = os.environ.get('OPENCLAW_GATEWAY_TOKEN', 'rocketride-test-token-
 
 
 def _http_invoke(tool: str, args: dict, session_key: str = 'main') -> dict:
-    """Helper: invoke a tool via HTTP POST /tools/invoke."""
+    """Invoke a tool via HTTP POST /tools/invoke."""
     url = f'{GATEWAY_HTTP_URL}/tools/invoke'
-    payload = json.dumps({
-        'tool': tool,
-        'args': args,
-        'sessionKey': session_key,
-    }).encode('utf-8')
+    payload = json.dumps(
+        {
+            'tool': tool,
+            'args': args,
+            'sessionKey': session_key,
+        }
+    ).encode('utf-8')
     headers = {
         'Authorization': f'Bearer {GATEWAY_TOKEN}',
         'Content-Type': 'application/json',
@@ -74,6 +76,7 @@ pytestmark = pytest.mark.skipif(
 # ===================================================================
 # 1. TRANSPORT LAYER TESTS
 # ===================================================================
+
 
 class TestTransportHTTP:
     """Test HTTP transport (POST /tools/invoke)."""
@@ -124,6 +127,7 @@ class TestTransportWebSocket:
     def test_websocket_connect_and_handshake(self):
         """Connect to gateway via WebSocket and complete handshake."""
         from websockets.sync.client import connect
+
         ws = connect(GATEWAY_WS_URL)
         try:
             # Should receive connect.challenge event
@@ -133,15 +137,19 @@ class TestTransportWebSocket:
             assert frame['event'] == 'connect.challenge'
 
             # Send connect request
-            ws.send(json.dumps({
-                'type': 'req',
-                'id': 'test-1',
-                'method': 'connect',
-                'params': {
-                    'auth': {'token': GATEWAY_TOKEN},
-                    'client': {'name': 'pytest', 'version': '1.0'},
-                },
-            }))
+            ws.send(
+                json.dumps(
+                    {
+                        'type': 'req',
+                        'id': 'test-1',
+                        'method': 'connect',
+                        'params': {
+                            'auth': {'token': GATEWAY_TOKEN},
+                            'client': {'name': 'pytest', 'version': '1.0'},
+                        },
+                    }
+                )
+            )
 
             # Should receive success response
             raw = ws.recv(timeout=10)
@@ -155,23 +163,44 @@ class TestTransportWebSocket:
     def test_tools_catalog_rpc(self):
         """Discover tools via tools.catalog RPC."""
         from websockets.sync.client import connect
+
         ws = connect(GATEWAY_WS_URL)
         try:
             # Handshake
             ws.recv(timeout=10)  # challenge
-            ws.send(json.dumps({
-                'type': 'req', 'id': 'h1', 'method': 'connect',
-                'params': {'auth': {'token': GATEWAY_TOKEN}, 'client': {'name': 'pytest', 'version': '1.0'}},
-            }))
+            ws.send(
+                json.dumps(
+                    {
+                        'type': 'req',
+                        'id': 'h1',
+                        'method': 'connect',
+                        'params': {'auth': {'token': GATEWAY_TOKEN}, 'client': {'name': 'pytest', 'version': '1.0'}},
+                    }
+                )
+            )
             ws.recv(timeout=10)  # connect response
 
             # Request tools catalog
-            ws.send(json.dumps({
-                'type': 'req', 'id': 'tc1', 'method': 'tools.catalog',
-                'params': {'includePlugins': True},
-            }))
-            raw = ws.recv(timeout=10)
-            resp = json.loads(raw)
+            ws.send(
+                json.dumps(
+                    {
+                        'type': 'req',
+                        'id': 'tc1',
+                        'method': 'tools.catalog',
+                        'params': {'includePlugins': True},
+                    }
+                )
+            )
+            # Loop until we find the response frame — the gateway may send
+            # health or other event frames before the tools.catalog response.
+            resp = None
+            for _ in range(10):
+                raw = ws.recv(timeout=10)
+                f = json.loads(raw)
+                if f.get('id') == 'tc1':
+                    resp = f
+                    break
+            assert resp is not None, 'Did not receive tools.catalog response'
 
             assert resp['type'] == 'res'
             assert resp['ok'] is True
@@ -192,6 +221,7 @@ class TestTransportWebSocket:
 # 2. DRIVER TESTS (unit tests with mock data)
 # ===================================================================
 
+
 class TestOpenClawDriver:
     """Test the OpenClawDriver ToolsBase adapter."""
 
@@ -199,6 +229,7 @@ class TestOpenClawDriver:
         # Import from the node package
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from openclaw_driver import OpenClawDriver
+
         if tools is None:
             tools = [
                 {'name': 'web_search', 'description': 'Search the web', 'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}},
@@ -206,7 +237,10 @@ class TestOpenClawDriver:
                 {'name': 'message', 'description': 'Send message', 'inputSchema': {'type': 'object'}},
             ]
         if invoke_fn is None:
-            invoke_fn = lambda name, args, sk: {'mocked': True, 'tool': name, 'args': args}
+
+            def invoke_fn(name, args, sk):  # noqa: D103
+                return {'mocked': True, 'tool': name, 'args': args}
+
         return OpenClawDriver(server_name='openclaw', tools=tools, invoke_fn=invoke_fn)
 
     def test_tool_query_returns_namespaced_tools(self):
@@ -247,6 +281,7 @@ class TestOpenClawDriver:
 
     def test_tool_invoke_calls_invoke_fn(self):
         called_with = {}
+
         def capture_invoke(name, args, sk):
             called_with.update({'name': name, 'args': args, 'sk': sk})
             return {'ok': True}
@@ -259,6 +294,7 @@ class TestOpenClawDriver:
 
     def test_tool_invoke_strips_framework_keys(self):
         called_with = {}
+
         def capture_invoke(name, args, sk):
             called_with['args'] = args
             return {'ok': True}
@@ -277,9 +313,11 @@ class TestOpenClawDriver:
         assert tools == []
 
     def test_permissive_schema_for_missing_input_schema(self):
-        driver = self._make_driver(tools=[
-            {'name': 'mytool', 'description': 'No schema'},
-        ])
+        driver = self._make_driver(
+            tools=[
+                {'name': 'mytool', 'description': 'No schema'},
+            ]
+        )
         tools = driver._tool_query()
         assert tools[0]['inputSchema'] == {'type': 'object', 'additionalProperties': True}
 
@@ -287,6 +325,7 @@ class TestOpenClawDriver:
 # ===================================================================
 # 3. GROUP:WEB TOGGLE TESTS
 # ===================================================================
+
 
 class TestGroupWeb:
     """Test web tools (web_search) via live gateway."""
@@ -320,6 +359,7 @@ class TestGroupWeb:
 # 4. GROUP:MESSAGING TOGGLE TESTS
 # ===================================================================
 
+
 class TestGroupMessaging:
     """Test messaging tools via live gateway."""
 
@@ -329,13 +369,13 @@ class TestGroupMessaging:
         result = _http_invoke('message', {'action': 'search', 'query': 'test'})
         # May fail due to no channels, but should NOT be 'not_found'
         if not result['ok']:
-            assert result['error']['type'] != 'not_found', \
-                'message tool should exist even without channels'
+            assert result['error']['type'] != 'not_found', 'message tool should exist even without channels'
 
 
 # ===================================================================
 # 5. GROUP:UI TOGGLE TESTS
 # ===================================================================
+
 
 class TestGroupUi:
     """Test browser/UI tools via live gateway."""
@@ -368,6 +408,7 @@ class TestGroupUi:
 # 6. GROUP:SKILLS TOGGLE TESTS
 # ===================================================================
 
+
 class TestGroupSkills:
     """Test skill/plugin-provided tools."""
 
@@ -380,6 +421,7 @@ class TestGroupSkills:
 # ===================================================================
 # 7. GROUP:SESSIONS TOGGLE TESTS
 # ===================================================================
+
 
 class TestGroupSessions:
     """Test session tools via live gateway."""
@@ -402,23 +444,34 @@ class TestGroupSessions:
 # 8. GATEWAY-DENIED TOOLS TESTS
 # ===================================================================
 
+
 class TestGatewayDeniedTools:
     """Verify tools blocked by gateway HTTP deny list return not_found."""
 
-    @pytest.mark.parametrize('tool_name', [
-        'exec', 'read', 'write', 'edit', 'apply_patch', 'process', 'cron', 'gateway',
-    ])
+    @pytest.mark.parametrize(
+        'tool_name',
+        [
+            'exec',
+            'read',
+            'write',
+            'edit',
+            'apply_patch',
+            'process',
+            'cron',
+            'gateway',
+        ],
+    )
     def test_denied_tool_returns_not_found(self, tool_name):
         """Tools on the gateway HTTP deny list should return not_found."""
         result = _http_invoke(tool_name, {})
         assert result['ok'] is False
-        assert result['error']['type'] == 'not_found', \
-            f'{tool_name} should be blocked by gateway HTTP deny list, got: {result["error"]}'
+        assert result['error']['type'] == 'not_found', f'{tool_name} should be blocked by gateway HTTP deny list, got: {result["error"]}'
 
 
 # ===================================================================
 # 9. GROUP:MEMORY TOGGLE TESTS
 # ===================================================================
+
 
 class TestGroupMemory:
     """Test memory tools via live gateway."""
@@ -439,12 +492,14 @@ class TestGroupMemory:
 # 10. OVERLAP FILTERING + DENY LIST TESTS (unit tests)
 # ===================================================================
 
+
 class TestOverlapFiltering:
     """Test the IGlobal._filter_tools static method with mock catalog data."""
 
     def _get_filter_fn(self):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from IGlobal import IGlobal
+
         return IGlobal._filter_tools
 
     def _mock_catalog(self):
@@ -546,9 +601,15 @@ class TestOverlapFiltering:
         """With default config: web+messaging+ui+skills ON, others OFF."""
         filter_tools = self._get_filter_fn()
         enabled = {
-            'group:web': True, 'group:fs': False, 'group:runtime': False,
-            'group:ui': True, 'group:messaging': True, 'group:memory': False,
-            'group:automation': False, 'group:sessions': False, 'group:nodes': False,
+            'group:web': True,
+            'group:fs': False,
+            'group:runtime': False,
+            'group:ui': True,
+            'group:messaging': True,
+            'group:memory': False,
+            'group:automation': False,
+            'group:sessions': False,
+            'group:nodes': False,
             '__skills__': True,
         }
         # Default deny list from services.json
@@ -584,9 +645,15 @@ class TestOverlapFiltering:
         """Even with all groups ON, gateway-denied tools are filtered out."""
         filter_tools = self._get_filter_fn()
         enabled = {
-            'group:web': True, 'group:fs': True, 'group:runtime': True,
-            'group:ui': True, 'group:messaging': True, 'group:memory': True,
-            'group:automation': True, 'group:sessions': True, 'group:nodes': True,
+            'group:web': True,
+            'group:fs': True,
+            'group:runtime': True,
+            'group:ui': True,
+            'group:messaging': True,
+            'group:memory': True,
+            'group:automation': True,
+            'group:sessions': True,
+            'group:nodes': True,
             '__skills__': True,
         }
         deny = set()  # No user deny list
@@ -617,11 +684,16 @@ class TestOverlapFiltering:
         """User deny list removes specific tools."""
         filter_tools = self._get_filter_fn()
         enabled = {
-            'group:web': True, 'group:messaging': True,
-            'group:fs': False, 'group:runtime': False,
-            'group:ui': False, 'group:memory': False,
-            'group:automation': False, 'group:sessions': False,
-            'group:nodes': False, '__skills__': True,
+            'group:web': True,
+            'group:messaging': True,
+            'group:fs': False,
+            'group:runtime': False,
+            'group:ui': False,
+            'group:memory': False,
+            'group:automation': False,
+            'group:sessions': False,
+            'group:nodes': False,
+            '__skills__': True,
         }
         deny = {'web_search', 'github_pr'}
 
@@ -637,11 +709,16 @@ class TestOverlapFiltering:
         """With skills toggle OFF, plugin/skill groups are hidden."""
         filter_tools = self._get_filter_fn()
         enabled = {
-            'group:web': True, 'group:messaging': True,
-            'group:fs': False, 'group:runtime': False,
-            'group:ui': False, 'group:memory': False,
-            'group:automation': False, 'group:sessions': False,
-            'group:nodes': False, '__skills__': False,
+            'group:web': True,
+            'group:messaging': True,
+            'group:fs': False,
+            'group:runtime': False,
+            'group:ui': False,
+            'group:memory': False,
+            'group:automation': False,
+            'group:sessions': False,
+            'group:nodes': False,
+            '__skills__': False,
         }
         deny = set()
 
@@ -664,12 +741,14 @@ class TestOverlapFiltering:
 # 11. OPENCLAW CLIENT TRANSPORT TESTS (live)
 # ===================================================================
 
+
 class TestOpenClawClientLive:
     """Test the OpenClawClient class against live gateway."""
 
     def _make_client(self):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from openclaw_client import OpenClawClient
+
         return OpenClawClient(
             ws_url=GATEWAY_WS_URL,
             http_url=GATEWAY_HTTP_URL,
@@ -714,6 +793,7 @@ class TestOpenClawClientLive:
         """Client raises on non-existent tool invocation."""
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from openclaw_client import OpenClawProtocolError
+
         client = self._make_client()
         try:
             client.start()
@@ -726,6 +806,7 @@ class TestOpenClawClientLive:
 # ===================================================================
 # 12. END-TO-END: FULL PIPELINE SIMULATION
 # ===================================================================
+
 
 class TestEndToEnd:
     """Simulate the full node pipeline: discover → filter → invoke."""
@@ -751,9 +832,15 @@ class TestEndToEnd:
 
             # Filter (default config)
             enabled = {
-                'group:web': True, 'group:fs': False, 'group:runtime': False,
-                'group:ui': True, 'group:messaging': True, 'group:memory': False,
-                'group:automation': False, 'group:sessions': False, 'group:nodes': False,
+                'group:web': True,
+                'group:fs': False,
+                'group:runtime': False,
+                'group:ui': True,
+                'group:messaging': True,
+                'group:memory': False,
+                'group:automation': False,
+                'group:sessions': False,
+                'group:nodes': False,
                 '__skills__': True,
             }
             deny = {'web_fetch', 'firecrawl_scrape', 'firecrawl_search'}
@@ -802,9 +889,15 @@ class TestEndToEnd:
             client.start()
             catalog = client.discover_tools()
             enabled = {
-                'group:web': True, 'group:ui': True, 'group:messaging': True,
-                'group:fs': False, 'group:runtime': False, 'group:memory': False,
-                'group:automation': False, 'group:sessions': False, 'group:nodes': False,
+                'group:web': True,
+                'group:ui': True,
+                'group:messaging': True,
+                'group:fs': False,
+                'group:runtime': False,
+                'group:memory': False,
+                'group:automation': False,
+                'group:sessions': False,
+                'group:nodes': False,
                 '__skills__': True,
             }
             filtered = IGlobal._filter_tools(catalog, enabled, set())

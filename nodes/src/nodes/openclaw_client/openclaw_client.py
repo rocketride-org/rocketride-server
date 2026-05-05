@@ -59,6 +59,7 @@ def _get_ws():
     global _ws_module
     if _ws_module is None:
         from websockets.sync.client import connect  # type: ignore[import-untyped]
+
         _ws_module = connect
     return _ws_module
 
@@ -67,12 +68,13 @@ def _get_ws():
 # Data types
 # ---------------------------------------------------------------------------
 
+
 class OpenClawProtocolError(RuntimeError):
     pass
 
 
 class OpenClawHttpError(RuntimeError):
-    def __init__(self, status: int, body: str, url: str) -> None:
+    def __init__(self, status: int, body: str, url: str) -> None:  # noqa: D107
         self.status = status
         self.body = body
         self.url = url
@@ -91,10 +93,11 @@ class OpenClawToolDef:
 # Client
 # ---------------------------------------------------------------------------
 
+
 class OpenClawClient:
     """Transport layer for communicating with an OpenClaw gateway."""
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         *,
         ws_url: str,
@@ -122,7 +125,7 @@ class OpenClawClient:
         self._pending_lock = threading.Lock()
 
         # Special queue for the connect.challenge event during handshake
-        self._challenge_queue: "queue.Queue[dict]" = queue.Queue()
+        self._challenge_queue: 'queue.Queue[dict]' = queue.Queue()
 
         self._connected = False
         self._subscribed_session: str | None = None
@@ -141,31 +144,37 @@ class OpenClawClient:
         self._ws = connect(self._ws_url)
 
         self._reader_thread = threading.Thread(
-            target=self._reader_loop, name='OpenClawWsReader', daemon=True,
+            target=self._reader_loop,
+            name='OpenClawWsReader',
+            daemon=True,
         )
         self._reader_thread.start()
 
         # Wait for connect.challenge from gateway
         try:
-            challenge = self._challenge_queue.get(timeout=self._rpc_timeout_s)
+            self._challenge_queue.get(timeout=self._rpc_timeout_s)
         except queue.Empty:
             raise TimeoutError('Timed out waiting for connect.challenge from gateway')
 
         # Send connect request with auth
         import platform as _platform
-        resp = self._send_rpc('connect', {
-            'auth': {'token': self._token},
-            'minProtocol': 3,
-            'maxProtocol': 3,
-            'client': {
-                'id': 'cli',
-                'version': '0.1.0',
-                'platform': _platform.system().lower(),
-                'mode': 'cli',
+
+        resp = self._send_rpc(
+            'connect',
+            {
+                'auth': {'token': self._token},
+                'minProtocol': 3,
+                'maxProtocol': 3,
+                'client': {
+                    'id': 'cli',
+                    'version': '0.1.0',
+                    'platform': _platform.system().lower(),
+                    'mode': 'cli',
+                },
+                'role': 'operator',
+                'scopes': ['operator.read', 'operator.write'],
             },
-            'role': 'operator',
-            'scopes': ['operator.read', 'operator.write'],
-        })
+        )
 
         if not isinstance(resp, dict):
             raise OpenClawProtocolError(f'connect response expected dict, got {type(resp)}')
@@ -287,7 +296,7 @@ class OpenClawClient:
         }
 
         # Create response queue before sending
-        resp_queue: "queue.Queue[dict]" = queue.Queue()
+        resp_queue: 'queue.Queue[dict]' = queue.Queue()
         with self._pending_lock:
             self._pending[req_id] = resp_queue
 
@@ -316,6 +325,82 @@ class OpenClawClient:
     # WebSocket reader thread
     # ------------------------------------------------------------------
 
+    def _handshake_direct(self, ws: Any) -> None:
+        """Perform the WebSocket handshake by reading/writing directly on the socket.
+
+        Used during reconnect when _reader_inner is not yet running and the
+        queue-based routing (_challenge_queue, _send_rpc) is unavailable.
+        """
+        import platform as _platform
+
+        # Read connect.challenge directly
+        raw = ws.recv(timeout=self._rpc_timeout_s)
+        frame = json.loads(raw)
+        if not (isinstance(frame, dict) and frame.get('event') == 'connect.challenge'):
+            raise OpenClawProtocolError(f'Expected connect.challenge on reconnect, got: {frame}')
+
+        # Send connect request directly
+        req_id = self._next_req_id()
+        ws.send(
+            json.dumps(
+                {
+                    'type': 'req',
+                    'id': req_id,
+                    'method': 'connect',
+                    'params': {
+                        'auth': {'token': self._token},
+                        'minProtocol': 3,
+                        'maxProtocol': 3,
+                        'client': {
+                            'id': 'cli',
+                            'version': '0.1.0',
+                            'platform': _platform.system().lower(),
+                            'mode': 'cli',
+                        },
+                        'role': 'operator',
+                        'scopes': ['operator.read', 'operator.write'],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        # Read connect response directly — loop to skip any interleaved events
+        resp: dict | None = None
+        for _ in range(10):
+            raw = ws.recv(timeout=self._rpc_timeout_s)
+            f = json.loads(raw)
+            if isinstance(f, dict) and str(f.get('id', '')) == req_id:
+                resp = f
+                break
+        if resp is None:
+            raise OpenClawProtocolError('Did not receive connect response after reconnect')
+        if not resp.get('ok', False):
+            error = resp.get('error', {})
+            msg = error.get('message', str(error)) if isinstance(error, dict) else str(error)
+            raise OpenClawProtocolError(f'connect failed on reconnect: {msg}')
+
+    def _subscribe_direct(self, ws: Any, session_key: str) -> None:
+        """Send sessions.messages.subscribe directly on the socket (no reader thread)."""
+        req_id = self._next_req_id()
+        ws.send(
+            json.dumps(
+                {
+                    'type': 'req',
+                    'id': req_id,
+                    'method': 'sessions.messages.subscribe',
+                    'params': {'sessionKey': session_key},
+                },
+                ensure_ascii=False,
+            )
+        )
+        # Read response, skipping interleaved events
+        for _ in range(10):
+            raw = ws.recv(timeout=self._rpc_timeout_s)
+            f = json.loads(raw)
+            if isinstance(f, dict) and str(f.get('id', '')) == req_id:
+                break
+
     def _reader_loop(self) -> None:
         """Background thread: reads WebSocket frames, routes responses and events."""
         backoff = 1.0
@@ -328,7 +413,8 @@ class OpenClawClient:
                 if self._stop.is_set():
                     return
                 logger.warning(
-                    'OpenClaw WebSocket disconnected, reconnecting in %.1fs', backoff,
+                    'OpenClaw WebSocket disconnected, reconnecting in %.1fs',
+                    backoff,
                     exc_info=True,
                 )
                 self._connected = False
@@ -338,31 +424,16 @@ class OpenClawClient:
                 try:
                     connect = _get_ws()
                     self._ws = connect(self._ws_url)
-                    # Re-handshake
-                    import platform as _platform
-                    challenge = self._challenge_queue.get(timeout=self._rpc_timeout_s)
-                    resp = self._send_rpc('connect', {
-                        'auth': {'token': self._token},
-                        'minProtocol': 3,
-                        'maxProtocol': 3,
-                        'client': {
-                            'id': 'cli',
-                            'version': '0.1.0',
-                            'platform': _platform.system().lower(),
-                            'mode': 'cli',
-                        },
-                        'role': 'operator',
-                        'scopes': ['operator.read', 'operator.write'],
-                    })
+                    # Re-handshake directly — _reader_inner is not yet running so
+                    # _challenge_queue and _send_rpc (which both depend on the reader
+                    # thread routing frames) cannot be used here.
+                    self._handshake_direct(self._ws)
                     self._connected = True
                     backoff = 1.0
                     logger.info('OpenClaw WebSocket reconnected')
                     # Re-subscribe to messages if bridge was active
                     if self._subscribed_session:
-                        self._send_rpc(
-                            'sessions.messages.subscribe',
-                            {'sessionKey': self._subscribed_session},
-                        )
+                        self._subscribe_direct(self._ws, self._subscribed_session)
                 except Exception:
                     if self._stop.is_set():
                         return

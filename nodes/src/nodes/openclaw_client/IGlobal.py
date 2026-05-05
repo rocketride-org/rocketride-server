@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
-from .openclaw_client import OpenClawClient, OpenClawToolDef
+from .openclaw_client import OpenClawClient
 from .openclaw_driver import OpenClawDriver
 
 logger = logging.getLogger(__name__)
@@ -64,14 +64,57 @@ _KNOWN_GROUPS = {v for v in GROUP_MAP.values() if v is not None}
 
 # Tools blocked by OpenClaw's gateway HTTP deny list by default.
 # These cannot be invoked via POST /tools/invoke without gateway config changes.
-_GATEWAY_HTTP_DENIED = frozenset({
-    'exec', 'process',              # group:runtime
-    'read', 'write', 'edit', 'apply_patch',  # group:fs
-    'cron',                         # group:automation
-    'sessions_spawn', 'sessions_send',  # group:sessions
-    'gateway',                      # group:automation
-    'whatsapp_login',               # channel-specific
-})
+_GATEWAY_HTTP_DENIED = frozenset(
+    {
+        'exec',
+        'process',  # group:runtime
+        'read',
+        'write',
+        'edit',
+        'apply_patch',  # group:fs
+        'cron',  # group:automation
+        'sessions_spawn',
+        'sessions_send',  # group:sessions
+        'gateway',  # group:automation
+        'whatsapp_login',  # channel-specific
+    }
+)
+
+# Hardcoded tool catalog for groups where tools.catalog RPC is unavailable
+# (e.g. operator.read scope not granted). Indexed by OpenClaw group ID.
+# Follows the same shape as the RPC response so _filter_tools() works unchanged.
+_HARDCODED_GROUPS: Dict[str, Dict[str, Any]] = {
+    'group:messaging': {
+        'id': 'group:messaging',
+        'label': 'Messaging',
+        'tools': [
+            {
+                'id': 'message',
+                'label': 'Send a message via a messaging channel',
+                'description': ('Send an outbound message through WhatsApp, Telegram, or Discord. The channel must be connected and configured in the OpenClaw gateway.'),
+                'inputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'channel': {
+                            'type': 'string',
+                            'enum': ['whatsapp', 'telegram', 'discord'],
+                            'description': 'Messaging channel to use',
+                        },
+                        'to': {
+                            'type': 'string',
+                            'description': ('Recipient identifier: E.164 phone number for WhatsApp (e.g. "+15551234567"), numeric chat ID for Telegram, channel/user ID for Discord'),
+                        },
+                        'text': {
+                            'type': 'string',
+                            'description': 'Message text to send',
+                        },
+                    },
+                    'required': ['channel', 'to', 'text'],
+                },
+            },
+        ],
+    },
+}
 
 
 class IGlobal(IGlobalBase):
@@ -97,10 +140,7 @@ class IGlobal(IGlobalBase):
         enable_bridge = bool(cfg.get('enableMessageBridge'))
         channel_filter_raw = str(cfg.get('channelFilter') or '').strip()
         self._bridge_enabled = enable_bridge
-        self._channel_filter = (
-            {c.strip().lower() for c in channel_filter_raw.split(',') if c.strip()}
-            if channel_filter_raw else set()
-        )
+        self._channel_filter = {c.strip().lower() for c in channel_filter_raw.split(',') if c.strip()} if channel_filter_raw else set()
 
         # Build set of enabled group IDs from config toggles
         enabled_groups = self._resolve_enabled_groups(cfg)
@@ -119,8 +159,19 @@ class IGlobal(IGlobalBase):
             )
             self._client.start()
 
-            # Discover and filter tools
-            catalog_groups = self._client.discover_tools()
+            # Discover tools; fall back to empty catalog if RPC fails (e.g. operator.read scope)
+            try:
+                catalog_groups = self._client.discover_tools()
+                logger.info('Tool discovery succeeded: %d groups', len(catalog_groups))
+            except Exception as disc_exc:
+                logger.warning(
+                    'tools.catalog RPC failed (%s); using hardcoded schemas only',
+                    disc_exc,
+                )
+                catalog_groups = []
+
+            # Inject hardcoded schemas (messaging etc.) — always replaces the gateway version
+            catalog_groups = self._inject_hardcoded_groups(catalog_groups, enabled_groups)
             filtered_tools = self._filter_tools(catalog_groups, enabled_groups, deny_set)
 
             self.driver = OpenClawDriver(
@@ -132,7 +183,8 @@ class IGlobal(IGlobalBase):
 
             logger.info(
                 'OpenClaw client initialized: %d tools from %d groups',
-                len(filtered_tools), len(catalog_groups),
+                len(filtered_tools),
+                len(catalog_groups),
             )
 
             # Subscribe to messages if bridge is enabled
@@ -198,6 +250,20 @@ class IGlobal(IGlobalBase):
         return enabled
 
     @staticmethod
+    def _inject_hardcoded_groups(
+        catalog_groups: List[Dict[str, Any]],
+        enabled_groups: Dict[str, bool],
+    ) -> List[Dict[str, Any]]:
+        """Replace any gateway-discovered group with the hardcoded schema for that group,
+        and inject hardcoded groups that are enabled but absent from the catalog.
+        """
+        merged = [g for g in catalog_groups if g.get('id') not in _HARDCODED_GROUPS]
+        for group_id, group_def in _HARDCODED_GROUPS.items():
+            if enabled_groups.get(group_id, False):
+                merged.append(group_def)
+        return merged
+
+    @staticmethod
     def _filter_tools(
         catalog_groups: List[Dict[str, Any]],
         enabled_groups: Dict[str, bool],
@@ -237,18 +303,20 @@ class IGlobal(IGlobalBase):
                     gateway_denied_skipped.append(tool_name)
                     continue
 
-                filtered.append({
-                    'name': tool_name,
-                    'description': tool.get('label') or tool.get('description') or '',
-                    'inputSchema': tool.get('inputSchema') or {'type': 'object', 'additionalProperties': True},
-                    'group': group_id,
-                })
+                filtered.append(
+                    {
+                        'name': tool_name,
+                        'description': tool.get('label') or tool.get('description') or '',
+                        'inputSchema': tool.get('inputSchema') or {'type': 'object', 'additionalProperties': True},
+                        'group': group_id,
+                    }
+                )
 
         if gateway_denied_skipped:
             logger.warning(
-                'Skipped %d tools blocked by OpenClaw gateway HTTP deny list: %s. '
-                'These require gateway config changes to enable via HTTP.',
-                len(gateway_denied_skipped), ', '.join(sorted(gateway_denied_skipped)),
+                'Skipped %d tools blocked by OpenClaw gateway HTTP deny list: %s. These require gateway config changes to enable via HTTP.',
+                len(gateway_denied_skipped),
+                ', '.join(sorted(gateway_denied_skipped)),
             )
 
         return filtered
@@ -258,7 +326,7 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     def _on_inbound_message(self, payload: Dict[str, Any]) -> None:
-        """Called from WebSocket reader thread when a session.message event arrives."""
+        """Handle a session.message event from the WebSocket reader thread."""
         if self._bridge_instance is None:
             return
 
@@ -273,6 +341,7 @@ class IGlobal(IGlobalBase):
         sender = payload.get('from', '')
         try:
             from rocketlib import Question
+
             q = Question()
             q.addQuestion(str(content))
             self._bridge_instance.instance.writeQuestions(q)
