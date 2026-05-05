@@ -49,6 +49,13 @@ from rocketlib import IInstanceBase, tool_function
 
 from .IGlobal import IGlobal
 
+# Cap on bytes returned by a single read_file call. The underlying FileStore
+# defaults to 100 MB, which can blow the agent's context window or OOM the
+# engine subprocess long before the LLM ever sees the result. Agents that need
+# more than MAX_READ_LIMIT in one shot must use a streaming approach.
+DEFAULT_READ_LIMIT = 256 * 1024  # 256 KB
+MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -71,17 +78,33 @@ class IInstance(IInstanceBase):
                     'description': 'Text encoding for decoding the file contents. Defaults to "utf-8".',
                     'default': 'utf-8',
                 },
+                'maxBytes': {
+                    'type': 'integer',
+                    'description': f'Maximum bytes to read. Default {DEFAULT_READ_LIMIT}, hard ceiling {MAX_READ_LIMIT}. Files larger than the cap are rejected with an error — use a smaller maxBytes for sampling, or split the file.',
+                    'default': DEFAULT_READ_LIMIT,
+                    'minimum': 1,
+                    'maximum': MAX_READ_LIMIT,
+                },
             },
             'additionalProperties': False,
         },
         description=(
-            'Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"). Returns: {path, content, size} where size is the byte length before decoding.'
+            'Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"), "maxBytes" (default 256 KB, max 4 MB). Returns: {path, content, size} where size is the byte length before decoding. Files larger than maxBytes are rejected.'
         ),
     )
     def read_file(self, args):
         path, encoding, _ = self._prepare(args, 'read_file', needs_encoding=True)
 
-        data = _run_async(self.IGlobal.file_store.read(path))
+        # `_prepare` accepts None for `args` but doesn't return the normalised
+        # dict, so guard here before pulling the per-op `maxBytes` field.
+        max_bytes = (args or {}).get('maxBytes', DEFAULT_READ_LIMIT)
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
+            raise ValueError('maxBytes must be an integer')
+        if max_bytes < 1:
+            raise ValueError('maxBytes must be at least 1')
+        max_bytes = min(max_bytes, MAX_READ_LIMIT)
+
+        data = _run_async(self.IGlobal.file_store.read(path, max_size=max_bytes))
         try:
             content = data.decode(encoding)
         except UnicodeDecodeError as e:
