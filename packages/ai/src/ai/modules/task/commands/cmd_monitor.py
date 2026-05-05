@@ -108,16 +108,15 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
         """Send a server-level event if this connection is subscribed via the '*' wildcard."""
         if '*' not in self._monitors:
             return
         if not (event_type & self._monitors['*']):
             return
-        # Tenant scoping: if the event carries an apikey, only deliver to matching accounts.
-        # Compare userToken directly (per-user key, no team suffix).
-        if apikey is not None and hasattr(self, '_account_info') and self._account_info:
-            if self._account_info.userToken != apikey:
+        # Tenant scoping: if the event carries a user_id, only deliver to matching accounts.
+        if user_id is not None and hasattr(self, '_account_info') and self._account_info:
+            if self._account_info.userId != user_id:
                 return
         await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
 
@@ -441,7 +440,7 @@ class MonitorCommands(DAPConn):
                             'change': 'unsubscribed',
                         },
                     },
-                    apikey=self._account_info.userToken,
+                    user_id=self._account_info.userId,
                 )
             else:
                 # Get the current type so we know what to update
@@ -465,7 +464,7 @@ class MonitorCommands(DAPConn):
                             'change': 'subscribed',
                         },
                     },
-                    apikey=self._account_info.userToken,
+                    user_id=self._account_info.userId,
                 )
 
                 # Send updates for what was missed (or empty state if task not running)

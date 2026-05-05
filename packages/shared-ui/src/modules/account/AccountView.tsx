@@ -25,6 +25,7 @@ import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/Ta
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, CreditPack } from '../billing/types';
 import { ProfilePanel } from './components/ProfilePanel';
+import { EnvScopeCard } from './components/EnvironmentPanel';
 import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
@@ -168,7 +169,7 @@ export interface IAccountViewProps {
 	/** Persists an updated organization name. */
 	onSaveOrgName: (name: string) => Promise<void>;
 	/** Creates a new API key and returns the raw key string. */
-	onCreateKey: (params: { name: string; teamId: string; permissions: string[]; expiresAt?: string }) => Promise<{ key: string }>;
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string }) => Promise<{ key: string }>;
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 	/** Sends an invitation to a new organization member. */
@@ -189,6 +190,22 @@ export interface IAccountViewProps {
 	onRemoveTeamMember: (params: { teamId: string; userId: string }) => Promise<void>;
 	/** Requests the host to load full detail for a specific team. */
 	onLoadTeamDetail: (teamId: string) => void;
+
+	// -- Environment secrets ----------------------------------------------------
+	/** Org-level env dict (null while loading). */
+	orgEnv: Record<string, string>;
+	/** Team-level env dict. */
+	teamEnv: Record<string, string>;
+	/** User-level env dict. */
+	userEnv: Record<string, string>;
+	/** Whether the user has team admin on their active team. */
+	isTeamAdmin: boolean;
+	/** Saves the full org env dict. */
+	onSaveOrgEnv: (env: Record<string, string>) => Promise<void>;
+	/** Saves the full team env dict. */
+	onSaveTeamEnv: (env: Record<string, string>) => Promise<void>;
+	/** Saves the full user env dict. */
+	onSaveUserEnv: (env: Record<string, string>) => Promise<void>;
 }
 
 // =============================================================================
@@ -203,7 +220,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, orgEnv, teamEnv, userEnv, isTeamAdmin: isTeamAdminProp, onSaveOrgEnv, onSaveTeamEnv, onSaveUserEnv } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -239,13 +256,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// =========================================================================
 
 	/** Union of all modal identifiers; null means no modal is open. */
-	type ModalId = 'create-key' | 'reveal-key' | 'revoke-key' | 'invite' | 'change-role' | 'edit-perms' | 'add-member' | 'create-team' | 'cancel-sub' | 'remove-member' | 'remove-team-member' | null;
+	type ModalId = 'create-key' | 'reveal-key' | 'revoke-key' | 'invite' | 'change-role' | 'edit-perms' | 'add-member' | 'create-team' | 'delete-team' | 'cancel-sub' | 'remove-member' | 'remove-team-member' | null;
 	const [modal, setModal] = useState<ModalId>(null);
 
 	// -- Modal form state -- one group of fields per modal dialog.
 	const [newKeyName, setNewKeyName] = useState('');
-	const [newKeyTeamId, setNewKeyTeamId] = useState('');
-	const [newKeyPerms, setNewKeyPerms] = useState<string[]>(['task.control', 'task.monitor']);
+	const [newKeyTeamId, setNewKeyTeamId] = useState<string>('');
+	const [newKeyPerms, setNewKeyPerms] = useState<string[]>([]);
 	const [newKeyExpiry, setNewKeyExpiry] = useState<number | null>(90);
 	/** Holds the newly created key value alongside its record so the reveal modal can display it once. */
 	const [revealedKey, setRevealedKey] = useState<{ key: string; record: Omit<ApiKeyRecord, 'active' | 'lastUsedAt' | 'revokedAt'> } | null>(null);
@@ -269,44 +286,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const [removeMemberTarget, setRemoveMemberTarget] = useState<MemberRecord | null>(null);
 	/** Tracks the team member being removed from a team. */
 	const [removeTeamMemberTarget, setRemoveTeamMemberTarget] = useState<{ userId: string; displayName: string } | null>(null);
+	/** Tracks the team ID pending delete confirmation. */
+	const [deleteTeamId, setDeleteTeamId] = useState<string | null>(null);
 	/** Shared saving flag used by all modal submit handlers. */
 	const [saving, setSaving] = useState(false);
 	/** Shared error string shown inside the active modal on failure. */
 	const [saveError, setSaveError] = useState<string | null>(null);
-
-	// -- Org edit state -- separate from saving/saveError so it doesn't conflict with modal state.
-	const [editOrgName, setEditOrgName] = useState(org?.name || '');
-	const [orgSaving, setOrgSaving] = useState(false);
-	const [orgError, setOrgError] = useState<string | null>(null);
-
-	// Re-sync the org name field when the org data changes.
-	React.useEffect(() => {
-		if (org?.name) setEditOrgName(org.name);
-	}, [org?.name]);
-
-	// =========================================================================
-	// ORG SAVE
-	// =========================================================================
-
-	/** Validates and persists the edited organization name. */
-	const saveOrgName = async () => {
-		const trimmed = editOrgName.trim();
-		// Step 1: validate the input.
-		if (!trimmed) {
-			setOrgError('Name cannot be empty');
-			return;
-		}
-		// Step 2: call the host callback.
-		setOrgSaving(true);
-		setOrgError(null);
-		try {
-			await onSaveOrgName(trimmed);
-		} catch (e) {
-			setOrgError(e instanceof Error ? e.message : 'Save failed');
-		} finally {
-			setOrgSaving(false);
-		}
-	};
 
 	// =========================================================================
 	// CREATE KEY
@@ -318,20 +303,28 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	 * value (which the server will never return again after this point).
 	 */
 	const handleCreateKey = async () => {
-		// Step 1: validate required fields.
-		if (!newKeyName.trim() || !newKeyTeamId) {
-			setSaveError('Name and team are required');
+		if (!newKeyName.trim()) {
+			setSaveError('Name is required');
+			return;
+		}
+		// Team-scoped keys require permissions
+		if (newKeyTeamId && newKeyPerms.length === 0) {
+			setSaveError('Select at least one permission for a team-scoped key');
 			return;
 		}
 		setSaving(true);
 		setSaveError(null);
 		try {
-			// Step 2: convert the selected number of days to an ISO expiry timestamp, or omit for no expiry.
 			const expiresAt = newKeyExpiry ? new Date(Date.now() + newKeyExpiry * 86400000).toISOString() : undefined;
-			// Step 3: call the host callback.
-			const body = await onCreateKey({ name: newKeyName.trim(), teamId: newKeyTeamId, permissions: newKeyPerms, ...(expiresAt ? { expiresAt } : {}) });
-			// Step 4: transition to the reveal modal.
-			setRevealedKey({ key: body.key, record: { id: '', name: newKeyName.trim(), teamId: newKeyTeamId, teamName: teams.find((t) => t.id === newKeyTeamId)?.name || null, permissions: newKeyPerms, createdAt: new Date().toISOString(), expiresAt: expiresAt || null } });
+			const params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string } = {
+				name: newKeyName.trim(),
+				permissions: newKeyTeamId ? newKeyPerms : [],
+				...(expiresAt ? { expiresAt } : {}),
+			};
+			if (newKeyTeamId) params.teamId = newKeyTeamId;
+			const body = await onCreateKey(params);
+			const teamName = newKeyTeamId ? teams.find((t) => t.id === newKeyTeamId)?.name || null : null;
+			setRevealedKey({ key: body.key, record: { id: '', name: newKeyName.trim(), teamId: newKeyTeamId || null, teamName, permissions: params.permissions, createdAt: new Date().toISOString(), expiresAt: expiresAt || null, isSession: false } });
 			setModal('reveal-key');
 		} catch (e) {
 			setSaveError(e instanceof Error ? e.message : 'Failed to create key');
@@ -491,12 +484,18 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	 * Deletes a team and returns the Teams panel to the list view.
 	 * @param teamId - The ID of the team to delete.
 	 */
-	const handleDeleteTeam = async (teamId: string) => {
+	const handleDeleteTeam = async () => {
+		if (!deleteTeamId) return;
+		setSaving(true);
+		setSaveError(null);
 		try {
-			await onDeleteTeam(teamId);
+			await onDeleteTeam(deleteTeamId);
 			onActiveTeamIdChange(null);
+			setModal(null);
 		} catch (e) {
-			console.log('delete team error:', e);
+			setSaveError(e instanceof Error ? e.message : 'Failed to delete team');
+		} finally {
+			setSaving(false);
 		}
 	};
 
@@ -567,8 +566,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	/** Resets the create-key form fields and opens the modal. */
 	const openCreateKey = () => {
 		setNewKeyName('');
-		setNewKeyTeamId(teams[0]?.id || '');
-		setNewKeyPerms(['task.control', 'task.monitor']);
+		setNewKeyTeamId('');
+		setNewKeyPerms([]);
 		setNewKeyExpiry(90);
 		setSaveError(null);
 		setModal('create-key');
@@ -668,6 +667,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
+						<EnvScopeCard label="User" env={userEnv} onSave={onSaveUserEnv} />
 					</div>
 				),
 			},
@@ -688,7 +688,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			organization: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<OrganizationPanel org={org} editOrgName={editOrgName} orgSaving={orgSaving} orgError={orgError} onOrgNameChange={setEditOrgName} onOrgNameSave={saveOrgName} isOrgAdmin={isOrgAdmin} />
+						<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
+						{isOrgAdmin && <EnvScopeCard label="Organization" env={orgEnv} onSave={onSaveOrgEnv} />}
 					</div>
 				),
 			},
@@ -713,10 +714,15 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							onAddMember={openAddMember}
 							onEditPerms={openEditPerms}
 							onRemoveMember={openRemoveTeamMember}
-							onDeleteTeam={handleDeleteTeam}
+							onDeleteTeam={(id) => {
+								setDeleteTeamId(id);
+								setSaveError(null);
+								setModal('delete-team');
+							}}
 							isOrgAdmin={isOrgAdmin}
 							isTeamAdmin={isActiveTeamAdmin}
 						/>
+						{activeTeamId && isTeamAdminProp && <EnvScopeCard label="Team" env={teamEnv} onSave={onSaveTeamEnv} />}
 					</div>
 				),
 			},
@@ -728,7 +734,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[profile, authUser, keys, org, editOrgName, orgSaving, orgError, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
+		[profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
 	);
 
 	// =========================================================================
@@ -781,20 +787,31 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={commonStyles.inputField} />
 					</div>
 					<div style={S.field}>
-						<div style={S.fieldLabel}>Team</div>
-						<select value={newKeyTeamId} onChange={(e) => setNewKeyTeamId(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
+						<div style={S.fieldLabel}>Team Scope</div>
+						<select
+							value={newKeyTeamId}
+							onChange={(e) => {
+								setNewKeyTeamId(e.target.value);
+								// Reset permissions when switching teams
+								setNewKeyPerms([]);
+							}}
+							style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}
+						>
+							<option value="">All Teams</option>
 							{teams.map((t) => (
 								<option key={t.id} value={t.id}>
 									{t.name}
 								</option>
 							))}
 						</select>
-						<div style={commonStyles.textMuted}>This key can only start tasks within the selected team.</div>
+						<div style={commonStyles.textMuted}>{newKeyTeamId ? 'Key is restricted to this team only.' : 'Key inherits all teams from your account.'}</div>
 					</div>
-					<div style={{ ...S.field, marginBottom: 14 }}>
-						<div style={S.fieldLabel}>Permissions</div>
-						<PermGrid value={newKeyPerms} onChange={setNewKeyPerms} />
-					</div>
+					{newKeyTeamId && (
+						<div style={{ ...S.field, marginBottom: 14 }}>
+							<div style={S.fieldLabel}>Permissions</div>
+							<PermGrid value={newKeyPerms} onChange={setNewKeyPerms} />
+						</div>
+					)}
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Expiry</div>
 						<ExpiryOpts value={newKeyExpiry} onChange={setNewKeyExpiry} />
@@ -833,11 +850,9 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								{keyCopied ? '\u2713 Copied' : '\u2398 Copy'}
 							</button>
 						</div>
-						<div style={revealStyles.warn}>{'\u26A0'} Store safely -- cannot be retrieved after closing.</div>
+						<div style={revealStyles.warn}>Warning: Store safely -- cannot be retrieved after closing.</div>
 					</div>
 					<div style={{ background: 'var(--rr-bg-surface-alt)', border: '1px solid var(--rr-border)', borderRadius: 7, padding: '10px 13px', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1.6 }}>
-						<strong>Team:</strong> {teams.find((t) => t.id === revealedKey.record.teamId)?.name || revealedKey.record.teamId} &nbsp;{'\u00B7'}&nbsp;
-						<strong>Perms:</strong> {revealedKey.record.permissions.join(', ')} &nbsp;{'\u00B7'}&nbsp;
 						<strong>Expires:</strong> {revealedKey.record.expiresAt ? new Date(revealedKey.record.expiresAt).toLocaleDateString() : 'No expiry'}
 					</div>
 				</Modal>
@@ -860,11 +875,9 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					}
 				>
 					<div style={{ fontSize: 13, fontWeight: 700, color: 'var(--rr-text-primary)', marginBottom: 2 }}>{revokeTarget.name}</div>
-					<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)', marginBottom: 14 }}>
-						{revokeTarget.teamName} {'\u00B7'} Last used {relativeTime(revokeTarget.lastUsedAt)}
-					</div>
+					<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)', marginBottom: 14 }}>Last used {relativeTime(revokeTarget.lastUsedAt)}</div>
 					<div style={{ display: 'flex', gap: 10, background: 'var(--rr-bg-surface-alt)', border: '1px solid var(--rr-color-error)', borderRadius: 7, padding: 12 }}>
-						<span style={{ fontSize: 16, flexShrink: 0 }}>{'\u26A0'}</span>
+						<span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0, color: 'var(--rr-color-error)' }}>!</span>
 						<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
 							<strong style={{ color: 'var(--rr-text-primary)' }}>This cannot be undone.</strong> Any service using this key will immediately lose access.
 						</div>
@@ -1004,11 +1017,11 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								) : (
 									<select value={addMemberUserId} onChange={(e) => setAddMemberUserId(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
 										<option value="" disabled>
-											Select a member\u2026
+											Select a member…
 										</option>
 										{eligible.map((m) => (
 											<option key={m.userId} value={m.userId}>
-												{m.displayName} \u2014 {m.email}
+												{m.displayName} — {m.email}
 											</option>
 										))}
 									</select>
@@ -1123,6 +1136,29 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="e.g. Engineering, Data Science, QA" style={commonStyles.inputField} autoFocus />
 						<div style={commonStyles.textMuted}>You'll be added as admin automatically.</div>
 					</div>
+					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
+				</Modal>
+			)}
+
+			{/* Delete Team */}
+			{modal === 'delete-team' && deleteTeamId && (
+				<Modal
+					title="Delete Team"
+					onClose={() => setModal(null)}
+					footer={
+						<>
+							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={() => setModal(null)}>
+								Cancel
+							</button>
+							<button style={{ ...commonStyles.buttonDanger, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleDeleteTeam} disabled={saving}>
+								{saving ? 'Deleting\u2026' : 'Yes, Delete'}
+							</button>
+						</>
+					}
+				>
+					<p style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
+						Are you sure you want to delete <strong style={{ color: 'var(--rr-text-primary)' }}>{teams.find((t) => t.id === deleteTeamId)?.name ?? 'this team'}</strong>? Members will not be removed from the organization.
+					</p>
 					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
 				</Modal>
 			)}

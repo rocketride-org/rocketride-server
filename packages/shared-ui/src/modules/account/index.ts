@@ -45,7 +45,7 @@ export type { BillingPanelProps } from './components/BillingPanel';
 
 export { Badge, PermPill, Avatar, RowIcon, Modal, PermGrid, ExpiryOpts } from './components/shared';
 export { initials, avatarColor, relativeTime } from './components/shared';
-export { S, PERMS, EXPIRY_OPTS } from './components/shared';
+export { S, PERMS, PERM_DISPLAY, EXPIRY_OPTS } from './components/shared';
 
 // =============================================================================
 // TYPES

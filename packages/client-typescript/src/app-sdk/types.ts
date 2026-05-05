@@ -161,6 +161,8 @@ export interface AppManifestEntry {
 	settings?: AppSettingDefinition[];
 	/** When false, the app runs without authentication. Default: true. */
 	authenticated?: boolean;
+	/** When false, the status bar is hidden for this app. Default: true. */
+	statusBar?: boolean;
 	/** Async loader — dynamically imports and returns the full AppDescriptor. */
 	load: () => Promise<AppDescriptor>;
 }

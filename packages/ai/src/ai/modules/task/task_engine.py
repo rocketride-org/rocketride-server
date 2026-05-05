@@ -195,6 +195,7 @@ class Task(DAPBase):
         provider: str = None,
         ttl: int = 900,
         client_id: str = '',
+        env: Dict[str, str] = None,
         **kwargs,
     ) -> None:
         """
@@ -303,6 +304,7 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
+        self._env: Dict[str, str] = env or {}
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -313,27 +315,30 @@ class Task(DAPBase):
 
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
+        Replace ${KEY} placeholders in a pipeline dictionary with environment values.
 
-        Only environment variables whose names start with ALLOWED_ENV_PREFIX
-        are resolved. All other references are replaced with a redacted
-        placeholder to prevent secret exfiltration.
+        Uses the merged environment dict (self._env) which was built by the
+        command handler from: .env → org secrets → team secrets → user secrets
+        → caller-supplied env overrides.
+
+        Only variables whose names start with ALLOWED_ENV_PREFIX are resolved.
+        All other references are replaced with a redacted placeholder to prevent
+        secret exfiltration.
 
         Args:
-            pipeline: Dictionary containing the pipeline configuration
+            pipeline: Dictionary containing the pipeline configuration.
 
         Returns:
-            New dictionary with resolved environment variables
+            New dictionary with resolved environment variables.
         """
         # Convert dict to JSON string
         pipeline_str = json.dumps(pipeline)
 
-        # Replace ${VAR_NAME} with environment variable value (if allowed)
+        # Replace ${VAR_NAME} with value from the merged env dict
         def replacer(match):
             env_var = match.group(1)
             if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
+                value = self._env.get(env_var, match.group(0))
                 if value == match.group(0):
                     return value  # placeholder not found
                 return json.dumps(value)[1:-1]  # escape but strip outer quotes
@@ -827,9 +832,9 @@ class Task(DAPBase):
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
                     try:
-                        task_apikey = self._server.get_task_control(self.token).apikey if self.token else None
+                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
                     except Exception:
-                        task_apikey = None
+                        task_user_id = None
                     await self._server.broadcast_server_event(
                         EVENT_TYPE.DASHBOARD,
                         {
@@ -842,7 +847,7 @@ class Task(DAPBase):
                                 'exitMessage': self._status.exitMessage or None,
                             },
                         },
-                        apikey=task_apikey,
+                        user_id=task_user_id,
                     )
 
         self.debug_message('Resource cleanup completed successfully')

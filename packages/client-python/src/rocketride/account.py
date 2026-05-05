@@ -149,31 +149,38 @@ class AccountApi:
         self,
         *,
         name: str,
-        team_id: str,
-        permissions: list[str],
+        permissions: list[str] | None = None,
         expires_at: str | None = None,
+        team_id: str | None = None,
     ) -> CreateKeyResult:
         """
-        Create a new API key and return the raw key string.
+        Create a new API key (PAT) and return the raw key string.
+
+        When team_id is None (default) the key inherits all teams and
+        permissions from the user. When team_id is set, the key is scoped
+        to that team and permissions must be provided. Effective permissions
+        are always intersected with the user's actual permissions at auth time.
 
         Args:
             name: Human-readable label for the key.
-            team_id: The team this key is scoped to.
-            permissions: Array of permission strings to grant to this key.
+            permissions: Permission strings. Required when team_id is set;
+                None means inherit all from the user.
             expires_at: Optional ISO timestamp for key expiration. None means no expiry.
+            team_id: Optional team UUID to scope this key to.
 
         Returns:
             Dict containing the raw key string under the ``key`` field.
         """
-        # Build arguments with camelCase keys for the server
         kwargs: dict = {
             'subcommand': 'create',
             'name': name,
-            'teamId': team_id,
-            'permissions': permissions,
         }
+        if permissions is not None:
+            kwargs['permissions'] = permissions
         if expires_at is not None:
             kwargs['expiresAt'] = expires_at
+        if team_id is not None:
+            kwargs['teamId'] = team_id
 
         body = await self._client.call('rrext_account_keys', **kwargs)
         return {'key': body['key']}

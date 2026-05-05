@@ -349,7 +349,7 @@ class TaskConn(
                     'clientId': self._account_info.userId if self._account_info else None,
                 },
             },
-            apikey=self._account_info.userToken,
+            user_id=self._account_info.userId,
         )
 
         return self.build_response(request, body=result.to_connect_result())

@@ -128,7 +128,7 @@ export class AccountApi {
 	/**
 	 * Creates a new API key and returns the raw key string.
 	 *
-	 * @param params - Key creation parameters (name, teamId, permissions, expiresAt).
+	 * @param params - Key creation parameters (name, permissions, expiresAt).
 	 * @returns Object containing the raw key string.
 	 */
 	async createKey(params: CreateKeyParams): Promise<{ key: string }> {
@@ -265,5 +265,52 @@ export class AccountApi {
 	 */
 	async removeTeamMember(orgId: string, params: { teamId: string; userId: string }): Promise<void> {
 		await this.client.call('rrext_account_teams', { subcommand: 'delete_member', orgId, ...params });
+	}
+
+	// =========================================================================
+	// ENVIRONMENT SECRETS
+	// =========================================================================
+
+	/**
+	 * Returns the available ROCKETRIDE_* key names from the merged environment.
+	 * Does not return values — only key names for use in dropdowns.
+	 *
+	 * @returns Array of key names (e.g. ['ROCKETRIDE_ANTHROPIC_KEY', 'ROCKETRIDE_OPENAI_KEY']).
+	 */
+	async getEnvironmentKeys(): Promise<string[]> {
+		const body = await this.client.call<{ keys: string[] }>('rrext_account_me', { subcommand: 'env_keys' });
+		return body.keys ?? [];
+	}
+
+	/**
+	 * Reads the environment dict for a scope (org, team, or user).
+	 *
+	 * @param scope   - One of 'org', 'team', 'user'.
+	 * @param scopeId - For org: orgId. For team: teamId. For user: omit (uses current user).
+	 * @returns Decrypted key-value dict.
+	 */
+	async getEnv(scope: 'org' | 'team' | 'user', scopeId?: string): Promise<Record<string, string>> {
+		const command = scope === 'org' ? 'rrext_account_org' : scope === 'team' ? 'rrext_account_teams' : 'rrext_account_me';
+		const args: Record<string, unknown> = { subcommand: 'get_env' };
+		if (scope === 'org' && scopeId) args.orgId = scopeId;
+		if (scope === 'team' && scopeId) args.teamId = scopeId;
+		const body = await this.client.call<{ env: Record<string, string> }>(command, args);
+		return body.env ?? {};
+	}
+
+	/**
+	 * Writes the full environment dict for a scope (org, team, or user).
+	 * Replaces the entire set of keys at that scope level.
+	 *
+	 * @param scope   - One of 'org', 'team', 'user'.
+	 * @param env     - Full key-value dict to store.
+	 * @param scopeId - For org: orgId. For team: teamId. For user: omit.
+	 */
+	async setEnv(scope: 'org' | 'team' | 'user', env: Record<string, string>, scopeId?: string): Promise<void> {
+		const command = scope === 'org' ? 'rrext_account_org' : scope === 'team' ? 'rrext_account_teams' : 'rrext_account_me';
+		const args: Record<string, unknown> = { subcommand: 'set_env', env };
+		if (scope === 'org' && scopeId) args.orgId = scopeId;
+		if (scope === 'team' && scopeId) args.teamId = scopeId;
+		await this.client.call(command, args);
 	}
 }

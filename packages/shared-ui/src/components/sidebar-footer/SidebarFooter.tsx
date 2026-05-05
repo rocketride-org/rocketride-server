@@ -75,7 +75,6 @@ export interface SidebarFooterProps {
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
 	onOpenDocs?: () => void;
-
 	// ── Popup menu items ────────────────────────────────────────────────────
 	/** Host-specific menu items shown in the avatar popup. */
 	menuItems?: SidebarFooterMenuItem[];
@@ -451,6 +450,10 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 							left: flyoutPos.left,
 							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
 							minWidth: 140,
+							maxHeight: `calc(100vh - ${flyoutPos.top + 8}px)`,
+							overflowY: 'auto',
+							scrollbarWidth: 'thin',
+							scrollbarColor: 'var(--rr-bg-scrollbar-thumb) transparent',
 							zIndex: 10001,
 						}}
 					>

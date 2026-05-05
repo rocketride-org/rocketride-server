@@ -19,24 +19,6 @@ import type { ConnectResult, TeamRecord, TeamDetail, TeamMemberRecord } from '..
 import { S, PermPill, Avatar, avatarColor } from './shared';
 
 // =============================================================================
-// DANGER ZONE STYLES
-// =============================================================================
-
-/** Styles for the danger zone section at the bottom of the team detail view. */
-const dangerStyles = {
-	/** Red-tinted bordered box that groups destructive actions. */
-	zone: { border: '1px solid var(--rr-color-error)', borderRadius: 9, overflow: 'hidden', marginBottom: 14, marginTop: 20 } as CSSProperties,
-	/** Header bar inside the danger zone. */
-	hdr: { padding: '10px 18px', background: 'var(--rr-bg-surface-alt)', borderBottom: '1px solid var(--rr-border)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.5px', color: 'var(--rr-color-error)' } as CSSProperties,
-	/** Horizontal row inside the danger zone that pairs a description with an action button. */
-	row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px' } as CSSProperties,
-	/** Bold label text for a danger-zone action. */
-	label: { fontSize: 12, fontWeight: 500, color: 'var(--rr-text-primary)', marginBottom: 2 } as CSSProperties,
-	/** Descriptive sub-text for a danger-zone action. */
-	desc: { fontSize: 11, color: 'var(--rr-text-secondary)' } as CSSProperties,
-};
-
-// =============================================================================
 // PROPS
 // =============================================================================
 
@@ -90,11 +72,11 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 					<div style={commonStyles.cardHeader}>
 						<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-							<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.buttonSmall, border: 'none', background: 'transparent' } as CSSProperties} onClick={onBack}>
+							<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.buttonSmall, border: 'none', background: 'transparent', fontSize: 20, fontWeight: 900, padding: '0 6px', lineHeight: '1rem' } as CSSProperties} onClick={onBack}>
 								{'\u2190'}
 							</button>
-							<div style={{ width: 22, height: 22, borderRadius: 5, background: teamDetail.color || avatarColor(teamDetail.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{teamDetail.name[0]}</div>
-							<span>
+							<div style={{ width: 22, height: 22, borderRadius: 5, background: avatarColor(teamDetail.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{teamDetail.name[0]}</div>
+							<span style={commonStyles.labelUppercase}>
 								{teamDetail.name} — {teamDetail.members.length} member{teamDetail.members.length !== 1 ? 's' : ''}
 							</span>
 						</div>
@@ -105,48 +87,46 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 						)}
 					</div>
 					<div style={S.rowList}>
-						{teamDetail.members.map((m, i) => (
-							<div key={m.userId} style={{ ...S.rowItem, borderBottom: i < teamDetail.members.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-								<Avatar name={m.displayName} email={m.email} size={28} />
-								<div style={S.rowInfo}>
-									<div style={S.rowName}>{m.displayName}</div>
-									<div style={commonStyles.textMuted}>{m.email}</div>
-									<div style={S.perms}>
-										{m.permissions.map((p) => (
-											<PermPill key={p} perm={p} />
-										))}
+						{(() => {
+							// Count how many team admins exist so the UI can prevent
+							// the last admin from removing themselves or dropping admin.
+							const adminCount = teamDetail.members.filter((m) => m.permissions.includes('team.admin')).length;
+
+							return teamDetail.members.map((m, i) => {
+								const isSelf = m.userId === profile?.userId;
+								const isLastAdmin = isSelf && m.permissions.includes('team.admin') && adminCount <= 1;
+
+								return (
+									<div key={m.userId} style={{ ...S.rowItem, borderBottom: i < teamDetail.members.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
+										<Avatar name={m.displayName} email={m.email} size={28} />
+										<div style={S.rowInfo}>
+											<div style={S.rowName}>{m.displayName}</div>
+											<div style={commonStyles.textMuted}>{m.email}</div>
+											<div style={S.perms}>
+												{m.permissions.map((p) => (
+													<PermPill key={p} perm={p} />
+												))}
+											</div>
+										</div>
+										{isTeamAdmin && (
+											<div style={S.rowActions}>
+												<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onEditPerms(m)}>
+													Edit Perms
+												</button>
+												{/* Hide Remove if this is the last admin (team must always have one). */}
+												{!isLastAdmin && (
+													<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemoveMember(m.userId, m.displayName)}>
+														Remove
+													</button>
+												)}
+											</div>
+										)}
 									</div>
-								</div>
-								{/* Hide edit/remove controls for the current user and non-team-admins. */}
-								{isTeamAdmin && m.userId !== profile?.userId && (
-									<div style={S.rowActions}>
-										<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onEditPerms(m)}>
-											Edit Perms
-										</button>
-										<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemoveMember(m.userId, m.displayName)}>
-											Remove
-										</button>
-									</div>
-								)}
-							</div>
-						))}
+								);
+							});
+						})()}
 					</div>
 				</div>
-
-				{isTeamAdmin && (
-					<div style={dangerStyles.zone}>
-						<div style={dangerStyles.hdr}>Danger Zone</div>
-						<div style={dangerStyles.row}>
-							<div>
-								<div style={dangerStyles.label}>Delete Team</div>
-								<div style={dangerStyles.desc}>Members are not deleted from the organization.</div>
-							</div>
-							<button style={commonStyles.buttonDanger as CSSProperties} onClick={() => onDeleteTeam(teamDetail.id)}>
-								Delete
-							</button>
-						</div>
-					</div>
-				)}
 			</section>
 		);
 	}
@@ -156,7 +136,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 		<section>
 			<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 				<div style={commonStyles.cardHeader}>
-					<span>
+					<span style={commonStyles.labelUppercase}>
 						Teams — {teams.length} team{teams.length !== 1 ? 's' : ''}
 					</span>
 					{isOrgAdmin && (
@@ -167,24 +147,36 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				</div>
 				<div style={S.rowList}>
 					{teams.map((t, i) => (
-						<div key={t.id} onClick={() => onSelectTeam(t.id)} style={{ ...S.rowItem, cursor: 'pointer', borderBottom: i < teams.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-							<div style={{ width: 32, height: 32, borderRadius: 7, background: t.color || avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
+						<div key={t.id} onClick={() => onSelectTeam(t.id)} style={{ ...S.rowItem, cursor: 'pointer', borderBottom: 'none' }}>
+							<div style={{ width: 32, height: 32, borderRadius: 7, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
 							<div style={S.rowInfo}>
 								<div style={S.rowName}>{t.name}</div>
 								<div style={commonStyles.textMuted}>
 									{t.memberCount} member{t.memberCount !== 1 ? 's' : ''}
 								</div>
 							</div>
-							{/* stopPropagation prevents the row's onClick from firing twice when the button is clicked directly. */}
-							<button
-								style={commonStyles.buttonSecondarySmall as CSSProperties}
-								onClick={(e) => {
-									e?.stopPropagation?.();
-									onSelectTeam(t.id);
-								}}
-							>
-								Manage {'\u2192'}
-							</button>
+							<div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+								{isOrgAdmin && (
+									<button
+										style={commonStyles.buttonSecondarySmall as CSSProperties}
+										onClick={(e) => {
+											e.stopPropagation();
+											onDeleteTeam(t.id);
+										}}
+									>
+										Delete
+									</button>
+								)}
+								<button
+									style={commonStyles.buttonSecondarySmall as CSSProperties}
+									onClick={(e) => {
+										e.stopPropagation();
+										onSelectTeam(t.id);
+									}}
+								>
+									Manage {'\u2192'}
+								</button>
+							</div>
 						</div>
 					))}
 					{teams.length === 0 && <div style={{ padding: '20px 18px', color: 'var(--rr-text-disabled)', fontSize: 12 }}>No teams yet.</div>}

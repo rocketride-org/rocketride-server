@@ -80,15 +80,29 @@ export function relativeTime(iso: string | null): string {
 // =============================================================================
 
 /**
+ * Human-friendly display labels for permission keys.
+ * Used by PermPill and anywhere else a permission needs a readable name.
+ */
+export const PERM_DISPLAY: Record<string, string> = {
+	'org.admin': 'Org: Admin',
+	'team.admin': 'Team: Admin',
+	'task.control': 'Task: Control',
+	'task.monitor': 'Task: Monitor',
+	'task.debug': 'Task: Debug',
+	'task.data': 'Task: Data',
+	'task.store': 'Task: Storage',
+};
+
+/**
  * Static list of known permission keys with human-readable descriptions.
  * Drives both PermGrid and the add-member / edit-perms modals.
  */
 export const PERMS = [
-	{ key: 'admin', desc: 'Manage team members' },
 	{ key: 'task.control', desc: 'Start / stop tasks' },
-	{ key: 'task.monitor', desc: 'View status & events' },
-	{ key: 'task.debug', desc: 'Attach debugger' },
 	{ key: 'task.data', desc: 'Submit data to tasks' },
+	{ key: 'task.monitor', desc: 'View status & events' },
+	{ key: 'task.store', desc: 'Access file storage' },
+	{ key: 'team.admin', desc: 'Manage team members' },
 ];
 
 /**
@@ -176,7 +190,7 @@ export const Badge: React.FC<{ variant: 'active' | 'admin' | 'member' | 'pending
  */
 export const PermPill: React.FC<{ perm: string }> = ({ perm }) => {
 	// Distinguish elevated permissions (admin/*) from standard capability flags.
-	const isAdmin = perm === 'admin' || perm === '*';
+	const isAdmin = perm === 'team.admin' || perm === 'org.admin' || perm === '*';
 	return (
 		<span
 			style={{
@@ -188,7 +202,7 @@ export const PermPill: React.FC<{ perm: string }> = ({ perm }) => {
 				background: 'var(--rr-bg-surface-alt)',
 			}}
 		>
-			{perm}
+			{PERM_DISPLAY[perm] ?? perm}
 		</span>
 	);
 };
@@ -302,7 +316,7 @@ export const PermGrid: React.FC<{ value: string[]; onChange: (v: string[]) => vo
 			{PERMS.map(({ key, desc }) => {
 				const checked = value.includes(key);
 				// Admin permission uses orange highlight; capability flags use blue.
-				const isAdmin = key === 'admin';
+				const isAdmin = key === 'team.admin';
 				const accent = isAdmin ? 'var(--rr-brand)' : 'var(--rr-color-info)';
 				return (
 					<div
@@ -339,8 +353,8 @@ export const PermGrid: React.FC<{ value: string[]; onChange: (v: string[]) => vo
 							{checked && '\u2713'}
 						</div>
 						<div>
-							<div style={{ fontSize: 11, fontWeight: 500, color: 'var(--rr-text-primary)' }}>{key}</div>
-							<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)' }}>{desc}</div>
+							<div style={{ fontSize: 11, fontWeight: 500, color: checked ? 'var(--rr-fg-button)' : 'var(--rr-text-primary)' }}>{PERM_DISPLAY[key] || key}</div>
+							<div style={{ fontSize: 10, color: checked ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)', opacity: checked ? 0.8 : 1 }}>{desc}</div>
 						</div>
 					</div>
 				);

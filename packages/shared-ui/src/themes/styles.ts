@@ -212,6 +212,7 @@ const buttonSecondary: CSSProperties = {
 const buttonSmall: CSSProperties = {
 	padding: '3px 9px',
 	fontSize: 11,
+	lineHeight: 1.4,
 };
 
 /**
@@ -610,6 +611,7 @@ const modalDialog: CSSProperties = {
 	...dialog,
 	width: 440,
 	maxWidth: '95vw',
+	overflow: 'hidden',
 };
 
 /**

@@ -30,6 +30,7 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import os
 from abc import ABC, abstractmethod
 
 
@@ -96,6 +97,26 @@ class AccountBase(ABC):
     # =========================================================================
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
+
+    async def get_merged_env(self, user_id: str, org_id: str, team_id: str | None) -> dict[str, str]:
+        """
+        Build the merged ROCKETRIDE_* environment for a user.
+
+        Merge order: os.environ → org → team → user.  Each layer overrides
+        the previous.
+
+        OSS default: returns ROCKETRIDE_* entries from os.environ only.
+        SaaS override: also decrypts org/team/user secrets from the database.
+
+        Args:
+            user_id: The user's internal ID.
+            org_id:  The user's organization ID.
+            team_id: The user's active team ID, or None.
+
+        Returns:
+            Merged key-value dict ready for pipeline variable resolution.
+        """
+        return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
 
     async def init_account(self, server) -> None:
         """

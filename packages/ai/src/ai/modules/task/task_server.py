@@ -109,11 +109,10 @@ class TASK_CONTROL:
         pipeline (Optional[Dict[str, Any]]): Task configuration and execution parameters
     """
 
-    # Short of the pipe -  used for display and events
+    # Short of the pipe — used for display and events
     id: str = ''
 
-    # These are the mapped userToken, client_id, and the token for the task
-    apikey: str = ''  # kept for backward compat; set to userToken at task start
+    # Connection and task identifiers
     client_id: str = ''
     token: str = ''
 
@@ -461,7 +460,7 @@ class TaskServer(DAPBase):
         if not getattr(conn, '_authenticated', False):
             self.release_unauthed_slot(getattr(conn, '_client_ip', ''))
 
-        conn_apikey = getattr(getattr(conn, '_account_info', None), 'userToken', None)
+        conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {
@@ -474,7 +473,7 @@ class TaskServer(DAPBase):
                     'clientVersion': getattr(conn, '_client_info', {}).get('version'),
                 },
             },
-            apikey=conn_apikey,
+            user_id=conn_user_id,
         )
 
         # Process all tasks for disconnection cleanup
@@ -704,7 +703,7 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
         """
         Broadcast a server-level event to all connections subscribed via the '*' wildcard.
 
@@ -717,13 +716,13 @@ class TaskServer(DAPBase):
                 Only connections whose '*' subscription includes this bit will receive the event.
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
-            apikey (str, optional): When provided, restricts delivery to connections
-                whose authenticated userToken matches this value (tenant scoping).
+            user_id (str, optional): When provided, restricts delivery to connections
+                whose authenticated userId matches this value (tenant scoping).
                 Pass None to broadcast to all '*'-subscribed connections regardless of tenant.
         """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event, apikey=apikey)
+                await conn.send_server_event(type, event=event, user_id=user_id)
             except Exception as e:
                 # Log individual delivery failures so dashboard-event drops leave
                 # a trace; match the pattern used by broadcast_task_event below.
@@ -896,7 +895,7 @@ class TaskServer(DAPBase):
                 'event': 'apaevt_dashboard',
                 'body': {'action': 'task_removed', 'timestamp': time.time(), 'taskId': control.id},
             },
-            apikey=control.apikey,
+            user_id=control.userId,
         )
 
         # Log task removal for audit trail and debugging
@@ -905,7 +904,6 @@ class TaskServer(DAPBase):
 
     async def start_task(
         self,
-        apikey: str,
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,
@@ -915,6 +913,7 @@ class TaskServer(DAPBase):
         user_id: str = '',
         team_id: str = '',
         org_id: str = '',
+        env: Dict[str, str] | None = None,
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -990,7 +989,6 @@ class TaskServer(DAPBase):
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
         # Parse task configuration from request arguments
-        control.apikey = apikey
         control.client_id = client_id
         control.userId = user_id
         control.teamId = team_id
@@ -1049,7 +1047,7 @@ class TaskServer(DAPBase):
         if control.token is None:
             control.token = self._server.account.generate_token(
                 content={
-                    'apikey': control.apikey,
+                    'userId': control.userId,
                     'project_id': control.project_id,
                     'source': control.source,
                 },
@@ -1127,6 +1125,7 @@ class TaskServer(DAPBase):
                 provider=control.provider,
                 ttl=ttl,
                 client_id=control.client_id,
+                env=env or {},
             )
 
             # Register task in central registry
@@ -1164,7 +1163,6 @@ class TaskServer(DAPBase):
 
     async def restart_task(
         self,
-        apikey: str,
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,

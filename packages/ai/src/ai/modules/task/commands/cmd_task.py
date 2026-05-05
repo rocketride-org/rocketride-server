@@ -52,6 +52,7 @@ The actual task execution and management is delegated to the TaskServer.
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
+from ai.account import account
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -146,28 +147,42 @@ class TaskCommands(DAPConn):
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
-            # Resolve org_id from the user's default team.
-            # Walk the organizations/teams tree to find which org owns the
-            # session's defaultTeam so it can be passed to start_task.
+            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Resolve org_id by walking the organizations/teams tree.
             org_id = ''
             for org in self._account_info.organizations or []:
                 for team in org.get('teams', []):
-                    if team.get('id') == self._account_info.defaultTeam:
+                    if team.get('id') == team_id:
                         org_id = org.get('id', '')
                         break
                 if org_id:
                     break
 
+            # Build merged environment for pipeline variable resolution.
+            # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
+            # Security: only accept ROCKETRIDE_* keys from the caller
+            raw_env = args.get('env', {})
+            caller_env = {k: v for k, v in raw_env.items() if k.startswith('ROCKETRIDE_')}
+            merged_env = await account.get_merged_env(
+                user_id=self._account_info.userId,
+                org_id=org_id,
+                team_id=team_id,
+            )
+            # Caller-supplied env overrides on top
+            merged_env.update(caller_env)
+
             # Start the task without debugger attachment
             response = await self._server.start_task(
-                self._account_info.userToken,
                 request,
                 self,
                 wait_for_running=True,
                 client_id=self._account_info.userId,
                 user_id=self._account_info.userId,
-                team_id=self._account_info.defaultTeam,
+                team_id=team_id,
                 org_id=org_id,
+                env=merged_env,
             )
 
             # Confirm successful task execution startup
@@ -201,7 +216,6 @@ class TaskCommands(DAPConn):
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
-                self._account_info.userToken,
                 request,
                 self,
                 wait_for_running=True,

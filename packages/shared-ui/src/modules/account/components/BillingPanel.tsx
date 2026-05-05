@@ -158,7 +158,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			{/* Subscriptions card */}
 			<div style={{ ...commonStyles.card, marginTop: 16, marginBottom: 14 }}>
 				<div style={commonStyles.cardHeader}>
-					<span>
+					<span style={commonStyles.labelUppercase}>
 						{subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
 					</span>
 					{isOrgAdmin && (

@@ -281,7 +281,6 @@ class MiscCommands(DAPConn):
                     'messagesOut': getattr(conn, '_messages_out', 0),
                     'authenticated': getattr(conn, '_authenticated', False),
                     'clientId': None,
-                    'apikey': '****',
                     'clientInfo': getattr(conn, '_client_info', {}),
                     'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
                     if hasattr(conn, '_monitors')
@@ -290,7 +289,6 @@ class MiscCommands(DAPConn):
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:
                     conn_info['clientId'] = conn._account_info.userId
-                    conn_info['apikey'] = self._mask_apikey(conn._account_info.userToken)
                 connections.append(conn_info)
 
             # Build tasks list

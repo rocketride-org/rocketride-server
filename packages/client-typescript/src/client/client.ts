@@ -715,14 +715,6 @@ export class RocketRideClient extends DAPClient {
 	 * Update the environment variables used for pipeline substitution.
 	 *
 	 * The env dictionary is used by {@link use} and {@link validate} to replace
-	 * `${ROCKETRIDE_*}` placeholders in pipeline configurations. Call this
-	 * whenever the user's `.env` settings change so subsequent pipeline
-	 * executions pick up the new values without reconnecting.
-	 */
-	setEnv(env: Record<string, string>): void {
-		this._env = { ...env };
-	}
-
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -745,46 +737,6 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 	// EXECUTION METHODS
 	// ============================================================================
-
-	/**
-	 * Substitute environment variables in a string.
-	 * Replaces ${ROCKETRIDE_*} patterns with values from client's env dictionary.
-	 * If variable is not found, leaves it unchanged.
-	 */
-	private substituteEnvVars(value: string): string {
-		// Match ${ROCKETRIDE_*} patterns
-		return value.replace(/\$\{(ROCKETRIDE_[^}]+)\}/g, (match, varName) => {
-			// Check if variable exists in client's env
-			if (varName in this._env) {
-				return String(this._env[varName]);
-			}
-			// If not found, leave as is
-			return match;
-		});
-	}
-
-	/**
-	 * Recursively process an object/array to substitute environment variables.
-	 * Only processes string values, leaving other types unchanged.
-	 */
-	private processEnvSubstitution(obj: unknown): unknown {
-		if (typeof obj === 'string') {
-			// If it's a string, perform substitution
-			return this.substituteEnvVars(obj);
-		} else if (Array.isArray(obj)) {
-			// If it's an array, process each element
-			return obj.map((item) => this.processEnvSubstitution(item));
-		} else if (obj !== null && typeof obj === 'object') {
-			// If it's an object, process each property
-			const result: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(obj)) {
-				result[key] = this.processEnvSubstitution(value);
-			}
-			return result;
-		}
-		// For other types (number, boolean, null), return as is
-		return obj;
-	}
 
 	/**
 	 * Load Node.js fs/promises at runtime without static imports.
@@ -929,9 +881,13 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
+			/** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+			env?: Record<string, string>;
+			/** Team ID to run the task under. Defaults to the user's default team. */
+			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -958,10 +914,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create a deep copy of the pipeline config to avoid modifying the original
-		let processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
-
-		// Perform environment variable substitution on the pipeline configuration
-		processedConfig = this.processEnvSubstitution(processedConfig);
+		const processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
 
 		// Override source if specified (after substitution)
 		if (source !== undefined) {
@@ -992,10 +945,22 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
+		// Build ROCKETRIDE_* env from client's .env + caller overrides
+		const rocketEnv: Record<string, string> = {};
+		for (const [k, v] of Object.entries(this._env)) {
+			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
+		}
+		if (env) Object.assign(rocketEnv, env);
+		if (Object.keys(rocketEnv).length > 0) {
+			arguments_.env = rocketEnv;
+		}
 		// Derive display name from filepath if not explicitly provided
 		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
 		if (effectiveName !== undefined) {
 			arguments_.name = effectiveName;
+		}
+		if (teamId !== undefined) {
+			arguments_.teamId = teamId;
 		}
 
 		// Send execution request to server

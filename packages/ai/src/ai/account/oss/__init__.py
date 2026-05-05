@@ -214,6 +214,9 @@ class Account(AccountBase):
     async def get_team(self, team_id: str) -> Dict:
         self._saas_only()
 
+    async def get_team_member(self, team_id: str, user_id: str):
+        self._saas_only()
+
     async def add_team_member(self, **kw):
         self._saas_only()
 
@@ -222,5 +225,83 @@ class Account(AccountBase):
 
     async def remove_team_member(self, **kw):
         self._saas_only()
+
+    # =========================================================================
+    # HANDLE ACCOUNT — env-only support for OSS
+    # =========================================================================
+
+    async def handle_account(self, conn, request):
+        """
+        Handle ``rrext_account_me`` for env subcommands only.
+
+        OSS supports ``get_env`` (reads ROCKETRIDE_* from os.environ) and
+        ``set_env`` (writes to os.environ + persists to .env file).
+        All other account commands raise NotImplementedError.
+
+        Args:
+            conn:    TaskConn instance.
+            request: DAP request dict.
+        """
+        command = request.get('command', '')
+        args = request.get('arguments', {})
+        sub = args.get('subcommand', '')
+
+        if command == 'rrext_account_me':
+            if sub == 'get_env':
+                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                return conn.build_response(request, body={'env': env})
+
+            if sub == 'set_env':
+                # Only accept ROCKETRIDE_* keys — reject anything else
+                raw = args.get('env', {})
+                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+                # Persist to .env file
+                import sys
+
+                exec_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                return conn.build_response(request, body={'updated': True})
+
+            if sub == 'env_keys':
+                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
+                return conn.build_response(request, body={'keys': keys})
+
+        raise NotImplementedError('Account management requires SaaS mode')
+
+    @staticmethod
+    def _write_env_file(path: str, env: Dict[str, str]) -> None:
+        """
+        Merge ROCKETRIDE_* entries into a .env file.
+
+        Preserves non-ROCKETRIDE lines and comments. Replaces existing
+        ROCKETRIDE_* lines and appends new ones.
+
+        Args:
+            path: Absolute path to the .env file.
+            env:  Key-value dict to write.
+        """
+        lines: List[str] = []
+        written_keys: set = set()
+        try:
+            with open(path, 'r') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#') and '=' in stripped:
+                        key = stripped.split('=', 1)[0].strip()
+                        if key.startswith('ROCKETRIDE_'):
+                            if key in env:
+                                lines.append(f'{key}={env[key]}\n')
+                                written_keys.add(key)
+                            continue
+                    lines.append(line)
+        except FileNotFoundError:
+            pass
+
+        for k, v in sorted(env.items()):
+            if k not in written_keys:
+                lines.append(f'{k}={v}\n')
+
+        with open(path, 'w') as f:
+            f.writelines(lines)
 
     # generate_token is inherited from AccountBase.
