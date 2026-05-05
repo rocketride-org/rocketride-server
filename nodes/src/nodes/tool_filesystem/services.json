@@ -83,7 +83,7 @@
 		},
 		"filesystem.pathWhitelist": {
 			"title": "Path Whitelist",
-			"description": "Regex patterns applied to the relative path of every operation. If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed.",
+			"description": "Regex patterns applied to the relative path of every operation using re.search semantics — a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,

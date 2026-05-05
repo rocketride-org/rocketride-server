@@ -23,8 +23,6 @@
 # SOFTWARE.
 # =============================================================================
 
-# =============================================================================
-
 """Tool filesystem package.
 
 This module exports the public interfaces for filesystem operations:

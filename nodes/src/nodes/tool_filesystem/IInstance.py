@@ -299,7 +299,9 @@ class IInstance(IInstanceBase):
         """
         args = _require_dict(args) if args is not None else {}
         self._check_ready()
-        flag_attr = self._ALLOW_FLAG_BY_TOOL[tool_name]
+        flag_attr = self._ALLOW_FLAG_BY_TOOL.get(tool_name)
+        if flag_attr is None:
+            raise RuntimeError(f'no allow-flag mapping for tool {tool_name!r}')
         if not getattr(self.IGlobal, flag_attr, False):
             label = flag_attr.removeprefix('allow_')
             raise ValueError(f'{label} access is not enabled for this filesystem tool')
@@ -376,10 +378,9 @@ def _run_async(coro):
     Only safe to call from a thread with no running event loop — the engine's
     tool dispatcher (``filters.py::_dispatch_tool``) calls ``@tool_function``
     methods synchronously, which is the supported caller. If invoked from a
-    thread that already has a running loop, ``loop.run_until_complete`` on a
-    fresh loop would block the thread and deadlock any work the coroutine
-    tries to route back through the outer loop; raise a clear error instead
-    of failing opaquely.
+    thread that already has a running loop, ``asyncio.run`` would raise a
+    generic ``RuntimeError``; we pre-check so the failure surfaces with a
+    tool_filesystem-specific message that points at the dispatcher contract.
     """
     try:
         asyncio.get_running_loop()
@@ -390,8 +391,4 @@ def _run_async(coro):
             '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
         )
 
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    return asyncio.run(coro)
