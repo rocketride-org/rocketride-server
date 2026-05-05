@@ -283,11 +283,16 @@ class IInstance(IInstanceBase):
 
         if path_required:
             path = _require_str(args, 'path')
+            self._check_path(path)
         else:
             path = args.get('path', '')
             if not isinstance(path, str):
                 raise ValueError('path must be a string')
-        self._check_path(path)
+            # Empty path means "account root" for list-style ops; skip the
+            # whitelist check so a configured whitelist doesn't block listing
+            # the root (an empty string can't match a non-trivial regex).
+            if path:
+                self._check_path(path)
 
         encoding: str | None = None
         if needs_encoding:
