@@ -74,7 +74,9 @@ class IGlobal(IGlobalBase):
 
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:
-            warning('tool_filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.')
+            warning(
+                'tool_filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
+            )
             self.client_id = None
             self.file_store = None
             return
