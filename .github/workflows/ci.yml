@@ -101,7 +101,14 @@ jobs:
       - run: echo "Build skipped — no code changes detected"
 
   # ---------------------------------------------------------------------------
-  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
+  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases).
+  #
+  #  ⚠ DO NOT add this job (or `codeql-cpp` below) to develop/main
+  #  required-status-checks. The `if:` guard skips these on PR runs, and a
+  #  skipped status never satisfies a required check → PRs would hang forever
+  #  in "Expected" state. The aggregator job `CI OK` is the canonical required
+  #  check. Security findings still surface in the Security tab via SARIF
+  #  upload from scheduled runs (weekly cron + every push to develop/main).
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL / ${{ matrix.language }}
@@ -135,6 +142,7 @@ jobs:
         with:
           category: '/language:${{ matrix.language }}'
 
+  # codeql-cpp: see ⚠ note above the `codeql` job — same not-required rule applies.
   codeql-cpp:
     name: CodeQL / cpp
     if: github.event_name == 'schedule'
@@ -153,7 +161,12 @@ jobs:
     secrets: inherit
 
   # ---------------------------------------------------------------------------
-  #  Container scan
+  #  Container scan — non-PR only (push/schedule/etc.).
+  #
+  #  ⚠ DO NOT add to develop/main required-status-checks (same caveat as
+  #  CodeQL above). Skipped on PR runs → would block merges. Trivy SARIF
+  #  uploads to the Security tab on every push to develop/main, so findings
+  #  remain visible without gating PR merges.
   # ---------------------------------------------------------------------------
   container-scan:
     name: Container scan / ${{ matrix.dockerfile }}
