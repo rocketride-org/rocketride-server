@@ -350,6 +350,29 @@ _TOOLS: List[Dict[str, Any]] = [
 # Build a fast lookup by name
 _TOOL_MAP: Dict[str, Dict[str, Any]] = {t['name']: t for t in _TOOLS}
 
+# Tools that *always* mutate repository state (working tree, index, refs,
+# remotes, or on-disk files). Blocked when readOnlyMode=true.
+#
+# NOTE: git.stash is intentionally NOT in this set — it is mutating only when
+# op != 'list'. The op-sensitive case is handled by _is_write_tool below; if
+# you add another op-sensitive tool, extend that helper, not this set.
+_WRITE_TOOLS: frozenset[str] = frozenset(
+    {
+        'git.clone',
+        'git.init',
+        'git.write_file',
+        'git.stage',
+        'git.commit',
+        'git.branch_create',
+        'git.checkout',
+        'git.branch_delete',
+        'git.merge',
+        'git.fetch',
+        'git.pull',
+        'git.push',
+    }
+)
+
 
 class IInstance(IInstanceBase):
     """RocketRide tool node that exposes git operations to an AI agent via pygit2."""
@@ -359,6 +382,17 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
     # Argument helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_write_tool(tool_name: str, args: Dict[str, Any]) -> bool:
+        """Return True if invoking *tool_name* with *args* would mutate repo state."""
+        if tool_name in _WRITE_TOOLS:
+            return True
+        # git.stash mutates state for push/pop/drop but not for list.
+        if tool_name == 'git.stash':
+            op = args.get('op')
+            return not (isinstance(op, str) and op.lower() == 'list')
+        return False
 
     @staticmethod
     def _bool_arg(a: Dict[str, Any], key: str, default: bool = False) -> bool:
@@ -422,6 +456,17 @@ class IInstance(IInstanceBase):
         git = self.IGlobal.repo
         if git is None:
             return json.dumps({'error': 'Git node is not initialised. Check node config.'})
+        # Fail closed: if a future refactor drops the attribute, treat the
+        # repo as read-only rather than silently allowing writes.
+        if getattr(git, 'read_only_mode', True) and self._is_write_tool(tool_name, args):
+            return json.dumps(
+                {
+                    'error': (
+                        f'{tool_name!r} is blocked in read-only mode. '
+                        'Set readOnlyMode=false in node config to allow write operations.'
+                    )
+                }
+            )
         try:
             return json.dumps(self._call(git, tool_name, args), ensure_ascii=False, default=str)
         except (GitError, ValueError) as exc:

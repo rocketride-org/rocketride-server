@@ -247,7 +247,18 @@ class GitRepo:
     safe_mode:
         When ``True``, destructive operations (force-push, deleting unmerged
         branches) raise ``GitError`` instead of executing.
+    read_only_mode:
+        When ``True``, *all* write operations (clone, init, write_file, stage,
+        commit, stash push/pop/drop, branch create/delete, checkout, merge,
+        fetch, pull, push) raise ``GitError``. Strictly stronger than
+        ``safe_mode`` — overrides it for the operations it covers.
     """
+
+    # Class-level annotations: these are also instance attributes (assigned in
+    # __init__), but declaring them here makes them visible to introspection
+    # (e.g. unittest.mock.create_autospec) and matches the IGlobal style.
+    safe_mode: bool = True
+    read_only_mode: bool = True
 
     def __init__(
         self,
@@ -259,6 +270,7 @@ class GitRepo:
         ssh_key: str = '',
         ssh_passphrase: str = '',
         safe_mode: bool = True,
+        read_only_mode: bool = True,
     ) -> None:
         """Configure the wrapper and optionally open an existing local repository.
 
@@ -273,6 +285,10 @@ class GitRepo:
             ssh_passphrase: Passphrase for the SSH private key (may be empty).
             safe_mode: When ``True``, blocks destructive operations such as
                 force-push and force branch deletion.
+            read_only_mode: When ``True``, blocks every mutating operation —
+                strictly stronger than ``safe_mode``. Read-only tools (status,
+                log, show, diff, blame, file_at, branch_list, grep, ls_files,
+                stash list) remain available.
         """
         self._repo_path = repo_path
         self._auth_type = auth_type.lower()
@@ -281,6 +297,7 @@ class GitRepo:
         self._ssh_key = ssh_key
         self._ssh_passphrase = ssh_passphrase
         self.safe_mode = safe_mode
+        self.read_only_mode = read_only_mode
         self._repo: Optional[pygit2.Repository] = None
 
         if repo_path:

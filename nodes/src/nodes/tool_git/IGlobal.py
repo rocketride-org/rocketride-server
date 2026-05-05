@@ -69,6 +69,8 @@ class IGlobal(IGlobalBase):
         ssh_passphrase = str(cfg.get('sshPassphrase') or '').strip()
         safe_mode_raw = cfg.get('safeMode', True)
         safe_mode = _parse_bool(safe_mode_raw, default=True)
+        read_only_mode_raw = cfg.get('readOnlyMode', True)
+        read_only_mode = _parse_bool(read_only_mode_raw, default=True)
 
         # Validate auth config
         if auth_type == 'token' and not token:
@@ -85,6 +87,7 @@ class IGlobal(IGlobalBase):
             ssh_key=ssh_key,
             ssh_passphrase=ssh_passphrase,
             safe_mode=safe_mode,
+            read_only_mode=read_only_mode,
         )
 
         if _is_url(repo_path):

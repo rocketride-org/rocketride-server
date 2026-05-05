@@ -28,7 +28,8 @@
 				"token": "",
 				"sshKey": "",
 				"sshPassphrase": "",
-				"safeMode": true
+				"safeMode": true,
+				"readOnlyMode": true
 			}
 		}
 	},
@@ -99,6 +100,16 @@
 				[true, "Yes — block destructive ops"],
 				[false, "No — allow all operations"]
 			]
+		},
+		"git.readOnlyMode": {
+			"type": "boolean",
+			"title": "Read-Only Mode",
+			"description": "Block ALL write operations (clone, init, write_file, stage, commit, stash push/pop/drop, branch create/delete, checkout, merge, fetch, pull, push). Read-only tools (status, log, show, diff, blame, file_at, branch_list, grep, ls_files, stash list) remain available. Strictly stronger than Safe Mode. Recommended when the agent only needs to inspect a repository.",
+			"default": true,
+			"enum": [
+				[true, "Yes — block all writes"],
+				[false, "No — allow writes (subject to Safe Mode)"]
+			]
 		}
 	},
 	"shape": [
@@ -113,7 +124,8 @@
 				"git.token",
 				"git.sshKey",
 				"git.sshPassphrase",
-				"git.safeMode"
+				"git.safeMode",
+				"git.readOnlyMode"
 			]
 		}
 	]

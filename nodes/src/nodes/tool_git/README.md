@@ -18,6 +18,7 @@ so no host `git` binary is required on the machine running the engine.
 | `sshKey`        | string  | PEM-encoded SSH private key content (SSH auth)                  |
 | `sshPassphrase` | string  | Passphrase for the SSH key (leave blank if none)                |
 | `safeMode`      | boolean | Default `true`. Blocks force-push and force branch deletion.    |
+| `readOnlyMode`  | boolean | Default `true`. Blocks **all** write operations. Strictly stronger than `safeMode`. |
 
 ### repoPath — local path vs remote URL
 
@@ -104,6 +105,18 @@ When `safeMode` is `true` (the default), the following operations raise an error
 Normal branch deletion (`force: false`) is always permitted regardless of safe mode.
 
 Set `safeMode: false` in the node config to allow force operations.
+
+---
+
+## Read-only mode
+
+When `readOnlyMode` is `true` (the default), every mutating tool is blocked at dispatch and returns a JSON error. This is strictly stronger than `safeMode` and is the recommended setting when the agent only needs to inspect a repository.
+
+Blocked tools: `git.clone`, `git.init`, `git.write_file`, `git.stage`, `git.commit`, `git.stash` (op `push` / `pop` / `drop`), `git.branch_create`, `git.checkout`, `git.branch_delete`, `git.merge`, `git.fetch`, `git.pull`, `git.push`.
+
+Always allowed: `git.status`, `git.log`, `git.show`, `git.diff`, `git.blame`, `git.file_at`, `git.branch_list`, `git.grep`, `git.ls_files`, and `git.stash` with `op: "list"`.
+
+Set `readOnlyMode: false` in the node config to allow write operations (subject to `safeMode`).
 
 ---
 

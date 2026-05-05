@@ -95,10 +95,16 @@ with patch.dict(
 
 
 def _make_instance() -> IInstance:
-    """Create an IInstance with a spec-matched GitRepo mock, bypassing __init__."""
+    """Create an IInstance with a spec-matched GitRepo mock, bypassing __init__.
+
+    Sets ``read_only_mode = False`` on the mock so dispatch tests for write
+    tools exercise the call path. Read-only-mode behavior is covered separately
+    in TestReadOnlyMode.
+    """
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = MagicMock()
     inst.IGlobal.repo = create_autospec(GitRepo, instance=True, spec_set=True)
+    inst.IGlobal.repo.read_only_mode = False
     return inst
 
 
@@ -507,6 +513,117 @@ class TestIInstanceSearch(unittest.TestCase):
         inst.IGlobal.repo.ls_files.return_value = {'tracked': ['a.py'], 'count': 1, 'untracked': ['b.py']}
         _invoke(inst, 'git.ls_files', {'untracked': True})
         inst.IGlobal.repo.ls_files.assert_called_once_with(path=None, untracked=True)
+
+
+class TestReadOnlyMode(unittest.TestCase):
+    """Verify readOnlyMode blocks every mutating tool at dispatch and lets reads through."""
+
+    def _make_readonly_instance(self) -> IInstance:
+        """Build an IInstance whose mocked repo reports read_only_mode=True."""
+        inst = IInstance.__new__(IInstance)
+        inst.IGlobal = MagicMock()
+        # Plain MagicMock (no spec_set) so we can freely set read_only_mode.
+        inst.IGlobal.repo = MagicMock()
+        inst.IGlobal.repo.read_only_mode = True
+        return inst
+
+    def test_commit_blocked_when_readonly(self) -> None:
+        """git.commit is blocked at dispatch and returns a read-only error."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.commit', {'message': 'x'}))
+        self.assertIn('read-only mode', msg)
+        # GitRepo method must NOT have been called.
+        inst.IGlobal.repo.commit.assert_not_called()
+
+    def test_write_file_blocked_when_readonly(self) -> None:
+        """git.write_file is blocked at dispatch in read-only mode."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.write_file', {'path': 'a.txt', 'content': 'x'}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.write_file.assert_not_called()
+
+    def test_push_blocked_when_readonly(self) -> None:
+        """git.push (even non-force) is blocked at dispatch in read-only mode."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.push'))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.push.assert_not_called()
+
+    def test_branch_delete_blocked_when_readonly(self) -> None:
+        """git.branch_delete is blocked at dispatch in read-only mode (force flag irrelevant)."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.branch_delete', {'name': 'feat/x'}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.branch_delete.assert_not_called()
+
+    def test_checkout_blocked_when_readonly(self) -> None:
+        """git.checkout is blocked at dispatch in read-only mode."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.checkout', {'branch': 'main'}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.checkout.assert_not_called()
+
+    def test_clone_blocked_when_readonly(self) -> None:
+        """git.clone called by the agent is blocked in read-only mode."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.clone', {'url': 'https://x/y.git', 'path': '/tmp/y'}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.clone.assert_not_called()
+
+    def test_status_allowed_when_readonly(self) -> None:
+        """Read-only tools (status, log, diff, etc.) succeed in read-only mode."""
+        inst = self._make_readonly_instance()
+        inst.IGlobal.repo.status.return_value = {
+            'branch': 'main',
+            'staged': [],
+            'unstaged': [],
+            'untracked': [],
+            'clean': True,
+        }
+        result = _ok(_invoke(inst, 'git.status'))
+        self.assertEqual(result['branch'], 'main')
+
+    def test_grep_allowed_when_readonly(self) -> None:
+        """git.grep (read-only) succeeds in read-only mode."""
+        inst = self._make_readonly_instance()
+        inst.IGlobal.repo.grep.return_value = []
+        _ok(_invoke(inst, 'git.grep', {'pattern': 'TODO'}))
+        inst.IGlobal.repo.grep.assert_called_once()
+
+    def test_stash_list_allowed_when_readonly(self) -> None:
+        """git.stash op='list' is read-only and allowed even in read-only mode."""
+        inst = self._make_readonly_instance()
+        inst.IGlobal.repo.stash.return_value = {'stashes': [], 'count': 0}
+        result = _ok(_invoke(inst, 'git.stash', {'op': 'list'}))
+        self.assertEqual(result['count'], 0)
+        inst.IGlobal.repo.stash.assert_called_once()
+
+    def test_stash_push_blocked_when_readonly(self) -> None:
+        """git.stash op='push' mutates state and is blocked in read-only mode."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.stash', {'op': 'push'}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.stash.assert_not_called()
+
+    def test_stash_default_op_blocked_when_readonly(self) -> None:
+        """git.stash with no op defaults to 'push' (mutating) and is blocked."""
+        inst = self._make_readonly_instance()
+        msg = _err(_invoke(inst, 'git.stash', {}))
+        self.assertIn('read-only mode', msg)
+        inst.IGlobal.repo.stash.assert_not_called()
+
+    def test_writes_allowed_when_readonly_disabled(self) -> None:
+        """When read_only_mode=False, write tools dispatch normally."""
+        inst = self._make_readonly_instance()
+        inst.IGlobal.repo.read_only_mode = False
+        inst.IGlobal.repo.commit.return_value = {
+            'sha': 'abc',
+            'short_sha': 'abc',
+            'message': 'x',
+            'author': 'A',
+        }
+        result = _ok(_invoke(inst, 'git.commit', {'message': 'x'}))
+        self.assertEqual(result['sha'], 'abc')
 
 
 class TestIInstanceErrors(unittest.TestCase):
