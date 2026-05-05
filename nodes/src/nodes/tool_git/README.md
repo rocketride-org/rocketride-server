@@ -106,6 +106,12 @@ Normal branch deletion (`force: false`) is always permitted regardless of safe m
 
 Set `safeMode: false` in the node config to allow force operations.
 
+### Security note: write scope
+
+Safe mode does **not** restrict file writes. Anything outside the `.git/` directory is fair game for `git.write_file` — including `.gitignore`, CI configs, build scripts, source files, and lockfiles. Path traversal (`../`) and writes inside `.git/` are blocked, but otherwise the agent has full read/write access to the working tree.
+
+When pointing the node at a real repository (rather than a remote URL that auto-clones into a temp directory), treat the agent as a human contributor with commit rights to that tree. If you need stricter scoping, run the agent against a temp clone or a sandboxed working copy.
+
 ---
 
 ## Read-only mode

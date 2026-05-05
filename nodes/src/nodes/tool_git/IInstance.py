@@ -321,7 +321,7 @@ _TOOLS: List[Dict[str, Any]] = [
     # Group 7 — Search
     {
         'name': 'git.grep',
-        'description': 'Search tracked file contents for a regex pattern. Returns file, line number, and matching line for each hit.',
+        'description': 'Search tracked file contents for a regex pattern. Returns file, line number, and matching line for each hit. Capped at max_results hits to keep responses bounded.',
         'input_schema': {
             'type': 'object',
             'required': ['pattern'],
@@ -330,6 +330,10 @@ _TOOLS: List[Dict[str, Any]] = [
                 'ref': {'type': 'string', 'description': 'Commit or branch to search (default: HEAD).'},
                 'path': {'type': 'string', 'description': 'Limit search to files under this path prefix.'},
                 'ignore_case': {'type': 'boolean', 'description': 'Case-insensitive matching (default: false).'},
+                'max_results': {
+                    'type': 'integer',
+                    'description': 'Maximum number of matches to return (1-10000, default 1000). Search stops once this many hits are collected.',
+                },
             },
         },
     },
@@ -557,6 +561,7 @@ class IInstance(IInstanceBase):
                 ref=a.get('ref') or None,
                 path=a.get('path') or None,
                 ignore_case=self._bool_arg(a, 'ignore_case', False),
+                max_results=self._int_arg_in_range(a, 'max_results', 1000, 1, 10000),
             )
         if name == 'git.ls_files':
             return git.ls_files(path=a.get('path') or None, untracked=self._bool_arg(a, 'untracked', False))

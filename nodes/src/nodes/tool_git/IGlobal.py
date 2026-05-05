@@ -37,15 +37,62 @@ that directory is deleted on ``endGlobal``.
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
+import sys
 import tempfile
 from pathlib import Path
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from .git_repo import GitError, GitRepo, scrub_credentials
+
+
+# ---------------------------------------------------------------------------
+# Filesystem cleanup helpers
+# ---------------------------------------------------------------------------
+
+
+def _force_writable_then_retry(func: Callable[..., Any], path: str, exc_info: Any) -> None:
+    """Clear the read-only bit on *path* and retry *func* — rmtree onerror/onexc handler.
+
+    libgit2 leaves pack files in ``.git/objects/pack/`` read-only on Windows, so a
+    plain ``shutil.rmtree`` (or ``ignore_errors=True``) leaves orphan temp dirs in
+    ``%TEMP%/rocketride_git_*``. Re-chmod and retry so the worktree is fully removed.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        # Best-effort — don't let cleanup failures break the pipeline.
+        pass
+
+
+def _rmtree(path: str) -> None:
+    """Remove *path* recursively, defeating Windows read-only attributes."""
+    # Python 3.12 renamed onerror -> onexc; support both signatures.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force_writable_then_retry)
+    else:
+        shutil.rmtree(path, onerror=_force_writable_then_retry)
+
+
+# ---------------------------------------------------------------------------
+# Config constants
+# ---------------------------------------------------------------------------
+
+
+# Mirrors the enum in services.json's git.authType field.
+_VALID_AUTH_TYPES = frozenset({'none', 'token', 'ssh'})
+
+
+# ---------------------------------------------------------------------------
+# IGlobal — pipeline-scoped state
+# ---------------------------------------------------------------------------
 
 
 class IGlobal(IGlobalBase):
@@ -56,9 +103,11 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self) -> None:
         """Initialise the GitRepo instance; clone remote URL or open local path if configured."""
+        # Skip during canvas/preview opens — only build the repo when the pipeline actually runs.
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
+        # --- Read raw node config -----------------------------------------
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         repo_path = str(cfg.get('repoPath') or '').strip()
@@ -72,13 +121,23 @@ class IGlobal(IGlobalBase):
         read_only_mode_raw = cfg.get('readOnlyMode', True)
         read_only_mode = _parse_bool(read_only_mode_raw, default=True)
 
-        # Validate auth config
+        # --- Validate auth config -----------------------------------------
+        # Unknown authType is downgraded to "none" rather than raising — this lets
+        # purely local pipelines (no remote ops) still run with a misconfigured field.
+        if auth_type not in _VALID_AUTH_TYPES:
+            warning(
+                f'tool_git: authType {auth_type!r} is not one of {sorted(_VALID_AUTH_TYPES)}; '
+                'falling back to "none" — remote operations will fail.'
+            )
+            auth_type = 'none'
         if auth_type == 'token' and not token:
             warning('tool_git: authType is "token" but no token is configured')
         if auth_type == 'ssh' and not ssh_key:
             warning('tool_git: authType is "ssh" but no sshKey is configured')
 
-        # Build a GitRepo without an open repo first (auth config is always needed)
+        # --- Build the GitRepo wrapper ------------------------------------
+        # Construct without an open repo first; the repo is bound below depending
+        # on whether repoPath is a remote URL, a local path, or empty.
         git = GitRepo(
             repo_path='',
             auth_type=auth_type,
@@ -90,50 +149,54 @@ class IGlobal(IGlobalBase):
             read_only_mode=read_only_mode,
         )
 
+        # --- Bind a repository to the wrapper -----------------------------
         if _is_url(repo_path):
-            # Auto-clone the remote URL into a fresh temp directory
+            # Remote URL → clone into a fresh temp dir; cleaned up in endGlobal.
             tmp = tempfile.mkdtemp(prefix='rocketride_git_')
             try:
                 git.clone(url=repo_path, path=tmp)
             except Exception as exc:
-                shutil.rmtree(tmp, ignore_errors=True)
-                # Redact credentials from the URL before including in error message.
+                # Cleanup on failed clone, then re-raise with credentials scrubbed.
+                _rmtree(tmp)
                 parsed = urlparse(repo_path)
                 if not parsed.scheme and repo_path.startswith('git@'):
-                    # git@host:org/repo SSH shorthand — no safe way to partially redact
+                    # git@host:org/repo SSH shorthand — no safe way to partially redact.
                     redacted = '<ssh-url>'
                 else:
-                    # Build netloc as hostname[:port] — drops any userinfo
+                    # Rebuild netloc as hostname[:port] — drops any userinfo.
                     safe_host = parsed.hostname or ''
                     if parsed.port:
                         safe_host = f'{safe_host}:{parsed.port}'
                     redacted = urlunparse((parsed.scheme, safe_host, parsed.path, '', '', ''))
-                # libgit2 sometimes echoes the raw URL (with credentials) in its
-                # error text — scrub any credentials from it.
+                # libgit2 sometimes echoes the raw URL (with credentials) in error text.
                 raise ValueError(f'tool_git: failed to clone {redacted!r}: {scrub_credentials(exc)}') from exc
             self._tmp_dir = tmp
 
         elif repo_path:
+            # Local path → open in place; mutations persist on disk.
             try:
                 git.open(repo_path)
             except GitError as exc:
                 raise ValueError(f'tool_git: {exc}') from exc
 
-        # else: no repoPath — git.clone / git.init can be called by the agent at runtime
+        # else: no repoPath → leave repo unbound. The agent can call git.clone /
+        # git.init at runtime to attach a repository.
 
         self.repo = git
 
     def validateConfig(self) -> None:
-        """Emit warnings for missing credentials or a non-existent local repoPath."""
+        """Emit warnings for invalid authType, missing credentials, or a non-existent local repoPath."""
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             auth_type = str(cfg.get('authType') or 'none').strip().lower()
             token = str(cfg.get('token') or '').strip()
             ssh_key = str(cfg.get('sshKey') or '').strip()
 
-            if auth_type == 'token' and not token:
+            if auth_type not in _VALID_AUTH_TYPES:
+                warning(f'Auth Type {auth_type!r} is not one of: {", ".join(sorted(_VALID_AUTH_TYPES))}')
+            elif auth_type == 'token' and not token:
                 warning('Token is required when Auth Type is "token"')
-            if auth_type == 'ssh' and not ssh_key:
+            elif auth_type == 'ssh' and not ssh_key:
                 warning('SSH Key is required when Auth Type is "ssh"')
 
             repo_path = str(cfg.get('repoPath') or '').strip()
@@ -146,8 +209,13 @@ class IGlobal(IGlobalBase):
         """Release the repo reference and delete any auto-cloned temp directory."""
         self.repo = None
         if self._tmp_dir:
-            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+            _rmtree(self._tmp_dir)
             self._tmp_dir = None
+
+
+# ---------------------------------------------------------------------------
+# Small config-parsing helpers
+# ---------------------------------------------------------------------------
 
 
 def _is_url(value: str) -> bool:

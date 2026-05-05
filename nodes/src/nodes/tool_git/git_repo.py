@@ -52,6 +52,7 @@ depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.
 
 import pygit2
 
+
 # ---------------------------------------------------------------------------
 # pygit2 constant compatibility (names changed across versions)
 # ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ class _TokenCallbacks(pygit2.RemoteCallbacks):
         url: str,
         username_from_url: Optional[str],
         allowed_types: int,
-    ) -> pygit2.credentials.UserPass:
+    ) -> pygit2.UserPass:
         """Return a UserPass credential object for libgit2."""
         if not (allowed_types & _GIT_CREDENTIAL_USERPASS_PLAINTEXT):
             raise GitError(
@@ -139,7 +140,7 @@ class _SshCallbacks(pygit2.RemoteCallbacks):
         url: str,
         username_from_url: Optional[str],
         allowed_types: int,
-    ) -> pygit2.credentials.Keypair:
+    ) -> pygit2.Keypair:
         """Write the SSH key to a temp file on first call and return a Keypair."""
         if not (allowed_types & _GIT_CREDENTIAL_SSH_KEY):
             raise GitError(
@@ -962,8 +963,9 @@ class GitRepo:
         ref: Optional[str] = None,
         path: Optional[str] = None,
         ignore_case: bool = False,
+        max_results: int = 1000,
     ) -> List[Dict[str, Any]]:
-        """Search tracked files for a pattern."""
+        """Search tracked files for a pattern. Stops after *max_results* hits."""
         repo = self._require_repo()
         flags = re.IGNORECASE if ignore_case else 0
         try:
@@ -980,7 +982,7 @@ class GitRepo:
             tree = repo.head.peel(pygit2.Tree)
 
         results: List[Dict[str, Any]] = []
-        _grep_tree(repo, tree, rx, path or '', results)
+        _grep_tree(repo, tree, rx, path or '', results, max_results=max(1, int(max_results)))
         return results
 
     def ls_files(
@@ -1098,9 +1100,13 @@ def _grep_tree(
     prefix: str,
     results: List[Dict[str, Any]],
     _path: str = '',
+    *,
+    max_results: int = 1000,
 ) -> None:
-    """Recursively search a tree for lines matching *rx*."""
+    """Recursively search a tree for lines matching *rx*. Stops once results hits *max_results*."""
     for entry in tree:
+        if len(results) >= max_results:
+            return
         entry_path = entry.name if not _path else f'{_path}/{entry.name}'
         obj = repo.get(entry.id)
         if obj is None:
@@ -1108,7 +1114,7 @@ def _grep_tree(
         if obj.type_str == 'tree':
             # Recurse if this directory could contain files that satisfy the prefix.
             if not prefix or _path_matches(entry_path, prefix) or prefix.startswith(entry_path + '/'):
-                _grep_tree(repo, obj, rx, prefix, results, entry_path)
+                _grep_tree(repo, obj, rx, prefix, results, entry_path, max_results=max_results)
         elif obj.type_str == 'blob':
             if prefix and not _path_matches(entry_path, prefix):
                 continue
@@ -1126,3 +1132,5 @@ def _grep_tree(
                             'content': line,
                         }
                     )
+                    if len(results) >= max_results:
+                        return

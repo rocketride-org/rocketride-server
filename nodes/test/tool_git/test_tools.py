@@ -490,14 +490,33 @@ class TestIInstanceSearch(unittest.TestCase):
         result = _ok(_invoke(inst, 'git.grep', {'pattern': 'hello'}))
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['file'], 'foo.py')
-        inst.IGlobal.repo.grep.assert_called_once_with(pattern='hello', ref=None, path=None, ignore_case=False)
+        inst.IGlobal.repo.grep.assert_called_once_with(
+            pattern='hello', ref=None, path=None, ignore_case=False, max_results=1000
+        )
 
     def test_grep_case_insensitive(self) -> None:
         """git.grep forwards ignore_case=True and path prefix."""
         inst = _make_instance()
         inst.IGlobal.repo.grep.return_value = []
         _invoke(inst, 'git.grep', {'pattern': 'TODO', 'ignore_case': True, 'path': 'src/'})
-        inst.IGlobal.repo.grep.assert_called_once_with(pattern='TODO', ref=None, path='src/', ignore_case=True)
+        inst.IGlobal.repo.grep.assert_called_once_with(
+            pattern='TODO', ref=None, path='src/', ignore_case=True, max_results=1000
+        )
+
+    def test_grep_max_results_forwarded(self) -> None:
+        """git.grep forwards a custom max_results value."""
+        inst = _make_instance()
+        inst.IGlobal.repo.grep.return_value = []
+        _invoke(inst, 'git.grep', {'pattern': 'x', 'max_results': 50})
+        inst.IGlobal.repo.grep.assert_called_once_with(
+            pattern='x', ref=None, path=None, ignore_case=False, max_results=50
+        )
+
+    def test_grep_max_results_out_of_range(self) -> None:
+        """git.grep returns an error when max_results is outside [1, 10000]."""
+        inst = _make_instance()
+        msg = _err(_invoke(inst, 'git.grep', {'pattern': 'x', 'max_results': 0}))
+        self.assertIn('between 1 and 10000', msg)
 
     def test_ls_files_defaults(self) -> None:
         """git.ls_files lists tracked files with untracked=False by default."""
