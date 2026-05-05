@@ -377,6 +377,54 @@ _WRITE_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+# Envelope keys that agent harnesses commonly attach to every tool call. They
+# do not belong to any tool's input_schema and are stripped silently before
+# validation so the agent doesn't get spurious "unknown parameter" errors for
+# them on every call.
+#
+# - "input": LangChain-style nested-args wrapper (sometimes a dict to merge,
+#   sometimes None when the agent has no extra args).
+# - "repo_path": some agents conflate the node-level config with per-call
+#   args; tool_git binds the repo at IGlobal.beginGlobal time, never per-call.
+# - "security_context": added by some sandboxed agent runtimes.
+_ENVELOPE_KEYS = frozenset({'input', 'repo_path', 'security_context'})
+
+
+def _strip_envelope(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge nested ``input`` dict into top level and drop envelope keys.
+
+    Returns a fresh dict; *args* is not mutated.
+    """
+    if not isinstance(args, dict):
+        return args
+    # If 'input' is itself a dict, merge it under the top-level keys (top-level
+    # wins on conflict — matches tool_github._normalize behaviour).
+    nested = args.get('input')
+    if isinstance(nested, dict):
+        merged = {**nested, **{k: v for k, v in args.items() if k != 'input'}}
+    else:
+        merged = dict(args)
+    return {k: v for k, v in merged.items() if k not in _ENVELOPE_KEYS}
+
+
+def _validate_args_against_schema(tool_name: str, args: Dict[str, Any]) -> None:
+    """Reject any *args* keys not declared in the tool's input_schema.
+
+    Raises ValueError with the allowed-parameter list so the agent gets
+    actionable feedback. Without this, an unknown key is silently dropped
+    and the call returns a default-valued result the agent then misreads
+    (the symptom that landed ``include_remote`` in production: the agent
+    saw "no remotes" and concluded the tool didn't support them).
+    """
+    schema = _TOOL_MAP[tool_name].get('input_schema', {})
+    allowed = set((schema.get('properties') or {}).keys())
+    unknown = sorted(k for k in args if k not in allowed)
+    if not unknown:
+        return
+    if allowed:
+        raise ValueError(f'{tool_name}: unknown parameter(s) {unknown}. Allowed parameters: {sorted(allowed)}.')
+    raise ValueError(f'{tool_name}: this tool takes no parameters; received unexpected: {unknown}.')
+
 
 class IInstance(IInstanceBase):
     """RocketRide tool node that exposes git operations to an AI agent via pygit2."""
@@ -460,6 +508,11 @@ class IInstance(IInstanceBase):
         git = self.IGlobal.repo
         if git is None:
             return json.dumps({'error': 'Git node is not initialised. Check node config.'})
+        # Strip harness envelope (``input`` / ``repo_path`` / ``security_context``)
+        # before policy/validation checks. _is_write_tool inspects the unwrapped
+        # ``op`` key for git.stash, so a wrapped {"input": {"op": "list"}} read
+        # would otherwise be misclassified as a write and blocked.
+        args = _strip_envelope(args)
         # Fail closed: if a future refactor drops the attribute, treat the
         # repo as read-only rather than silently allowing writes.
         if getattr(git, 'read_only_mode', True) and self._is_write_tool(tool_name, args):
@@ -472,6 +525,11 @@ class IInstance(IInstanceBase):
                 }
             )
         try:
+            # Reject any remaining keys not declared in the tool's schema.
+            # Without this, hallucinated params like ``include_remote`` are
+            # silently dropped and the agent sees a misleading default-valued
+            # result instead of an error it can correct from.
+            _validate_args_against_schema(tool_name, args)
             return json.dumps(self._call(git, tool_name, args), ensure_ascii=False, default=str)
         except (GitError, ValueError) as exc:
             return json.dumps({'error': str(exc)})

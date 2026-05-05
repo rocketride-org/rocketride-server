@@ -691,6 +691,77 @@ class TestIInstanceErrors(unittest.TestCase):
         self.assertEqual(result['branch'], 'main')
 
 
+class TestDispatchSchemaValidation(unittest.TestCase):
+    """Strict-mode validation: reject unknown args, strip envelope, merge nested input.
+
+    Reproduces the production failure where an agent passed
+    ``include_remote: true`` to ``git.branch_list`` (the schema declares
+    ``remote``); the dispatcher silently dropped the unknown key and
+    returned local-only branches, which the agent then misread as
+    "this tool doesn't support remotes".
+    """
+
+    def test_unknown_param_returns_error_with_allowed_list(self) -> None:
+        """git.branch_list with `include_remote` (not in schema) returns an error
+        listing the allowed parameters so the agent can self-correct.
+        """
+        inst = _make_instance()
+        msg = _err(_invoke(inst, 'git.branch_list', {'include_remote': True}))
+        self.assertIn("unknown parameter(s) ['include_remote']", msg)
+        self.assertIn('remote', msg)
+        self.assertIn('all_branches', msg)
+        # The repo method should NOT have been called when validation fails.
+        inst.IGlobal.repo.branch_list.assert_not_called()
+
+    def test_unknown_param_on_no_arg_tool(self) -> None:
+        """Tools whose schema declares no properties also reject unknown args."""
+        inst = _make_instance()
+        msg = _err(_invoke(inst, 'git.status', {'foo': 1}))
+        self.assertIn('takes no parameters', msg)
+        inst.IGlobal.repo.status.assert_not_called()
+
+    def test_envelope_keys_are_stripped_silently(self) -> None:
+        """`input`, `repo_path`, `security_context` pass through without error."""
+        inst = _make_instance()
+        inst.IGlobal.repo.status.return_value = {
+            'branch': 'main',
+            'staged': [],
+            'unstaged': [],
+            'untracked': [],
+            'clean': True,
+        }
+        result = _ok(
+            _invoke(
+                inst,
+                'git.status',
+                {'input': None, 'repo_path': '$ROCKETRIDE_GIT_REPO_PATH', 'security_context': 'x'},
+            )
+        )
+        self.assertEqual(result['branch'], 'main')
+        inst.IGlobal.repo.status.assert_called_once_with()
+
+    def test_nested_input_dict_is_merged(self) -> None:
+        """`{"input": {"remote": true}}` is unwrapped so legitimate args reach the tool."""
+        inst = _make_instance()
+        inst.IGlobal.repo.branch_list.return_value = {
+            'local': [],
+            'remote': ['origin/main'],
+        }
+        _ok(_invoke(inst, 'git.branch_list', {'input': {'remote': True}}))
+        inst.IGlobal.repo.branch_list.assert_called_once_with(remote=True, all_branches=False)
+
+    def test_top_level_overrides_nested_on_conflict(self) -> None:
+        """Top-level keys win over nested-input keys (predictable precedence)."""
+        inst = _make_instance()
+        inst.IGlobal.repo.branch_list.return_value = {'local': [], 'remote': []}
+        _invoke(
+            inst,
+            'git.branch_list',
+            {'input': {'remote': False}, 'remote': True},
+        )
+        inst.IGlobal.repo.branch_list.assert_called_once_with(remote=True, all_branches=False)
+
+
 # ---------------------------------------------------------------------------
 # Path-traversal guard tests for write_file / stage
 # ---------------------------------------------------------------------------
