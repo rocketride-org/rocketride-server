@@ -105,7 +105,6 @@ jobs:
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL / ${{ matrix.language }}
-    if: github.event_name == 'schedule' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -121,9 +120,11 @@ jobs:
             build-mode: none
     steps:
       - name: Checkout
+        if: github.event_name == 'schedule' || github.event_name == 'push'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Initialize CodeQL
+        if: github.event_name == 'schedule' || github.event_name == 'push'
         uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
           languages: ${{ matrix.language }}
@@ -131,6 +132,7 @@ jobs:
           queries: security-and-quality
 
       - name: Perform CodeQL Analysis
+        if: github.event_name == 'schedule' || github.event_name == 'push'
         uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
           category: '/language:${{ matrix.language }}'
