@@ -47,7 +47,12 @@ def getClientToken(tenant, region, clientId, clientSecret, scopes):
     # If we have not connecter the app yet, do so now
     if data['app'] is None:
         # Get a new app
-        app = msal.ConfidentialClientApplication(client_id=clientId, authority='https://login.microsoftonline.com/' + tenant, client_credential=clientSecret, azure_region=region)
+        app = msal.ConfidentialClientApplication(
+            client_id=clientId,
+            authority='https://login.microsoftonline.com/' + tenant,
+            client_credential=clientSecret,
+            azure_region=region,
+        )
 
         # Save it
         data['app'] = app
@@ -78,7 +83,9 @@ def getPasswordToken(tenant, region, clientId, username, password, scopes):
     # If we have not connecter the app yet, do so now
     if data['app'] is None:
         # Get a new app
-        app = msal.ConfidentialClientApplication(client_id=clientId, authority='https://login.microsoftonline.com/' + tenant, azure_region=region)
+        app = msal.ConfidentialClientApplication(
+            client_id=clientId, authority='https://login.microsoftonline.com/' + tenant, azure_region=region
+        )
 
         # Save it
         data['app'] = app
@@ -108,7 +115,9 @@ def getAccessTokenByRefreshToken(clientId, clientSecret, refresh_token, scopes):
     # If we have not connecter the app yet, do so now
     if data['app'] is None:
         # Get a new app
-        app = msal.ConfidentialClientApplication(client_id=clientId, authority='https://login.microsoftonline.com/common', client_credential=clientSecret)
+        app = msal.ConfidentialClientApplication(
+            client_id=clientId, authority='https://login.microsoftonline.com/common', client_credential=clientSecret
+        )
 
         # Save it
         data['app'] = app
@@ -146,12 +155,30 @@ def getToken(service, scopes: list, refresh_token: str = '') -> str:
 
     # if is personal account - get access token by refresh token
     if parameters.get('authType') == 'personal':
-        return getAccessTokenByRefreshToken(clientId=parameters['clientId'], clientSecret=parameters['clientSecret'], refresh_token=refresh_token, scopes=scopes)
+        return getAccessTokenByRefreshToken(
+            clientId=parameters['clientId'],
+            clientSecret=parameters['clientSecret'],
+            refresh_token=refresh_token,
+            scopes=scopes,
+        )
 
     if parameters['auth'] == 'password':
-        return getPasswordToken(tenant=parameters['tenant'], region=parameters['region'], clientId=parameters['clientId'], username=parameters['accountName'], password=parameters['accountPassword'], scopes=scopes)
+        return getPasswordToken(
+            tenant=parameters['tenant'],
+            region=parameters['region'],
+            clientId=parameters['clientId'],
+            username=parameters['accountName'],
+            password=parameters['accountPassword'],
+            scopes=scopes,
+        )
 
     if parameters['auth'] == 'secure':
-        return getClientToken(tenant=parameters['tenant'], region=parameters['region'], clientId=parameters['clientId'], clientSecret=parameters['clientSecret'], scopes=scopes)
+        return getClientToken(
+            tenant=parameters['tenant'],
+            region=parameters['region'],
+            clientId=parameters['clientId'],
+            clientSecret=parameters['clientSecret'],
+            scopes=scopes,
+        )
 
     raise Exception('Invalid auth mode: ' + parameters['auth'])

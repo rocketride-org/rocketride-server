@@ -82,7 +82,9 @@ def _check_missing_models(
             stacklevel=3,
         )
 
-    assert not error_missing, f'These {node_label} model IDs (modelSource: provider/manual) are in services.json but not in the live API: {sorted(error_missing)}'
+    assert not error_missing, (
+        f'These {node_label} model IDs (modelSource: provider/manual) are in services.json but not in the live API: {sorted(error_missing)}'
+    )
 
 
 def _fetch_openai_model_ids(api_key: str, base_url: str | None = None) -> Set[str]:

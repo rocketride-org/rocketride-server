@@ -166,10 +166,15 @@ class TASK_TOKENS(BaseModel):
 
     """
 
-    cpu_utilization: float = Field(default=0.0, description='Cumulative CPU utilization tokens charged since monitoring started')
+    cpu_utilization: float = Field(
+        default=0.0, description='Cumulative CPU utilization tokens charged since monitoring started'
+    )
     cpu_memory: float = Field(default=0.0, description='Cumulative CPU memory tokens charged since monitoring started')
     gpu_memory: float = Field(default=0.0, description='Cumulative GPU memory tokens charged since monitoring started')
-    total: float = Field(default=0.0, description='Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started')
+    total: float = Field(
+        default=0.0,
+        description='Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started',
+    )
 
 
 class TASK_METRICS(BaseModel):
@@ -200,19 +205,29 @@ class TASK_METRICS(BaseModel):
     """
 
     # Current snapshot
-    cpu_percent: float = Field(default=0.0, description='Current CPU utilization percentage (normalized 0-100%, per-process)')
+    cpu_percent: float = Field(
+        default=0.0, description='Current CPU utilization percentage (normalized 0-100%, per-process)'
+    )
     cpu_memory_mb: float = Field(default=0.0, description='Current CPU memory (RAM) usage in megabytes (per-process)')
     gpu_memory_mb: float = Field(default=0.0, description='Current GPU memory (VRAM) usage in megabytes (per-process)')
 
     # Peak values
     peak_cpu_percent: float = Field(default=0.0, description='Peak CPU utilization percentage during task execution')
-    peak_cpu_memory_mb: float = Field(default=0.0, description='Peak CPU memory usage in megabytes during task execution')
-    peak_gpu_memory_mb: float = Field(default=0.0, description='Peak GPU memory usage in megabytes during task execution')
+    peak_cpu_memory_mb: float = Field(
+        default=0.0, description='Peak CPU memory usage in megabytes during task execution'
+    )
+    peak_gpu_memory_mb: float = Field(
+        default=0.0, description='Peak GPU memory usage in megabytes during task execution'
+    )
 
     # Average values
     avg_cpu_percent: float = Field(default=0.0, description='Average CPU utilization percentage over task lifetime')
-    avg_cpu_memory_mb: float = Field(default=0.0, description='Average CPU memory usage in megabytes over task lifetime')
-    avg_gpu_memory_mb: float = Field(default=0.0, description='Average GPU memory usage in megabytes over task lifetime')
+    avg_cpu_memory_mb: float = Field(
+        default=0.0, description='Average CPU memory usage in megabytes over task lifetime'
+    )
+    avg_gpu_memory_mb: float = Field(
+        default=0.0, description='Average GPU memory usage in megabytes over task lifetime'
+    )
 
 
 class TASK_STATUS_FLOW(BaseModel):
@@ -267,7 +282,9 @@ class TASK_STATUS_FLOW(BaseModel):
 
     totalPipes: int = Field(default=0, description='Total number of concurrent pipeline execution instances')
 
-    byPipe: Dict[int, List[str]] = Field(default_factory=dict, description='Component execution stacks by pipeline instance ID')
+    byPipe: Dict[int, List[str]] = Field(
+        default_factory=dict, description='Component execution stacks by pipeline instance ID'
+    )
 
 
 class TASK_STATUS(BaseModel):
@@ -323,7 +340,9 @@ class TASK_STATUS(BaseModel):
 
     completed: bool = Field(default=False, description='Task completion flag - true when task has finished execution')
 
-    state: int = Field(default=TASK_STATE.NONE.value, description='Current task lifecycle state from TASK_STATE enumeration')
+    state: int = Field(
+        default=TASK_STATE.NONE.value, description='Current task lifecycle state from TASK_STATE enumeration'
+    )
 
     startTime: float = Field(default=0.0, description='Task start timestamp (Unix time) for duration calculation')
 
@@ -335,7 +354,9 @@ class TASK_STATUS(BaseModel):
     status: str = Field(default='', description='Current status message describing task activity and progress')
 
     # Error and Warning Management with History
-    warnings: List[str] = Field(default_factory=list, description='Warning message history (limited to 50 recent entries)')
+    warnings: List[str] = Field(
+        default_factory=list, description='Warning message history (limited to 50 recent entries)'
+    )
 
     errors: List[str] = Field(default_factory=list, description='Error message history (limited to 50 recent entries)')
 
@@ -345,7 +366,9 @@ class TASK_STATUS(BaseModel):
     currentSize: int = Field(default=0, description='Size in bytes of the item currently being processed')
 
     # Status Notes and Contextual Information
-    notes: List[Union[str, dict]] = Field(default_factory=list, description='Contextual notes and information for status display')
+    notes: List[Union[str, dict]] = Field(
+        default_factory=list, description='Contextual notes and information for status display'
+    )
 
     # Comprehensive Processing Statistics
     totalSize: int = Field(default=0, description='Total size in bytes of all items to be processed')
@@ -370,7 +393,9 @@ class TASK_STATUS(BaseModel):
     rateCount: int = Field(default=0, description='Current processing rate in items per second (instantaneous)')
 
     # Service Health and Operational State
-    serviceUp: bool = Field(default=False, description='Service operational status - true when ready to process requests')
+    serviceUp: bool = Field(
+        default=False, description='Service operational status - true when ready to process requests'
+    )
 
     # Task Termination Information
     exitCode: int = Field(default=0, description='Process exit code - 0 for success, non-zero for errors')
@@ -378,10 +403,17 @@ class TASK_STATUS(BaseModel):
     exitMessage: str = Field(default='', description='Exit message providing details about task termination')
 
     # Pipeline Component Execution Flow Tracking
-    pipeflow: TASK_STATUS_FLOW = Field(default_factory=TASK_STATUS_FLOW, description='Pipeline component execution flow and visualization data')
+    pipeflow: TASK_STATUS_FLOW = Field(
+        default_factory=TASK_STATUS_FLOW, description='Pipeline component execution flow and visualization data'
+    )
 
     # Resource Utilization Metrics (user-facing, normalized)
-    metrics: TASK_METRICS = Field(default_factory=TASK_METRICS, description='Real-time resource utilization metrics (CPU normalized to 0-100%, memory in MB, GPU memory in MB)')
+    metrics: TASK_METRICS = Field(
+        default_factory=TASK_METRICS,
+        description='Real-time resource utilization metrics (CPU normalized to 0-100%, memory in MB, GPU memory in MB)',
+    )
 
     # Token Usage (user-facing billing - cumulative tokens from task start)
-    tokens: TASK_TOKENS = Field(default_factory=TASK_TOKENS, description='Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00)')
+    tokens: TASK_TOKENS = Field(
+        default_factory=TASK_TOKENS, description='Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00)'
+    )

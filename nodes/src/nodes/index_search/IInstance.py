@@ -318,7 +318,9 @@ class IInstance(IInstanceTransform):
                 debug('Vector mode missing vector_dim; cannot index')
                 continue
             client.ensure_index_vector(index=index, dimension=vector_dim)
-            metadata_payload = meta.model_dump(exclude_none=True) if meta is not None and hasattr(meta, 'model_dump') else None
+            metadata_payload = (
+                meta.model_dump(exclude_none=True) if meta is not None and hasattr(meta, 'model_dump') else None
+            )
             try:
                 embedding_list = [float(x) for x in embedding]  # type: ignore
             except Exception:
@@ -366,6 +368,7 @@ class IInstance(IInstanceTransform):
 
     def renderObject(self, object: Entry) -> None:
         """Stream document text to the writeText lane (Elasticsearch only; uses DocumentStoreBase)."""
+
         def callback(text: str) -> None:
             self.instance.sendText(text)
 
@@ -377,4 +380,3 @@ class IInstance(IInstanceTransform):
             return
         self.IGlobal.store.render(objectId=object.objectId, callback=callback)
         self.preventDefault()
-

@@ -61,7 +61,13 @@ class Store(DocumentStoreBase):
     similarity: str = 'Cosine'
     client: WeaviateClient | None = None
     collectionObj: Collection | None = None
-    similarityDict: dict = {'cosine': VectorDistances.COSINE, 'dot': VectorDistances.DOT, 'l2-squared': VectorDistances.L2_SQUARED, 'hamming': VectorDistances.HAMMING, 'manhattan': VectorDistances.MANHATTAN}
+    similarityDict: dict = {
+        'cosine': VectorDistances.COSINE,
+        'dot': VectorDistances.DOT,
+        'l2-squared': VectorDistances.L2_SQUARED,
+        'hamming': VectorDistances.HAMMING,
+        'manhattan': VectorDistances.MANHATTAN,
+    }
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -96,7 +102,9 @@ class Store(DocumentStoreBase):
         if similarity in ['cosine', 'dot', 'l2-squared', 'hamming', 'manhattan']:
             self.similarity = self.similarityDict[similarity]
         else:
-            raise Exception('The metric you provided in the config.json does not match required weaviate configurations')
+            raise Exception(
+                'The metric you provided in the config.json does not match required weaviate configurations'
+            )
 
         if profile == 'cloud':
             self.client = weaviate.connect_to_weaviate_cloud(
@@ -251,7 +259,9 @@ class Store(DocumentStoreBase):
         # Now, add the documents to the results
         for point in points:
             # Get the payload content and metadata
-            metadata = cast(DocMetadata, {k: v for k, v in point.properties.items() if k not in {'content'} and v is not None})
+            metadata = cast(
+                DocMetadata, {k: v for k, v in point.properties.items() if k not in {'content'} and v is not None}
+            )
             content = point.properties.get('content')
 
             if point.metadata.distance is not None:
@@ -548,7 +558,13 @@ class Store(DocumentStoreBase):
         offset = 0
         while True:
             # Build filter for getting a set of chunks within the offset range
-            points = self.collectionObj.query.fetch_objects(filters=(Filter.by_property('objectId').equal(objectId) & Filter.by_property('chunkId').greater_or_equal(offset) & Filter.by_property('chunkId').less_than(offset + self.renderChunkSize)))
+            points = self.collectionObj.query.fetch_objects(
+                filters=(
+                    Filter.by_property('objectId').equal(objectId)
+                    & Filter.by_property('chunkId').greater_or_equal(offset)
+                    & Filter.by_property('chunkId').less_than(offset + self.renderChunkSize)
+                )
+            )
 
             # Create a renderChunkSize array with empty
             # entries. This will allow us to join even when

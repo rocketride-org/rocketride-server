@@ -65,7 +65,9 @@ class IInstance(IInstanceBase):
                 },
             },
         },
-        description=lambda self: (self.IGlobal.tool_description or 'Accepts a text input and returns the pipeline result.'),
+        description=lambda self: (
+            self.IGlobal.tool_description or 'Accepts a text input and returns the pipeline result.'
+        ),
         output_schema=lambda self: {
             'type': 'object',
             'properties': {
@@ -104,7 +106,9 @@ class IInstance(IInstanceBase):
         response = _to_python_dict(entry.response)
 
         if not response:
-            debug('tool_pipe: sub-pipeline returned no data — ensure a response node is connected at the end of the sub-pipeline')
+            debug(
+                'tool_pipe: sub-pipeline returned no data — ensure a response node is connected at the end of the sub-pipeline'
+            )
 
         result = _extract_return_value(response, self.IGlobal.return_type)
 

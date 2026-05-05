@@ -146,7 +146,22 @@ class PreProcessor(PreProcessorBase):
         # Get the configuration to pass, excluding 'splitter'. We can't use
         # pop since it may be an IJson value which is not supported at this time
         # exclude internal keys that must never reach constructors
-        classConfig = {key: value for key, value in config.items() if key not in {'splitter', 'mode', 'strlen', 'tokens', 'hf_tokenizer', 'tokenizer', 'transform', 'max_model_tokens', 'bytes_per_token'}}
+        classConfig = {
+            key: value
+            for key, value in config.items()
+            if key
+            not in {
+                'splitter',
+                'mode',
+                'strlen',
+                'tokens',
+                'hf_tokenizer',
+                'tokenizer',
+                'transform',
+                'max_model_tokens',
+                'bytes_per_token',
+            }
+        }
 
         # Determine the overlap and size
         chunk_size = self._splitSize

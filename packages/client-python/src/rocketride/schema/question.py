@@ -352,17 +352,41 @@ class Question(BaseModel):
         questions: List of questions to ask
     """
 
-    type: QuestionType = Field(QuestionType.QUESTION, description='Type of question - question uses basic Q&A, semantic uses AI understanding, keyword uses text matching.')
-    filter: Optional[DocFilter] = Field(default_factory=DocFilter, description='Controls which documents to search and how to process results.')
-    expectJson: Optional[bool] = Field(False, description='Set to True to get structured JSON responses instead of text.')
-    role: Optional[str] = Field('', description='AI role or persona for the conversation (e.g., "You are a financial analyst").')
-    instructions: Optional[List[QuestionInstruction]] = Field(default_factory=list, description='Custom instructions to guide the AI response.')
-    history: Optional[List[QuestionHistory]] = Field(default_factory=list, description='Previous messages in this conversation for context.')
-    examples: Optional[List[QuestionExample]] = Field(default_factory=list, description='Example question/answer pairs to show desired response format.')
-    context: Optional[List[str]] = Field(default_factory=list, description='Additional context information to help the AI understand your question.')
-    goals: Optional[List[str]] = Field(default_factory=list, description='High-level objectives the AI should work towards (rendered as ### Goal before the prompt).')
-    documents: Optional[List[Doc]] = Field(default_factory=list, description='Specific documents to reference when answering.')
-    questions: Optional[List[QuestionText]] = Field(default_factory=list, description='List of questions to ask (usually just one).')
+    type: QuestionType = Field(
+        QuestionType.QUESTION,
+        description='Type of question - question uses basic Q&A, semantic uses AI understanding, keyword uses text matching.',
+    )
+    filter: Optional[DocFilter] = Field(
+        default_factory=DocFilter, description='Controls which documents to search and how to process results.'
+    )
+    expectJson: Optional[bool] = Field(
+        False, description='Set to True to get structured JSON responses instead of text.'
+    )
+    role: Optional[str] = Field(
+        '', description='AI role or persona for the conversation (e.g., "You are a financial analyst").'
+    )
+    instructions: Optional[List[QuestionInstruction]] = Field(
+        default_factory=list, description='Custom instructions to guide the AI response.'
+    )
+    history: Optional[List[QuestionHistory]] = Field(
+        default_factory=list, description='Previous messages in this conversation for context.'
+    )
+    examples: Optional[List[QuestionExample]] = Field(
+        default_factory=list, description='Example question/answer pairs to show desired response format.'
+    )
+    context: Optional[List[str]] = Field(
+        default_factory=list, description='Additional context information to help the AI understand your question.'
+    )
+    goals: Optional[List[str]] = Field(
+        default_factory=list,
+        description='High-level objectives the AI should work towards (rendered as ### Goal before the prompt).',
+    )
+    documents: Optional[List[Doc]] = Field(
+        default_factory=list, description='Specific documents to reference when answering.'
+    )
+    questions: Optional[List[QuestionText]] = Field(
+        default_factory=list, description='List of questions to ask (usually just one).'
+    )
 
     def addInstruction(self, title: str, instruction: str):
         """
@@ -522,25 +546,28 @@ class Question(BaseModel):
 
         # JSON formatting
         if self.expectJson:
-            all_instructions.append(QuestionInstruction(
-                subtitle='JSON Response Format',
-                instructions=(
-                    '- Respond **only** with a fenced, valid JSON structure.\r\n'
-                    '- Properly escape all quotes within content strings.\r\n'
-                    '- No additional text, comments, or explanations.\r\n'
-                    '- Ensure your answer is strictly valid JSON format.\r\n'
-                    '- Double check the JSON response to ensure it is valid.\r\n'
-                    '- Enclose the json with ```json and ``` tags.'
-                ),
-            ))
-            if has_previous_json_failed:
-                all_instructions.append(QuestionInstruction(
-                    subtitle='CRITICAL',
+            all_instructions.append(
+                QuestionInstruction(
+                    subtitle='JSON Response Format',
                     instructions=(
-                        '- Your previous response returned invalid JSON.\r\n'
-                        '- Examine your JSON and ensure it is complete and follows the JSON standards.'
+                        '- Respond **only** with a fenced, valid JSON structure.\r\n'
+                        '- Properly escape all quotes within content strings.\r\n'
+                        '- No additional text, comments, or explanations.\r\n'
+                        '- Ensure your answer is strictly valid JSON format.\r\n'
+                        '- Double check the JSON response to ensure it is valid.\r\n'
+                        '- Enclose the json with ```json and ``` tags.'
                     ),
-                ))
+                )
+            )
+            if has_previous_json_failed:
+                all_instructions.append(
+                    QuestionInstruction(
+                        subtitle='CRITICAL',
+                        instructions=(
+                            '- Your previous response returned invalid JSON.\r\n- Examine your JSON and ensure it is complete and follows the JSON standards.'
+                        ),
+                    )
+                )
 
         # User-provided instructions
         all_instructions.extend(self.instructions)

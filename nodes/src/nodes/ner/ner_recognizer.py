@@ -100,7 +100,15 @@ class NERRecognizer:
             # Format results
             formatted_entities = []
             for entity in filtered_entities:
-                formatted_entities.append({'entity_group': entity.get('entity_group', entity.get('entity', 'UNKNOWN')), 'word': entity.get('word', ''), 'score': entity.get('score', 0.0), 'start': entity.get('start', 0), 'end': entity.get('end', 0)})
+                formatted_entities.append(
+                    {
+                        'entity_group': entity.get('entity_group', entity.get('entity', 'UNKNOWN')),
+                        'word': entity.get('word', ''),
+                        'score': entity.get('score', 0.0),
+                        'start': entity.get('start', 0),
+                        'end': entity.get('end', 0),
+                    }
+                )
 
             return formatted_entities
 
@@ -154,7 +162,18 @@ class NERRecognizer:
         lines = [f'Found {len(entities)} entities:']
 
         # Map entity types to readable names
-        type_names = {'PER': 'People', 'PERSON': 'People', 'ORG': 'Organizations', 'LOC': 'Locations', 'LOCATION': 'Locations', 'MISC': 'Miscellaneous', 'DATE': 'Dates', 'TIME': 'Times', 'MONEY': 'Monetary Values', 'PERCENT': 'Percentages'}
+        type_names = {
+            'PER': 'People',
+            'PERSON': 'People',
+            'ORG': 'Organizations',
+            'LOC': 'Locations',
+            'LOCATION': 'Locations',
+            'MISC': 'Miscellaneous',
+            'DATE': 'Dates',
+            'TIME': 'Times',
+            'MONEY': 'Monetary Values',
+            'PERCENT': 'Percentages',
+        }
 
         for entity_type, words in summary.items():
             readable_type = type_names.get(entity_type.upper(), entity_type)

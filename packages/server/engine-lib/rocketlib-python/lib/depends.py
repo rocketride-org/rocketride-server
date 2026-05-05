@@ -119,7 +119,6 @@ def _get_cache_dir() -> str:
     return os.path.join(_get_executable_dir(), 'cache')
 
 
-
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
     Run a subprocess command, keeping stdin open until process exits.
@@ -213,8 +212,7 @@ def _ensure_pip():
 def _uv_abs_path() -> str:
     """Get the absolute path to the uv executable based on platform."""
     exe_dir = _get_executable_dir()
-    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else \
-           os.path.join(exe_dir, 'bin', 'uv')
+    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else os.path.join(exe_dir, 'bin', 'uv')
 
 
 def _uv_available() -> bool:
@@ -239,7 +237,9 @@ def _ensure_wheel():
         return
 
     monitorStatus('Installing wheel...')
-    result = _run([sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False)
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
+    )
 
     if result.returncode != 0:
         error(f'Failed to install wheel: {result.stderr}')
@@ -441,7 +441,16 @@ def _compile_constraints(constraints_path: str):
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
     debug(f'Compile: {args}')
-    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.PIPE,
+        encoding='utf-8',
+        errors='replace',
+        cwd=exe_dir,
+    )
 
     if result.returncode != 0:
         error(f'Failed to compile constraints: {result.stderr}')

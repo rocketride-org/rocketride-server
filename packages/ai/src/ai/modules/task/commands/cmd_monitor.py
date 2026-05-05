@@ -303,7 +303,12 @@ class MonitorCommands(DAPConn):
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)
                     # Exclude: NONE(0), COMPLETED(5), CANCELLED(6)
-                    if status.state in [TASK_STATE.STARTING.value, TASK_STATE.INITIALIZING.value, TASK_STATE.RUNNING.value, TASK_STATE.STOPPING.value]:
+                    if status.state in [
+                        TASK_STATE.STARTING.value,
+                        TASK_STATE.INITIALIZING.value,
+                        TASK_STATE.RUNNING.value,
+                        TASK_STATE.STOPPING.value,
+                    ]:
                         tasks.append(
                             {
                                 'id': target.id,
@@ -392,7 +397,9 @@ class MonitorCommands(DAPConn):
             # If is ok if the task doesn't exist at this point in time...
             try:
                 # Get the task (ownership check inside)
-                control = self._server.get_task_control_by_project(project_id, source, self._account_info, require='task.monitor')
+                control = self._server.get_task_control_by_project(
+                    project_id, source, self._account_info, require='task.monitor'
+                )
 
                 # The task is running, we can fill it in
                 event_id = control.id
