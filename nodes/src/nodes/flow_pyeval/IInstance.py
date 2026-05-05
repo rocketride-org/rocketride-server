@@ -143,15 +143,19 @@ class IInstance(FlowBaseIInstance):
 
         try:
             result = bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
-            _flow_log('warn',
+            _flow_log(
+                'warn',
                 'flow_pyeval evaluated condition=%r kwargs_keys=%r → %s',
-                expression, list(kwargs.keys()), result,
+                expression,
+                list(kwargs.keys()),
+                result,
             )
             return result
         except Exception as exc:
             _flow_log_exc(
                 'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',
-                expression, exc,
+                expression,
+                exc,
             )
             _logger.error(
                 'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',

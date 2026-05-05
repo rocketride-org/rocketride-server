@@ -411,7 +411,14 @@ class FlowBaseIInstance(IInstanceBase):
         on a bad condition string or a transient failure.
         """
         condition = getattr(self.IGlobal, 'condition', '')
-        kwargs_preview = {k: (f'<{type(v).__name__} len={len(v) if hasattr(v, "__len__") else "?"}>' if not isinstance(v, (int, float, bool)) else v) for k, v in kwargs.items()}
+        kwargs_preview = {
+            k: (
+                f'<{type(v).__name__} len={len(v) if hasattr(v, "__len__") else "?"}>'
+                if not isinstance(v, (int, float, bool))
+                else v
+            )
+            for k, v in kwargs.items()
+        }
         _flow_log(
             'warn',
             '_safe_check ENTER node=%s condition=%r kwargs=%r',
