@@ -55,6 +55,7 @@ hub that respects access permissions and client preferences.
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
+from ai.account.models import resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 
 
@@ -183,8 +184,8 @@ class MonitorCommands(DAPConn):
         else:
             self.verify_permission('task.monitor')
 
-        # Verify this notification goes to the correct user (cross-team safe)
-        if control.userId != self._account_info.userId:
+        # Verify the caller has access to this task's team
+        if not resolve_task_permissions(self._account_info, control.teamId):
             return
 
         # Build the base project-scoped key
@@ -286,14 +287,11 @@ class MonitorCommands(DAPConn):
         # If we just turned on task
         if new & EVENT_TYPE.TASK:
             try:
-                # Get current user id for cross-team task visibility
-                caller_user_id = self._account_info.userId
-
-                # Loop through all the active tasks owned by this user
+                # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []
                 for token, target in self._server._task_control.items():
-                    # If this is not ours, skip it
-                    if target.userId != caller_user_id:
+                    # Skip tasks the caller has no team membership for
+                    if not resolve_task_permissions(self._account_info, target.teamId):
                         continue
 
                     # Get the task status once
@@ -379,9 +377,9 @@ class MonitorCommands(DAPConn):
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
 
-            # Verify the caller owns this task (cross-team safe)
-            if control.userId != self._account_info.userId:
-                raise PermissionError('Access denied: task belongs to a different account')
+            # Verify the caller has access to this task's team
+            if not resolve_task_permissions(self._account_info, control.teamId):
+                raise PermissionError('Access denied: no permissions for this task')
 
             # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
             event_key = f'p.{control.project_id}.{control.source}'

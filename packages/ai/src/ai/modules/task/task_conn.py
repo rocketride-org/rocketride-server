@@ -73,7 +73,7 @@ from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
-from ai.account.models import AccountInfo, resolve_team_permissions
+from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -423,11 +423,8 @@ class TaskConn(
         args = request.get('arguments') or {}
         token = args.get('token', None)
 
-        # Now, we are good... but we need to verify permissions
-        if permissions:
-            self.verify_permission(permissions)
-
-        # Get the task
+        # Permission checks are deferred to get_task() / callers where the
+        # task's team is known, so we can resolve against the correct team.
         return token
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
@@ -453,14 +450,17 @@ class TaskConn(
         # Get the token
         token = self.get_task_token(request, permissions)
 
-        # Get the task control and verify ownership for API key auth
+        # Get the task control and verify access for API key auth
         control = self._server.get_task_control(token)
 
-        # For API key auth, verify the task belongs to this user (cross-team safe).
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
+        # For all other auth types, resolve permissions against the task's team.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if control.userId != self._account_info.userId:
-                raise PermissionError('Access denied: task belongs to a different account')
+            perms = resolve_task_permissions(self._account_info, control.teamId)
+            if not perms:
+                raise PermissionError('Access denied: no permissions for this task')
+            if permissions and permissions not in perms:
+                raise PermissionError(f'Permission {permissions!r} denied for this task')
 
         return control.task
 

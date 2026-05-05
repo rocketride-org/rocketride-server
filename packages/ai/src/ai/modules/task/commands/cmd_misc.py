@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source
 
 # Only import for type checking to avoid circular import errors
@@ -220,8 +221,12 @@ class MiscCommands(DAPConn):
             current_time = time.time()
             caller_user_id = self._account_info.userId
 
-            # Snapshot and filter to caller's own data (cross-team: match on userId)
-            task_controls = [c for c in server._task_control.values() if c.userId == caller_user_id]
+            # Snapshot tasks the caller has access to (own, teammate, org admin)
+            task_controls = [
+                c for c in server._task_control.values()
+                if resolve_task_permissions(self._account_info, c.teamId)
+            ]
+            # Connections are user-scoped (not task-scoped), so filter by userId
             conn_items = [
                 (cid, conn)
                 for cid, conn in server._connections.items()

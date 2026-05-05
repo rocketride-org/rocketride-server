@@ -138,6 +138,38 @@ _FULL_TEAM_PERMISSIONS = [
 ]
 
 
+def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> list[str]:
+    """
+    Return the caller's effective permissions for a task owned by the given team.
+
+    Unlike ``resolve_team_permissions`` this does **not** raise when the caller
+    has no relationship to the team — it returns an empty list instead,
+    signalling "no access".
+
+    Resolution order (first match wins):
+      1. Walk ``account_info.organizations``.
+      2. For each org, walk its teams looking for *task_team_id*.
+      3. If found and org has ``org.admin`` → full permissions.
+      4. If found → that team's stored permissions.
+      5. Not found in any org → ``[]`` (no access).
+
+    Args:
+        account_info: The authenticated caller's session.
+        task_team_id: The ``teamId`` from the task's TASK_CONTROL.
+
+    Returns:
+        Effective permission list, or empty list if the caller has no
+        membership in the task's team.
+    """
+    for org in account_info.organizations:
+        for team in org.get('teams', []):
+            if team['id'] == task_team_id:
+                if 'org.admin' in org.get('permissions', []):
+                    return list(_FULL_TEAM_PERMISSIONS)
+                return list(team.get('permissions', []))
+    return []
+
+
 def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[str]:
     """
     Return caller's permissions for a specific team.

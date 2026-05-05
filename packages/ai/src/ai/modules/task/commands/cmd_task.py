@@ -53,6 +53,7 @@ The actual task execution and management is delegated to the TaskServer.
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.account.models import resolve_task_permissions
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -350,12 +351,9 @@ class TaskCommands(DAPConn):
 
             tasks = []
 
-            # Iterate all tasks and include only those owned by this user.
-            # Match on userId so tasks started with any team key are visible.
-            caller_user_id = self._account_info.userId
+            # Iterate all tasks the caller has access to (own, teammate, or org admin).
             for control in self._server._task_control.values():
-                if control.userId != caller_user_id:
-                    # Skip tasks belonging to other users.
+                if not resolve_task_permissions(self._account_info, control.teamId):
                     continue
 
                 # Get current status for name and status string

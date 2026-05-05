@@ -83,7 +83,7 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_team_permissions
+from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
@@ -584,12 +584,11 @@ class TaskServer(DAPBase):
         for control in self._task_control.values():
             if control.project_id == project_id and control.source == source:
                 if account_info is not None:
-                    if control.userId != account_info.userId:
-                        raise PermissionError('Access denied: task belongs to a different account')
-                    if require:
-                        perms = resolve_team_permissions(account_info, control.teamId)
-                        if require not in perms:
-                            raise PermissionError(f'Permission {require!r} denied for this task')
+                    perms = resolve_task_permissions(account_info, control.teamId)
+                    if not perms:
+                        raise PermissionError('Access denied: no permissions for this task')
+                    if require and require not in perms:
+                        raise PermissionError(f'Permission {require!r} denied for this task')
                 return control
 
         raise RuntimeError('Your pipeline is not running')
@@ -1250,10 +1249,13 @@ class TaskServer(DAPBase):
             # Update the new owner
             control.launch_owner = conn
 
-            # Verify the caller owns this task
+            # Verify the caller has control permissions for this task
             if conn and hasattr(conn, '_account_info') and conn._account_info:
-                if conn._account_info.userId != control.userId:
-                    raise RuntimeError('Cannot restart task: task belongs to a different account.')
+                perms = resolve_task_permissions(conn._account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Cannot restart task: no permissions for this task')
+                if 'task.control' not in perms:
+                    raise PermissionError("Permission 'task.control' denied for this task")
 
             # Check if debugger is attached - fail if so
             if control.task.has_attached_debugger():
