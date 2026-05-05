@@ -11,5 +11,6 @@
   "python.analysis.extraPaths": [
     "packages/server/engine-lib/rocketlib-python/lib",
     "packages/ai/src"
-  ]
+  ],
+  "DockerRun.DisableDockerrc": true
 }

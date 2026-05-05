@@ -26,7 +26,10 @@ class PreProcessor:
             return text
 
         try:
-            prediction = self._model.predict([text])
+            value = float(text)
+            prediction = self._model.predict([[value]])
             return str(prediction[0])
+        except (ValueError, TypeError):
+            return text
         except Exception:
             return text
