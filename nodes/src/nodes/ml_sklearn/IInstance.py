@@ -4,33 +4,28 @@
 # =============================================================================
 import copy
 from rocketlib import IInstanceBase, Entry
-from .IGlobal import IGlobal
+from . import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Per-thread instance for the ml_sklearn node."""
-
     IGlobal: IGlobal
 
     def open(self, obj: Entry):
         pass
 
     def _process(self, text: str) -> str:
-        """Run inference or passthrough."""
         if self.IGlobal.preprocessor is not None:
             return self.IGlobal.preprocessor.process(text)
         return text
 
-    def writeText(self, question):
-        """Called by engine when text lane input arrives."""
-        question = copy.deepcopy(question)
-        text = question.text if hasattr(question, 'text') else str(question)
-        question.text = self._process(text)
-        self.instance.writeAnswers(question)
+    def writeText(self, text: str):
+        """Engine calls this with plain string from text lane."""
+        result = self._process(text)
+        self.instance.writeAnswers(result)
 
     def writeAnswers(self, question):
-        """Called by engine when answers lane input arrives."""
+        """Engine calls this with question object from answers lane."""
         question = copy.deepcopy(question)
-        text = question.text if hasattr(question, 'text') else str(question)
+        text = getattr(question, 'text', '') or str(question)
         question.text = self._process(text)
         self.instance.writeAnswers(question)
