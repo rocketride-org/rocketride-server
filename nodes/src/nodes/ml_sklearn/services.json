@@ -15,11 +15,11 @@
 	"documentation": "https://docs.rocketride.org",
 	"tile": [],
 	"lanes": {
-		"text": ["answers"]
+		"answers": ["answers"]
 	},
 	"input": [
 		{
-			"lane": "text",
+			"lane": "answers",
 			"output": [
 				{
 					"lane": "answers"
@@ -40,7 +40,7 @@
 		"profiles": ["default"],
 		"cases": [
 			{
-				"text": "hello world",
+				"answers": [{"text": "hello world"}],
 				"expect": {
 					"answers": {
 						"notEmpty": true
