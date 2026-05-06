@@ -348,7 +348,7 @@ class GitRepo:
     def _require_repo(self) -> pygit2.Repository:
         """Return the active repository or raise GitError if none is loaded."""
         if self._repo is None:
-            raise GitError('No repository loaded. Set repoPath in config or call git.clone first.')
+            raise GitError('No repository loaded. Set repoPath in config or call clone first.')
         return self._repo
 
     def _safe_guard(self, operation: str) -> None:
@@ -833,7 +833,7 @@ class GitRepo:
                 conflicts = [c.our.path for c in repo.index.conflicts if c.our]
                 # Abort cleanly: clear MERGE_HEAD/MERGE_MSG and reset the index
                 # and worktree to HEAD. Leaving the repo half-merged would
-                # silently corrupt the next git.commit (which would create a
+                # silently corrupt the next commit (which would create a
                 # non-merge commit containing conflict markers).
                 repo.state_cleanup()
                 repo.reset(repo.head.target, _GIT_RESET_HARD)

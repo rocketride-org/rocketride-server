@@ -44,8 +44,8 @@
 	//
 	// Required:
 	//		The prefix mapped (added/removed) when converting URLs <=> paths.
-	//		Also used as the namespace for the node's tool names (git.clone,
-	//		git.status, …).
+	//		Also used as the namespace for the node's tool names (clone,
+	//		status, …).
 	//
 	"prefix": "git",
 	//
@@ -112,7 +112,7 @@
 		"git.repoPath": {
 			"type": "string",
 			"title": "Repository Path",
-			"description": "Local path to an existing repository, or a remote URL (https://, git@, ssh://). A remote URL is cloned into a temporary directory at pipeline start and cleaned up on exit. Leave blank to let the agent call git.clone or git.init at runtime.",
+			"description": "Local path to an existing repository, or a remote URL (https://, git@, ssh://). A remote URL is cloned into a temporary directory at pipeline start and cleaned up on exit. Leave blank to let the agent call clone or init at runtime.",
 			"default": ""
 		},
 		"git.authType": {

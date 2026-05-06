@@ -12,7 +12,6 @@ Integration tests are automatically skipped when the variable is unset.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -57,6 +56,24 @@ _rocketlib_stub.IInstanceBase = object
 _rocketlib_stub.IGlobalBase = object
 _rocketlib_stub.OPEN_MODE = MagicMock()
 _rocketlib_stub.warning = MagicMock()
+
+
+# Stand-in for rocketlib.tool_function — must mirror the real decorator's
+# behaviour (stamp __tool_meta__ and return fn unchanged), or @_tool wraps the
+# IInstance methods in MagicMocks and every test fails opaquely.
+def _stub_tool_function(*, input_schema=None, description=None, output_schema=None):
+    def decorator(fn):
+        fn.__tool_meta__ = {
+            'input_schema': input_schema,
+            'description': description,
+            'output_schema': output_schema,
+        }
+        return fn
+
+    return decorator
+
+
+_rocketlib_stub.tool_function = _stub_tool_function
 
 _ai_config_stub = MagicMock()
 _ai_common_stub = MagicMock()
@@ -108,30 +125,38 @@ def _make_instance() -> IInstance:
     return inst
 
 
-def _invoke(inst: IInstance, tool_name: str, args: Optional[Dict[str, Any]] = None) -> str:
-    """Drive IInstance.invoke() with a tool.invoke op and return param.output."""
+def _invoke(inst: IInstance, tool_name: str, args: Optional[Dict[str, Any]] = None) -> Any:
+    """Call the @_tool-decorated method directly and return its result.
+
+    Tool name = method name (no ``git.`` prefix). Accepts the legacy ``git.X``
+    form too so historical assertions keep working — strips the prefix.
+    The framework's IInstanceBase.invoke chain isn't exercised here; we test
+    each tool method as a unit.
+    """
     if args is None:
         args = {}
-    param = MagicMock()
-    param.op = 'tool.invoke'
-    param.tool_name = tool_name
-    param.input = args
-    inst.invoke(param)
-    return param.output
+    if tool_name.startswith('git.'):
+        tool_name = tool_name[len('git.') :]
+    method = getattr(inst, tool_name)
+    return method(args)
 
 
-def _ok(result: str) -> Any:
-    """Assert the JSON result has no 'error' key and return the parsed dict."""
-    data = json.loads(result)
-    assert 'error' not in data, f'Unexpected error: {data["error"]}'
-    return data
+def _ok(result: Any) -> Any:
+    """Assert the result has no 'error' key and return it.
+
+    Methods now return Python objects directly (the framework JSON-encodes
+    them downstream), so JSON parsing is no longer needed.
+    """
+    if isinstance(result, dict):
+        assert 'error' not in result, f'Unexpected error: {result["error"]}'
+    return result
 
 
-def _err(result: str) -> str:
-    """Assert the JSON result contains an 'error' key and return the message."""
-    data = json.loads(result)
-    assert 'error' in data, f'Expected error but got: {data}'
-    return data['error']
+def _err(result: Any) -> str:
+    """Assert the result is a dict with an 'error' key and return the message."""
+    assert isinstance(result, dict), f'Expected error dict but got: {type(result).__name__}: {result!r}'
+    assert 'error' in result, f'Expected error but got: {result}'
+    return result['error']
 
 
 # ---------------------------------------------------------------------------
@@ -140,28 +165,61 @@ def _err(result: str) -> str:
 
 
 class TestToolQuery(unittest.TestCase):
-    """Tests for the tool.query operation."""
+    """Tests that the framework can discover every @_tool-decorated method."""
 
-    def test_query_populates_tools(self) -> None:
-        """tool.query appends all registered tool descriptors to param.tools."""
-        inst = _make_instance()
-        param = MagicMock()
-        param.op = 'tool.query'
-        param.tools = []
-        inst.invoke(param)
-        names = [t['name'] for t in param.tools]
-        self.assertIn('git.status', names)
-        self.assertIn('git.clone', names)
-        self.assertIn('git.push', names)
-        self.assertGreater(len(names), 15)
+    # Every @_tool method on IInstance, in declaration order. If you add or
+    # remove a tool, update this list.
+    _EXPECTED_TOOLS = (
+        'clone',
+        'init',
+        'status',
+        'log',
+        'show',
+        'diff',
+        'blame',
+        'file_at',
+        'write_file',
+        'stage',
+        'commit',
+        'stash',
+        'branch_list',
+        'branch_create',
+        'checkout',
+        'branch_delete',
+        'merge',
+        'fetch',
+        'pull',
+        'push',
+        'grep',
+        'ls_files',
+    )
 
-    def test_unknown_op_returns_param(self) -> None:
-        """Unrecognised op codes pass the param through unchanged."""
-        inst = _make_instance()
-        param = MagicMock()
-        param.op = 'something.else'
-        result = inst.invoke(param)
-        self.assertIs(result, param)
+    def test_every_tool_has_meta(self) -> None:
+        """Every public method on IInstance should carry __tool_meta__ for framework discovery."""
+        for name in self._EXPECTED_TOOLS:
+            method = getattr(IInstance, name, None)
+            self.assertIsNotNone(method, f'IInstance.{name} not defined')
+            self.assertTrue(
+                hasattr(method, '__tool_meta__'),
+                f'IInstance.{name} is missing __tool_meta__ (forgot @_tool?)',
+            )
+
+    def test_tool_meta_exposes_input_schema_and_description(self) -> None:
+        """__tool_meta__ should carry both an input_schema dict and a non-empty description."""
+        for name in self._EXPECTED_TOOLS:
+            meta = getattr(IInstance, name).__tool_meta__
+            self.assertIsInstance(meta['input_schema'], dict, f'{name}: input_schema not a dict')
+            self.assertEqual(meta['input_schema'].get('type'), 'object', f'{name}: schema type != object')
+            self.assertIsInstance(meta['description'], str, f'{name}: description not a string')
+            self.assertGreater(len(meta['description']), 10, f'{name}: description too short')
+
+    def test_no_legacy_dispatcher_attributes(self) -> None:
+        """The old custom-dispatch surface (_TOOLS, _dispatch, _call, ...) is gone."""
+        for legacy in ('_TOOLS', '_TOOL_MAP', '_WRITE_TOOLS', '_dispatch', '_call'):
+            self.assertFalse(
+                hasattr(IInstance, legacy),
+                f'IInstance still has legacy attribute {legacy!r}',
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -666,29 +724,17 @@ class TestIInstanceErrors(unittest.TestCase):
         self.assertNotIn('secrettoken', msg)
         self.assertIn('<redacted>', msg)
 
-    def test_unknown_tool_returns_error(self) -> None:
-        """An unregistered tool name produces an 'Unknown tool' error response."""
-        inst = _make_instance()
-        msg = _err(_invoke(inst, 'git.does_not_exist'))
-        self.assertIn('Unknown tool', msg)
-
-    def test_json_string_input_is_parsed(self) -> None:
-        """A JSON string passed as param.input is parsed into a dict before dispatch."""
-        inst = _make_instance()
-        inst.IGlobal.repo.status.return_value = {
-            'branch': 'main',
-            'staged': [],
-            'unstaged': [],
-            'untracked': [],
-            'clean': True,
-        }
-        param = MagicMock()
-        param.op = 'tool.invoke'
-        param.tool_name = 'git.status'
-        param.input = '{}'  # string instead of dict
-        inst.invoke(param)
-        result = _ok(param.output)
-        self.assertEqual(result['branch'], 'main')
+    # Tests removed:
+    #
+    # - test_unknown_tool_returns_error: unknown-tool dispatch is now a
+    #   framework concern (IInstanceBase._dispatch_tool raises PreventDefault
+    #   so the engine tries the next driver). tool_git no longer has its own
+    #   "Unknown tool" path to test.
+    #
+    # - test_json_string_input_is_parsed: the old custom invoke() did
+    #   json.loads on string inputs. The framework doesn't, and it appears
+    #   the engine has always passed dicts in practice — there are no
+    #   reproducible reports of string inputs reaching tool_git in the wild.
 
 
 class TestDispatchSchemaValidation(unittest.TestCase):

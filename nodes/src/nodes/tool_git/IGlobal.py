@@ -179,8 +179,8 @@ class IGlobal(IGlobalBase):
             except GitError as exc:
                 raise ValueError(f'tool_git: {exc}') from exc
 
-        # else: no repoPath → leave repo unbound. The agent can call git.clone /
-        # git.init at runtime to attach a repository.
+        # else: no repoPath → leave repo unbound. The agent can call clone /
+        # init at runtime to attach a repository.
 
         self.repo = git
 
