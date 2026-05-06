@@ -46,89 +46,17 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import pygit2
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import (
+    IInstanceBase,
+    normalize_tool_input,
+    optional_bool,
+    optional_int,
+    tool_function,
+    validate_tool_input_schema,
+)
 
 from .git_repo import GitError, scrub_credentials
 from .IGlobal import IGlobal
-
-# ---------------------------------------------------------------------------
-# Envelope stripping
-# ---------------------------------------------------------------------------
-#
-# Agent harnesses commonly attach metadata to every tool call that is not part
-# of any tool's input_schema. We strip these before validation so the agent
-# doesn't get spurious "unknown parameter" errors for them on every call.
-#
-# - "input": LangChain-style nested-args wrapper (sometimes a dict to merge,
-#   sometimes None when the agent has no extra args).
-# - "repo_path": some agents conflate the node-level config with per-call
-#   args; tool_git binds the repo at IGlobal.beginGlobal time, never per-call.
-# - "security_context": added by some sandboxed agent runtimes.
-_ENVELOPE_KEYS = frozenset({'input', 'repo_path', 'security_context'})
-
-
-def _strip_envelope(args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Merge nested ``input`` dict into top level and drop envelope keys.
-
-    Returns a fresh dict; *args* is not mutated. Returns ``{}`` for non-dict input.
-    """
-    if not isinstance(args, dict):
-        return {}
-    nested = args.get('input')
-    if isinstance(nested, dict):
-        # Top-level keys win on conflict — matches tool_github._normalize behaviour.
-        merged = {**nested, **{k: v for k, v in args.items() if k != 'input'}}
-    else:
-        merged = dict(args)
-    return {k: v for k, v in merged.items() if k not in _ENVELOPE_KEYS}
-
-
-# ---------------------------------------------------------------------------
-# Schema validation
-# ---------------------------------------------------------------------------
-
-
-def _validate_args(input_schema: Dict[str, Any], tool_name: str, args: Dict[str, Any]) -> None:
-    """Reject any *args* keys not declared in *input_schema*.
-
-    Raises ValueError listing the allowed parameters so the agent gets
-    actionable feedback. Without this, an unknown key is silently dropped and
-    the call returns a default-valued result the agent then misreads (the
-    symptom that landed ``include_remote`` in production).
-    """
-    allowed = set((input_schema.get('properties') or {}).keys())
-    unknown = sorted(k for k in args if k not in allowed)
-    if not unknown:
-        return
-    if allowed:
-        raise ValueError(f'{tool_name}: unknown parameter(s) {unknown}. Allowed parameters: {sorted(allowed)}.')
-    raise ValueError(f'{tool_name}: this tool takes no parameters; received unexpected: {unknown}.')
-
-
-# ---------------------------------------------------------------------------
-# Typed argument helpers
-# ---------------------------------------------------------------------------
-
-
-def _bool_arg(args: Dict[str, Any], key: str, default: bool = False) -> bool:
-    """Extract a boolean arg; raise ValueError if the value is not a bool."""
-    v = args.get(key, default)
-    if isinstance(v, bool):
-        return v
-    # JSON null deserialises to None — treat it the same as an absent key.
-    if v is None:
-        return default
-    raise ValueError(f'{key} must be a boolean')
-
-
-def _int_arg_in_range(args: Dict[str, Any], key: str, default: int, lo: int, hi: int) -> int:
-    """Extract an integer arg in [lo, hi]; raise ValueError if out of range or wrong type."""
-    v = args.get(key, default)
-    if isinstance(v, bool) or not isinstance(v, int):
-        raise ValueError(f'{key} must be an integer between {lo} and {hi}')
-    if not lo <= v <= hi:
-        raise ValueError(f'{key} must be between {lo} and {hi}')
-    return v
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +101,31 @@ def _tool(
         @functools.wraps(fn)
         def wrapper(self: 'IInstance', args: Optional[Dict[str, Any]]) -> Any:
             try:
-                args = _strip_envelope(args)
+                # extra_envelope_keys: 'repo_path' is a tool_git-specific
+                # wrapper — some agents echo the node-level config back into
+                # per-call args. tool_git binds the repo at
+                # IGlobal.beginGlobal time, never per-call.
+                #
+                # strip_keys: 'input' and 'repo_path' also arrive as scalars
+                # (e.g. `input: null`, `repo_path: "$..."`) — extra_envelope_keys
+                # only unwraps them when their values are dicts. Listing them
+                # in strip_keys drops the scalar form too so the schema
+                # validator below doesn't flag harness-injected metadata as
+                # unknown args. 'security_context' is the helper's default
+                # strip; we re-list it because passing strip_keys overrides
+                # the default.
+                #
+                # JSON-string and Pydantic coercion are off — the engine path
+                # in this codebase always delivers dicts, never the exotic
+                # shapes those branches handle.
+                args = normalize_tool_input(
+                    args,
+                    extra_envelope_keys=('repo_path',),
+                    strip_keys=('input', 'repo_path', 'security_context'),
+                    parse_json_strings=False,
+                    unwrap_pydantic=False,
+                    tool_name=tool_name,
+                )
                 if self.IGlobal.repo is None:
                     return {'error': 'Git node is not initialised. Check node config.'}
                 # Determine if THIS call mutates state. Static True/False covers
@@ -187,7 +139,7 @@ def _tool(
                             'Set readOnlyMode=false in node config to allow write operations.'
                         )
                     }
-                _validate_args(input_schema, tool_name, args)
+                validate_tool_input_schema(input_schema, args, tool_name=tool_name)
                 return fn(self, args)
             except (GitError, ValueError) as exc:
                 return {'error': str(exc)}
@@ -304,7 +256,7 @@ class IInstance(IInstanceBase):
     def log(self, args: Dict[str, Any]) -> Any:
         """Commit history with optional filters."""
         return self.IGlobal.repo.log(
-            max_count=_int_arg_in_range(args, 'max_count', 20, 1, 200),
+            max_count=optional_int(args, 'max_count', default=20, lo=1, hi=200, tool_name='log'),
             branch=args.get('branch') or None,
             path=args.get('path') or None,
             author=args.get('author') or None,
@@ -354,7 +306,7 @@ class IInstance(IInstanceBase):
             ref_a=ref_a,
             ref_b=ref_b,
             path=args.get('path') or None,
-            staged=_bool_arg(args, 'staged', False),
+            staged=optional_bool(args, 'staged', default=False, tool_name='diff'),
         )
 
     @_tool(
@@ -490,8 +442,8 @@ class IInstance(IInstanceBase):
     def branch_list(self, args: Dict[str, Any]) -> Any:
         """List branches."""
         return self.IGlobal.repo.branch_list(
-            remote=_bool_arg(args, 'remote', False),
-            all_branches=_bool_arg(args, 'all_branches', False),
+            remote=optional_bool(args, 'remote', default=False, tool_name='branch_list'),
+            all_branches=optional_bool(args, 'all_branches', default=False, tool_name='branch_list'),
         )
 
     @_tool(
@@ -540,7 +492,10 @@ class IInstance(IInstanceBase):
     )
     def branch_delete(self, args: Dict[str, Any]) -> Any:
         """Delete a branch."""
-        return self.IGlobal.repo.branch_delete(name=args['name'], force=_bool_arg(args, 'force', False))
+        return self.IGlobal.repo.branch_delete(
+            name=args['name'],
+            force=optional_bool(args, 'force', default=False, tool_name='branch_delete'),
+        )
 
     @_tool(
         input_schema={
@@ -611,7 +566,7 @@ class IInstance(IInstanceBase):
         return self.IGlobal.repo.push(
             remote=args.get('remote') or 'origin',
             branch=args.get('branch') or None,
-            force=_bool_arg(args, 'force', False),
+            force=optional_bool(args, 'force', default=False, tool_name='push'),
         )
 
     # ==================================================================
@@ -641,8 +596,8 @@ class IInstance(IInstanceBase):
             pattern=args['pattern'],
             ref=args.get('ref') or None,
             path=args.get('path') or None,
-            ignore_case=_bool_arg(args, 'ignore_case', False),
-            max_results=_int_arg_in_range(args, 'max_results', 1000, 1, 10000),
+            ignore_case=optional_bool(args, 'ignore_case', default=False, tool_name='grep'),
+            max_results=optional_int(args, 'max_results', default=1000, lo=1, hi=10000, tool_name='grep'),
         )
 
     @_tool(
@@ -660,5 +615,5 @@ class IInstance(IInstanceBase):
         """List tracked files."""
         return self.IGlobal.repo.ls_files(
             path=args.get('path') or None,
-            untracked=_bool_arg(args, 'untracked', False),
+            untracked=optional_bool(args, 'untracked', default=False, tool_name='ls_files'),
         )

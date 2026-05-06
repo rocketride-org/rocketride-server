@@ -51,29 +51,17 @@ _pygit2_stub.GitError = type('GitError', (Exception,), {})
 _pygit2_stub.RemoteCallbacks = object
 _pygit2_stub.Signature = MagicMock()
 
-_rocketlib_stub = MagicMock()
-_rocketlib_stub.IInstanceBase = object
-_rocketlib_stub.IGlobalBase = object
-_rocketlib_stub.OPEN_MODE = MagicMock()
-_rocketlib_stub.warning = MagicMock()
-
-
-# Stand-in for rocketlib.tool_function — must mirror the real decorator's
-# behaviour (stamp __tool_meta__ and return fn unchanged), or @_tool wraps the
-# IInstance methods in MagicMocks and every test fails opaquely.
-def _stub_tool_function(*, input_schema=None, description=None, output_schema=None):
-    def decorator(fn):
-        fn.__tool_meta__ = {
-            'input_schema': input_schema,
-            'description': description,
-            'output_schema': output_schema,
-        }
-        return fn
-
-    return decorator
-
-
-_rocketlib_stub.tool_function = _stub_tool_function
+# Stub the two opaque modules rocketlib needs at import time:
+#   - engLib: the C++ engine binding, only built into the engine runtime.
+#   - depends: rocketlib's dep-bootstrapper, which writes to a Python-install-
+#     adjacent cache dir (admin-only on default Windows installs). Our stub
+#     turns the dep bootstrap into a no-op.
+# With these in place, `import rocketlib` works and we get the real
+# tool_function / normalize_tool_input / require_int / require_bool.
+sys.modules['engLib'] = MagicMock()
+_depends_stub = MagicMock()
+_depends_stub.depends = lambda *args, **kwargs: None
+sys.modules['depends'] = _depends_stub
 
 _ai_config_stub = MagicMock()
 _ai_common_stub = MagicMock()
@@ -81,19 +69,19 @@ _ai_common_stub.config = _ai_config_stub
 _ai_stub = MagicMock()
 _ai_stub.common = _ai_common_stub
 
-_depends_stub = MagicMock()
-_depends_stub.depends = MagicMock()
+# Make rocketlib importable from this test by adding its lib path to sys.path,
+# then patch tool_git's other (still-stubbed) sibling modules.
+_rocketlib_lib = Path(__file__).resolve().parents[3] / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib'
+sys.path.insert(0, str(_rocketlib_lib))
 
 with patch.dict(
     sys.modules,
     {
         'pygit2': _pygit2_stub,
         'pygit2.credentials': _pygit2_stub,
-        'rocketlib': _rocketlib_stub,
         'ai': _ai_stub,
         'ai.common': _ai_common_stub,
         'ai.common.config': _ai_config_stub,
-        'depends': _depends_stub,
     },
 ):
     _src = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_git'

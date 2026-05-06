@@ -28,7 +28,15 @@ from __future__ import annotations
 
 import pytest
 
-from rocketlib import normalize_tool_input, optional_str, require_int, require_str
+from rocketlib import (
+    normalize_tool_input,
+    optional_bool,
+    optional_int,
+    optional_str,
+    require_int,
+    require_str,
+    validate_tool_input_schema,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -334,3 +342,340 @@ class TestOptionalStr:
     def test_tool_name_prefixes_error(self):
         with pytest.raises(ValueError, match='read_file: "encoding" must be a string'):
             optional_str({'encoding': 42}, 'encoding', tool_name='read_file')
+
+
+# ---------------------------------------------------------------------------
+# optional_int
+# ---------------------------------------------------------------------------
+
+
+class TestOptionalInt:
+    """Mirrors TestOptionalStr's coverage where applicable, plus the
+    require_int-shaped type and bounds rules.
+    """
+
+    def test_returns_value_when_present(self):
+        assert optional_int({'max_count': 42}, 'max_count') == 42
+
+    def test_numeric_string_coerced(self):
+        # Same as require_int — accept string-encoded ints.
+        assert optional_int({'n': '42'}, 'n') == 42
+
+    def test_returns_default_when_missing(self):
+        assert optional_int({}, 'max_count', default=20) == 20
+
+    def test_returns_default_when_none(self):
+        # JSON null deserialises to Python None — treat it the same as
+        # an absent key (the agent explicitly chose to not specify).
+        assert optional_int({'max_count': None}, 'max_count', default=20) == 20
+
+    def test_default_defaults_to_none(self):
+        assert optional_int({}, 'max_count') is None
+
+    def test_returns_non_int_default_untouched_when_missing(self):
+        # Same rationale as optional_str: ``default`` is author-supplied at
+        # call time; validating it would reject perfectly legitimate sentinel
+        # values.
+        sentinel = object()
+        assert optional_int({}, 'n', default=sentinel) is sentinel
+        assert optional_int({}, 'n', default='unset') == 'unset'
+
+    def test_default_not_range_checked(self):
+        # When the key is absent, the default is returned unchanged even
+        # if it falls outside [lo, hi]. An out-of-range default is an
+        # author bug at call site, not an agent bug at runtime.
+        assert optional_int({}, 'max_count', default=999, lo=1, hi=200) == 999
+        assert optional_int({}, 'max_count', default=-5, lo=0, hi=10) == -5
+
+    def test_lo_lower_bound_inclusive(self):
+        # lo is inclusive, matches require_int.
+        assert optional_int({'n': 1}, 'n', lo=1, hi=200) == 1
+        with pytest.raises(ValueError, match='"n" must be an integer between 0 and 200'):
+            optional_int({'n': -1}, 'n', lo=0, hi=200)
+
+    def test_hi_upper_bound_inclusive(self):
+        # hi is inclusive, matches require_int.
+        assert optional_int({'n': 200}, 'n', lo=1, hi=200) == 200
+        with pytest.raises(ValueError, match='"n" must be an integer between 1 and 200'):
+            optional_int({'n': 201}, 'n', lo=1, hi=200)
+
+    def test_lo_alone_rejects_below_only(self):
+        # Only lo set: arbitrarily-large values pass; anything below lo fails.
+        assert optional_int({'n': 10**9}, 'n', lo=1) == 10**9
+        with pytest.raises(ValueError, match='"n" must be an integer >= 1'):
+            optional_int({'n': 0}, 'n', lo=1)
+
+    def test_hi_alone_rejects_above_only(self):
+        # Only hi set: arbitrarily-negative values pass; anything above hi fails.
+        assert optional_int({'n': -(10**9)}, 'n', hi=200) == -(10**9)
+        with pytest.raises(ValueError, match='"n" must be an integer <= 200'):
+            optional_int({'n': 999}, 'n', hi=200)
+
+    def test_no_bounds_accepts_any_int(self):
+        # No lo or hi → only type validation, no range check.
+        assert optional_int({'n': 10**18}, 'n') == 10**18
+        assert optional_int({'n': -(10**18)}, 'n') == -(10**18)
+
+    def test_bool_rejected(self):
+        # Same as require_int: bool is technically an int but agent intent
+        # is almost certainly different.
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': True}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': False}, 'n')
+
+    def test_float_rejected(self):
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': 3.7}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': 3.0}, 'n')
+
+    def test_non_numeric_string_raises(self):
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': 'abc'}, 'n')
+
+    def test_unsupported_type_rejected(self):
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': [1, 2]}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            optional_int({'n': {'x': 1}}, 'n')
+
+    def test_tool_name_prefixes_error_on_present_value(self):
+        with pytest.raises(ValueError, match='log: "max_count" must be an integer'):
+            optional_int({'max_count': 'abc'}, 'max_count', tool_name='log')
+
+    def test_tool_name_prefixes_range_error(self):
+        with pytest.raises(ValueError, match='log: "max_count" must be an integer between 1 and 200'):
+            optional_int({'max_count': 999}, 'max_count', lo=1, hi=200, tool_name='log')
+
+    def test_does_not_mutate_args(self):
+        # Pure inspection — no setdefault, no pop.
+        args = {'max_count': 42}
+        snapshot = dict(args)
+        optional_int(args, 'max_count', default=20, lo=1, hi=200)
+        assert args == snapshot
+
+
+# ---------------------------------------------------------------------------
+# optional_bool
+# ---------------------------------------------------------------------------
+
+
+class TestOptionalBool:
+    """Mirrors TestOptionalStr / TestOptionalInt — strict bool typing,
+    default returned untouched on the absent path.
+    """
+
+    def test_returns_value_when_present(self):
+        assert optional_bool({'staged': True}, 'staged') is True
+        assert optional_bool({'staged': False}, 'staged') is False
+
+    def test_returns_default_when_missing(self):
+        assert optional_bool({}, 'staged', default=False) is False
+        assert optional_bool({}, 'staged', default=True) is True
+
+    def test_returns_default_when_none(self):
+        # JSON null → Python None → use default.
+        assert optional_bool({'staged': None}, 'staged', default=False) is False
+        assert optional_bool({'staged': None}, 'staged', default=True) is True
+
+    def test_default_defaults_to_none(self):
+        assert optional_bool({}, 'staged') is None
+
+    def test_returns_non_bool_default_untouched_when_missing(self):
+        # Mirrors optional_str/optional_int: ``default`` is author-supplied
+        # at call time; validating it would reject legitimate sentinels.
+        sentinel = object()
+        assert optional_bool({}, 'staged', default=sentinel) is sentinel
+        assert optional_bool({}, 'staged', default='unset') == 'unset'
+        assert optional_bool({}, 'staged', default=0) == 0
+
+    def test_int_rejected(self):
+        # No truthy coercion: 1/0 are common LLM hallucinations of bool but
+        # strict typing surfaces them as errors so the agent self-corrects.
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': 1}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': 0}, 'staged')
+
+    def test_string_rejected(self):
+        # Same rationale — "true"/"false" strings are LLM hallucinations.
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': 'true'}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': 'false'}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': ''}, 'staged')
+
+    def test_unsupported_type_rejected(self):
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': [True]}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            optional_bool({'staged': {'x': 1}}, 'staged')
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='diff: "staged" must be a boolean'):
+            optional_bool({'staged': 'yes'}, 'staged', tool_name='diff')
+
+    def test_no_tool_name_no_prefix(self):
+        with pytest.raises(ValueError) as exc:
+            optional_bool({'staged': 'yes'}, 'staged')
+        assert str(exc.value).startswith('"staged"'), f'expected no prefix, got: {exc.value!r}'
+
+    def test_does_not_mutate_args(self):
+        # Pure inspection.
+        args = {'staged': True}
+        snapshot = dict(args)
+        optional_bool(args, 'staged', default=False)
+        assert args == snapshot
+
+    def test_present_overrides_default(self):
+        # Belt-and-suspenders: when the agent explicitly sends False with
+        # default=True, we return False. The "absent" path is None / missing,
+        # not False.
+        assert optional_bool({'staged': False}, 'staged', default=True) is False
+
+
+# ---------------------------------------------------------------------------
+# validate_tool_input_schema
+# ---------------------------------------------------------------------------
+
+
+class TestValidateToolInputSchema:
+    """Unknown-key rejection against an ``@tool_function`` input schema.
+
+    The schema declared on ``@tool_function`` is documentation-only — the
+    framework dispatches without enforcing it. Tool nodes that want runtime
+    rejection of hallucinated parameter names (the ``include_remote`` bug
+    class) call this helper to opt in.
+    """
+
+    # Reusable schemas
+    _BRANCH_LIST = {
+        'type': 'object',
+        'required': [],
+        'properties': {
+            'remote': {'type': 'boolean'},
+            'all_branches': {'type': 'boolean'},
+        },
+    }
+    _STATUS = {'type': 'object', 'properties': {}, 'required': []}
+
+    def test_empty_args_against_empty_schema_passes(self):
+        # Both empty — nothing to flag.
+        assert validate_tool_input_schema(self._STATUS, {}) is None
+
+    def test_empty_args_against_populated_schema_passes(self):
+        # No keys to flag — schema's allowed list is irrelevant when args is empty.
+        assert validate_tool_input_schema(self._BRANCH_LIST, {}) is None
+
+    def test_all_known_keys_pass(self):
+        assert validate_tool_input_schema(self._BRANCH_LIST, {'remote': True}) is None
+        assert (
+            validate_tool_input_schema(
+                self._BRANCH_LIST,
+                {'remote': True, 'all_branches': False},
+            )
+            is None
+        )
+
+    def test_single_unknown_key_lists_allowed(self):
+        # The production bug from PR #731: agent sent ``include_remote``,
+        # the schema declares ``remote``. Helper must surface both the bad
+        # key and the allowed list.
+        with pytest.raises(ValueError) as exc:
+            validate_tool_input_schema(self._BRANCH_LIST, {'include_remote': True})
+        msg = str(exc.value)
+        assert "['include_remote']" in msg
+        assert "'remote'" in msg
+        assert "'all_branches'" in msg
+
+    def test_multiple_unknown_keys_sorted(self):
+        # Sorted output makes the error stable across Python dict-ordering
+        # changes and easier for an agent's prompt to parse.
+        with pytest.raises(ValueError) as exc:
+            validate_tool_input_schema(
+                self._BRANCH_LIST,
+                {'zebra': 1, 'alpha': 2, 'mango': 3},
+            )
+        assert "['alpha', 'mango', 'zebra']" in str(exc.value)
+
+    def test_unknown_alongside_known(self):
+        # Mixed args: one valid, one bogus. Only the bogus one is reported.
+        with pytest.raises(ValueError) as exc:
+            validate_tool_input_schema(
+                self._BRANCH_LIST,
+                {'remote': True, 'bogus': 'x'},
+            )
+        msg = str(exc.value)
+        assert "['bogus']" in msg
+        assert 'remote' not in msg.split("['")[1]  # 'remote' only appears in the allowed list, not unknown
+
+    def test_no_args_tool_with_extra_keys_special_message(self):
+        # When the schema declares zero properties, the error reads
+        # "this tool takes no parameters" instead of the allowed-list
+        # form. Distinct phrasing helps an agent recognise the
+        # "you sent args, none accepted" case.
+        with pytest.raises(ValueError, match='this tool takes no parameters'):
+            validate_tool_input_schema(self._STATUS, {'foo': 1})
+
+    def test_missing_properties_key_treated_as_no_args(self):
+        # A schema with no ``properties`` key (uncommon, but legal JSON
+        # Schema) is treated identically to ``properties: {}``.
+        with pytest.raises(ValueError, match='this tool takes no parameters'):
+            validate_tool_input_schema({'type': 'object'}, {'foo': 1})
+
+    def test_properties_explicitly_none_treated_as_no_args(self):
+        # Defensive: ``schema.get('properties') or {}`` collapses None to
+        # empty so a malformed schema doesn't crash with AttributeError.
+        with pytest.raises(ValueError, match='this tool takes no parameters'):
+            validate_tool_input_schema({'properties': None}, {'foo': 1})
+
+    def test_empty_input_schema_passes_when_args_empty(self):
+        # Truly empty schema + empty args → no-op, even though the schema
+        # has no ``properties`` key at all.
+        assert validate_tool_input_schema({}, {}) is None
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='branch_list: unknown parameter'):
+            validate_tool_input_schema(
+                self._BRANCH_LIST,
+                {'include_remote': True},
+                tool_name='branch_list',
+            )
+
+    def test_tool_name_prefixes_no_args_message(self):
+        with pytest.raises(ValueError, match='status: this tool takes no parameters'):
+            validate_tool_input_schema(self._STATUS, {'foo': 1}, tool_name='status')
+
+    def test_no_tool_name_no_prefix(self):
+        # Empty tool_name (default) — error starts directly with the
+        # subject, no leading ``: ``.
+        with pytest.raises(ValueError) as exc:
+            validate_tool_input_schema(self._BRANCH_LIST, {'bogus': 1})
+        msg = str(exc.value)
+        assert msg.startswith('unknown parameter'), f'expected no prefix, got: {msg!r}'
+
+    def test_does_not_mutate_args(self):
+        # Pure inspection — the helper must not pop the unknown keys it
+        # reports (caller may want to log them).
+        args = {'remote': True, 'bogus': 1}
+        snapshot = dict(args)
+        with pytest.raises(ValueError):
+            validate_tool_input_schema(self._BRANCH_LIST, args)
+        assert args == snapshot
+
+    def test_does_not_mutate_schema(self):
+        # Defensive: ensure we never .pop() or otherwise touch the schema
+        # the caller passed in (it's typically a frozen module-level dict
+        # used by every call).
+        schema_snapshot = {
+            'type': 'object',
+            'required': [],
+            'properties': {
+                'remote': {'type': 'boolean'},
+                'all_branches': {'type': 'boolean'},
+            },
+        }
+        validate_tool_input_schema(self._BRANCH_LIST, {'remote': True})
+        assert self._BRANCH_LIST == schema_snapshot

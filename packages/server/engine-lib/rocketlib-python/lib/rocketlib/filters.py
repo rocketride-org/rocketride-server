@@ -24,7 +24,7 @@
 
 from __future__ import annotations  # Enables forward references
 import json
-from typing import TYPE_CHECKING, Dict, Any, Iterable, List, TypedDict, Callable, Protocol
+from typing import TYPE_CHECKING, Dict, Any, Iterable, List, Optional, TypedDict, Callable, Protocol
 from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke
 from .error import APERR, Ec
 
@@ -228,7 +228,14 @@ def require_str(args: Dict[str, Any], key: str, *, tool_name: str = '') -> str:
     return val.strip()
 
 
-def require_int(args: Dict[str, Any], key: str, *, tool_name: str = '') -> int:
+def require_int(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    lo: Optional[int] = None,
+    hi: Optional[int] = None,
+    tool_name: str = '',
+) -> int:
     """Return ``args[key]`` coerced to ``int``, or raise ValueError.
 
     Accepts plain ints and numeric strings. The following are rejected with
@@ -239,6 +246,16 @@ def require_int(args: Dict[str, Any], key: str, *, tool_name: str = '') -> int:
     * ``float`` — ``int(3.7)`` would truncate to ``3``, and ``inf`` / ``nan``
       would leak an ``OverflowError`` / ``ValueError`` from ``int()``.
     * Any other non-(int|str) type, e.g. lists, dicts, ``Decimal``.
+
+    Optional bounds:
+
+    * ``lo`` — if set, the value must be ``>= lo``.
+    * ``hi`` — if set, the value must be ``<= hi``.
+    * Both — the value must lie in ``[lo, hi]``.
+    * Neither — no range check.
+
+    The error message advertises the configured bounds so the agent can
+    see what range it should retry within.
     """
     prefix = f'{tool_name}: ' if tool_name else ''
     val = args.get(key)
@@ -250,11 +267,181 @@ def require_int(args: Dict[str, Any], key: str, *, tool_name: str = '') -> int:
     # technically valid but takes minutes; an opaque traceback would be
     # worse than the friendly message).
     if isinstance(val, (bool, float)) or not isinstance(val, (int, str)):
-        raise ValueError(f'{prefix}"{key}" must be an integer')
+        raise ValueError(f'{prefix}"{key}" must be an integer{_range_phrase(lo, hi)}')
     try:
-        return int(val)
+        out = int(val)
     except (TypeError, ValueError, OverflowError):
-        raise ValueError(f'{prefix}"{key}" must be an integer')
+        raise ValueError(f'{prefix}"{key}" must be an integer{_range_phrase(lo, hi)}')
+    if lo is not None and out < lo:
+        raise ValueError(f'{prefix}"{key}" must be an integer{_range_phrase(lo, hi)}')
+    if hi is not None and out > hi:
+        raise ValueError(f'{prefix}"{key}" must be an integer{_range_phrase(lo, hi)}')
+    return out
+
+
+def _range_phrase(lo: Optional[int], hi: Optional[int]) -> str:
+    """Render ' between LO and HI' / ' >= LO' / ' <= HI' / ''."""
+    if lo is not None and hi is not None:
+        return f' between {lo} and {hi}'
+    if lo is not None:
+        return f' >= {lo}'
+    if hi is not None:
+        return f' <= {hi}'
+    return ''
+
+
+def require_bool(args: Dict[str, Any], key: str, *, tool_name: str = '') -> bool:
+    """Return ``args[key]`` as ``bool``, or raise ValueError.
+
+    Strict on type to keep agent intent unambiguous. Accepts ``True`` and
+    ``False`` only — no truthy coercion of ``1``/``0``/``"true"``/``"false"``,
+    because schemas declared ``"type": "boolean"`` mean exactly that and
+    a coerced string smells like an LLM hallucination worth flagging.
+
+    For optional booleans (typical schema default), call
+    ``args.setdefault(key, <default>)`` before this helper.
+    """
+    prefix = f'{tool_name}: ' if tool_name else ''
+    val = args.get(key)
+    if val is None:
+        raise ValueError(f'{prefix}"{key}" is required')
+    if not isinstance(val, bool):
+        raise ValueError(f'{prefix}"{key}" must be a boolean')
+    return val
+
+
+def validate_tool_input_schema(
+    input_schema: Dict[str, Any],
+    args: Dict[str, Any],
+    *,
+    tool_name: str = '',
+) -> None:
+    """Reject any *args* keys not declared in ``input_schema['properties']``.
+
+    Without this check, a hallucinated parameter name (e.g. ``include_remote``
+    instead of the schema's ``remote``) is silently dropped by the dispatcher
+    and the call returns a default-valued result the agent then misreads —
+    "this tool doesn't support remotes" — and gives up. Raising a clean
+    ValueError that names the bad key and lists the allowed ones lets the
+    agent self-correct on the next turn.
+
+    The framework's ``@tool_function`` only uses ``input_schema`` to build
+    the ``tool.query`` descriptor; runtime validation is opt-in via this
+    helper. Pair it with :func:`normalize_tool_input` for the typical
+    "strip envelope, then validate" pattern at tool-method entry.
+
+    Args:
+        input_schema: The JSON-schema-shaped dict that's also passed to
+            ``@tool_function``. Only ``input_schema['properties']`` is
+            consulted; missing or ``None`` is treated as "no allowed keys".
+        args: The (already-normalised) tool arguments dict.
+        tool_name: Short identifier prefixed onto error messages so an
+            agent looking at multiple errors can attribute each to the
+            specific tool. Empty string omits the prefix.
+
+    Raises:
+        ValueError: If ``args`` contains any key not in
+            ``input_schema['properties']``. The message lists the unknown
+            keys and the allowed ones (or "this tool takes no parameters"
+            for schemas with empty properties).
+    """
+    allowed = set((input_schema.get('properties') or {}).keys())
+    unknown = sorted(k for k in args if k not in allowed)
+    if not unknown:
+        return
+    prefix = f'{tool_name}: ' if tool_name else ''
+    if allowed:
+        raise ValueError(f'{prefix}unknown parameter(s) {unknown}. Allowed parameters: {sorted(allowed)}.')
+    raise ValueError(f'{prefix}this tool takes no parameters; received unexpected: {unknown}.')
+
+
+def optional_bool(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    default: Any = None,
+    tool_name: str = '',
+) -> Any:
+    """Return ``args[key]`` as ``bool``, or ``default`` if absent/None.
+
+    Type rules mirror :func:`require_bool` exactly when the key is present
+    (strict ``True`` / ``False`` only — no truthy coercion of ``1``/``0``/
+    ``"true"``). The only difference is the absent-key path: instead of
+    raising "is required", ``default`` is returned.
+
+    Following :func:`optional_str`: type validation only fires when ``key``
+    is present. ``default`` is returned untouched on the absent path so
+    callers can use non-bool sentinels (e.g. ``object()``, ``None``) without
+    the helper rejecting them.
+
+    Args:
+        args: The (already-normalised) tool arguments dict.
+        key: The optional argument name.
+        default: Value to return when ``key`` is missing or its value is None.
+            Defaults to ``None``. Returned untouched — the helper does NOT
+            type-check the default; an unusual default is an author-side
+            choice, not an agent-side bug.
+        tool_name: Short identifier prefixed onto error messages.
+
+    Raises:
+        ValueError: If ``key`` is present with a non-bool value.
+    """
+    if key not in args:
+        return default
+    val = args[key]
+    if val is None:
+        return default
+    if not isinstance(val, bool):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" must be a boolean')
+    return val
+
+
+def optional_int(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    default: Any = None,
+    lo: Optional[int] = None,
+    hi: Optional[int] = None,
+    tool_name: str = '',
+) -> Any:
+    """Return ``args[key]`` coerced to ``int``, or ``default`` if absent/None.
+
+    Type and bounds rules mirror :func:`require_int` exactly when the key is
+    present (bool / float / unsupported types rejected; optional ``lo`` / ``hi``
+    inclusive bounds checked). The only difference is the absent-key path:
+    instead of raising "is required", ``default`` is returned.
+
+    Following :func:`optional_str`: type and bounds validation only fires
+    when ``key`` is present. ``default`` is returned untouched on the absent
+    path so callers can use non-int sentinels (e.g. ``object()``) without
+    the helper rejecting them.
+
+    Args:
+        args: The (already-normalised) tool arguments dict.
+        key: The optional argument name.
+        default: Value to return when ``key`` is missing or its value is None.
+            Defaults to ``None``. Returned untouched — the helper does NOT
+            range-check the default; an out-of-range default is an
+            author-side bug, not an agent-side bug.
+        lo: If set, the value (when present) must be ``>= lo``.
+        hi: If set, the value (when present) must be ``<= hi``.
+        tool_name: Short identifier prefixed onto error messages so a
+            multi-tool dispatcher can attribute each error to a tool.
+
+    Raises:
+        ValueError: If ``key`` is present with a non-int value, or with an
+            int outside the configured ``[lo, hi]`` bounds.
+    """
+    if key not in args:
+        return default
+    val = args[key]
+    if val is None:
+        return default
+    # Reuse require_int's type + range machinery so the validation rules
+    # stay in sync between required and optional variants.
+    return require_int({key: val}, key, lo=lo, hi=hi, tool_name=tool_name)
 
 
 def optional_str(
