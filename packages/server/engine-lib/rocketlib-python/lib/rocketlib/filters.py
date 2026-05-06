@@ -108,6 +108,7 @@ def normalize_tool_input(
     input_obj: Any,
     *,
     extra_envelope_keys: Iterable[str] = (),
+    strip_keys: Iterable[str] = ('security_context',),
     parse_json_strings: bool = True,
     unwrap_pydantic: bool = True,
     tool_name: str = 'tool',
@@ -126,12 +127,16 @@ def normalize_tool_input(
          whose value is a dict is merged into the top level. Top-level keys
          win on conflict (so a sibling key beside the envelope overrides
          the one inside it).
-      6. Strip ``security_context`` (engine-injected, never tool args).
+      6. Strip every key listed in ``strip_keys``.
 
     Args:
         input_obj: Raw tool input as delivered by the engine's invoke chain.
         extra_envelope_keys: Additional keys that, like ``input``, wrap the
             real arguments and should be unwrapped/merged.
+        strip_keys: Keys to drop from the final dict before returning.
+            Defaults to ``('security_context',)`` — engine-injected and
+            never a tool arg. Pass ``()`` to disable stripping, or a list
+            to add more (e.g. ``('security_context', 'trace_id')``).
         parse_json_strings: Try ``json.loads`` on string inputs. Set False
             for tools where the engine path is known never to deliver a
             JSON-encoded string.
@@ -174,7 +179,7 @@ def normalize_tool_input(
         warning(f'{tool_name}: unexpected input type {type(input_obj).__name__}')
         return {}
 
-    # Shallow-copy so the envelope-merge and ``security_context`` pop below
+    # Shallow-copy so the envelope-merge and the strip_keys pop below
     # never mutate a caller-owned dict.
     input_obj = dict(input_obj)
 
@@ -184,7 +189,8 @@ def normalize_tool_input(
             extras = {k: v for k, v in input_obj.items() if k != key}
             input_obj = {**wrapped, **extras}
 
-    input_obj.pop('security_context', None)
+    for key in strip_keys:
+        input_obj.pop(key, None)
     return input_obj
 
 
