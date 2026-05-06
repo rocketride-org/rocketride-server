@@ -20,6 +20,7 @@
 	"input": [
 		{
 			"lane": "answers",
+			"min": 0,
 			"output": [
 				{
 					"lane": "answers"
@@ -31,8 +32,7 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"model_path": "",
-				"fallback": true
+				"model_path": ""
 			}
 		}
 	},
@@ -40,7 +40,9 @@
 		"profiles": ["default"],
 		"cases": [
 			{
-				"answers": [{"text": "hello world"}],
+				"answers": {
+					"answers": [{"text": "hello world"}]
+				},
 				"expect": {
 					"answers": {
 						"notEmpty": true
