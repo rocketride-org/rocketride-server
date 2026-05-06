@@ -49,14 +49,16 @@ Usage::
 """
 
 import os
+import signal
 import sys
+import threading
 import urllib.parse
 import uvicorn
 import asyncio
 import importlib
 import time
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Union, Tuple
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -98,6 +100,58 @@ logo = r"""
             Copyright (c) 2026 Aparavi Software AG
                     All rights reserved
     """
+
+
+def _is_restorable_signal_handler(handler: Any) -> bool:
+    """Return True when Python's signal.signal() accepts the saved handler."""
+    return handler in (signal.SIG_IGN, signal.SIG_DFL) or callable(handler)
+
+
+def _build_signal_safe_capture(server: uvicorn.Server):
+    """
+    Build a Uvicorn-compatible signal capture context manager.
+
+    Some embedded or supervisor-driven runtimes can leave a C-level signal
+    handler installed. Python exposes that previous handler as None, but rejects
+    None when a later signal.signal(sig, handler) call tries to restore it.
+    Uvicorn's default capture_signals() restores every saved handler verbatim,
+    which makes shutdown/restart noisy with:
+        TypeError: signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object
+
+    This preserves Uvicorn's normal behavior while skipping handlers Python
+    cannot restore.
+    """
+    uvicorn_server_module = getattr(uvicorn, 'server', None)
+    handled_signals = getattr(uvicorn_server_module, 'HANDLED_SIGNALS', None)
+    if handled_signals is None:
+        return None
+
+    @contextmanager
+    def capture_signals():
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+
+        original_handlers = {}
+        for sig in handled_signals:
+            try:
+                original_handlers[sig] = signal.signal(sig, server.handle_exit)
+            except (OSError, RuntimeError, ValueError) as exc:
+                debug(f'Unable to install signal handler for {sig}: {exc}')
+
+        try:
+            yield
+        finally:
+            for sig, handler in original_handlers.items():
+                if not _is_restorable_signal_handler(handler):
+                    debug(f'Skipping unrestorable signal handler for {sig}: {handler!r}')
+                    continue
+                signal.signal(sig, handler)
+
+            for captured_signal in reversed(getattr(server, '_captured_signals', [])):
+                signal.raise_signal(captured_signal)
+
+    return capture_signals
 
 
 @asynccontextmanager
@@ -388,7 +442,13 @@ class WebServer:
         )
 
         # Return the configured server instance
-        return uvicorn.Server(config)
+        server = uvicorn.Server(config)
+
+        signal_safe_capture = _build_signal_safe_capture(server)
+        if signal_safe_capture is not None:
+            server.capture_signals = signal_safe_capture
+
+        return server
 
     async def _on_startup(self):
         """

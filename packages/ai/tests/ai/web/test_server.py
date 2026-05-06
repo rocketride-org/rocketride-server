@@ -1,5 +1,6 @@
 """Tests for ALLOWED_MODULES allowlist and WebServer.use() validation."""
 
+import signal
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -65,7 +66,7 @@ _inject('dotenv', MagicMock())
 _inject('uvicorn', MagicMock())
 
 # Now we can safely import the module under test
-from ai.web.server import WebServer
+from ai.web.server import WebServer, _build_signal_safe_capture
 from ai.modules import ALL as ALLOWED_MODULES
 
 
@@ -163,3 +164,34 @@ class TestUseMethod:
 
         mock_import.assert_not_called()
         cached_module.initModule.assert_not_called()
+
+
+class TestSignalCapture:
+    """Verify Uvicorn shutdown signal restoration is tolerant of embedded runtimes."""
+
+    def test_capture_signals_skips_unrestorable_previous_handler(self, monkeypatch):
+        import ai.web.server as server_module
+
+        handled_signal = signal.SIGTERM
+        fake_server = SimpleNamespace(handle_exit=MagicMock(), _captured_signals=[])
+        calls = []
+
+        server_module.uvicorn.server.HANDLED_SIGNALS = [handled_signal]
+
+        def fake_signal(sig, handler):
+            calls.append((sig, handler))
+            if handler is fake_server.handle_exit:
+                return None
+            if handler is None:
+                raise TypeError('signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object')
+            return signal.SIG_DFL
+
+        monkeypatch.setattr(server_module.signal, 'signal', fake_signal)
+        monkeypatch.setattr(server_module.signal, 'raise_signal', MagicMock())
+
+        capture_signals = _build_signal_safe_capture(fake_server)
+
+        with capture_signals():
+            pass
+
+        assert calls == [(handled_signal, fake_server.handle_exit)]
