@@ -47,7 +47,23 @@ jobs:
   init:
     name: Initialize
     # Skip when CI failed; manual dispatch always runs.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    #
+    # The `head_branch == 'develop'` guard makes explicit what the
+    # `branches: [develop]` filter on the trigger already enforces:
+    # this workflow runs privileged jobs (secrets: inherit, contents:
+    # write) on the head_sha of the triggering CI run. Static analyzers
+    # (e.g. OSSF Scorecard's DangerousWorkflow rule) flag workflow_run
+    # patterns that checkout `head_sha` without a branch check, since
+    # in principle workflow_run can be triggered by CI runs on any
+    # branch and a checkout of an untrusted ref with secrets is the
+    # canonical supply-chain attack vector. The explicit branch check
+    # below ties the trust boundary to develop's branch protection
+    # (PR + code-owner review + required checks), which is the actual
+    # safety guarantee.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'develop')
     uses: ./.github/workflows/_init.yaml
     with:
       # `head_sha` pins the build to the exact commit whose CI passed,
