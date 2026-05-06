@@ -24,13 +24,13 @@
 /**
  * Build tasks for the rocketlib Python package.
  *
- * Commands:
- *   test - Run rocketlib unit tests (uses dist/server/engine as Python interp
- *          so the engLib C extension is importable).
- *
- * The package itself is synced into dist/server by server:setup-python (via
- * server:build), so there is no separate sync step here — depending on
- * server:build is enough to make `from rocketlib import ...` work in tests.
+ * Exposes a single internal action, ``rocketlib:run-pytest``, used as a
+ * step inside ``server:test``. There is no public ``rocketlib:test``
+ * umbrella — rocketlib's helpers are tested as part of the engine's test
+ * suite, not as a standalone target. The pytest invocation uses
+ * ``dist/server/engine`` as the Python interpreter so the engLib C
+ * extension is importable; the package itself is synced into dist/server
+ * by ``server:setup-python`` (via ``server:build``).
  */
 const path = require('path');
 const { execCommand, DIST_ROOT } = require('../../../../../scripts/lib');
@@ -75,20 +75,8 @@ module.exports = {
     description: 'rocketlib Python package',
 
     actions: [
-        // Internal actions
+        // Internal action — invoked by server:test as a step.
         { name: 'rocketlib:run-pytest', action: makeRunPytestAction },
-
-        // Public actions (have descriptions)
-        {
-            name: 'rocketlib:test', action: (options) => ({
-                description: 'Test rocketlib Python helpers',
-                steps: [
-                    'server:build',
-                    'rocketlib:run-pytest'
-                ],
-                options
-            })
-        }
     ]
 };
 

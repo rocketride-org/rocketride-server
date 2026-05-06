@@ -962,7 +962,7 @@ function makeTestAction() {
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'rocketlib:run-pytest'], 'Run tests'),
 				],
 			}),
 		],
