@@ -4,7 +4,8 @@
 # =============================================================================
 import copy
 from rocketlib import IInstanceBase, Entry
-from . import IGlobal
+from ai.common.schema import Answer
+from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
@@ -18,14 +19,10 @@ class IInstance(IInstanceBase):
             return self.IGlobal.preprocessor.process(text)
         return text
 
-    def writeText(self, text: str):
-        """Engine calls this with plain string from text lane."""
+    def writeAnswers(self, answer: Answer):
+        """Process answer text through sklearn model and forward downstream."""
+        answer = copy.deepcopy(answer)
+        text = answer.getText() if answer else ''
         result = self._process(text)
-        self.instance.writeAnswers(result)
-
-    def writeAnswers(self, question):
-        """Engine calls this with question object from answers lane."""
-        question = copy.deepcopy(question)
-        text = getattr(question, 'text', '') or str(question)
-        question.text = self._process(text)
-        self.instance.writeAnswers(question)
+        answer.setText(result)
+        self.instance.writeAnswers(answer)
