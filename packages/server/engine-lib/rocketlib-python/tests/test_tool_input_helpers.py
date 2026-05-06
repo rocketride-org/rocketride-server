@@ -121,6 +121,30 @@ class TestNormalizeToolInput:
     def test_empty_dict_returns_empty(self):
         assert normalize_tool_input({}) == {}
 
+    def test_does_not_mutate_caller_dict(self):
+        # The helper used to pop ``security_context`` from the caller's
+        # original dict. Pin the no-side-effects contract so future edits
+        # can't reintroduce that.
+        original = {'q': 'hi', 'security_context': {'user': 'alice'}}
+        snapshot = {'q': 'hi', 'security_context': {'user': 'alice'}}
+
+        result = normalize_tool_input(original)
+
+        assert result == {'q': 'hi'}
+        assert original == snapshot, 'normalize_tool_input must not mutate its argument'
+
+    def test_does_not_mutate_caller_dict_via_input_envelope(self):
+        # Same guarantee when the envelope-merge path runs: the caller's
+        # outer dict and inner ``input`` dict must both be untouched.
+        inner = {'q': 'hi'}
+        original = {'input': inner, 'security_context': {'user': 'alice'}}
+
+        result = normalize_tool_input(original)
+
+        assert result == {'q': 'hi'}
+        assert original == {'input': {'q': 'hi'}, 'security_context': {'user': 'alice'}}
+        assert inner == {'q': 'hi'}
+
     def test_warning_emitted_for_unexpected_type(self, monkeypatch):
         # The helper does a lazy ``from .engine import warning`` to avoid a
         # circular import at module load. Patch the engine module so we can
@@ -250,6 +274,14 @@ class TestOptionalStr:
 
     def test_returns_default_when_missing(self):
         assert optional_str({}, 'encoding', default='utf-8') == 'utf-8'
+
+    def test_returns_non_string_default_untouched_when_missing(self):
+        # Type validation must not fire on the absent path — otherwise
+        # callers passing a non-string sentinel as default would get
+        # rejected for an arg they didn't supply.
+        sentinel = object()
+        assert optional_str({}, 'encoding', default=sentinel) is sentinel
+        assert optional_str({}, 'encoding', default=0) == 0
 
     def test_returns_default_when_none(self):
         assert optional_str({'encoding': None}, 'encoding', default='utf-8') == 'utf-8'

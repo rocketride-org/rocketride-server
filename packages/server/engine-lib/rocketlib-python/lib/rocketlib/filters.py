@@ -174,6 +174,10 @@ def normalize_tool_input(
         warning(f'{tool_name}: unexpected input type {type(input_obj).__name__}')
         return {}
 
+    # Shallow-copy so the envelope-merge and ``security_context`` pop below
+    # never mutate a caller-owned dict.
+    input_obj = dict(input_obj)
+
     for key in ('input', *extra_envelope_keys):
         wrapped = input_obj.get(key)
         if isinstance(wrapped, dict):
@@ -259,8 +263,15 @@ def optional_str(
     Raises ValueError if ``key`` is present but the value is not a string.
     Unlike :func:`require_str`, the returned value is **not** stripped — an
     explicitly-supplied "" stays "".
+
+    Type validation only fires when ``key`` is present with a non-string
+    value. A non-string ``default`` is returned untouched on the absent
+    path — validating ``default`` would mean the helper rejects perfectly
+    legitimate ``optional_str(args, 'n', default=0)`` calls.
     """
-    val = args.get(key, default)
+    if key not in args:
+        return default
+    val = args[key]
     if val is None:
         return default
     if not isinstance(val, str):
