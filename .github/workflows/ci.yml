@@ -100,65 +100,9 @@ jobs:
     steps:
       - run: echo "Build skipped — no code changes detected"
 
-  # ---------------------------------------------------------------------------
-  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases).
-  #
-  #  ⚠ DO NOT add this job (or `codeql-cpp` below) to develop/main
-  #  required-status-checks. The `if:` guard skips these on PR runs, and a
-  #  skipped status never satisfies a required check → PRs would hang forever
-  #  in "Expected" state. The aggregator job `CI OK` is the canonical required
-  #  check. Security findings still surface in the Security tab via SARIF
-  #  upload from scheduled runs (weekly cron + every push to develop/main).
-  # ---------------------------------------------------------------------------
-  codeql:
-    name: CodeQL / ${{ matrix.language }}
-    if: github.event_name == 'schedule' || github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: javascript-typescript
-            build-mode: none
-          - language: python
-            build-mode: none
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-          queries: security-and-quality
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          category: '/language:${{ matrix.language }}'
-
-  # codeql-cpp: see ⚠ note above the `codeql` job — same not-required rule applies.
-  codeql-cpp:
-    name: CodeQL / cpp
-    if: github.event_name == 'schedule'
-    needs: init
-    uses: ./.github/workflows/_build.yaml
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-    with:
-      codeql: true
-      full_version: ${{ needs.init.outputs.full_server_version }}
-      build_hash: ${{ needs.init.outputs.build_hash }}
-      build_stamp: ${{ needs.init.outputs.build_stamp }}
-      nodownload: true
-    secrets: inherit
+  # CodeQL: replaced by GitHub's "Default setup" — managed in repo Settings →
+  # Code security. Scans Python, JavaScript/TypeScript (and C/C++ via
+  # GitHub-managed autobuild). Findings surface in the Security tab.
 
   # ---------------------------------------------------------------------------
   #  Container scan — non-PR only (push/schedule/etc.).
