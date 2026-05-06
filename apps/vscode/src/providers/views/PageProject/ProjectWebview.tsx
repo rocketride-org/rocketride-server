@@ -42,6 +42,7 @@ const ProjectWebview: React.FC = () => {
 	const [isDirty, setIsDirty] = useState(false);
 	const [isNew, setIsNew] = useState(false);
 	const [subscribed, setSubscribed] = useState(true);
+	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
@@ -81,6 +82,7 @@ const ProjectWebview: React.FC = () => {
 				setServicesJson(msg.services);
 				setIsConnected(msg.isConnected);
 				if (msg.isSubscribed !== undefined) setSubscribed(msg.isSubscribed);
+				setIsReadonly(msg.isReadonly ?? false);
 				setStatusMap(msg.statuses ?? {});
 				setViewState({
 					mode: vs?.mode ?? 'design',
@@ -312,7 +314,7 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} />
+			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} />
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
 		</>
 	);

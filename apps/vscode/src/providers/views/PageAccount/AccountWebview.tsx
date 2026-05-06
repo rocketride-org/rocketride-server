@@ -48,6 +48,16 @@ const AccountWebview: React.FC = () => {
 	const [section, setSection] = useState<AccountSection>('profile');
 	const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
 
+	// Billing state
+	const [subscriptions, setSubscriptions] = useState<any[]>([]);
+	const [billingLoading, setBillingLoading] = useState(false);
+	const [billingError, setBillingError] = useState<string | null>(null);
+	const [creditBalance, setCreditBalance] = useState<any | null>(null);
+	const [creditPacks, setCreditPacks] = useState<any[]>([]);
+
+	// Section load error
+	const [sectionError, setSectionError] = useState<string | null>(null);
+
 	/**
 	 * Pending promise resolver for `onCreateKey`. The provider posts
 	 * `account:keyCreated` asynchronously; this ref holds the resolve
@@ -71,7 +81,7 @@ const AccountWebview: React.FC = () => {
 			case 'account:init':
 				setIsConnected(message.isConnected);
 				setProfile(message.profile);
-				setAuthUser(message.profile);
+				setAuthUser((message as any).authUser ?? message.profile);
 				setOrg(message.org);
 				setMembers(message.members);
 				setTeams(message.teams);
@@ -87,6 +97,9 @@ const AccountWebview: React.FC = () => {
 			// -- Granular updates -------------------------------------------------
 			case 'account:profile':
 				setProfile(message.profile);
+				break;
+			case 'account:authUser':
+				setAuthUser((message as any).authUser);
 				break;
 			case 'account:keys':
 				setKeys(message.keys);
@@ -112,9 +125,18 @@ const AccountWebview: React.FC = () => {
 				}
 				break;
 
+			// -- Billing ----------------------------------------------------------
+			case 'account:billing':
+				setSubscriptions((message as any).subscriptions ?? []);
+				setBillingLoading((message as any).billingLoading ?? false);
+				setBillingError((message as any).billingError ?? null);
+				setCreditBalance((message as any).creditBalance ?? null);
+				setCreditPacks((message as any).creditPacks ?? []);
+				break;
+
 			// -- Error ------------------------------------------------------------
 			case 'account:error':
-				console.log('[AccountWebview] Host error:', message.error);
+				setSectionError(message.error);
 				break;
 		}
 	}, []);
@@ -218,6 +240,21 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'account:loadTeamDetail', teamId });
 	}, []);
 
+	/** Cancels a subscription by app ID. */
+	const handleCancelSubscription = useCallback(async (appId: string): Promise<void> => {
+		sendMessageRef.current({ type: 'billing:cancel', appId } as any);
+	}, []);
+
+	/** Opens the Stripe customer portal in the browser. */
+	const handleOpenPortal = useCallback(async (): Promise<void> => {
+		sendMessageRef.current({ type: 'billing:portal' } as any);
+	}, []);
+
+	/** Opens a Stripe checkout session for a credit pack. */
+	const handleBuyCredits = useCallback(async (pack: any): Promise<void> => {
+		sendMessageRef.current({ type: 'billing:buyCredits', packId: pack.id } as any);
+	}, []);
+
 	// =========================================================================
 	// RENDER
 	// =========================================================================
@@ -229,6 +266,7 @@ const AccountWebview: React.FC = () => {
 	return (
 		<AccountView
 			isConnected={isConnected}
+			sectionError={sectionError}
 			profile={profile}
 			authUser={authUser}
 			keys={keys}
@@ -236,17 +274,18 @@ const AccountWebview: React.FC = () => {
 			members={members}
 			teams={teams}
 			teamDetail={teamDetail}
-			subscriptions={[]}
-			billingLoading={false}
-			billingError={null}
-			creditBalance={null}
-			creditPacks={[]}
-			onCancelSubscription={async () => {}}
-			onOpenPortal={async () => {}}
-			onBuyCredits={async () => {}}
+			subscriptions={subscriptions}
+			billingLoading={billingLoading}
+			billingError={billingError}
+			creditBalance={creditBalance}
+			creditPacks={creditPacks}
+			onCancelSubscription={handleCancelSubscription}
+			onOpenPortal={handleOpenPortal}
+			onBuyCredits={handleBuyCredits}
 			section={section}
 			onSectionChange={(s) => {
 				setSection(s);
+				setSectionError(null);
 				sendMessageRef.current({ type: 'account:sectionChange', section: s });
 			}}
 			activeTeamId={activeTeamId}
@@ -267,6 +306,12 @@ const AccountWebview: React.FC = () => {
 			onEditTeamMemberPerms={handleEditTeamMemberPerms}
 			onRemoveTeamMember={handleRemoveTeamMember}
 			onLoadTeamDetail={handleLoadTeamDetail}
+			orgEnv={{}}
+			teamEnv={{}}
+			userEnv={{}}
+			onSaveOrgEnv={async () => {}}
+			onSaveTeamEnv={async () => {}}
+			onSaveUserEnv={async () => {}}
 		/>
 	);
 };

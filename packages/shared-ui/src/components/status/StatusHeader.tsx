@@ -69,8 +69,6 @@ export interface StatusHeaderProps {
 	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	/** Extra content rendered to the left of the Run/Stop button. */
 	extraActions?: ReactNode;
-	/** When true, the Run button is disabled and greyed out (statusOnly mode). */
-	disableRun?: boolean;
 	/** When false, the Run button shows "Subscribe" instead of "Run". */
 	isSubscribed?: boolean;
 }
@@ -78,8 +76,6 @@ export interface StatusHeaderProps {
 export interface StatusActionsProps {
 	taskStatus: ITaskStatus | null | undefined;
 	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
-	/** When true, the Run button is disabled and greyed out (e.g. statusOnly mode). */
-	disableRun?: boolean;
 	/** When false, the Run button shows "Subscribe" instead of "Run". */
 	isSubscribed?: boolean;
 }
@@ -158,7 +154,7 @@ const getControlButton = (state: number) => {
  *   Row 2:   Status message
  *   Row 3:   Started Xs ago (when running)
  */
-export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction, extraActions, disableRun, isSubscribed }) => {
+export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction, extraActions, isSubscribed }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;
 	const hasStatus = !!taskStatus?.status;
 	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
@@ -183,7 +179,7 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
 			<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 					{extraActions}
-					{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} disableRun={disableRun} isSubscribed={isSubscribed} />}
+					{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} isSubscribed={isSubscribed} />}
 				</div>
 				<div style={{ ...commonStyles.textMuted, fontSize: 'var(--rr-font-size-caption)', visibility: showElapsed ? 'visible' : 'hidden' }}>
 					Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
@@ -197,13 +193,9 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
  * StatusActions — Run/Stop button for the tab bar actions slot.
  * Renders in the TabPanel bar, not inside the panel content.
  */
-export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipelineAction, disableRun, isSubscribed }) => {
+export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipelineAction, isSubscribed }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;
 	let btn = getControlButton(state);
-	// In statusOnly mode, disable the Run button (no pipeline JSON to execute)
-	if (disableRun && btn.action === 'run') {
-		btn = { ...btn, disabled: true, variant: 'disabled' };
-	}
 	// Not subscribed — show "Subscribe" instead of "Run"
 	if (isSubscribed === false && btn.action === 'run') {
 		btn = { ...btn, label: 'Subscribe' };

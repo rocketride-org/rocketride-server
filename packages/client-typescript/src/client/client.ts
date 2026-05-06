@@ -1059,6 +1059,20 @@ export class RocketRideClient extends DAPClient {
 		return body?.token as string | undefined;
 	}
 
+	/**
+	 * Returns the unresolved pipeline for a running task.
+	 *
+	 * The pipeline is returned exactly as stored — ${ROCKETRIDE_*} placeholders are
+	 * NOT substituted, so no secrets are included in the response.
+	 *
+	 * @param token - Task token returned by {@link getTaskToken}.
+	 * @returns The unresolved pipeline dict, or undefined if the task is not found.
+	 */
+	async getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined> {
+		const body = await this.call('rrext_get_pipeline', undefined, { token });
+		return body?.pipeline as Record<string, unknown> | undefined;
+	}
+
 	// ============================================================================
 	// DATA METHODS
 	// ============================================================================

@@ -301,6 +301,45 @@ class RocketRideClient(
         return BillingApi(self)
 
     # =========================================================================
+    # TASK METHODS
+    # =========================================================================
+
+    async def get_task_token(self, project_id: str, source: str) -> 'str | None':
+        """
+        Resolve a running task's token from its project ID and source component.
+
+        The token is required for operations like terminate, restart, and
+        get_task_pipeline. Returns None if no task is currently running for
+        the given project/source pair.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+
+        Returns:
+            Task token string, or None if no matching task is running.
+        """
+        body = await self.call('rrext_get_token', projectId=project_id, source=source)
+        return body.get('token')
+
+    async def get_task_pipeline(self, token: str) -> 'dict | None':
+        """
+        Retrieve the unresolved pipeline for a running task.
+
+        The pipeline is returned exactly as stored on the task —
+        ``${ROCKETRIDE_*}`` placeholders are NOT substituted, so no secrets
+        are included in the response.
+
+        Args:
+            token: Task token returned by :meth:`get_task_token`.
+
+        Returns:
+            The unresolved pipeline dict, or None if the task is not found.
+        """
+        body = await self.call('rrext_get_pipeline', token=token)
+        return body.get('pipeline')
+
+    # =========================================================================
     # SERVER INFO — PRE-AUTH PROBE
     # =========================================================================
 

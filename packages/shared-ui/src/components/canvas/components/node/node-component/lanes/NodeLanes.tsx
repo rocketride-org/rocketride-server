@@ -47,6 +47,7 @@ import { IServiceCatalog, IServiceLane, INodeData, INodeLayout } from '../../../
 
 import { LaneHandle } from '../../../handles';
 import { useFlow } from '../../../../hooks';
+import { useFlowPreferences } from '../../../../context/FlowPreferencesContext';
 import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import InsideLines from './InsideLines';
@@ -110,6 +111,7 @@ const RedAsterisk = (
 
 export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
 	const { edges, servicesJson: _servicesJson, setQuickAddState } = useFlow();
+	const { isLocked } = useFlowPreferences();
 	const servicesJson = useMemo(() => (_servicesJson ?? {}) as IServiceCatalog, [_servicesJson]);
 
 	// Service-level display fields looked up from catalog at render time
@@ -229,16 +231,17 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 													type="target"
 													position={layout === 'horizontal' ? Position.Left : Position.Top}
 													isConnected={inputConnected}
-													onClick={(e) =>
-														setQuickAddState({
-															nodeId,
-															handleId: targetId,
-															laneType: type,
-															isSource: false,
-															position: { x: e.clientX, y: e.clientY },
-															mode: 'lane',
-														})
-													}
+													onClick={(e) => {
+														if (!isLocked)
+															setQuickAddState({
+																nodeId,
+																handleId: targetId,
+																laneType: type,
+																isSource: false,
+																position: { x: e.clientX, y: e.clientY },
+																mode: 'lane',
+															});
+													}}
 													color="var(--rr-border)"
 												/>
 											</span>
@@ -286,16 +289,17 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 												position={layout === 'horizontal' ? Position.Right : Position.Bottom}
 												isConnected={isOutputConnected(sourceId)}
 												color="var(--rr-border)"
-												onClick={(e) =>
-													setQuickAddState({
-														nodeId,
-														handleId: sourceId,
-														laneType: type,
-														isSource: true,
-														position: { x: e.clientX, y: e.clientY },
-														mode: 'lane',
-													})
-												}
+												onClick={(e) => {
+													if (!isLocked)
+														setQuickAddState({
+															nodeId,
+															handleId: sourceId,
+															laneType: type,
+															isSource: true,
+															position: { x: e.clientX, y: e.clientY },
+															mode: 'lane',
+														});
+												}}
 											/>
 										</span>
 									</div>

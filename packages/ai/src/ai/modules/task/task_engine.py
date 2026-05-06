@@ -384,9 +384,13 @@ class Task(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
+
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). Must
+                      not be stored — caller discards it after the temp file is written.
 
         Returns:
             Complete subprocess task configuration
@@ -400,12 +404,12 @@ class Task(DAPBase):
         config = {
             'keystore': 'kvsfile://data/keystore.json',
             'pipeline': {
-                'version': self._pipeline.get('version', 1),
-                'source': self._pipeline.get('source'),
-                'project_id': self._pipeline.get('project_id'),
-                'name': self._pipeline.get('name'),
-                'description': self._pipeline.get('description'),
-                'components': self._pipeline.get('components', []),
+                'version': pipeline.get('version', 1),
+                'source': pipeline.get('source'),
+                'project_id': pipeline.get('project_id'),
+                'name': pipeline.get('name'),
+                'description': pipeline.get('description'),
+                'components': pipeline.get('components', []),
             },
             'threadCount': self._threads,
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -419,7 +423,7 @@ class Task(DAPBase):
             'type': 'pipeline',
         }
 
-    async def _write_task_file(self) -> str:
+    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
         """
         Write task configuration to temporary file.
 
@@ -428,13 +432,17 @@ class Task(DAPBase):
         - Unpredictable filename to prevent symlink attacks
         - O_EXCL flag to prevent TOCTOU race conditions
 
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). The
+                      caller must not retain a reference after this returns.
+
         Returns:
             Path to temporary task configuration file
 
         Raises:
             OSError: If file cannot be created or written
         """
-        pipeline_task = self._build_task()
+        pipeline_task = self._build_task(pipeline)
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
 
         fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
@@ -1482,18 +1490,20 @@ class Task(DAPBase):
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
 
-            # Resolve any ${...} in the pipeline
-            self._pipeline = self._resolve_pipeline(self._pipeline)
+            # Resolve ${...} placeholders into a local variable — never stored on self
+            # so secrets are not retained in memory beyond the temp file write.
+            resolved = self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
-            self._check_pipeline(self._pipeline)
+            self._check_pipeline(resolved)
 
             # Mark the start time
             if not self._is_restarting:
                 self._status.startTime = time.time()
 
-            # Write it out
-            self._tmpfile = await self._write_task_file()
+            # Write it out, then let `resolved` go out of scope
+            self._tmpfile = await self._write_task_file(resolved)
+            del resolved
 
             # Setup the first part of the command line args
             # --autoterm: exit when parent dies (stdin closes)

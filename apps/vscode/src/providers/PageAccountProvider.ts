@@ -39,6 +39,8 @@ interface AccountWebviewMessage {
 	role?: string;
 	section?: string;
 	params?: Record<string, unknown>;
+	appId?: string;
+	packId?: string;
 }
 
 // =============================================================================
@@ -202,6 +204,19 @@ export class PageAccountProvider {
 				await this.handleDeleteAccount(panel);
 				break;
 
+			// -- Billing ----------------------------------------------------------
+			case 'billing:cancel':
+				await this.handleCancelSubscription(panel, message.appId as string);
+				break;
+
+			case 'billing:portal':
+				await this.handleOpenPortal();
+				break;
+
+			case 'billing:buyCredits':
+				await this.handleBuyCredits(message.packId as string);
+				break;
+
 			// -- Section navigation (lazy loading) --------------------------------
 			case 'account:sectionChange':
 				await this.handleSectionChange(panel, message.section as string);
@@ -232,10 +247,13 @@ export class PageAccountProvider {
 		}
 
 		// Post init with profile only — org/members/teams/keys load lazily.
+		// authUser is the ConnectResult (includes defaultTeam); profile is the
+		// richer profile dict from getProfile (includes org/team structure).
 		await panel.webview.postMessage({
 			type: 'account:init',
 			isConnected,
 			profile,
+			authUser: accountInfo ?? null,
 			org: null,
 			members: [],
 			teams: [],
@@ -281,6 +299,9 @@ export class PageAccountProvider {
 				await this.refreshOrg(panel);
 				await this.refreshTeams(panel);
 				break;
+			case 'billing':
+				await this.fetchBillingData(panel);
+				break;
 		}
 	}
 
@@ -325,9 +346,13 @@ export class PageAccountProvider {
 		// Step 1: send the set_default_team request.
 		await client.account.setDefaultTeam(teamId);
 
-		// Step 2: fetch the refreshed profile and post it back to the webview.
+		// Step 2: the server pushes a refreshed ConnectResult to all connections
+		// via push_account_update. The SDK updates getAccountInfo() automatically.
+		// Post both profile and authUser so the UI reflects the new default.
 		const profile = await client.account.getProfile().catch(() => null);
-		await panel.webview.postMessage({ type: 'account:profile', profile: profile || client.getAccountInfo() || null });
+		const authUser = client.getAccountInfo();
+		await panel.webview.postMessage({ type: 'account:profile', profile: profile || authUser || null });
+		await panel.webview.postMessage({ type: 'account:authUser', authUser });
 	}
 
 	// =========================================================================
@@ -716,6 +741,115 @@ export class PageAccountProvider {
 		// Step 2: re-fetch all data on reconnect.
 		if (status.state === ConnectionState.CONNECTED) {
 			await this.sendInitialData(PageAccountProvider.panel);
+		}
+	}
+
+	// =========================================================================
+	// BILLING HANDLERS
+	// =========================================================================
+
+	/**
+	 * Fetches all billing data (subscriptions, credit balance, credit packs)
+	 * and posts the combined result to the webview.
+	 */
+	private async fetchBillingData(panel: vscode.WebviewPanel): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) {
+			await panel.webview.postMessage({
+				type: 'account:billing',
+				subscriptions: [],
+				creditBalance: null,
+				creditPacks: [],
+				billingLoading: false,
+				billingError: 'No organisation found. Please sign in first.',
+			});
+			return;
+		}
+
+		// Post loading state
+		await panel.webview.postMessage({
+			type: 'account:billing',
+			subscriptions: [],
+			creditBalance: null,
+			creditPacks: [],
+			billingLoading: true,
+			billingError: null,
+		});
+
+		try {
+			// Fetch all billing data in parallel via the SDK
+			const [subscriptions, creditBalance, creditPacks] = await Promise.all([client.billing.getDetails(orgId), client.billing.getCreditBalance(orgId), client.billing.listCreditPacks()]);
+
+			await panel.webview.postMessage({
+				type: 'account:billing',
+				subscriptions,
+				creditBalance,
+				creditPacks,
+				billingLoading: false,
+				billingError: null,
+			});
+		} catch (error) {
+			console.error(`[PageAccountProvider] Failed to fetch billing data: ${error}`);
+			await panel.webview.postMessage({
+				type: 'account:billing',
+				subscriptions: [],
+				creditBalance: null,
+				creditPacks: [],
+				billingLoading: false,
+				billingError: `Failed to load billing data: ${error}`,
+			});
+		}
+	}
+
+	/**
+	 * Cancels a subscription and re-fetches billing data.
+	 *
+	 * @param panel - The webview panel.
+	 * @param appId - The app whose subscription to cancel.
+	 */
+	private async handleCancelSubscription(panel: vscode.WebviewPanel, appId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) return;
+
+		try {
+			await client.billing.cancelSubscription(orgId, appId);
+			// Re-fetch so the UI reflects the change
+			await this.fetchBillingData(panel);
+		} catch (error) {
+			console.error(`[PageAccountProvider] Failed to cancel subscription: ${error}`);
+			this.postError(panel, `Failed to cancel subscription: ${error}`);
+		}
+	}
+
+	/**
+	 * Creates a Stripe portal session and opens the URL in the user's browser.
+	 */
+	private async handleOpenPortal(): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) return;
+
+		try {
+			const { url } = await client.billing.createPortalSession(orgId, 'https://rocketride.ai');
+			await vscode.env.openExternal(vscode.Uri.parse(url));
+		} catch (error) {
+			console.error(`[PageAccountProvider] Failed to open billing portal: ${error}`);
+		}
+	}
+
+	/**
+	 * Creates a Stripe checkout session for a credit pack and opens the URL.
+	 *
+	 * @param packId - The credit pack identifier to purchase.
+	 */
+	private async handleBuyCredits(packId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) return;
+
+		try {
+			const { url } = await client.billing.createCreditCheckout(orgId, packId, 'https://rocketride.ai');
+			await vscode.env.openExternal(vscode.Uri.parse(url));
+		} catch (error) {
+			console.error(`[PageAccountProvider] Failed to create credit checkout: ${error}`);
 		}
 	}
 

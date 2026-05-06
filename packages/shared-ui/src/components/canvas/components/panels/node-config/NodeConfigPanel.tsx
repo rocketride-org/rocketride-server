@@ -200,7 +200,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
 	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
-	const { getPreference, setPreference } = useFlowPreferences();
+	const { getPreference, setPreference, isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------
 	const isAnnotation = node.data.provider === 'annotation';
@@ -442,7 +442,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	// --- Render -------------------------------------------------------------
 
 	const title = isAnnotation ? 'Note' : (service?.title ?? node.data.provider);
-	const disableSave = !isDirty || isSubmitting;
+	const disableSave = !isDirty || isSubmitting || isLocked;
 
 	return (
 		<>

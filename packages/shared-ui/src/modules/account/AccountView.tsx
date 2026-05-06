@@ -112,6 +112,8 @@ export interface IAccountViewProps {
 	// -- Data ------------------------------------------------------------------
 	/** Whether the shell client is connected to the server. */
 	isConnected: boolean;
+	/** Error message from the last failed data load for the active section, or null. */
+	sectionError?: string | null;
 	/** The live/editable profile data from the server, or null while loading. */
 	profile: ConnectResult | null;
 	/** Cached identity from the auth provider, used as display fallback. */
@@ -220,7 +222,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, orgEnv, teamEnv, userEnv, isTeamAdmin: isTeamAdminProp, onSaveOrgEnv, onSaveTeamEnv, onSaveUserEnv } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, orgEnv, teamEnv, userEnv, isTeamAdmin: isTeamAdminProp, onSaveOrgEnv, onSaveTeamEnv, onSaveUserEnv } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -666,6 +668,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			profile: {
 				content: (
 					<div style={commonStyles.tabContent}>
+						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
 						<EnvScopeCard label="User" env={userEnv} onSave={onSaveUserEnv} />
 					</div>
@@ -681,6 +684,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			'api-keys': {
 				content: (
 					<div style={commonStyles.tabContent}>
+						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<ApiKeysPanel keys={keys} onCreateKey={openCreateKey} onRevokeKey={openRevokeKey} />
 					</div>
 				),
@@ -688,6 +692,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			organization: {
 				content: (
 					<div style={commonStyles.tabContent}>
+						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
 						{isOrgAdmin && <EnvScopeCard label="Organization" env={orgEnv} onSave={onSaveOrgEnv} />}
 					</div>
@@ -696,6 +701,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			teams: {
 				content: (
 					<div style={commonStyles.tabContent}>
+						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<TeamsPanel
 							teams={teams}
 							teamDetail={teamDetail}
@@ -729,12 +735,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			members: {
 				content: (
 					<div style={commonStyles.tabContent}>
+						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={openRemoveMember} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},
 		}),
-		[profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
 	);
 
 	// =========================================================================

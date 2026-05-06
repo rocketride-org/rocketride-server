@@ -281,6 +281,35 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
+    async def on_rrext_get_pipeline(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_get_pipeline' command to retrieve the unresolved pipeline for a task.
+
+        Returns the original pipeline dict as stored on the task — placeholders such as
+        ${ROCKETRIDE_API_KEY} are NOT substituted, so no secrets are exposed.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - token (str): Task token to query
+
+        Returns:
+            Dict[str, Any]: DAP response with pipeline in body:
+                - pipeline (Dict): The unresolved pipeline configuration
+
+        Raises:
+            Exception: If the task cannot be found or the caller lacks task.monitor permission
+        """
+        try:
+            # Step 1: locate the task — verifies task.monitor permission.
+            task = self.get_task(request, 'task.monitor')
+
+            # Step 2: return the unresolved pipeline (${...} placeholders intact).
+            return self.build_response(request, body={'pipeline': task._pipeline})
+
+        except Exception as e:
+            self.debug_message(f'Failed to get pipeline from task: {str(e)}')
+            raise
+
     async def on_rrext_get_token(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle DAP 'rrext_status' command to retrieve the current status of a task.
