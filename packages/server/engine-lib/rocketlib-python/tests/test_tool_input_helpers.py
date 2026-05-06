@@ -14,117 +14,25 @@ tool_firecrawl, tool_exa_search, tool_pipe, tool_filesystem); pinning the
 shared helpers' contract here means future bug fixes only need to land
 in one place.
 
-Importing the full ``rocketlib`` package pulls in the C++ ``engLib`` module
-and triggers a ``depends()`` bootstrap that writes into the Python install
-directory — neither is available in a plain unit-test environment. We
-sidestep that by loading just ``filters.py`` into a synthetic ``rocketlib``
-package with stubbed ``rocketlib.types`` / ``rocketlib.error`` / ``engLib``
-siblings.
+Run with::
+
+    ./builder rocketlib:test
+
+The ``rocketlib:test`` builder action invokes ``dist/server/engine`` (the
+built engine binary) as the Python interpreter, so ``rocketlib`` and its
+``engLib`` C extension are importable directly. Tests assume the engine
+has been built (``./builder server:build`` runs as a dependency).
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
-
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Lightweight stub-loader: produces a ``rocketlib.filters`` module that
-# binds normalize_tool_input without dragging in engLib / pydantic / pip.
-# ---------------------------------------------------------------------------
-
-
-def _load_filters_module() -> ModuleType:
-    rocketlib_root = (
-        Path(__file__).resolve().parents[2]
-        / 'packages'
-        / 'server'
-        / 'engine-lib'
-        / 'rocketlib-python'
-        / 'lib'
-        / 'rocketlib'
-    )
-
-    class _Sentinel:
-        def __getattr__(self, name):  # noqa: ARG002
-            return _Sentinel()
-
-        def __call__(self, *args, **kwargs):  # noqa: ARG002
-            return None
-
-    # Stub engLib so ``from engLib import IFilterInstance`` (which filters.py
-    # runs at import time inside ``_patch_classes()``) succeeds.
-    eng = ModuleType('engLib')
-    eng.IFilterInstance = type('IFilterInstance', (), {})
-    sys.modules.setdefault('engLib', eng)
-
-    # Synthetic ``rocketlib`` package — just a namespace so the relative
-    # imports in filters.py resolve without executing the real __init__.
-    pkg = ModuleType('rocketlib')
-    pkg.__path__ = []  # mark as package so ``from .x`` works
-    sys.modules.setdefault('rocketlib', pkg)
-
-    # rocketlib.types stub: filters.py imports OPEN_MODE, ENDPOINT_MODE,
-    # SERVICE_MODE, Entry, IControl, IInvoke from it.
-    types_mod = ModuleType('rocketlib.types')
-    types_mod.OPEN_MODE = _Sentinel()
-    types_mod.ENDPOINT_MODE = _Sentinel()
-    types_mod.SERVICE_MODE = _Sentinel()
-    types_mod.Entry = type('Entry', (), {})
-    types_mod.IControl = type('IControl', (), {'control': '', 'param': None, 'result': None})
-    types_mod.IInvoke = type('IInvoke', (), {})
-    sys.modules.setdefault('rocketlib.types', types_mod)
-    pkg.types = types_mod
-
-    # rocketlib.error stub: filters.py imports APERR and Ec.
-    error_mod = ModuleType('rocketlib.error')
-
-    class _APERR(Exception):
-        def __init__(self, code, msg=''):
-            self.code = code
-            self.msg = msg
-            super().__init__(msg)
-
-    error_mod.APERR = _APERR
-    error_mod.Ec = SimpleNamespace(PreventDefault='PreventDefault', InvalidParam='InvalidParam')
-    sys.modules.setdefault('rocketlib.error', error_mod)
-    pkg.error = error_mod
-
-    # rocketlib.engine stub: filters.py lazy-imports ``warning`` from it.
-    engine_mod = ModuleType('rocketlib.engine')
-    engine_mod.warning = lambda *a, **kw: None
-    engine_mod.monitorSSE = lambda *a, **kw: None
-    sys.modules.setdefault('rocketlib.engine', engine_mod)
-    pkg.engine = engine_mod
-
-    # Now load filters.py as ``rocketlib.filters``. The trailing
-    # ``_patch_classes()`` call needs ``engLib.IFilterInstance`` (stubbed
-    # above) and is otherwise harmless.
-    spec = importlib.util.spec_from_file_location(
-        'rocketlib.filters',
-        rocketlib_root / 'filters.py',
-    )
-    assert spec is not None and spec.loader is not None
-    filters_mod = importlib.util.module_from_spec(spec)
-    sys.modules['rocketlib.filters'] = filters_mod
-    spec.loader.exec_module(filters_mod)
-    pkg.filters = filters_mod
-    return filters_mod
-
-
-_filters = _load_filters_module()
-normalize_tool_input = _filters.normalize_tool_input
-require_str = _filters.require_str
-require_int = _filters.require_int
-optional_str = _filters.optional_str
+from rocketlib import normalize_tool_input, optional_str, require_int, require_str
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# normalize_tool_input
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +122,10 @@ class TestNormalizeToolInput:
         assert normalize_tool_input({}) == {}
 
     def test_warning_emitted_for_unexpected_type(self, monkeypatch):
-        from rocketlib import engine as engine_module  # the stub from _load_filters_module
+        # The helper does a lazy ``from .engine import warning`` to avoid a
+        # circular import at module load. Patch the engine module so we can
+        # observe what gets emitted.
+        from rocketlib import engine as engine_module
 
         captured: list[str] = []
         monkeypatch.setattr(engine_module, 'warning', lambda msg: captured.append(msg))
@@ -297,6 +208,31 @@ class TestRequireInt:
             require_int({'n': True}, 'n')
         with pytest.raises(ValueError, match='"n" must be an integer'):
             require_int({'n': False}, 'n')
+
+    def test_float_rejected(self):
+        # int(3.7) silently returns 3 — pin the helper against truncation.
+        # int(3.0) is also rejected: agents passing fractional notation
+        # probably meant a different field, and accepting it would defeat
+        # the strict-typing rationale this helper exists for.
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': 3.7}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': 3.0}, 'n')
+
+    def test_inf_and_nan_rejected(self):
+        # int(float('inf')) raises OverflowError — make sure callers see a
+        # clean ValueError instead of a leaked exception.
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': float('inf')}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': float('nan')}, 'n')
+
+    def test_unsupported_type_rejected(self):
+        # Catch-all for non-(int|str) types: lists, dicts, Decimals, etc.
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': [1, 2]}, 'n')
+        with pytest.raises(ValueError, match='"n" must be an integer'):
+            require_int({'n': {'x': 1}}, 'n')
 
     def test_tool_name_prefixes_error(self):
         with pytest.raises(ValueError, match='issue_get: "issue_number" is required'):

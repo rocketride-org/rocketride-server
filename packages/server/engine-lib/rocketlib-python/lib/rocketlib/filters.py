@@ -221,21 +221,29 @@ def require_str(args: Dict[str, Any], key: str, *, tool_name: str = '') -> str:
 def require_int(args: Dict[str, Any], key: str, *, tool_name: str = '') -> int:
     """Return ``args[key]`` coerced to ``int``, or raise ValueError.
 
-    Accepts ints and numeric strings. ``bool`` is rejected (despite being
-    an ``int`` subclass) because agents that pass ``{"issue_number": true}``
-    almost never mean ``1``.
+    Accepts plain ints and numeric strings. The following are rejected with
+    a ValueError instead of being silently coerced:
+
+    * ``bool`` — despite being an ``int`` subclass, ``{"issue_number": true}``
+      almost never means ``1``.
+    * ``float`` — ``int(3.7)`` would truncate to ``3``, and ``inf`` / ``nan``
+      would leak an ``OverflowError`` / ``ValueError`` from ``int()``.
+    * Any other non-(int|str) type, e.g. lists, dicts, ``Decimal``.
     """
+    prefix = f'{tool_name}: ' if tool_name else ''
     val = args.get(key)
     if val is None:
-        prefix = f'{tool_name}: ' if tool_name else ''
         raise ValueError(f'{prefix}"{key}" is required')
-    if isinstance(val, bool):
-        prefix = f'{tool_name}: ' if tool_name else ''
+    # bool is an int subclass and float would truncate — keep str and real
+    # int as the only inputs that reach the coercion below. OverflowError
+    # is also caught for defence-in-depth (e.g. ``int('1' * 10**6)`` is
+    # technically valid but takes minutes; an opaque traceback would be
+    # worse than the friendly message).
+    if isinstance(val, (bool, float)) or not isinstance(val, (int, str)):
         raise ValueError(f'{prefix}"{key}" must be an integer')
     try:
         return int(val)
-    except (TypeError, ValueError):
-        prefix = f'{tool_name}: ' if tool_name else ''
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f'{prefix}"{key}" must be an integer')
 
 
