@@ -22,7 +22,7 @@
 # =============================================================================
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 class ExpectationError(Exception):
@@ -163,25 +163,14 @@ class ExpectationValidator:
 
             # Lane has no content (None or missing) — avoid subscript errors
             if result is None:
-                errors.append(
-                    ExpectationError(
-                        f"Lane ${lane} has no content (result is None); cannot validate '{content_path}'",
-                        f'${lane}',
-                        content_path,
-                        result,
-                    )
-                )
+                errors.append(ExpectationError(f"Lane ${lane} has no content (result is None); cannot validate '{content_path}'", f'${lane}', content_path, result))
                 return errors
 
             # Get content value using lane shortcut path
             try:
                 content_value = self._get_property(result, content_path)
             except (KeyError, IndexError, TypeError) as e:
-                errors.append(
-                    ExpectationError(
-                        f"Could not access lane content at '{content_path}': {e}", f'${lane}', content_path, result
-                    )
-                )
+                errors.append(ExpectationError(f"Could not access lane content at '{content_path}': {e}", f'${lane}', content_path, result))
                 return errors
 
             # Apply content matchers to the content value (lane-aware)
@@ -208,11 +197,7 @@ class ExpectationValidator:
         # Handle simple matchers
         if 'equals' in expect:
             if value != expect['equals']:
-                errors.append(
-                    ExpectationError(
-                        f"Expected equals '{expect['equals']}' but got '{value}'", path, expect['equals'], value
-                    )
-                )
+                errors.append(ExpectationError(f"Expected equals '{expect['equals']}' but got '{value}'", path, expect['equals'], value))
 
         if 'contains' in expect:
             expected = expect['contains']
@@ -250,21 +235,13 @@ class ExpectationValidator:
             min_len = expect['minLength']
             actual_len = len(value) if hasattr(value, '__len__') else 0
             if actual_len < min_len:
-                errors.append(
-                    ExpectationError(
-                        f'Expected minimum length {min_len} but got {actual_len}', path, min_len, actual_len
-                    )
-                )
+                errors.append(ExpectationError(f'Expected minimum length {min_len} but got {actual_len}', path, min_len, actual_len))
 
         if 'maxLength' in expect:
             max_len = expect['maxLength']
             actual_len = len(value) if hasattr(value, '__len__') else 0
             if actual_len > max_len:
-                errors.append(
-                    ExpectationError(
-                        f'Expected maximum length {max_len} but got {actual_len}', path, max_len, actual_len
-                    )
-                )
+                errors.append(ExpectationError(f'Expected maximum length {max_len} but got {actual_len}', path, max_len, actual_len))
 
         if 'greaterThan' in expect:
             threshold = expect['greaterThan']
@@ -285,11 +262,7 @@ class ExpectationValidator:
             expected_type = expect['type']
             actual_type = self._get_type_name(value)
             if actual_type != expected_type:
-                errors.append(
-                    ExpectationError(
-                        f"Expected type '{expected_type}' but got '{actual_type}'", path, expected_type, actual_type
-                    )
-                )
+                errors.append(ExpectationError(f"Expected type '{expected_type}' but got '{actual_type}'", path, expected_type, actual_type))
 
         if 'property' in expect:
             prop_expect = expect['property']
@@ -311,9 +284,7 @@ class ExpectationValidator:
                     item_errors = self._validate_value(item, expect['each'], f'{path}[{i}]')
                     errors.extend(item_errors)
             else:
-                errors.append(
-                    ExpectationError("Expected an array for 'each' matcher", path, 'array', type(value).__name__)
-                )
+                errors.append(ExpectationError("Expected an array for 'each' matcher", path, 'array', type(value).__name__))
 
         if 'any' in expect:
             if isinstance(value, (list, tuple)):
@@ -324,15 +295,9 @@ class ExpectationValidator:
                         any_passed = True
                         break
                 if not any_passed:
-                    errors.append(
-                        ExpectationError(
-                            "Expected at least one item to match 'any' condition", path, expect['any'], value
-                        )
-                    )
+                    errors.append(ExpectationError("Expected at least one item to match 'any' condition", path, expect['any'], value))
             else:
-                errors.append(
-                    ExpectationError("Expected an array for 'any' matcher", path, 'array', type(value).__name__)
-                )
+                errors.append(ExpectationError("Expected an array for 'any' matcher", path, 'array', type(value).__name__))
 
         if 'noError' in expect and expect['noError']:
             # Just check that there's no error - value exists
@@ -358,11 +323,7 @@ class ExpectationValidator:
         try:
             prop_value = self._get_property(value, prop_path)
         except (KeyError, IndexError, TypeError) as e:
-            errors.append(
-                ExpectationError(
-                    f"Could not access property at '{prop_path}': {e}", f'{path}.{prop_path}', prop_path, value
-                )
-            )
+            errors.append(ExpectationError(f"Could not access property at '{prop_path}': {e}", f'{path}.{prop_path}', prop_path, value))
             return errors
 
         # Validate the nested property with remaining expectations

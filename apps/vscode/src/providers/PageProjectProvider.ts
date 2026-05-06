@@ -694,9 +694,6 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			retainContextWhenHidden: true,
 		});
 
-		const env: Record<string, string | boolean> = ConfigManager.getInstance().getEnv();
-		env['devMode'] = true;
-
 		panel.webview.html = `<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
@@ -708,7 +705,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 (function() {
 	const vscode = acquireVsCodeApi();
 	const iframe = document.getElementById('app-iframe');
-	const envVars = ${JSON.stringify(env)};
+	const envVars = { devMode: true };
 	let iframeOrigin = '*';
 	try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
 

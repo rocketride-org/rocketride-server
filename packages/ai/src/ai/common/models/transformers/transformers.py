@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.transformers')
@@ -543,16 +544,18 @@ class PipelineProxy:
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
         """Execute pipeline on inputs."""
-        result = self._client.send_command(
-            'inference',
-            {
-                'command': 'pipeline_call',
-                'inputs': inputs,
-                'output_fields': self.output_fields,
-                **kwargs,
-            },
-        )
-        return result.get('result')
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            result = self._client.send_command(
+                'inference',
+                {
+                    'command': 'pipeline_call',
+                    'inputs': inputs,
+                    'output_fields': self.output_fields,
+                    **kwargs,
+                },
+            )
+            return result.get('result')
 
     @property
     def metadata(self) -> Dict:
@@ -590,14 +593,16 @@ class PipelineLocal:
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
         """Execute pipeline on inputs."""
-        if isinstance(inputs, str):
-            inputs = [inputs]
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if isinstance(inputs, str):
+                inputs = [inputs]
 
-        preprocessed = TransformersLoader.preprocess(self._pipeline, inputs, self._metadata)
-        raw_output = TransformersLoader.inference(self._pipeline, preprocessed, self._metadata)
-        results = TransformersLoader.postprocess(self._pipeline, raw_output, len(inputs), self.output_fields)
+            preprocessed = TransformersLoader.preprocess(self._pipeline, inputs, self._metadata)
+            raw_output = TransformersLoader.inference(self._pipeline, preprocessed, self._metadata)
+            results = TransformersLoader.postprocess(self._pipeline, raw_output, len(inputs), self.output_fields)
 
-        return results
+            return results
 
     @property
     def metadata(self) -> Dict:
@@ -668,15 +673,17 @@ class ModelProxy:
 
     def generate(self, **kwargs) -> Any:
         """Generate text (for language models)."""
-        result = self._client.send_command(
-            'inference',
-            {
-                'command': 'generate',
-                'inputs': kwargs,
-                'output_fields': self.output_fields,
-            },
-        )
-        return result.get('result')
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            result = self._client.send_command(
+                'inference',
+                {
+                    'command': 'generate',
+                    'inputs': kwargs,
+                    'output_fields': self.output_fields,
+                },
+            )
+            return result.get('result')
 
 
 class ModelLocal:
@@ -701,14 +708,16 @@ class ModelLocal:
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
         """Run model inference."""
-        if isinstance(inputs, str):
-            inputs = [inputs]
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if isinstance(inputs, str):
+                inputs = [inputs]
 
-        preprocessed = TransformersLoader.preprocess(self._model, inputs, self._metadata)
-        raw_output = TransformersLoader.inference(self._model, preprocessed, self._metadata)
-        results = TransformersLoader.postprocess(self._model, raw_output, len(inputs), self.output_fields)
+            preprocessed = TransformersLoader.preprocess(self._model, inputs, self._metadata)
+            raw_output = TransformersLoader.inference(self._model, preprocessed, self._metadata)
+            results = TransformersLoader.postprocess(self._model, raw_output, len(inputs), self.output_fields)
 
-        return results
+            return results
 
     @property
     def metadata(self) -> Dict:

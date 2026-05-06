@@ -60,22 +60,6 @@ export class PageSettingsProvider {
 			getActiveWebviews: () => this.activeWebviews,
 		});
 		this.registerCommands();
-		this.setupEnvChangeListener();
-	}
-
-	/**
-	 * Sets up a listener for environment variable changes
-	 */
-	private setupEnvChangeListener(): void {
-		const envChangeListener = this.configManager.onEnvVarsChanged(() => {
-			if (this._isSaving) return;
-			// Reload settings in all active webviews
-			this.activeWebviews.forEach((webview) => {
-				this.loadAllSettings(webview);
-			});
-		});
-
-		this.disposables.push(envChangeListener);
 	}
 
 	/**
@@ -226,9 +210,6 @@ export class PageSettingsProvider {
 			}
 		}
 
-		// Get environment variables
-		const envVars = this.configManager.getEnvVars();
-
 		// Send nested structure matching the webview SettingsData type
 		const allSettings = {
 			// Connection groups
@@ -260,7 +241,6 @@ export class PageSettingsProvider {
 			// Top-level settings
 			defaultPipelinePath: config.defaultPipelinePath,
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
-			envVars: envVars,
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
@@ -309,6 +289,9 @@ export class PageSettingsProvider {
 
 			// 1. Write everything atomically — no listeners fire during this
 			await this.configManager.applyAllSettings(snapshot);
+
+			// Mark welcome as dismissed — user has configured settings
+			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
 			// 2. Dev connection: disconnect old mode, connect with new config
 			const connectionManager = getConnectionManager();

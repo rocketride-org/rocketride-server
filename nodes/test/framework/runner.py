@@ -41,9 +41,7 @@ class NodeTestRunner:
         - Result validation
     """
 
-    def __init__(
-        self, client, config: NodeTestConfig, profile: Optional[str] = None, testdata_dir: Optional[str] = None
-    ):
+    def __init__(self, client, config: NodeTestConfig, profile: Optional[str] = None, testdata_dir: Optional[str] = None):
         """
         Initialize the test runner.
 
@@ -284,9 +282,7 @@ class NodeTestRunner:
         return results
 
 
-async def run_node_tests(
-    client, config: NodeTestConfig, profile: Optional[str] = None
-) -> List[Tuple[TestCase, Dict[str, Any], List[ExpectationError]]]:
+async def run_node_tests(client, config: NodeTestConfig, profile: Optional[str] = None) -> List[Tuple[TestCase, Dict[str, Any], List[ExpectationError]]]:
     """
     Convenience function to run all tests for a node configuration.
 

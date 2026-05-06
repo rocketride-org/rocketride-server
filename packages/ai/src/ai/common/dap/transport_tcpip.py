@@ -346,9 +346,7 @@ class TransportTCP(TransportBase):
 
             # Establish TCP connection (optionally with timeout in ms)
             if timeout is not None and timeout > 0:
-                self._reader, self._writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port), timeout=timeout / 1000.0
-                )
+                self._reader, self._writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout / 1000.0)
             else:
                 self._reader, self._writer = await asyncio.open_connection(host, port)
             self._connected = True

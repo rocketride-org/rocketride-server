@@ -95,9 +95,7 @@ class TestProfilerRoutesRequireAuth:
         calls = _get_registered_routes()
         for c in calls:
             _, kwargs = c
-            assert kwargs.get('public', False) is False, (
-                f'Route {c[0][0]} is registered as public but should require auth'
-            )
+            assert kwargs.get('public', False) is False, f'Route {c[0][0]} is registered as public but should require auth'
 
 
 class TestProfilerReportXSSEscape:

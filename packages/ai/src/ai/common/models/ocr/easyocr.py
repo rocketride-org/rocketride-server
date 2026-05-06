@@ -34,6 +34,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from .utils import preprocess_image_transparency, group_words_into_lines
 
@@ -365,12 +366,14 @@ class EasyOCR:
         if single_input:
             images = [images]
 
-        if self._proxy_mode:
-            results = self._read_remote(images)
-        else:
-            results = self._read_local(images)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                results = self._read_remote(images)
+            else:
+                results = self._read_local(images)
 
-        return results[0] if single_input else results
+            return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
         """Execute local OCR."""

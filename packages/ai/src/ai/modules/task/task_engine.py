@@ -53,7 +53,6 @@ from ai.constants import (
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
 )
 from ai import CONST_AI_NODE_SCRIPT
-from ai.web.metrics import metrics
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
@@ -997,10 +996,11 @@ class Task(DAPBase):
             download_name = download_info.get('name', 'unknown')
             self._status.status = f'Downloading "{download_name}"'
 
-        # Handle performance metrics with merging
+        # Handle subprocess billing metrics (from >MET* protocol)
         elif event_type == 'apaevt_status_metrics':
             new_metrics = body.get('metrics', {})
-            self._status.metrics = metrics.merge(self._status.metrics, new_metrics)
+            if self._task_metrics:
+                self._task_metrics.merge_subprocess_metrics(new_metrics)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':
@@ -1613,9 +1613,16 @@ class Task(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
+                # Resolve billing identity from task control
+                _control = self._server.get_task_control(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
+                    task_id=self.id,
+                    client_id=self.client_id,
+                    user_id=getattr(_control, 'userId', '') if _control else '',
+                    team_id=getattr(_control, 'teamId', '') if _control else '',
+                    org_id=getattr(_control, 'orgId', '') if _control else '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

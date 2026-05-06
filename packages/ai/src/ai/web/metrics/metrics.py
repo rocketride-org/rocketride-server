@@ -1,7 +1,7 @@
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class Timer:
@@ -136,6 +136,23 @@ class MetricsManager:
         for timer in timers.values():
             timer.start()
 
+    def _resolve_pipe_id(self, pipe_id: Optional[int]) -> int:
+        """
+        Resolve pipe_id from explicit argument or ContextVar.
+
+        If *pipe_id* is ``None``, reads ``current_pipe_id`` from the
+        ambient ContextVar (set by ``taskMetricsObjectBegin``).  Raises
+        ``RuntimeError`` if neither source provides a value.
+        """
+        if pipe_id is not None:
+            return pipe_id
+        from . import current_pipe_id
+
+        resolved = current_pipe_id.get(None)
+        if resolved is None:
+            raise RuntimeError('No pipe_id provided and no pipeline billing context set (current_pipe_id ContextVar is None)')
+        return resolved
+
     def _get_pipe_metrics(self, pipe_id: int) -> Dict[str, Any]:
         # Get the pipe metrics
         pipe_metrics = self._pipe_metrics.get(pipe_id, None)
@@ -188,6 +205,32 @@ class MetricsManager:
 
     def _report(self, task_metrics: Dict[str, Any]):
         pass
+
+    def report_for_billing(self, task_id: str) -> Dict[str, Any]:
+        """
+        Build a billing-ready snapshot of the current task metrics.
+
+        Returns a plain dict suitable for JSON serialisation and emission
+        via the ``>MET*`` stdout protocol.  Timer values are in
+        milliseconds; counters are raw accumulated integers.
+
+        Args:
+            task_id: The task whose metrics to report.
+
+        Returns:
+            ``{"timers": {name: ms, ...}, "counters": {name: value, ...},
+            "events": [...]}`` or ``{}`` if the task is unknown.
+        """
+        with self._lock:
+            task_metrics = self._task_metrics.get(task_id)
+            if not task_metrics:
+                return {}
+            metrics = task_metrics.get('metrics', {})
+            return {
+                'timers': {k: v for k, v in metrics.get('timers', {}).items()},
+                'counters': dict(metrics.get('counters', {})),
+                'events': list(metrics.get('events', [])),
+            }
 
     def begin_task(self, task_id: str):
         """
@@ -263,7 +306,7 @@ class MetricsManager:
         self._pipe_metrics[pipe_id] = metrics
 
         # One more object being pushed through
-        self.counter(pipe_id, 'request', 1)
+        self.counter('request', 1, pipe_id=pipe_id)
 
     def end_object(self, task_id: str, pipe_id: int):
         """
@@ -295,74 +338,86 @@ class MetricsManager:
         # Return
         return
 
-    def counter(self, pipe_id: int, name: str, value: int):
+    def counter(self, name: str, value: int, *, pipe_id: Optional[int] = None):
         """
         Increment a named counter by the specified value.
 
         Args:
             name: The name of the counter.
             value: The value to add to the counter.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         counters = pipe_metrics['counters']
         counters[name] = counters.get(name, 0) + value
 
-    def event(self, pipe_id: int, event: Dict[str, Any]):
+    def event(self, event: Dict[str, Any], *, pipe_id: Optional[int] = None):
         """
         Log a structured event with the given details.
 
         Args:
             event: Dictionary containing event data.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         pipe_metrics['events'].append(event)
 
-    def start_timer(self, pipe_id: int, resource: str = 'cpu'):
+    def start_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
         """
         Start timing for a specific resource.
 
         Args:
             resource: The name of the resource being timed.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
         # Create timer if it doesn't exist, then start it
         timer = timers.setdefault(resource, Timer(autostart=False))
         timer.start()
 
-    def stop_timer(self, pipe_id: int, resource: str = 'cpu'):
+    def stop_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
         """
         Stop timing for a specific resource.
 
         Args:
             resource: The name of the resource to stop timing.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
 
         if resource in timers:
             timers[resource].stop()
 
-    def pause_timer(self, pipe_id: int, resource: str = 'cpu'):
+    def pause_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
         """
         Pause timing for a specific resource.
 
         Args:
             resource: The name of the resource to pause.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
 
         if resource in timers:
             timers[resource].pause()
 
-    def resume_timer(self, pipe_id: int, resource: str = 'cpu'):
+    def resume_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
         """
         Resume timing for a specific resource.
 
         Args:
             resource: The name of the resource to resume.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
 
@@ -370,17 +425,19 @@ class MetricsManager:
             timers[resource].resume()
 
     @contextmanager
-    def resource(self, pipe_id: int, name: str):
+    def resource(self, name: str = 'cpu', *, pipe_id: Optional[int] = None):
         """
         Context manager to time a specific resource.
 
         Args:
             name: The name of the resource being timed.
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
 
         Usage:
-            with metrics.resource("gpu"):
+            with metrics.resource('gpu'):
                 ...  # code to measure
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
 
@@ -394,14 +451,14 @@ class MetricsManager:
             timer.stop()
 
     @contextmanager
-    def pause_all(self, pipe_id: int):
+    def pause_all(self, *, pipe_id: Optional[int] = None):
         """
         Context manager to temporarily pause all active timers.
 
-        Example:
-            with metrics.pause_all():
-                ...  # do something without affecting timers
+        Args:
+            pipe_id: Explicit pipe_id, or None to read from ContextVar.
         """
+        pipe_id = self._resolve_pipe_id(pipe_id)
         pipe_metrics = self._get_pipe_metrics(pipe_id)
         timers = pipe_metrics['timers']
 
@@ -417,6 +474,35 @@ class MetricsManager:
             for timer in timers.values():
                 if timer.paused:
                     timer.resume()
+
+    @contextmanager
+    def test_context(self, task_id: str = '_test', pipe_id: int = 0):
+        """
+        Context manager that sets up a full billing context for tests.
+
+        Creates task and pipe metrics, sets the ``current_pipe_id``
+        ContextVar, and tears everything down on exit.  Allows tests
+        to call model inference without a real pipeline.
+
+        Usage::
+
+            with metrics.test_context():
+                result = pipeline('classify', inputs)
+        """
+        from . import current_pipe_id
+
+        self.begin_task(task_id)
+        self.begin_object(task_id, pipe_id)
+        token = current_pipe_id.set(pipe_id)
+        try:
+            yield
+        finally:
+            current_pipe_id.reset(token)
+            # Only end_object if it wasn't already ended (e.g. by the code under test)
+            if pipe_id in self._pipe_metrics:
+                self.end_object(task_id, pipe_id)
+            if task_id in self._task_metrics:
+                self.end_task(task_id)
 
 
 # Global instance used throughout the application

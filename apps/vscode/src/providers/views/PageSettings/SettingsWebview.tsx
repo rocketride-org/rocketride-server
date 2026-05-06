@@ -435,13 +435,13 @@ export const PageSettings: React.FC = () => {
 	/**
 	 * Probe cloud server to check SaaS compatibility
 	 */
-	const handleProbeCloudServer = (): void => {
+	const handleProbeCloudServer = (cloudUrl: string): void => {
 		setIsSaasProbed(undefined); // reset to loading
-		sendMessage({ type: 'probeServerInfo' } as any);
+		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
 	};
 
-	const handleFetchTeams = (): void => {
-		sendMessage({ type: 'fetchTeams' } as any);
+	const handleFetchTeams = (cloudUrl: string): void => {
+		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
 	/**

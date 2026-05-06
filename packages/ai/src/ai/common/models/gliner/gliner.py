@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.gliner')
@@ -393,10 +394,12 @@ class GLiNER:
         Returns:
             List of entity dicts with 'start', 'end', 'text', 'label', 'score' keys
         """
-        if self._proxy_mode:
-            return self._predict_remote(text, labels, threshold, flat_ner, multi_label)
-        else:
-            return self._predict_local(text, labels, threshold, flat_ner, multi_label)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                return self._predict_remote(text, labels, threshold, flat_ner, multi_label)
+            else:
+                return self._predict_local(text, labels, threshold, flat_ner, multi_label)
 
     def _predict_local(
         self,

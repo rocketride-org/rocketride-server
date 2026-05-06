@@ -120,12 +120,6 @@ export class ConnectionManager extends EventEmitter {
 	// =========================================================================
 
 	protected setupConfigurationListener(): void {
-		this.disposables.push(
-			this.configManager.onEnvVarsChanged((env) => {
-				this.client?.setEnv(env);
-			})
-		);
-
 		const disposable = this.configManager.onConfigurationChanged((_config) => {
 			if (this.isDisposing) {
 				return;
@@ -234,7 +228,6 @@ export class ConnectionManager extends EventEmitter {
 	protected createClient(): RocketRideClient {
 		const client = new RocketRideClient({
 			persist: true,
-			env: this.configManager.getEnv(),
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
@@ -464,20 +457,43 @@ export class ConnectionManager extends EventEmitter {
 		return { ...this.connectionStatus };
 	}
 
+	/**
+	 * Returns the HTTP/HTTPS URL for this connection's server.
+	 * Local mode uses the actual engine port; remote modes derive
+	 * the URL from the group's configured hostUrl.
+	 */
 	public getHttpUrl(): string {
+		// Local mode: engine runs on a dynamic port
 		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
 			const port = this.manager.getActualPort();
 			if (port) return `http://localhost:${port}`;
 		}
-		return this.configManager.getHttpUrl();
+		// Remote modes: normalize the group's hostUrl into a clean origin
+		const hostUrl = this.getGroupConfig().hostUrl;
+		if (!hostUrl) return 'http://localhost:5565';
+		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
+		const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+		return `${url.protocol}//${url.hostname}:${port}`;
 	}
 
+	/**
+	 * Returns the WebSocket URL for this connection's DAP service.
+	 * Local mode uses the actual engine port; remote modes derive
+	 * the URL from the group's configured hostUrl.
+	 */
 	public getWebSocketUrl(): string {
+		// Local mode: engine runs on a dynamic port
 		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
 			const port = this.manager.getActualPort();
 			if (port) return `ws://localhost:${port}/task/service`;
 		}
-		return this.configManager.getWebSocketUrl();
+		// Remote modes: normalize the group's hostUrl and upgrade to ws/wss
+		const hostUrl = this.getGroupConfig().hostUrl;
+		if (!hostUrl) return 'ws://localhost:5565/task/service';
+		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
+		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+		const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+		return `${wsProtocol}//${url.hostname}:${port}/task/service`;
 	}
 
 	public getEngineInfo(): { version: string | null; publishedAt: string | null } {

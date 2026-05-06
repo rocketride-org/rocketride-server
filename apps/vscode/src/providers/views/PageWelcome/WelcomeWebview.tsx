@@ -38,9 +38,7 @@ import '../../styles/root.css';
 // TYPE DEFINITIONS
 // =============================================================================
 
-interface WelcomeExtraSettings {
-	showOnStartup: boolean;
-}
+interface WelcomeExtraSettings {}
 
 type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'engineVersionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'teamsLoaded'; teams: Array<{ id: string; name: string }> } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerProgress'; message: string } | { type: 'dockerComplete' } | { type: 'dockerError'; message: string } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceProgress'; message: string } | { type: 'serviceComplete' } | { type: 'serviceError'; message: string } | { type: 'serviceNeedsSudo' };
 
@@ -154,7 +152,6 @@ export const PageWelcome: React.FC = () => {
 
 	// Settings state
 	const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
-	const [showOnStartup, setShowOnStartup] = useState(true);
 
 	// Branding
 	const [logoDarkUri, setLogoDarkUri] = useState<string | undefined>();
@@ -203,7 +200,6 @@ export const PageWelcome: React.FC = () => {
 			switch (msg.type) {
 				case 'settingsLoaded':
 					setSettings(msg.settings);
-					setShowOnStartup(msg.settings.showOnStartup);
 					if (msg.logoDarkUri) setLogoDarkUri(msg.logoDarkUri);
 					if (msg.logoLightUri) setLogoLightUri(msg.logoLightUri);
 					if (msg.settings.development.connectionMode === 'local') {
@@ -354,22 +350,17 @@ export const PageWelcome: React.FC = () => {
 		sendMessage({ type: 'saveAndConnect', settings });
 	};
 
-	const handleProbeCloudServer = () => {
+	const handleProbeCloudServer = (cloudUrl: string) => {
 		setIsSaasProbed(undefined);
-		sendMessage({ type: 'probeServerInfo' } as any);
+		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
 	};
 
-	const handleFetchTeams = () => {
-		sendMessage({ type: 'fetchTeams' } as any);
+	const handleFetchTeams = (cloudUrl: string) => {
+		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
 	const handleTestConnection = (hostUrl: string, apiKey: string) => {
 		sendMessage({ type: 'testConnection', hostUrl, apiKey } as any);
-	};
-
-	const handleShowOnStartupChange = (checked: boolean) => {
-		setShowOnStartup(checked);
-		sendMessage({ type: 'setShowOnStartup', show: checked });
 	};
 
 	// Docker/Service action helpers
@@ -556,14 +547,6 @@ export const PageWelcome: React.FC = () => {
 						>
 							Advanced Settings
 						</a>
-					</div>
-
-					{/* Show on startup checkbox */}
-					<div style={{ marginTop: 'auto', paddingTop: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
-						<input type="checkbox" id="showOnStartup" checked={showOnStartup} style={{ width: 'auto', margin: 0 }} onChange={(e) => handleShowOnStartupChange(e.target.checked)} />
-						<label htmlFor="showOnStartup" style={{ fontSize: 12, color: 'var(--rr-text-secondary)', cursor: 'pointer', margin: 0 }}>
-							Show welcome page on startup
-						</label>
 					</div>
 				</div>
 			</div>

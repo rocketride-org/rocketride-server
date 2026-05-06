@@ -112,10 +112,6 @@ export class PageWelcomeProvider {
 						}
 						break;
 
-					case 'setShowOnStartup':
-						await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, !message.show, vscode.ConfigurationTarget.Global);
-						break;
-
 					default: {
 						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)
 						const handled = await this.connHandler.handleMessage(message, this.panel.webview);
@@ -212,7 +208,6 @@ export class PageWelcomeProvider {
 				integrationWindsurf: workspaceConfig.get('integrations.windsurf', false),
 				integrationClaudeMd: workspaceConfig.get('integrations.claudeMd', false),
 				integrationAgentsMd: workspaceConfig.get('integrations.agentsMd', false),
-				showOnStartup: !this.isDismissed(),
 			},
 		});
 	}
@@ -257,6 +252,9 @@ export class PageWelcomeProvider {
 					await this.configManager.deleteApiKey('development');
 				}
 			}
+
+			// Mark welcome as dismissed so it doesn't show again
+			await workspaceConfig.update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
 
 			// Close panel
 			this.panel?.dispose();

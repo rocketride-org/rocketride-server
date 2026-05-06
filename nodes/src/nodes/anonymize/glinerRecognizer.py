@@ -212,9 +212,7 @@ class GliNERRecognizer:
 
         return _anonymize(text, all_matches_sorted, self.anonymize_char)
 
-    def handleClassifications(
-        self, classifications: dict, target_object_text: str, classificationPolicy: any, classificationRules: any
-    ):
+    def handleClassifications(self, classifications: dict, target_object_text: str, classificationPolicy: any, classificationRules: any):
         """
         Handle classifications from upstream classifier - extracts labels and matches,
         then delegates to core anonymize method.
@@ -236,8 +234,6 @@ class GliNERRecognizer:
         labels = self.ruleParser.get_rules_names(unique_id_refs) + rules
 
         # Extract existing matches from classifications (offset, length tuples)
-        existing_matches = list(
-            (m['offset'], m['length']) for m in ((m.get('location', {}).get('inChars') or m) for m in text_matches)
-        )
+        existing_matches = list((m['offset'], m['length']) for m in ((m.get('location', {}).get('inChars') or m) for m in text_matches))
 
         return self.process(target_object_text, labels, existing_matches)

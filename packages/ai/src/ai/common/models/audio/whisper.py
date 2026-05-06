@@ -25,6 +25,7 @@ import os
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.whisper')
@@ -544,10 +545,12 @@ class Whisper:
         if not isinstance(audio, bytes):
             raise TypeError(f'audio must be bytes (PCM int16), got {type(audio)}')
 
-        if self._proxy_mode:
-            return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, **kwargs)
-        else:
-            return self._transcribe_local(audio, **kwargs)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, **kwargs)
+            else:
+                return self._transcribe_local(audio, **kwargs)
 
     def _transcribe_local(self, audio: bytes, **kwargs) -> Dict[str, Any]:
         """Execute local transcription using loader methods."""

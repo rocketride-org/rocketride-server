@@ -12,7 +12,7 @@ import json
 import os
 import stat
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 
 class TestWriteTaskFileSecurity(unittest.TestCase):
@@ -47,11 +47,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         try:
             file_stat = os.stat(taskpath)
             mode = stat.S_IMODE(file_stat.st_mode)
-            self.assertEqual(
-                mode,
-                0o600,
-                f'Expected file permissions 0o600, got {oct(mode)}. Temp files with pipeline config (may contain API keys) must not be world-readable.',
-            )
+            self.assertEqual(mode, 0o600, f'Expected file permissions 0o600, got {oct(mode)}. Temp files with pipeline config (may contain API keys) must not be world-readable.')
         finally:
             os.unlink(taskpath)
 
@@ -62,11 +58,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         try:
             basename = os.path.basename(taskpath)
             predictable_name = f'{engine.id}.json'
-            self.assertNotEqual(
-                basename,
-                predictable_name,
-                f'Filename must not be the predictable "{predictable_name}". Predictable temp paths enable symlink attacks.',
-            )
+            self.assertNotEqual(basename, predictable_name, f'Filename must not be the predictable "{predictable_name}". Predictable temp paths enable symlink attacks.')
         finally:
             os.unlink(taskpath)
 

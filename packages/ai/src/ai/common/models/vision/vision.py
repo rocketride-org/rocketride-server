@@ -12,6 +12,7 @@ import os
 from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Tuple
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.vision')
@@ -267,17 +268,19 @@ class CLIPModel:
 
     def get_image_features(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
-        if self._proxy_mode:
-            image_bytes = _image_to_bytes(image)
-            result = self._client.send_command(
-                'inference',
-                {'data': image_bytes, 'output_fields': ['embedding']},
-            )
-            results = result.get('result', [])
-            if results and isinstance(results[0], dict):
-                return results[0].get('embedding') or results[0].get('$embedding') or []
-            return list(results[0]) if results else []
-        return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                image_bytes = _image_to_bytes(image)
+                result = self._client.send_command(
+                    'inference',
+                    {'data': image_bytes, 'output_fields': ['embedding']},
+                )
+                results = result.get('result', [])
+                if results and isinstance(results[0], dict):
+                    return results[0].get('embedding') or results[0].get('$embedding') or []
+                return list(results[0]) if results else []
+            return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
 
 
 class ViTModel:
@@ -324,14 +327,16 @@ class ViTModel:
 
     def __call__(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
-        if self._proxy_mode:
-            image_bytes = _image_to_bytes(image)
-            result = self._client.send_command(
-                'inference',
-                {'data': image_bytes, 'output_fields': ['embedding']},
-            )
-            results = result.get('result', [])
-            if results and isinstance(results[0], dict):
-                return results[0].get('embedding') or results[0].get('$embedding') or []
-            return list(results[0]) if results else []
-        return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                image_bytes = _image_to_bytes(image)
+                result = self._client.send_command(
+                    'inference',
+                    {'data': image_bytes, 'output_fields': ['embedding']},
+                )
+                results = result.get('result', [])
+                if results and isinstance(results[0], dict):
+                    return results[0].get('embedding') or results[0].get('$embedding') or []
+                return list(results[0]) if results else []
+            return _extract_embedding_from_bundle(self._bundle, image, self._metadata)

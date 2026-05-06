@@ -40,7 +40,7 @@ Storage:
 
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
-
+from pydantic import BaseModel
 import hashlib
 
 
@@ -238,13 +238,7 @@ class MockQuery:
     def __init__(self, collection: 'MockCollection'):
         self.collection = collection
 
-    def near_vector(
-        self,
-        near_vector: List[float],
-        filters: Optional[Filter] = None,
-        limit: int = 10,
-        return_metadata: Optional[MetadataQuery] = None,
-    ) -> QueryResult:
+    def near_vector(self, near_vector: List[float], filters: Optional[Filter] = None, limit: int = 10, return_metadata: Optional[MetadataQuery] = None) -> QueryResult:
         """Perform vector similarity search."""
         results = []
 
@@ -268,14 +262,7 @@ class MockQuery:
 
             metadata = MetadataResult(distance=distance) if return_metadata else MetadataResult()
 
-            results.append(
-                QueryObject(
-                    uuid=uuid,
-                    properties=self._serialize_properties(properties),
-                    vector=stored_vector,
-                    metadata=metadata,
-                )
-            )
+            results.append(QueryObject(uuid=uuid, properties=self._serialize_properties(properties), vector=stored_vector, metadata=metadata))
 
         # Sort by distance (lower is better for cosine distance)
         results.sort(key=lambda x: x.metadata.distance if x.metadata.distance else 1.0)
@@ -293,14 +280,7 @@ class MockQuery:
             if filters and not filters.matches(properties):
                 continue
 
-            results.append(
-                QueryObject(
-                    uuid=uuid,
-                    properties=self._serialize_properties(properties),
-                    vector=data.get('vector'),
-                    metadata=MetadataResult(),
-                )
-            )
+            results.append(QueryObject(uuid=uuid, properties=self._serialize_properties(properties), vector=data.get('vector'), metadata=MetadataResult()))
 
         return QueryResult(objects=results[offset : offset + limit])
 
@@ -436,20 +416,12 @@ class MockWeaviateClient:
 # =============================================================================
 
 
-def connect_to_local(
-    host: str = 'localhost',
-    port: int = 8080,
-    grpc_port: int = 50051,
-    auth_credentials: Any = None,
-    additional_config: Any = None,
-) -> MockWeaviateClient:
+def connect_to_local(host: str = 'localhost', port: int = 8080, grpc_port: int = 50051, auth_credentials: Any = None, additional_config: Any = None) -> MockWeaviateClient:
     """Connect to a local Weaviate instance (mocked)."""
     return MockWeaviateClient()
 
 
-def connect_to_weaviate_cloud(
-    cluster_url: str, auth_credentials: Any = None, additional_config: Any = None
-) -> MockWeaviateClient:
+def connect_to_weaviate_cloud(cluster_url: str, auth_credentials: Any = None, additional_config: Any = None) -> MockWeaviateClient:
     """Connect to Weaviate Cloud (mocked)."""
     return MockWeaviateClient()
 

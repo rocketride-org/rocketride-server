@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     import numpy as np
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.sentence_transformers')
@@ -348,10 +349,12 @@ class SentenceTransformer:
         if isinstance(sentences, str):
             sentences = [sentences]
 
-        if self._proxy_mode:
-            return self._encode_remote(sentences, batch_size, **kwargs)
-        else:
-            return self._encode_local(sentences, batch_size, **kwargs)
+        metrics.counter('gpu_inference_count', 1)
+        with metrics.resource('gpu'):
+            if self._proxy_mode:
+                return self._encode_remote(sentences, batch_size, **kwargs)
+            else:
+                return self._encode_local(sentences, batch_size, **kwargs)
 
     def _encode_local(self, sentences: List[str], batch_size: int, **kwargs) -> np.ndarray:
         """Execute local encoding using loader methods."""
