@@ -45,7 +45,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, optional_str, require_str, tool_function
 
 from .IGlobal import IGlobal
 
@@ -307,7 +307,7 @@ class IInstance(IInstanceBase):
             raise ValueError(f'{label} access is not enabled for this filesystem tool')
 
         if path_required:
-            path = _require_str(args, 'path')
+            path = require_str(args, 'path', tool_name=tool_name)
             self._check_path(path)
         else:
             path = args.get('path', '')
@@ -321,7 +321,7 @@ class IInstance(IInstanceBase):
 
         encoding: str | None = None
         if needs_encoding:
-            encoding = _optional_str(args, 'encoding', default='utf-8') or 'utf-8'
+            encoding = optional_str(args, 'encoding', default='utf-8', tool_name=tool_name) or 'utf-8'
 
         content: str | None = None
         if needs_content:
@@ -354,22 +354,6 @@ def _require_dict(args: Any) -> dict:
     if not isinstance(args, dict):
         raise ValueError('Tool input must be a JSON object (dict)')
     return args
-
-
-def _require_str(args: dict, key: str) -> str:
-    val = args.get(key)
-    if not isinstance(val, str) or not val.strip():
-        raise ValueError(f'{key} is required and must be a non-empty string')
-    return val
-
-
-def _optional_str(args: dict, key: str, *, default: str | None = None) -> str | None:
-    val = args.get(key, default)
-    if val is None:
-        return default
-    if not isinstance(val, str):
-        raise ValueError(f'{key} must be a string')
-    return val
 
 
 def _run_async(coro):

@@ -23,7 +23,8 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
-from typing import TYPE_CHECKING, Dict, Any, List, TypedDict, Callable, Protocol
+import json
+from typing import TYPE_CHECKING, Dict, Any, Iterable, List, TypedDict, Callable, Protocol
 from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke
 from .error import APERR, Ec
 
@@ -89,6 +90,194 @@ def tool_function(
         return fn
 
     return decorator
+
+
+# =========================================================================
+# Tool input normalisation
+#
+# Agents call tools with payloads that the engine's invoke pipeline can
+# deliver in several shapes — plain dicts, Pydantic models, JSON strings,
+# or wrapped envelopes such as {"input": {...}, "security_context": ...}.
+# Every tool node used to ship its own copy of this normalisation
+# function; consolidating into one canonical helper means bug fixes and
+# behaviour decisions live in one place.
+# =========================================================================
+
+
+def normalize_tool_input(
+    input_obj: Any,
+    *,
+    extra_envelope_keys: Iterable[str] = (),
+    parse_json_strings: bool = True,
+    unwrap_pydantic: bool = True,
+    tool_name: str = 'tool',
+) -> Dict[str, Any]:
+    """Coerce agent-supplied tool input to a plain args dict.
+
+    Handles, in order:
+      1. ``None`` -> ``{}``
+      2. Pydantic model unwrap (via ``model_dump()`` / ``dict()``) when
+         ``unwrap_pydantic`` is True.
+      3. JSON-string parse when ``parse_json_strings`` is True. A string
+         that does not parse to a dict is left unchanged (and falls through
+         to the unexpected-type branch below).
+      4. Anything still not a dict -> ``{}`` after a ``warning(...)``.
+      5. Nested envelope unwrap: any of ``('input', *extra_envelope_keys)``
+         whose value is a dict is merged into the top level. Top-level keys
+         win on conflict (so a sibling key beside the envelope overrides
+         the one inside it).
+      6. Strip ``security_context`` (engine-injected, never tool args).
+
+    Args:
+        input_obj: Raw tool input as delivered by the engine's invoke chain.
+        extra_envelope_keys: Additional keys that, like ``input``, wrap the
+            real arguments and should be unwrapped/merged.
+        parse_json_strings: Try ``json.loads`` on string inputs. Set False
+            for tools where the engine path is known never to deliver a
+            JSON-encoded string.
+        unwrap_pydantic: Call ``model_dump()`` / ``dict()`` on objects that
+            expose them. Set False for tools where the engine path never
+            delivers a Pydantic instance.
+        tool_name: Short identifier prefixed onto warning messages so
+            unexpected-input traces are attributable to a specific node.
+
+    Returns:
+        A plain ``dict`` of normalised tool arguments. Returns ``{}`` for
+        inputs that cannot be coerced (e.g. integers, lists, malformed
+        JSON), after emitting a warning.
+    """
+    if input_obj is None:
+        return {}
+
+    if unwrap_pydantic:
+        model_dump = getattr(input_obj, 'model_dump', None)
+        if callable(model_dump):
+            input_obj = model_dump()
+        else:
+            as_dict = getattr(input_obj, 'dict', None)
+            if callable(as_dict):
+                input_obj = as_dict()
+
+    if parse_json_strings and isinstance(input_obj, str):
+        try:
+            parsed = json.loads(input_obj)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            input_obj = parsed
+
+    if not isinstance(input_obj, dict):
+        # Lazy import: engine.py imports from filters.py, so we can't pull
+        # warning() at module load.
+        from .engine import warning
+
+        warning(f'{tool_name}: unexpected input type {type(input_obj).__name__}')
+        return {}
+
+    # Shallow-copy so the envelope-merge and ``security_context`` pop below
+    # never mutate a caller-owned dict.
+    input_obj = dict(input_obj)
+
+    for key in ('input', *extra_envelope_keys):
+        wrapped = input_obj.get(key)
+        if isinstance(wrapped, dict):
+            extras = {k: v for k, v in input_obj.items() if k != key}
+            input_obj = {**wrapped, **extras}
+
+    input_obj.pop('security_context', None)
+    return input_obj
+
+
+# =========================================================================
+# Tool argument validators
+#
+# Tool nodes used to ship private ``_require_str`` / ``_require_int`` /
+# ``_optional_str`` helpers with subtly inconsistent semantics — for
+# example, tool_github's ``_require_str`` crashed with ``AttributeError``
+# on truthy non-string inputs, while tool_filesystem's variant raised a
+# clean ValueError. Centralising the helpers here lets every tool node
+# get the same validation behaviour and leaves room to fix bugs in one
+# place.
+# =========================================================================
+
+
+def require_str(args: Dict[str, Any], key: str, *, tool_name: str = '') -> str:
+    """Return ``args[key]`` as a non-empty stripped string, or raise ValueError.
+
+    Args:
+        args: The normalised tool args dict (typically the output of
+            :func:`normalize_tool_input`).
+        key: The required argument name.
+        tool_name: Short identifier prefixed onto error messages — usually
+            the tool function name (``'file_create'``) or node name
+            (``'tool_github'``). Empty string omits the prefix.
+
+    Raises:
+        ValueError: If ``key`` is missing, not a string, or is empty/whitespace.
+    """
+    val = args.get(key)
+    if not isinstance(val, str) or not val.strip():
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" is required and must be a non-empty string')
+    return val.strip()
+
+
+def require_int(args: Dict[str, Any], key: str, *, tool_name: str = '') -> int:
+    """Return ``args[key]`` coerced to ``int``, or raise ValueError.
+
+    Accepts plain ints and numeric strings. The following are rejected with
+    a ValueError instead of being silently coerced:
+
+    * ``bool`` — despite being an ``int`` subclass, ``{"issue_number": true}``
+      almost never means ``1``.
+    * ``float`` — ``int(3.7)`` would truncate to ``3``, and ``inf`` / ``nan``
+      would leak an ``OverflowError`` / ``ValueError`` from ``int()``.
+    * Any other non-(int|str) type, e.g. lists, dicts, ``Decimal``.
+    """
+    prefix = f'{tool_name}: ' if tool_name else ''
+    val = args.get(key)
+    if val is None:
+        raise ValueError(f'{prefix}"{key}" is required')
+    # bool is an int subclass and float would truncate — keep str and real
+    # int as the only inputs that reach the coercion below. OverflowError
+    # is also caught for defence-in-depth (e.g. ``int('1' * 10**6)`` is
+    # technically valid but takes minutes; an opaque traceback would be
+    # worse than the friendly message).
+    if isinstance(val, (bool, float)) or not isinstance(val, (int, str)):
+        raise ValueError(f'{prefix}"{key}" must be an integer')
+    try:
+        return int(val)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f'{prefix}"{key}" must be an integer')
+
+
+def optional_str(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    default: Any = None,
+    tool_name: str = '',
+) -> Any:
+    """Return ``args[key]`` as a string, or ``default`` if absent/None.
+
+    Raises ValueError if ``key`` is present but the value is not a string.
+    Unlike :func:`require_str`, the returned value is **not** stripped — an
+    explicitly-supplied "" stays "".
+
+    Type validation only fires when ``key`` is present with a non-string
+    value. A non-string ``default`` is returned untouched on the absent
+    path — validating ``default`` would mean the helper rejects perfectly
+    legitimate ``optional_str(args, 'n', default=0)`` calls.
+    """
+    if key not in args:
+        return default
+    val = args[key]
+    if val is None:
+        return default
+    if not isinstance(val, str):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" must be a string')
+    return val
 
 
 class IKeyValueStore:
