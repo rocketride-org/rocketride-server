@@ -90,12 +90,45 @@ class TestNormalizeToolInput:
         result = normalize_tool_input({'input': {'q': 'inner'}, 'q': 'outer'})
         assert result == {'q': 'outer'}
 
-    def test_security_context_stripped(self):
+    def test_security_context_stripped_by_default(self):
+        # ``security_context`` is in the default ``strip_keys`` so callers
+        # don't have to opt in to engine-injected-key removal.
         result = normalize_tool_input({'q': 'x', 'security_context': {'user': 'a'}})
         assert result == {'q': 'x'}
 
     def test_security_context_stripped_from_inside_input_envelope(self):
         result = normalize_tool_input({'input': {'q': 'x', 'security_context': {'user': 'a'}}})
+        assert result == {'q': 'x'}
+
+    def test_strip_keys_disabled_keeps_security_context(self):
+        # Pass an empty ``strip_keys`` to disable the default stripping —
+        # ``security_context`` is preserved verbatim.
+        result = normalize_tool_input(
+            {'q': 'x', 'security_context': {'user': 'a'}},
+            strip_keys=(),
+        )
+        assert result == {'q': 'x', 'security_context': {'user': 'a'}}
+
+    def test_strip_keys_custom_replaces_default(self):
+        # ``strip_keys`` is a replacement, not additive: when the caller
+        # supplies their own list, ``security_context`` is no longer
+        # stripped unless the caller includes it.
+        result = normalize_tool_input(
+            {'q': 'x', 'security_context': {'user': 'a'}, 'trace_id': 'abc'},
+            strip_keys=('trace_id',),
+        )
+        assert result == {'q': 'x', 'security_context': {'user': 'a'}}
+
+    def test_strip_keys_can_drop_multiple(self):
+        result = normalize_tool_input(
+            {'q': 'x', 'security_context': {}, 'trace_id': 'abc', 'session': 'z'},
+            strip_keys=('security_context', 'trace_id', 'session'),
+        )
+        assert result == {'q': 'x'}
+
+    def test_strip_keys_missing_keys_silently_ignored(self):
+        # pop(key, None) — listing a key that isn't present is a no-op.
+        result = normalize_tool_input({'q': 'x'}, strip_keys=('not_present',))
         assert result == {'q': 'x'}
 
     def test_non_dict_input_envelope_left_alone(self):
