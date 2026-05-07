@@ -428,6 +428,29 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
+    def _executeRawQuery(self, query: str) -> dict | None:
+        """Execute a raw SQL statement (read or write) without LLM or safety gating.
+
+        Uses ``engine.begin()`` so writes auto-commit. Returns
+        ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
+        (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+        """
+        try:
+            with self.IGlobal.engine.begin() as conn:
+                result = conn.execute(text(query))
+                if result.returns_rows:
+                    rows = result.fetchall()
+                    column_names = result.keys()
+                    return {
+                        'rows': [dict(zip(column_names, row)) for row in rows],
+                        'affected_rows': 0,
+                    }
+                return {'rows': [], 'affected_rows': result.rowcount}
+
+        except SQLAlchemyError as e:
+            error(f'Error executing raw SQL query: {e}')
+            return None
+
     def _formatResultAsMarkdown(self, result: Any) -> str:
         """Convert a query result to a markdown table string."""
         headers = None
@@ -463,6 +486,28 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
+
+        # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            execute_result = self._executeRawQuery(question_text)
+            if execute_result is None:
+                return
+
+            rows = execute_result['rows']
+            affected = execute_result['affected_rows']
+            markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+            if 'text' in lanes:
+                self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+            if 'table' in lanes and rows:
+                self.instance.writeTable(markdown)
+
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps(execute_result))
+                self.instance.writeAnswers(answer)
+            return
 
         try:
             # Ask the LLM to translate the natural-language question into SQL.
