@@ -183,8 +183,7 @@ class DocumentStoreBase(ABC):
                 # If this is the first part of the table
                 if tableKey not in tableDocs:
                     # Add it to the list
-                    # TODO: Fix this
-                    tableDocs[tableKey] = Doc(objectId=objectId, chunk=doc.metadata.chunkId, score=chunk.score)
+                    tableDocs[tableKey] = Doc(objectId=objectId, chunk=chunk.metadata.chunkId, score=chunk.score)
 
                 # Append the text
                 tableDocs[tableKey].page_content += chunk.page_content
