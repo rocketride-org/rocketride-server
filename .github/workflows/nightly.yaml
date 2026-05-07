@@ -13,15 +13,6 @@ permissions:
   contents: write
   packages: write
   id-token: write
-  # Required so the prerelease tag-push step can push tags whose target
-  # commit touches files under .github/workflows/. Without this, GitHub
-  # rejects with "refusing to allow a GitHub App to create or update
-  # workflow ... without `workflows` permission" — and silently bricks
-  # the whole prerelease pipeline. `Clean up prereleases` runs first and
-  # deletes existing tags, then every prerelease-creation job fails to
-  # push, leaving the repo with zero -prerelease tags until the next
-  # nightly run on a commit that doesn't touch any workflow file.
-  workflows: write
 
 # Triggered when develop's CI run completes successfully — this is the
 # gate. A red CI on develop (whether from a bad merge, a flaky test, or
