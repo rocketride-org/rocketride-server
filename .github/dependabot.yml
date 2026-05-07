@@ -1,0 +1,249 @@
+# =============================================================================
+# Dependabot configuration for rocketride-server
+# =============================================================================
+#
+# Goal: predictable, low-noise weekly dependency updates plus immediate
+# security PRs (which are managed separately by GitHub's automated security
+# fixes feature, already enabled at the repo level).
+#
+# Strategy:
+#   - One ecosystem entry per package manifest location
+#   - Group minor/patch updates aggressively to keep the PR queue small
+#   - Major-version updates remain individual so they get full review
+#   - Weekly cadence on Mondays (lines up with team's sprint kickoff)
+#
+# Drop at .github/dependabot.yml
+# =============================================================================
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # npm (pnpm) — root workspace
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      # One PR for all minor/patch production-dep bumps
+      npm-production:
+        applies-to: version-updates
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      # One PR for all minor/patch dev-dep bumps
+      npm-development:
+        applies-to: version-updates
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # Don't auto-create major-version update PRs — they need human attention
+    # and tend to break things. Use `pnpm outdated` manually for those.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # npm — packages/client-typescript (published SDK)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/packages/client-typescript"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-typescript"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      client-typescript-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # npm — packages/shared-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/packages/shared-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      shared-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # npm — apps/dropper-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/apps/dropper-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      dropper-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # npm — apps/chat-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/apps/chat-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      chat-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # Python — root pyproject.toml (covers most ai/nodes deps via workspace)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      python-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # Python — published SDK
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/packages/client-python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # ---------------------------------------------------------------------------
+  # Python — MCP client SDK
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/packages/client-mcp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # ---------------------------------------------------------------------------
+  # Python — pipeline node deps (ML/AI runtime)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: nodes"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Node deps include large ML libs (torch, transformers); group them
+    # so we don't get ten "bump torch" PRs across minor versions.
+    groups:
+      nodes-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions — workflow file SHA pin updates
+  # ---------------------------------------------------------------------------
+  # Matches the team's existing supply-chain-defense pattern of pinning
+  # third-party actions to commit SHAs (see secret-scan.yml). Dependabot
+  # opens PRs to bump those SHAs when upstream releases.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: ci"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      gh-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
