@@ -154,7 +154,7 @@ class DocumentStoreBase(ABC):
 
             # Update the score if this one is higher
             if doc.score > tableDocs[tableKey].score:
-                tableDocs[tableKey] = doc.score
+                tableDocs[tableKey].score = doc.score
 
         # If there are no tables, done
         if not len(tableIds):
@@ -182,8 +182,11 @@ class DocumentStoreBase(ABC):
 
                 # If this is the first part of the table
                 if tableKey not in tableDocs:
+                    original_content = chunk.page_content
                     chunk.page_content = ''
                     tableDocs[tableKey] = chunk
+                    tableDocs[tableKey].page_content += original_content
+                    continue
 
                 # Append the text
                 tableDocs[tableKey].page_content += chunk.page_content
