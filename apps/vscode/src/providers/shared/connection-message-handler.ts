@@ -8,7 +8,7 @@
  * webview messages (cloud auth, engine versions, test connection, docker/service
  * lifecycle).
  *
- * Used by both PageSettingsProvider and PageWelcomeProvider so connection
+ * Used by both SettingsProvider and WelcomeProvider so connection
  * management code is never duplicated.
  */
 

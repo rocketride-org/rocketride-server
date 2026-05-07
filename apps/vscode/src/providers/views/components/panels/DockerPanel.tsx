@@ -59,7 +59,7 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 		return () => document.removeEventListener('click', handler);
 	}, [idPrefix]);
 
-	// Simplified mode: description only (used by PageAuth)
+	// Simplified mode: description only (used by Auth page)
 	if (simplified) {
 		return (
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>

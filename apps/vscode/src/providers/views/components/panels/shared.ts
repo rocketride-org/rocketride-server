@@ -6,7 +6,7 @@
 /**
  * Shared UI helpers for target panels (Docker, Service, etc.).
  *
- * Extracted from PageDeploy.tsx — split button with version dropdown,
+ * Extracted from Deploy.tsx — split button with version dropdown,
  * status indicator, installed action buttons, styles, and types.
  */
 

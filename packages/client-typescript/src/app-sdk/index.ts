@@ -27,7 +27,7 @@
 // External developers install `rocketride` and import from this subpath:
 //
 //   import type { AppDescriptor, ShellAppProps } from 'rocketride/app-sdk';
-//   import { useShellConnection, useWorkspace, shellBus } from 'rocketride/app-sdk';
+//   import { useShellConnection, useWorkspace, connectionManager } from 'rocketride/app-sdk';
 //
 // At build time:   TypeScript resolves these declarations and provides full
 //                  IntelliSense for all types, hooks, and functions.
@@ -202,20 +202,25 @@ export declare class Documents {
 }
 
 // =============================================================================
-// EVENT BUS
+// CONNECTION MANAGER
 // =============================================================================
 
 /**
- * Module-level event bus singleton.
+ * Module-level connection manager singleton.
  *
- * Provides typed `emit` and `on` methods backed by the shell's event system.
- * Works from React components, hooks, or plain functions.
+ * Provides typed `emit` and `on` methods backed by the shell's event system,
+ * plus client access and connection state.  Works from React components,
+ * hooks, or plain functions.
  */
-export declare const shellBus: {
+export declare const connectionManager: {
 	/** Emit a typed shell event. */
 	emit<K extends keyof ShellEventMap>(event: K, payload: ShellEventMap[K]): void;
 	/** Subscribe to a typed shell event. Returns an unsubscribe function. */
 	on<K extends keyof ShellEventMap>(event: K, handler: (payload: ShellEventMap[K]) => void): () => void;
+	/** Returns the RocketRide client singleton, or null if not initialised. */
+	getClient(): import('../client/index').RocketRideClient | null;
+	/** Returns true when the WebSocket is authenticated and connected. */
+	isConnected(): boolean;
 };
 
 /**

@@ -253,7 +253,7 @@ export class ConnectionManager extends EventEmitter {
 				} else if (message.event?.startsWith('apaevt_')) {
 					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
 				}
-				this.emit('event', message);
+				this.emit('shell:event', message);
 			},
 			onConnected: async () => {
 				this.updateConnectionStatus({
@@ -264,7 +264,7 @@ export class ConnectionManager extends EventEmitter {
 					progressMessage: undefined,
 				});
 				this.logger.output(`${icons.success} Connected to RocketRide server`);
-				this.emit('connected');
+				this.emit('shell:connected');
 
 				// Fetch and cache services list
 				this.refreshServices().catch((err) => {
@@ -279,7 +279,7 @@ export class ConnectionManager extends EventEmitter {
 				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
 					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
 				}
-				this.emit('disconnected');
+				this.emit('shell:disconnected');
 			},
 			onConnectError: async (error: Error) => {
 				// Auth rejection: stop retrying, clear stale credentials, and
@@ -394,7 +394,7 @@ export class ConnectionManager extends EventEmitter {
 				state: ConnectionState.DISCONNECTED,
 				lastError: errorMessage,
 			});
-			this.emit('error', error);
+			this.emit('shell:error', error);
 		}
 	}
 
@@ -521,7 +521,7 @@ export class ConnectionManager extends EventEmitter {
 	public async refreshServices(): Promise<void> {
 		if (!this.isConnected() || !this.client) {
 			this.clearServicesCache();
-			this.emit('servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
 			return;
 		}
 
@@ -535,12 +535,12 @@ export class ConnectionManager extends EventEmitter {
 				const services: Record<string, unknown> = body.services ?? {};
 				this.cachedServices = services;
 				this.cachedServicesError = null;
-				this.emit('servicesUpdated', { services, servicesError: undefined });
+				this.emit('shell:servicesUpdated', { services, servicesError: undefined });
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				this.cachedServices = null;
 				this.cachedServicesError = msg;
-				this.emit('servicesUpdated', { services: {}, servicesError: msg });
+				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
 			} finally {
 				this.servicesRefreshPromise = null;
 			}
@@ -564,7 +564,12 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 		Object.assign(this.connectionStatus, updates);
-		this.emit('connectionStateChanged', this.connectionStatus);
+		this.emit('shell:statusChange', this.connectionStatus);
+
+		// Also emit the simple status message for UI consumers that don't
+		// need the full ConnectionStatus object
+		const message = this.connectionStatus.progressMessage ?? null;
+		this.emit('shell:statusMessage', { message });
 	}
 
 	protected async updateCredentialsStatus(): Promise<void> {

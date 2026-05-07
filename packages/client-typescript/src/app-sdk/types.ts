@@ -437,5 +437,5 @@ export interface ShellEventMap {
 	'shell:sidebarCollapsing': Record<string, never>;
 	'shell:themeChange': { tokens: Record<string, string> };
 	'shell:statusChange': { message: string | null };
-	'server:event': { event: unknown };
+	'shell:event': { event: unknown };
 }
