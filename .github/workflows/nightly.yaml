@@ -74,7 +74,7 @@ jobs:
       build_stamp: ${{ needs.init.outputs.build_stamp }}
       nodownload: true
       package: true
-      retention_days: 3
+      # retention_days inherits _build.yaml's default (1 day) — see comment there.
     secrets: inherit
 
   cleanup-prereleases:
