@@ -1,5 +1,11 @@
 name: Build
 
+# Default least-privilege permissions for the workflow. Individual jobs
+# below raise to write where they actually need it (Docker push, SARIF
+# upload, etc.). Closes Scorecard TokenPermissionsID #513.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
