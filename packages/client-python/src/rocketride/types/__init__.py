@@ -150,6 +150,9 @@ from .account import (
     TeamMemberParams,
 )
 
+# Deploy types: deployment records.
+from .deploy import DeploymentRecord
+
 # Billing types: subscriptions, Stripe plans, compute credits.
 from .billing import (
     BillingDetail,
@@ -248,6 +251,8 @@ __all__ = [
     'CreateKeyResult',
     'InviteMemberParams',
     'TeamMemberParams',
+    # Deploy types
+    'DeploymentRecord',
     # Billing types
     'BillingDetail',
     'StripePlan',
