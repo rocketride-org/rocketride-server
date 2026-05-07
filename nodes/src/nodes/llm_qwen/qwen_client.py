@@ -43,6 +43,8 @@ class Chat(ChatBase):
     Create a Qwen chat bot via DashScope's OpenAI-compatible API.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):

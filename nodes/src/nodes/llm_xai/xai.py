@@ -36,6 +36,8 @@ class Chat(ChatBase):
     Create an XAI chat bot.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatXAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):

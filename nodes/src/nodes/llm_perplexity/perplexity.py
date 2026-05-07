@@ -49,6 +49,8 @@ class Chat(ChatBase):
     Perplexity AI chat node with search-enhanced language models.
     """
 
+    SUPPORTS_STREAMING = True
+
     _model: str = ''
     _llm: ChatOpenAI
 

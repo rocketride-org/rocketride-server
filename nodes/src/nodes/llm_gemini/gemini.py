@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from google import genai
@@ -42,6 +42,8 @@ class Chat(ChatBase):
         >>> chat = Chat(provider='gemini', connConfig={'apikey': 'your-api-key'}, bag={})
         >>> response = chat._chat('Hello, how are you?')
     """
+
+    SUPPORTS_STREAMING = True
 
     _client: genai.Client
 
@@ -114,6 +116,16 @@ class Chat(ChatBase):
         # Simple approximation: ~0.75 tokens per word
         word_count = len(value.split())
         return int(word_count / 0.75)
+
+    def _chat_stream(self, prompt: str, on_chunk: Callable[[str], None]) -> str:
+        """Stream a chat prompt via google-genai's `generate_content_stream`."""
+        pieces = []
+        for chunk in self._client.models.generate_content_stream(model=self._model, contents=prompt):
+            text = getattr(chunk, 'text', None)
+            if text:
+                pieces.append(text)
+                on_chunk(text)
+        return ''.join(pieces)
 
     def _chat(self, prompt: str) -> str:
         """

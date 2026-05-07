@@ -83,6 +83,8 @@ class Chat(ChatBase):
     Create an Anthropic chat bot.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatAnthropic
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):

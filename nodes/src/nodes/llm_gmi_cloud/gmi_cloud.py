@@ -33,6 +33,8 @@ from langchain_openai import ChatOpenAI
 class Chat(ChatBase):
     """Creates a GMI Cloud chat bot."""
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):

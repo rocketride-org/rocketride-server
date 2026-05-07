@@ -22,7 +22,7 @@
 # =============================================================================
 
 import re
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ibm_watsonx_ai import Credentials
@@ -77,6 +77,8 @@ class Chat(ChatBase):
     IBM Watson chat class.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ModelInference
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -124,6 +126,20 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat_stream(self, prompt: str, on_chunk: Callable[[str], None]) -> str:
+        """Stream a chat prompt via ibm-watsonx-ai's `ModelInference.chat_stream`."""
+        messages = [{'role': 'user', 'content': prompt}]
+        pieces = []
+        for chunk in self._llm.chat_stream(messages=messages):
+            try:
+                text = chunk['choices'][0]['delta'].get('content')
+            except (KeyError, IndexError, TypeError):
+                text = None
+            if text:
+                pieces.append(text)
+                on_chunk(text)
+        return ''.join(pieces)
 
     def _chat(self, prompt: str) -> str:
         """

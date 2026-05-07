@@ -37,7 +37,7 @@ from rocketlib import debug
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
@@ -53,6 +53,8 @@ class Chat(ChatBase):
     """
     Create a Mistral AI chat bot.
     """
+
+    SUPPORTS_STREAMING = True
 
     _model: str = ''
     _client: Mistral
@@ -239,6 +241,21 @@ class Chat(ChatBase):
             return (2, 1.5)  # 2 retries, 1.5 second base delay for medium models
         else:
             return (2, 1.0)  # 2 retries, 1 second base delay for small models
+
+    def _chat_stream(self, prompt: str, on_chunk: Callable[[str], None]) -> str:
+        """Stream a chat prompt via mistralai's `client.chat.stream`."""
+        messages = [{'role': 'user', 'content': prompt}]
+        pieces = []
+        for event in self._client.chat.stream(model=self._model, messages=messages, temperature=0.0):
+            try:
+                delta = event.data.choices[0].delta
+            except (AttributeError, IndexError):
+                continue
+            text = getattr(delta, 'content', None)
+            if text:
+                pieces.append(text)
+                on_chunk(text)
+        return ''.join(pieces)
 
     def chat(self, question: Question) -> Answer:
         """Send a chat message to Mistral AI and get the response."""

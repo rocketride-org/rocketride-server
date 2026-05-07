@@ -13,7 +13,7 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+from typing import Dict, Any, Callable
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -132,6 +132,33 @@ class ChatBase:
 
         # Return the results
         return results.content
+
+    def _chat_stream(self, prompt: str, on_chunk: Callable[[str], None]) -> str:
+        """
+        Streaming variant of `_chat`. Default implementation iterates the
+        LangChain Runnable's `.stream()` method, emits each text delta via
+        `on_chunk(delta)`, and returns the accumulated full response.
+
+        Providers whose `_llm` is not a LangChain Runnable (e.g. native
+        google-genai, mistral, ibm-watsonx-ai) should override this with
+        their SDK's native streaming call.
+        """
+        pieces = []
+        for chunk in self._llm.stream(prompt):
+            text = getattr(chunk, 'content', None)
+            if not text:
+                continue
+            # Some chat models return a list of content blocks (vision / tool
+            # use) — flatten to the text parts only.
+            if not isinstance(text, str):
+                try:
+                    text = ''.join(p.get('text', '') for p in text if isinstance(p, dict))
+                except Exception:
+                    text = str(text)
+            if text:
+                pieces.append(text)
+                on_chunk(text)
+        return ''.join(pieces)
 
     def getTokens(self, value: str) -> int:
         """
@@ -450,6 +477,86 @@ class ChatBase:
 
             # And return it
             return answer
+
+    SUPPORTS_STREAMING: bool = False
+
+    def _chat_stream_with_retries(self, prompt: str, on_chunk: Callable[[str], None]) -> str:
+        """
+        Streaming variant of `_chat_with_retries`.
+
+        Network retries are only attempted before any chunk is emitted. Once
+        a chunk has reached the caller, a mid-stream failure is propagated
+        immediately rather than restarting the visible output — the caller
+        finalizes the stream with an error marker and the user keeps the
+        partial text already on screen.
+        """
+        from ai.constants import CONST_CHAT_MAX_RETRIES, CONST_CHAT_BASE_DELAY, CONST_CHAT_MAX_DELAY
+
+        max_network_retries = CONST_CHAT_MAX_RETRIES
+        base_delay = CONST_CHAT_BASE_DELAY
+        max_delay = CONST_CHAT_MAX_DELAY
+
+        for attempt in range(max_network_retries):
+            emitted = {'value': False}
+
+            def gated(text: str) -> None:
+                emitted['value'] = True
+                on_chunk(text)
+
+            try:
+                return self._chat_stream(prompt, gated)
+            except Exception as e:
+                if emitted['value']:
+                    raise self.map_exception(e)
+
+                is_retryable = self.is_retryable_error(e)
+                if not is_retryable or attempt == max_network_retries - 1:
+                    debug(f'Chat stream failed after {attempt + 1} attempts: {str(e)}')
+                    raise self.map_exception(e)
+
+                delay = min(base_delay * (2**attempt), max_delay)
+                debug(f'Network/API error on streaming attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...')
+                time.sleep(delay)
+
+        raise Exception('Unexpected exit from streaming retry loop')
+
+    def chat_stream(self, question: Question, on_chunk: Callable[[str], None]) -> Answer:
+        """
+        Streaming variant of `chat()`.
+
+        Emits incremental text via `on_chunk(delta)` as the model generates,
+        then returns the final `Answer` (identical shape to what `chat()`
+        would return). The Answer written to the output lane is canonical;
+        chunks are observation-only.
+
+        Falls back to non-streaming `chat()` when `question.expectJson` is
+        True — partial JSON cannot be safely parsed or rendered.
+
+        `on_chunk` receives only the new text since the previous call
+        (deltas, not cumulative). The caller is responsible for any
+        cross-thread serialization of emit calls.
+        """
+        if question.expectJson:
+            return self.chat(question)
+
+        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
+
+        prompt_tokens = self.getTokens(prompt)
+        if prompt_tokens >= self._modelTotalTokens - 100:
+            debug(f'Warning: Prompt ({prompt_tokens} tokens) exceeds input allocation ({self._modelTotalTokens} tokens)')
+
+        response = self._chat_stream_with_retries(prompt, on_chunk)
+
+        try:
+            result_tokens = self.getTokens(response)
+            if prompt_tokens + result_tokens >= self._modelTotalTokens - 5:
+                debug(f'Warning: Result ({result_tokens} tokens) was probably truncated')
+        except Exception:
+            pass
+
+        answer = Answer(expectJson=False)
+        answer.setAnswer(response)
+        return answer
 
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:

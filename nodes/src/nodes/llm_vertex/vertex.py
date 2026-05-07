@@ -52,6 +52,8 @@ class Chat(ChatBase):
     Create an vertex chat bot.
     """
 
+    SUPPORTS_STREAMING = True
+
     """
     Privates
     """

@@ -36,6 +36,8 @@ class Chat(ChatBase):
     Creates an Deepseek chat bot.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):

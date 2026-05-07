@@ -15,6 +15,8 @@ class Chat(ChatBase):
     Create an OpenAI-compatible API chat bot with custom base_url support.
     """
 
+    SUPPORTS_STREAMING = True
+
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -33,10 +35,10 @@ class Chat(ChatBase):
 
         # Build kwargs for ChatOpenAI
         kwargs = {
-            "model": self._model,
-            "api_key": apikey,
-            "temperature": 0,
-            "max_tokens": self._modelOutputTokens,
+            'model': self._model,
+            'api_key': apikey,
+            'temperature': 0,
+            'max_tokens': self._modelOutputTokens,
         }
         if base_url:
             kwargs['base_url'] = base_url
