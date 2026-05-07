@@ -36,10 +36,14 @@ on:
         type: boolean
         default: false
       retention_days:
+        # 1 day is enough to chain build → release → docker within the same
+        # workflow run; downloads inside a run work even after "expiry".
+        # Higher retention multiplies the 3-platform artifact set (~2 GB)
+        # against the 0.5 GB org storage cap and overflows it within a day.
         description: Artifact retention in days
         required: false
         type: number
-        default: 3
+        default: 1
 
 jobs:
   build:
