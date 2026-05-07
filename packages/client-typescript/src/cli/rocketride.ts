@@ -815,12 +815,11 @@ export class RocketRideCLI {
 	}
 
 	private setupSignalHandlers(): void {
-		// TODO: Enable proper signal handling
-		// const signalHandler = () => {
-		// 	this.cancel();
-		// };
-		// process.on('SIGINT', signalHandler);
-		// process.on('SIGTERM', signalHandler);
+		const signalHandler = () => {
+			this.cancel();
+		};
+		process.on('SIGINT', signalHandler);
+		process.on('SIGTERM', signalHandler);
 	}
 
 	private createProgram(): Command {
