@@ -253,6 +253,15 @@ export class ConnectionManager extends EventEmitter {
 				} else if (message.event?.startsWith('apaevt_')) {
 					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
 				}
+
+				// Transform apaext_account into a dedicated shell:accountUpdate
+				// event — don't also emit it as a generic shell:event to avoid
+				// duplicate handling downstream
+				if (message.event === 'apaext_account' && message.body) {
+					this.emit('shell:accountUpdate', message.body);
+					return;
+				}
+
 				this.emit('shell:event', message);
 			},
 			onConnected: async () => {

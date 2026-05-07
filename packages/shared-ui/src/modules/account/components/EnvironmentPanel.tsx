@@ -95,11 +95,17 @@ export interface EnvironmentPanelProps {
 export const EnvScopeCard: React.FC<{
 	/** Scope label (e.g. "Organization", "Team", "User"). */
 	label: string;
-	/** Current env dict. */
-	env: Record<string, string>;
+	/** Current env dict. `undefined` = not yet loaded (shows loading state). */
+	env: Record<string, string> | undefined;
+	/**
+	 * Called on mount to request the parent to load this scope's env data.
+	 * The parent fetches the data and sets the `env` prop, which triggers
+	 * a re-render with the loaded values.
+	 */
+	onRequestLoad?: () => void;
 	/** Saves the full dict. */
 	onSave: (env: Record<string, string>) => Promise<void>;
-}> = ({ label, env, onSave }) => {
+}> = ({ label, env, onRequestLoad, onSave }) => {
 	// Local draft state — clone from prop on load
 	const [draft, setDraft] = useState<[string, string][]>([]);
 	const [dirty, setDirty] = useState(false);
@@ -108,8 +114,15 @@ export const EnvScopeCard: React.FC<{
 	const [error, setError] = useState<string | null>(null);
 	const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
 
-	// Sync draft from prop when env changes externally
+	// Request data load on mount — the parent will set the env prop
+	// when the data arrives, triggering the sync effect below
 	useEffect(() => {
+		if (env === undefined && onRequestLoad) onRequestLoad();
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Sync draft from prop when env changes externally (including initial load)
+	useEffect(() => {
+		if (env === undefined) return; // Not yet loaded — keep current draft
 		setDraft(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)));
 		setDirty(false);
 	}, [env]);
@@ -178,7 +191,7 @@ export const EnvScopeCard: React.FC<{
 						<>
 							<button
 								onClick={() => {
-									setDraft(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)));
+									setDraft(env ? Object.entries(env).sort(([a], [b]) => a.localeCompare(b)) : []);
 									setDirty(false);
 									setError(null);
 								}}
@@ -204,29 +217,36 @@ export const EnvScopeCard: React.FC<{
 				</div>
 			</div>
 			<div style={{ padding: '8px 18px 12px' }}>
-				{/* Existing entries */}
-				{draft.map(([key, value], idx) => (
-					<div key={idx} style={styles.row}>
-						<input value={key} onChange={(e) => updateEntry(idx, 'key', e.target.value)} placeholder="ROCKETRIDE_KEY_NAME" style={styles.keyInput as CSSProperties} />
-						<input type={revealedKeys.has(key) ? 'text' : 'password'} value={value} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
-						<button onClick={() => toggleReveal(key)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
-							{revealedKeys.has(key) ? 'Hide' : 'Show'}
-						</button>
-						<button onClick={() => removeEntry(idx)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
-							Delete
-						</button>
-					</div>
-				))}
+				{/* Loading state — env hasn't arrived from the server yet */}
+				{env === undefined ? (
+					<div style={{ padding: '8px 0', fontSize: 12, color: 'var(--rr-text-disabled)' }}>Loading...</div>
+				) : (
+					<>
+						{/* Existing entries */}
+						{draft.map(([key, value], idx) => (
+							<div key={idx} style={styles.row}>
+								<input value={key} onChange={(e) => updateEntry(idx, 'key', e.target.value)} placeholder="ROCKETRIDE_KEY_NAME" style={styles.keyInput as CSSProperties} />
+								<input type={revealedKeys.has(key) ? 'text' : 'password'} value={value} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
+								<button onClick={() => toggleReveal(key)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
+									{revealedKeys.has(key) ? 'Hide' : 'Show'}
+								</button>
+								<button onClick={() => removeEntry(idx)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
+									Delete
+								</button>
+							</div>
+						))}
 
-				{/* Add button */}
-				<div style={styles.addRow}>
-					<button onClick={addEntry} style={{ ...commonStyles.buttonSecondarySmall, fontSize: 11 } as CSSProperties}>
-						+ Add Variable
-					</button>
-				</div>
+						{/* Add button */}
+						<div style={styles.addRow}>
+							<button onClick={addEntry} style={{ ...commonStyles.buttonSecondarySmall, fontSize: 11 } as CSSProperties}>
+								+ Add Variable
+							</button>
+						</div>
 
-				{/* Empty state */}
-				{draft.length === 0 && <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--rr-text-disabled)' }}>No environment variables set at this level.</div>}
+						{/* Empty state */}
+						{draft.length === 0 && <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--rr-text-disabled)' }}>No environment variables set at this level.</div>}
+					</>
+				)}
 			</div>
 		</div>
 	);

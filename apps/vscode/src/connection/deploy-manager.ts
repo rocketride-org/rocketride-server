@@ -103,7 +103,7 @@ export class DeployManager extends ConnectionManager {
 	// =========================================================================
 
 	/** Events forwarded from the dev connection in shared mode. */
-	private static readonly FORWARDED_EVENTS = ['shell:statusChange', 'shell:statusMessage', 'shell:connected', 'shell:disconnected', 'shell:error', 'shell:event', 'shell:servicesUpdated'];
+	private static readonly FORWARDED_EVENTS = ['shell:statusChange', 'shell:statusMessage', 'shell:connected', 'shell:disconnected', 'shell:error', 'shell:event', 'shell:accountUpdate', 'shell:servicesUpdated'];
 
 	/**
 	 * Subscribes to the dev connection and re-emits events under the deploy

@@ -428,10 +428,11 @@ const SidebarViewWebview: React.FC = () => {
 			});
 		}
 
-		// ── Account / Billing / Settings / Log out ──────────────────────────
+		// ── Account / Settings / Log out ─────────────────────────────────────
 		// cloudConnected is computed by the extension host via isCloudConnected()
+		// Billing is a tab inside Account — no separate menu item needed.
 		if (cloudConnected) {
-			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) }, { id: 'billing', label: 'Billing', icon: BxCog, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.billing.open' }) });
+			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) });
 		}
 
 		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });

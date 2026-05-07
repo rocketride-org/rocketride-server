@@ -55,7 +55,6 @@ export default defineConfig({
 			'page-welcome': './src/providers/views/Welcome/index.tsx',
 			'page-monitor': './src/providers/views/Monitor/index.tsx',
 			'page-account': './src/providers/views/Account/index.tsx',
-			'page-billing': './src/providers/views/Billing/index.tsx',
 			'page-auth': './src/providers/views/Auth/index.tsx',
 		},
 	},

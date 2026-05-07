@@ -41,6 +41,9 @@ interface AccountWebviewMessage {
 	params?: Record<string, unknown>;
 	appId?: string;
 	packId?: string;
+	scope?: 'org' | 'team' | 'user';
+	scopeId?: string;
+	env?: Record<string, string>;
 }
 
 // =============================================================================
@@ -50,6 +53,14 @@ interface AccountWebviewMessage {
 export class AccountProvider {
 	/** Singleton panel reference — prevents duplicate panels. */
 	private static panel: vscode.WebviewPanel | null = null;
+
+	/** Tracks the last section the webview navigated to, so we know what to
+	 *  reload when a server-pushed account update arrives. */
+	private static currentSection: string = 'profile';
+
+	/** Tracks the currently viewed team detail, so we can reload it when
+	 *  a server-pushed account update arrives (e.g. permission changes). */
+	private static activeTeamId: string | null = null;
 
 	private disposables: vscode.Disposable[] = [];
 
@@ -180,6 +191,7 @@ export class AccountProvider {
 				break;
 
 			case 'account:loadTeamDetail':
+				AccountProvider.activeTeamId = message.teamId as string;
 				await this.handleLoadTeamDetail(panel, message.teamId as string);
 				break;
 
@@ -217,8 +229,46 @@ export class AccountProvider {
 				await this.handleBuyCredits(message.packId as string);
 				break;
 
+			// -- Environment variables --------------------------------------------
+			case 'account:getEnv': {
+				const { client: envGetClient } = this.resolveClient();
+				if (!envGetClient) {
+					this.postError(panel, 'Not connected');
+					break;
+				}
+				try {
+					// Fetch env vars for the requested scope from the server
+					const env = await envGetClient.account.getEnv(message.scope!, message.scopeId);
+					await panel.webview.postMessage({
+						type: 'account:env',
+						scope: message.scope,
+						scopeId: message.scopeId,
+						env,
+					});
+				} catch (err: unknown) {
+					this.postError(panel, err instanceof Error ? err.message : String(err));
+				}
+				break;
+			}
+
+			case 'account:saveEnv': {
+				const { client: envSaveClient } = this.resolveClient();
+				if (!envSaveClient) {
+					this.postError(panel, 'Not connected');
+					break;
+				}
+				try {
+					// Persist env vars for the requested scope on the server
+					await envSaveClient.account.setEnv(message.scope!, message.env!, message.scopeId);
+				} catch (err: unknown) {
+					this.postError(panel, err instanceof Error ? err.message : String(err));
+				}
+				break;
+			}
+
 			// -- Section navigation (lazy loading) --------------------------------
 			case 'account:sectionChange':
+				AccountProvider.currentSection = message.section as string;
 				await this.handleSectionChange(panel, message.section as string);
 				break;
 		}
@@ -298,6 +348,11 @@ export class AccountProvider {
 			case 'teams':
 				await this.refreshOrg(panel);
 				await this.refreshTeams(panel);
+				// If a team detail is currently being viewed, reload it too
+				// so permission/member changes are reflected
+				if (AccountProvider.activeTeamId) {
+					await this.handleLoadTeamDetail(panel, AccountProvider.activeTeamId);
+				}
 				break;
 			case 'billing':
 				await this.fetchBillingData(panel);
@@ -711,11 +766,21 @@ export class AccountProvider {
 			});
 		});
 
-		// Re-fetch profile when the server pushes an account update event
-		const accountEventListener = this.connectionManager.on('shell:event', (event: any) => {
-			if (event?.event === 'apaext_account' && AccountProvider.panel) {
-				this.refreshProfile(AccountProvider.panel).catch((error) => {
+		// Re-fetch data when the server pushes an account update
+		const accountEventListener = this.connectionManager.on('shell:accountUpdate', () => {
+			if (AccountProvider.panel) {
+				const panel = AccountProvider.panel;
+				// Refresh profile (always needed — identity/permissions may have changed)
+				this.refreshProfile(panel).catch((error) => {
 					console.error(`[AccountProvider] Account update error: ${error}`);
+				});
+				// Re-fetch the currently visible section's data (teams, members, etc.)
+				this.handleSectionChange(panel, AccountProvider.currentSection).catch((error) => {
+					console.error(`[AccountProvider] Section reload error: ${error}`);
+				});
+				// Notify the webview so it can re-fetch env data
+				panel.webview.postMessage({ type: 'account:accountUpdate' }).then(undefined, (err: unknown) => {
+					console.error(`[AccountProvider] Failed to post accountUpdate: ${err}`);
 				});
 			}
 		});

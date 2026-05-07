@@ -86,13 +86,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		const eventListener = this.connectionManager.on('shell:event', (event) => {
 			try {
 				this.handleEvent(event);
-				// Forward subscription status changes from account updates
-				if (event.event === 'apaext_account') {
-					this.broadcastSubscriptionStatus();
-				}
 			} catch (error) {
 				this.logger.error(`Handling event: ${error}`);
 			}
+		});
+
+		// Account updates (subscription changes, env changes) are emitted as
+		// a dedicated shell:accountUpdate — no longer buried in shell:event
+		const accountUpdateListener = this.connectionManager.on('shell:accountUpdate', () => {
+			this.broadcastSubscriptionStatus();
 		});
 
 		const connectionStateListener = this.connectionManager.on('shell:statusChange', async (connectionStatus) => {
@@ -110,7 +112,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.broadcastServicesToAllEditors(payload);
 		});
 
-		this.disposables.push(eventListener, connectionStateListener, servicesUpdatedListener);
+		this.disposables.push(eventListener, accountUpdateListener, connectionStateListener, servicesUpdatedListener);
 	}
 
 	// =========================================================================

@@ -46,7 +46,7 @@ import { StatusProvider } from './providers/StatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
-import { BillingProvider } from './providers/BillingProvider';
+// BillingProvider removed — billing is now a tab in AccountProvider
 import { AuthProvider } from './providers/AuthProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
@@ -247,7 +247,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				status = new StatusProvider(context);
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				new AccountProvider(context);
-				new BillingProvider(context);
 				new AuthProvider(context, context.extensionUri);
 
 				// Register unified project editor (canvas + status + trace)

@@ -26,7 +26,7 @@ import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
-import { EnvVariablesSettings } from './EnvVariablesSettings';
+// EnvVariablesSettings removed — env is now managed in the Account page
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
@@ -547,46 +547,6 @@ export const Settings: React.FC = () => {
 		sendMessage({ type: 'sudoPassword', password } as any);
 	};
 
-	/**
-	 * Add or update an environment variable (local state only, not saved until "Save All Settings")
-	 */
-	const handleEnvVarAdd = (key: string, value: string): void => {
-		setSettings((prev) => ({
-			...prev,
-			envVars: {
-				...prev.envVars,
-				[key]: value,
-			},
-		}));
-	};
-
-	/**
-	 * Update an existing environment variable (local state only, not saved until "Save All Settings")
-	 */
-	const handleEnvVarUpdate = (key: string, value: string): void => {
-		setSettings((prev) => ({
-			...prev,
-			envVars: {
-				...prev.envVars,
-				[key]: value,
-			},
-		}));
-	};
-
-	/**
-	 * Delete an environment variable (local state only, not saved until "Save All Settings")
-	 */
-	const handleEnvVarDelete = (key: string): void => {
-		setSettings((prev) => {
-			const newEnvVars = { ...prev.envVars };
-			delete newEnvVars[key];
-			return {
-				...prev,
-				envVars: newEnvVars,
-			};
-		});
-	};
-
 	// ========================================================================
 	// RENDER
 	// ========================================================================
@@ -600,7 +560,6 @@ export const Settings: React.FC = () => {
 			{ id: 'development', label: 'Development' },
 			{ id: 'deployment', label: 'Deployment' },
 			{ id: 'pipeline', label: 'Pipeline' },
-			{ id: 'environment', label: 'Environment' },
 			{ id: 'debugging', label: 'Debugging' },
 			{ id: 'integrations', label: 'Integrations' },
 		],
@@ -726,14 +685,6 @@ export const Settings: React.FC = () => {
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
 						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
-					</div>
-				),
-			},
-			environment: {
-				content: (
-					<div style={commonStyles.tabContent}>
-						<MessageDisplay message={message} />
-						<EnvVariablesSettings settings={settings} onSave={handleSaveSettings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
 					</div>
 				),
 			},

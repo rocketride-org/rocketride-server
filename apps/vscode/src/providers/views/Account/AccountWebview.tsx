@@ -67,6 +67,16 @@ const AccountWebview: React.FC = () => {
 
 	const sendMessageRef = useRef<(msg: AccountWebviewToHost) => void>(() => {});
 
+	/**
+	 * Pending promise resolvers for `onLoadEnv`. The provider posts
+	 * `account:env` asynchronously; this map holds resolve functions
+	 * keyed by `scope:scopeId` so each response fulfils the correct caller.
+	 */
+	const envResolverRef = useRef<Map<string, (env: Record<string, string>) => void>>(new Map());
+
+	/** Bumped when an `account:accountUpdate` event arrives to trigger re-fetches. */
+	const [refreshSignal, setRefreshSignal] = useState(0);
+
 	// =========================================================================
 	// INCOMING MESSAGES
 	// =========================================================================
@@ -133,6 +143,23 @@ const AccountWebview: React.FC = () => {
 				setCreditBalance((message as any).creditBalance ?? null);
 				setCreditPacks((message as any).creditPacks ?? []);
 				break;
+
+			// -- Env variables ----------------------------------------------------
+			case 'account:env': {
+				// Resolve the pending promise for the matching scope+scopeId key
+				const key = `${message.scope}:${message.scopeId ?? ''}`;
+				const resolver = envResolverRef.current.get(key);
+				if (resolver) {
+					resolver(message.env);
+					envResolverRef.current.delete(key);
+				}
+				break;
+			}
+			case 'account:accountUpdate': {
+				// Bump signal so downstream components re-fetch env data
+				setRefreshSignal((n) => n + 1);
+				break;
+			}
 
 			// -- Error ------------------------------------------------------------
 			case 'account:error':
@@ -240,6 +267,26 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'account:loadTeamDetail', teamId });
 	}, []);
 
+	/** Requests env data from the extension host via postMessage and waits for the response. */
+	const handleLoadEnv = useCallback(async (scope: 'org' | 'team' | 'user', scopeId?: string): Promise<Record<string, string>> => {
+		return new Promise<Record<string, string>>((resolve) => {
+			const key = `${scope}:${scopeId ?? ''}`;
+			// Step 1: stash the resolver so the incoming message handler can fulfil it.
+			envResolverRef.current.set(key, resolve);
+			// Step 2: send the request to the host.
+			sendMessageRef.current({ type: 'account:getEnv', scope, scopeId });
+			// Step 3: timeout fallback — resolve with empty if host doesn't respond.
+			setTimeout(() => {
+				if (envResolverRef.current.delete(key)) resolve({});
+			}, 10000);
+		});
+	}, []);
+
+	/** Sends an env save request to the extension host. */
+	const handleSaveEnv = useCallback(async (scope: 'org' | 'team' | 'user', env: Record<string, string>, scopeId?: string): Promise<void> => {
+		sendMessageRef.current({ type: 'account:saveEnv', scope, env, scopeId });
+	}, []);
+
 	/** Cancels a subscription by app ID. */
 	const handleCancelSubscription = useCallback(async (appId: string): Promise<void> => {
 		sendMessageRef.current({ type: 'billing:cancel', appId } as any);
@@ -306,12 +353,9 @@ const AccountWebview: React.FC = () => {
 			onEditTeamMemberPerms={handleEditTeamMemberPerms}
 			onRemoveTeamMember={handleRemoveTeamMember}
 			onLoadTeamDetail={handleLoadTeamDetail}
-			orgEnv={{}}
-			teamEnv={{}}
-			userEnv={{}}
-			onSaveOrgEnv={async () => {}}
-			onSaveTeamEnv={async () => {}}
-			onSaveUserEnv={async () => {}}
+			onLoadEnv={handleLoadEnv}
+			onSaveEnv={handleSaveEnv}
+			refreshSignal={refreshSignal}
 		/>
 	);
 };
