@@ -46,6 +46,7 @@ from functools import cached_property
 from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .account import AccountApi
 from .billing import BillingApi
+from .database import DatabaseApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -317,6 +318,11 @@ class RocketRideClient(
     def billing(self) -> BillingApi:
         """Billing and subscription operations (plans, checkout, credits)."""
         return BillingApi(self)
+
+    @cached_property
+    def database(self) -> DatabaseApi:
+        """Direct database query operations (raw SQL/Cypher execution)."""
+        return DatabaseApi(self)
 
     # =========================================================================
     # TASK METHODS
