@@ -2,7 +2,7 @@
 	"title": "Shell",
 	"protocol": "tool_shell://",
 	"classType": ["tool"],
-	"capabilities": ["invoke"],
+	"capabilities": ["invoke", "experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_shell",
