@@ -1,0 +1,65 @@
+# shellcheck shell=bash
+# Discord webhook call helper with retry/backoff.
+#
+# Sourced by .github/workflows/discord-{pr,issues,discussions}.yml. Each
+# workflow performs actions/checkout (default branch / PR head), then:
+#
+#   source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
+#   PATCH_BODY=$(discord_curl -X PATCH ...) || true
+#   PATCH_STATUS=$(cat "$DISCORD_STATUS_FILE")
+#
+# Discord webhooks return 429 (with Retry-After) and transient 5xx during
+# incidents. Without retry any blip aborts the job, blocking the calling
+# workflow's checks queue. discord_curl wraps curl so 429/5xx are retried;
+# non-429 4xx are returned to the caller unchanged.
+#
+# Status sink: callers invoke discord_curl via $(...), which runs in a
+# subshell, so shell variables set inside don't propagate back. The HTTP
+# status is published through DISCORD_STATUS_FILE (a step-owned temp file)
+# so callers can read it after the substitution returns.
+
+DISCORD_STATUS_FILE=$(mktemp)
+trap 'rm -f "$DISCORD_STATUS_FILE"' EXIT
+
+discord_curl() {
+  local max_attempts=5 attempt=1 backoff=1
+  local headers response status body retry_after
+  headers=$(mktemp); trap 'rm -f "$headers"' RETURN
+  while [ $attempt -le $max_attempts ]; do
+    : > "$headers"
+    response=$(curl -sS --connect-timeout 10 --max-time 60 -D "$headers" -w "\n%{http_code}" "$@") || true
+    status=$(printf '%s' "$response" | tail -n 1)
+    body=$(printf '%s' "$response" | sed '$d')
+
+    if [ -n "$status" ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+      printf '%s' "$status" > "$DISCORD_STATUS_FILE"
+      printf '%s' "$body"
+      return 0
+    fi
+
+    if [ "$status" = "429" ]; then
+      retry_after=$(awk 'tolower($1)=="retry-after:"{print $2}' "$headers" | tr -d '\r' | head -n1)
+      retry_after=${retry_after:-$backoff}
+      retry_after=$(awk -v n="$retry_after" 'BEGIN{ x=n+0; printf "%d", (x<1?1:(x==int(x)?x:int(x)+1)) }')
+      [ "$retry_after" -gt 60 ] && retry_after=60
+      echo "::warning::Discord 429 (rate limited); sleeping ${retry_after}s before retry $((attempt+1))/${max_attempts}" >&2
+      sleep "$retry_after"
+    elif [ -n "$status" ] && [ "$status" -ge 500 ]; then
+      echo "::warning::Discord ${status} (transient); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
+      sleep "$backoff"
+      backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
+    elif [ -z "$status" ]; then
+      echo "::warning::Discord call failed (no HTTP response); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
+      sleep "$backoff"
+      backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
+    else
+      printf '%s' "$status" > "$DISCORD_STATUS_FILE"
+      printf '%s' "$body"
+      return 1
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '%s' "${status:-000}" > "$DISCORD_STATUS_FILE"
+  printf '%s' "$body"
+  return 1
+}
