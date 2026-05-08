@@ -30,6 +30,54 @@ jobs:
             exit 0
           fi
 
+          # ── Discord webhook call helper with retry/backoff ───────────────
+          # Discord webhooks return 429 (rate limit, with Retry-After) and
+          # transient 5xx during incidents. Without retry any blip aborts
+          # the job. This wraps curl so 429/5xx are retried; non-429 4xx
+          # are returned to the caller. Sets $DISCORD_LAST_STATUS.
+          discord_curl() {
+            local max_attempts=5 attempt=1 backoff=1
+            local headers response status body retry_after
+            headers=$(mktemp); trap 'rm -f "$headers"' RETURN
+            while [ $attempt -le $max_attempts ]; do
+              : > "$headers"
+              response=$(curl -sS -D "$headers" -w "\n%{http_code}" "$@") || true
+              status=$(printf '%s' "$response" | tail -n 1)
+              body=$(printf '%s' "$response" | sed '$d')
+
+              if [ -n "$status" ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+                DISCORD_LAST_STATUS="$status"
+                printf '%s' "$body"
+                return 0
+              fi
+
+              if [ "$status" = "429" ]; then
+                retry_after=$(awk 'tolower($1)=="retry-after:"{print $2}' "$headers" | tr -d '\r' | head -n1)
+                retry_after=${retry_after:-$backoff}
+                retry_after=$(awk -v n="$retry_after" 'BEGIN{ x=n+0; printf "%d", (x<1?1:(x==int(x)?x:int(x)+1)) }')
+                [ "$retry_after" -gt 60 ] && retry_after=60
+                echo "::warning::Discord 429 (rate limited); sleeping ${retry_after}s before retry $((attempt+1))/${max_attempts}" >&2
+                sleep "$retry_after"
+              elif [ -n "$status" ] && [ "$status" -ge 500 ]; then
+                echo "::warning::Discord ${status} (transient); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
+                sleep "$backoff"
+                backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
+              elif [ -z "$status" ]; then
+                echo "::warning::Discord call failed (no HTTP response); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
+                sleep "$backoff"
+                backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
+              else
+                DISCORD_LAST_STATUS="$status"
+                printf '%s' "$body"
+                return 1
+              fi
+              attempt=$((attempt + 1))
+            done
+            DISCORD_LAST_STATUS="${status:-000}"
+            printf '%s' "$body"
+            return 1
+          }
+
           NUMBER="${{ github.event.discussion.number }}"
           OWNER="${REPO%/*}"
           NAME="${REPO#*/}"
@@ -202,13 +250,11 @@ jobs:
 
           # ── Post or patch ────────────────────────────────────────────────
           if [ -n "$DISCORD_MSG_ID" ]; then
-            PATCH_RESPONSE=$(curl -sS -w "\n%{http_code}" -X PATCH \
+            PATCH_BODY=$(discord_curl -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
-
-            PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
-            PATCH_STATUS=$(echo "$PATCH_RESPONSE" | tail -n 1)
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID") || true
+            PATCH_STATUS="$DISCORD_LAST_STATUS"
             echo "PATCH status: $PATCH_STATUS"
 
             if [ "$PATCH_STATUS" = "404" ]; then
@@ -223,10 +269,13 @@ jobs:
           fi
 
           if [ -z "$DISCORD_MSG_ID" ]; then
-            RESPONSE=$(curl -sS -f \
+            if ! RESPONSE=$(discord_curl \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "${DISCORD_WEBHOOK_URL}?wait=true")
+              "${DISCORD_WEBHOOK_URL}?wait=true"); then
+              echo "::error::Discord POST failed (status ${DISCORD_LAST_STATUS}) after retries"
+              exit 1
+            fi
             NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
 
             # ── Race guard: re-search for a marker created by a concurrent run ──
@@ -234,10 +283,10 @@ jobs:
 
             if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
               # Another run won the race — delete our duplicate message, use theirs
-              curl -sS -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" || true
+              discord_curl -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" > /dev/null || true
               DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
-              curl -sS -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
-                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null
+              discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
               gh api graphql \
