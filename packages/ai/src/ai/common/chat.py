@@ -13,7 +13,7 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -80,6 +80,15 @@ class ChatBase:
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
 
+        # Most-recent ``AIMessage.usage_metadata`` from a LangChain-backed
+        # invoke, normalised by ``_normalize_usage``. ``chat()`` resets this
+        # before each question and copies the final value onto the returned
+        # Answer so the writeAnswers trace surfaces token counts at FULL
+        # pipeline trace level. Providers that don't go through
+        # ``self._llm.invoke`` (e.g. Gemini, IBM Watson use vendor SDKs
+        # directly) leave this as ``None``.
+        self._last_usage: Optional[Dict[str, Any]] = None
+
     def getTotalTokens(self) -> int:
         """
         Return the total number of tokens that the model can handle.
@@ -126,9 +135,23 @@ class ChatBase:
         Raises:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
+
+        Side effects:
+            Captures ``AIMessage.usage_metadata`` from the LangChain response
+            into ``self._last_usage`` so ``chat()`` can attach token counts to
+            the returned ``Answer``. Subclasses that override this method to
+            bypass LangChain (e.g. vendor-SDK drivers) should populate
+            ``self._last_usage`` themselves if they want their token counts in
+            the trace.
         """
         # Ask the LLM
         results = self._llm.invoke(prompt)
+
+        # Capture token usage from the AIMessage. LangChain standardises
+        # ``usage_metadata`` across providers (Anthropic, OpenAI, Bedrock,
+        # Vertex, etc.), so a single hook here covers every provider that
+        # routes through ``self._llm.invoke`` without per-driver wiring.
+        self._last_usage = _normalize_usage(getattr(results, 'usage_metadata', None))
 
         # Return the results
         return results.content
@@ -409,6 +432,11 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
+        # Reset captured usage so a stale value from a prior question can't
+        # leak onto this Answer if the underlying _chat fails before
+        # populating it (e.g. a vendor-SDK driver that doesn't surface usage).
+        self._last_usage = None
+
         # Use chat_string which already handles network retries and token management
         response = self.chat_string(question.getPrompt())
 
@@ -427,6 +455,8 @@ class ChatBase:
                     # Create the json answer and return it
                     answer = Answer(expectJson=True)
                     answer.setAnswer(parsed_response)
+                    if self._last_usage:
+                        answer.usage_metadata = self._last_usage
                     return answer
 
                 except (json.JSONDecodeError, ValueError):
@@ -448,8 +478,58 @@ class ChatBase:
             answer = Answer(expectJson=False)
             answer.setAnswer(response)
 
+            # Attach usage_metadata captured by _chat (None for vendor-SDK
+            # drivers that bypass LangChain's standardised usage shape).
+            if self._last_usage:
+                answer.usage_metadata = self._last_usage
+
             # And return it
             return answer
+
+
+def _normalize_usage(usage: Any) -> Optional[Dict[str, Any]]:
+    """Normalise LangChain ``AIMessage.usage_metadata`` into a plain JSON-ready dict.
+
+    Preserves LangChain's cross-provider standardised shape (``input_tokens``,
+    ``output_tokens``, ``total_tokens``, plus optional ``input_token_details``
+    / ``output_token_details``) so any provider routed through
+    ``self._llm.invoke`` ends up with usable token counts in the trace
+    without per-driver code.
+
+    Additionally surfaces Anthropic's raw-API field names
+    (``cache_read_input_tokens`` / ``cache_creation_input_tokens``) as flat
+    aliases when ``input_token_details.cache_read`` /
+    ``input_token_details.cache_creation`` are present, so tracer consumers
+    that already expect those names from Anthropic don't have to navigate
+    the nested details dict.
+
+    Returns ``None`` if ``usage`` is missing or has no extractable fields,
+    which lets ``chat()`` skip attaching the field entirely.
+    """
+    if not isinstance(usage, dict):
+        return None
+
+    out: Dict[str, Any] = {}
+
+    for key in ('input_tokens', 'output_tokens', 'total_tokens'):
+        val = usage.get(key)
+        if isinstance(val, (int, float)):
+            out[key] = int(val)
+
+    for details_key in ('input_token_details', 'output_token_details'):
+        details = usage.get(details_key)
+        if isinstance(details, dict):
+            converted = {k: int(v) for k, v in details.items() if isinstance(v, (int, float))}
+            if converted:
+                out[details_key] = converted
+
+    input_details = out.get('input_token_details') or {}
+    if 'cache_read' in input_details:
+        out['cache_read_input_tokens'] = input_details['cache_read']
+    if 'cache_creation' in input_details:
+        out['cache_creation_input_tokens'] = input_details['cache_creation']
+
+    return out or None
 
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:
