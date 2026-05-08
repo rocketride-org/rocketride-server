@@ -57,7 +57,7 @@
 			"handlebars": ">=4.7.9",
 			"js-yaml": ">=4.1.1",
 			"postcss": ">=8.4.31",
-			"protobufjs": ">=7.5.5",
+			"protobufjs": ">=7.5.5 <8",
 			"qs": ">=6.14.1"
 		},
 		"supportedArchitectures": {
