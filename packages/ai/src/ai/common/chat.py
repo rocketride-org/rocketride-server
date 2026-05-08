@@ -551,8 +551,10 @@ class ChatBase:
             result_tokens = self.getTokens(response)
             if prompt_tokens + result_tokens >= self._modelTotalTokens - 5:
                 debug(f'Warning: Result ({result_tokens} tokens) was probably truncated')
-        except Exception:
-            pass
+        except Exception as e:
+            # Don't fail the call: chunks are already on the wire. But log
+            # so tokenizer issues are visible instead of silently swallowed.
+            debug(f'Warning: getTokens(response) failed after streaming (modelTotalTokens={self._modelTotalTokens}, prompt_tokens={prompt_tokens}): {e}')
 
         answer = Answer(expectJson=False)
         answer.setAnswer(response)
