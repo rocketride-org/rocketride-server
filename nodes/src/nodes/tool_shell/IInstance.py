@@ -31,11 +31,12 @@ returns stdout, stderr, and exit code.
 from __future__ import annotations
 
 import os
+import shlex
 
 from rocketlib import IInstanceBase, tool_function
 
 from .IGlobal import IGlobal, MAX_TIMEOUT
-from .shell_executor import build_environment, execute_command
+from .shell_executor import build_environment, execute_command, is_destructive_argv
 
 
 class IInstance(IInstanceBase):
@@ -50,7 +51,7 @@ class IInstance(IInstanceBase):
             'properties': {
                 'command': {
                     'type': 'string',
-                    'description': 'Shell command to execute (interpreted by the host shell). Example: "npm run build" or "ls -la /tmp".',
+                    'description': 'Command to execute. By default it is parsed (shlex) into argv and run without a shell — pipes, redirects, globs, and "&&" do not work. Set "use_shell": true (only if the node permits it) to enable shell features. Example: "npm run build" or "ls -la /tmp".',
                 },
                 'working_dir': {
                     'type': 'string',
@@ -65,6 +66,16 @@ class IInstance(IInstanceBase):
                     'type': 'integer',
                     'description': 'Optional timeout in seconds for this call. Capped by the node configuration.',
                     'minimum': 1,
+                },
+                'use_shell': {
+                    'type': 'boolean',
+                    'description': 'If true, run the command via the host shell (enables pipes, redirects, globs, "&&"). Only honored when the node has shell mode enabled in its configuration; otherwise the call is rejected.',
+                    'default': False,
+                },
+                'confirm_destructive': {
+                    'type': 'boolean',
+                    'description': 'Required to permit destructive operations like "rm -r", "dd of=", "mkfs", "find -delete", "shred", "git clean -f", "chmod 000", "truncate -s 0". Without this flag, such commands are rejected. Only checked in argv mode.',
+                    'default': False,
                 },
             },
         },
@@ -104,6 +115,10 @@ class IInstance(IInstanceBase):
 
         self._validate_command(command)
 
+        use_shell = bool(args.get('use_shell', False))
+        if use_shell and not self.IGlobal.allow_shell:
+            raise ValueError('"use_shell" is not permitted by the node configuration. Enable "Allow shell mode" in the node configuration to run commands through the host shell.')
+
         cwd = self._resolve_cwd(args.get('working_dir'))
         timeout = self._resolve_timeout(args.get('timeout'))
         call_env = args.get('env')
@@ -117,12 +132,28 @@ class IInstance(IInstanceBase):
             allow_external_env=self.IGlobal.allow_external_env,
         )
 
+        if use_shell:
+            command_to_run: str | list[str] = command
+        else:
+            try:
+                argv = shlex.split(command)
+            except ValueError as exc:
+                raise ValueError(f'Could not parse command into argv: {exc}') from exc
+            if not argv:
+                raise ValueError('"command" must contain at least one token after parsing')
+
+            destructive, label = is_destructive_argv(argv)
+            if destructive and not bool(args.get('confirm_destructive', False)):
+                raise ValueError(f'Command appears to perform a destructive operation ({label}). Pass "confirm_destructive": true in the call args to acknowledge and proceed.')
+            command_to_run = argv
+
         return execute_command(
-            command,
+            command_to_run,
             cwd=cwd,
             env=env,
             timeout=timeout,
             max_output_bytes=self.IGlobal.max_output_bytes,
+            use_shell=use_shell,
         )
 
     def _validate_command(self, command: str) -> None:

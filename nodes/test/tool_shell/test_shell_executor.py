@@ -16,21 +16,20 @@ from pathlib import Path
 # engine runtime).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_shell'))
 
-from shell_executor import build_environment, execute_command  # noqa: E402
+from shell_executor import build_environment, execute_command, is_destructive_argv  # noqa: E402
 
 
-# Use the running interpreter so the tests are cross-platform: shell=True
-# resolves the path on both Windows (cmd.exe) and Unix (/bin/sh).
-PY = f'"{sys.executable}"'
+# Use the running interpreter so the tests are cross-platform.
+PY = sys.executable
 
 
 class TestExecuteCommandBasics:
-    """execute_command happy paths."""
+    """execute_command happy paths in argv mode (the safer default)."""
 
     def test_captures_stdout(self):
         """Stdout from the child is captured in the result."""
         result = execute_command(
-            f'{PY} -c "print(\'hello\')"',
+            [PY, '-c', "print('hello')"],
             cwd=None,
             env=dict(os.environ),
             timeout=10,
@@ -44,7 +43,7 @@ class TestExecuteCommandBasics:
     def test_captures_stderr(self):
         """Stderr from the child is captured in the result."""
         result = execute_command(
-            f'{PY} -c "import sys; sys.stderr.write(\'oops\')"',
+            [PY, '-c', "import sys; sys.stderr.write('oops')"],
             cwd=None,
             env=dict(os.environ),
             timeout=10,
@@ -56,7 +55,7 @@ class TestExecuteCommandBasics:
     def test_propagates_nonzero_exit_code(self):
         """Non-zero exit codes propagate verbatim."""
         result = execute_command(
-            f'{PY} -c "import sys; sys.exit(2)"',
+            [PY, '-c', 'import sys; sys.exit(2)'],
             cwd=None,
             env=dict(os.environ),
             timeout=10,
@@ -64,6 +63,39 @@ class TestExecuteCommandBasics:
         )
         assert result['exit_code'] == 2
         assert result['timed_out'] is False
+
+    def test_argv_mode_does_not_interpret_shell_metacharacters(self):
+        """Pipes/redirects passed as argv tokens reach the child as literals."""
+        # In shell mode, '|' and 'evil' would pipe stdout. In argv mode they
+        # are positional arguments to python -c, not shell metas.
+        result = execute_command(
+            [PY, '-c', 'import sys; print(sys.argv[1:])', '|', 'evil'],
+            cwd=None,
+            env=dict(os.environ),
+            timeout=10,
+            max_output_bytes=4096,
+        )
+        assert result['exit_code'] == 0
+        assert "'|'" in result['stdout']
+        assert "'evil'" in result['stdout']
+
+
+class TestExecuteCommandShellMode:
+    """Opt-in shell mode preserves access to pipes/redirects/globs."""
+
+    def test_shell_mode_interprets_metacharacters(self):
+        """With use_shell=True, '&&' chains commands at the shell level."""
+        result = execute_command(
+            f'"{PY}" -c "print(\'first\')" && "{PY}" -c "print(\'second\')"',
+            cwd=None,
+            env=dict(os.environ),
+            timeout=10,
+            max_output_bytes=4096,
+            use_shell=True,
+        )
+        assert result['exit_code'] == 0
+        assert 'first' in result['stdout']
+        assert 'second' in result['stdout']
 
 
 class TestExecuteCommandTimeout:
@@ -76,7 +108,7 @@ class TestExecuteCommandTimeout:
         # Track wall time so we can verify the tree-kill returns promptly.
         start = time.monotonic()
         result = execute_command(
-            f'{PY} -c "import time; time.sleep(5)"',
+            [PY, '-c', 'import time; time.sleep(5)'],
             cwd=None,
             env=dict(os.environ),
             timeout=1,
@@ -98,7 +130,7 @@ class TestExecuteCommandWorkingDir:
     def test_runs_in_specified_directory(self, tmp_path):
         """Child runs with the supplied cwd."""
         result = execute_command(
-            f'{PY} -c "import os; print(os.getcwd())"',
+            [PY, '-c', 'import os; print(os.getcwd())'],
             cwd=str(tmp_path),
             env=dict(os.environ),
             timeout=10,
@@ -118,7 +150,7 @@ class TestExecuteCommandEnvInjection:
         env = dict(os.environ)
         env['ROCKETRIDE_TEST_VAR'] = 'injected-value'
         result = execute_command(
-            f"{PY} -c \"import os; print(os.environ.get('ROCKETRIDE_TEST_VAR', 'MISSING'))\"",
+            [PY, '-c', "import os; print(os.environ.get('ROCKETRIDE_TEST_VAR', 'MISSING'))"],
             cwd=None,
             env=env,
             timeout=10,
@@ -136,7 +168,7 @@ class TestExecuteCommandTruncation:
         """Stdout above the cap is truncated and marked."""
         # Emit ~4 KiB but cap at 1 KiB.
         result = execute_command(
-            f'{PY} -c "print(\'x\' * 4096)"',
+            [PY, '-c', "print('x' * 4096)"],
             cwd=None,
             env=dict(os.environ),
             timeout=10,
@@ -155,7 +187,7 @@ class TestExecuteCommandTruncation:
         # this guards against the previous capture_output=True behaviour that
         # buffered the whole output in memory before truncating.
         result = execute_command(
-            f'{PY} -c "import sys; sys.stdout.write(\'y\' * (2 * 1024 * 1024))"',
+            [PY, '-c', "import sys; sys.stdout.write('y' * (2 * 1024 * 1024))"],
             cwd=None,
             env=dict(os.environ),
             timeout=15,
@@ -170,6 +202,81 @@ class TestExecuteCommandTruncation:
         payload = result['stdout'][: -len(marker)]
         assert len(payload) == 4096
         assert payload == 'y' * 4096
+
+
+class TestIsDestructiveArgv:
+    """is_destructive_argv detects argv that performs destructive operations."""
+
+    def test_empty_argv_is_not_destructive(self):
+        """An empty argv list is reported as non-destructive."""
+        ok, label = is_destructive_argv([])
+        assert ok is False and label is None
+
+    def test_plain_command_is_not_destructive(self):
+        """A normal read-only command is not flagged."""
+        ok, _ = is_destructive_argv(['ls', '-la'])
+        assert ok is False
+
+    def test_rm_without_recursive_is_not_destructive(self):
+        """`rm somefile` (no recursive flag) is not flagged — single-file deletes are routine."""
+        ok, _ = is_destructive_argv(['rm', 'somefile'])
+        assert ok is False
+
+    def test_rm_recursive_short(self):
+        """`rm -r dir` is flagged."""
+        ok, label = is_destructive_argv(['rm', '-r', 'dir'])
+        assert ok is True and label == 'rm -r'
+
+    def test_rm_recursive_combined_short(self):
+        """`rm -rf dir` (combined short flags) is flagged."""
+        ok, label = is_destructive_argv(['rm', '-rf', 'dir'])
+        assert ok is True and label == 'rm -r'
+
+    def test_rm_recursive_long(self):
+        """`rm --recursive dir` is flagged."""
+        ok, label = is_destructive_argv(['rm', '--recursive', 'dir'])
+        assert ok is True and label == 'rm -r'
+
+    def test_dd_with_of(self):
+        """`dd if=... of=...` is flagged."""
+        ok, label = is_destructive_argv(['dd', 'if=/dev/zero', 'of=/dev/sda'])
+        assert ok is True and label == 'dd of='
+
+    def test_mkfs_variants(self):
+        """`mkfs` and `mkfs.ext4` are both flagged."""
+        ok1, _ = is_destructive_argv(['mkfs', '/dev/sda1'])
+        ok2, _ = is_destructive_argv(['mkfs.ext4', '/dev/sda1'])
+        assert ok1 is True and ok2 is True
+
+    def test_find_delete(self):
+        """`find . -delete` is flagged."""
+        ok, label = is_destructive_argv(['find', '.', '-name', '*.log', '-delete'])
+        assert ok is True and label == 'find -delete'
+
+    def test_git_clean_force(self):
+        """`git clean -fd` is flagged."""
+        ok, label = is_destructive_argv(['git', 'clean', '-fd'])
+        assert ok is True and label == 'git clean -f'
+
+    def test_git_clean_dry_run_not_flagged(self):
+        """`git clean -n` (dry run, no force) is not flagged — git refuses to delete without -f."""
+        ok, _ = is_destructive_argv(['git', 'clean', '-n'])
+        assert ok is False
+
+    def test_truncate_to_zero(self):
+        """`truncate -s 0 file` is flagged."""
+        ok, label = is_destructive_argv(['truncate', '-s', '0', 'file'])
+        assert ok is True and label == 'truncate -s 0'
+
+    def test_shred(self):
+        """Bare `shred file` is flagged."""
+        ok, label = is_destructive_argv(['shred', 'file'])
+        assert ok is True and label == 'shred'
+
+    def test_chmod_000(self):
+        """`chmod 000 file` (lockout) is flagged."""
+        ok, label = is_destructive_argv(['chmod', '000', 'file'])
+        assert ok is True and label == 'chmod 000'
 
 
 class TestBuildEnvironment:

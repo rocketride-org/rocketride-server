@@ -24,7 +24,9 @@
 """
 Subprocess driver for tool_shell.
 
-Runs a command string in the host shell with bounded timeout and output capture.
+Runs a command in the host with bounded timeout and output capture. The
+default is argv-list execution with no shell (eliminates the shell-injection
+attack class); shell mode is opt-in via ``use_shell=True``.
 """
 
 from __future__ import annotations
@@ -34,11 +36,75 @@ import signal
 import subprocess
 import sys
 import threading
+from typing import Callable
 
 
 _TRUNCATED_MARKER = '\n...[truncated]'
 _READ_CHUNK_SIZE = 4096
 _IS_WINDOWS = sys.platform == 'win32'
+
+
+def _rm_recursive(argv: list[str]) -> bool:
+    """``rm`` invocation that recursively deletes (``-r`` / ``-rf`` / ``--recursive``)."""
+    if argv[0] != 'rm':
+        return False
+    for tok in argv[1:]:
+        if tok == '--recursive':
+            return True
+        if tok.startswith('-') and not tok.startswith('--') and ('r' in tok or 'R' in tok):
+            return True
+    return False
+
+
+def _git_clean_force(argv: list[str]) -> bool:
+    """``git clean`` with a force flag (the only way it actually deletes)."""
+    if argv[0] != 'git' or len(argv) < 2 or argv[1] != 'clean':
+        return False
+    return any(tok == '--force' or (tok.startswith('-') and not tok.startswith('--') and 'f' in tok) for tok in argv[2:])
+
+
+def _truncate_to_zero(argv: list[str]) -> bool:
+    """``truncate -s 0`` (or ``-s0``) — wipes file contents in place."""
+    if argv[0] != 'truncate':
+        return False
+    for i, tok in enumerate(argv[1:], start=1):
+        if tok == '-s' and i + 1 < len(argv) and argv[i + 1] == '0':
+            return True
+        if tok == '-s0' or tok == '--size=0':
+            return True
+    return False
+
+
+_DESTRUCTIVE_CHECKS: list[tuple[str, Callable[[list[str]], bool]]] = [
+    ('rm -r', _rm_recursive),
+    ('dd of=', lambda a: a[0] == 'dd' and any(t.startswith('of=') for t in a[1:])),
+    ('mkfs', lambda a: a[0] == 'mkfs' or a[0].startswith('mkfs.')),
+    ('find -delete', lambda a: a[0] == 'find' and '-delete' in a[1:]),
+    ('shred', lambda a: a[0] == 'shred'),
+    ('git clean -f', _git_clean_force),
+    ('chmod 000', lambda a: a[0] == 'chmod' and '000' in a[1:]),
+    ('truncate -s 0', _truncate_to_zero),
+]
+
+
+def is_destructive_argv(argv: list[str]) -> tuple[bool, str | None]:
+    """Return ``(True, label)`` if *argv* matches a known-destructive pattern.
+
+    Used by the IInstance layer to gate destructive operations behind an
+    explicit ``confirm_destructive`` token in the call args. Only meaningful
+    in argv mode — shell-mode commands aren't analysed because the shell can
+    express equivalent operations (redirects, expansions) that flat-string
+    analysis cannot reliably detect.
+    """
+    if not argv:
+        return False, None
+    for label, check in _DESTRUCTIVE_CHECKS:
+        try:
+            if check(argv):
+                return True, label
+        except (IndexError, AttributeError):
+            continue
+    return False, None
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
@@ -70,14 +136,20 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
 
 
 def execute_command(
-    command: str,
+    command: str | list[str],
     *,
     cwd: str | None,
     env: dict[str, str],
     timeout: int,
     max_output_bytes: int,
+    use_shell: bool = False,
 ) -> dict:
-    """Run *command* in the host shell and capture its result.
+    """Run *command* and capture its result.
+
+    With ``use_shell=False`` (default), *command* must be an argv list and
+    the child is spawned directly without a shell — eliminating the entire
+    shell-injection class. With ``use_shell=True``, *command* is a string
+    interpreted by the host shell (enabling pipes, redirects, globs, ``&&``).
 
     Stdout and stderr are streamed through reader threads and capped at
     ``max_output_bytes`` per stream so a runaway command cannot exhaust
@@ -89,7 +161,7 @@ def execute_command(
     # the entire tree on timeout — otherwise shell-spawned grandchildren
     # outlive proc.kill() and keep our reader threads blocked on their pipes.
     popen_kwargs: dict = {
-        'shell': True,
+        'shell': use_shell,
         'cwd': cwd,
         'env': env,
         'stdout': subprocess.PIPE,
@@ -105,7 +177,7 @@ def execute_command(
     except FileNotFoundError as exc:
         return {
             'stdout': '',
-            'stderr': f'Shell not available: {exc}',
+            'stderr': f'Command not available: {exc}',
             'exit_code': 127,
             'timed_out': False,
             'truncated': False,

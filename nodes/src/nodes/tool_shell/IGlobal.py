@@ -57,7 +57,8 @@ class IGlobal(IGlobalBase):
     timeout: int = DEFAULT_TIMEOUT
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     env_vars: dict[str, str] | None = None
-    allow_external_env: bool = True
+    allow_external_env: bool = False
+    allow_shell: bool = False
     command_patterns: list[re.Pattern] | None = None
 
     def beginGlobal(self) -> None:
@@ -71,6 +72,7 @@ class IGlobal(IGlobalBase):
         self.max_output_bytes = parse_max_output(cfg)
         self.env_vars = parse_env_vars(cfg)
         self.allow_external_env = bool(cfg.get('allowExternalEnv', False))
+        self.allow_shell = bool(cfg.get('allowShell', False))
 
         invalid_pattern_errors: list[str] = []
 
@@ -92,5 +94,6 @@ class IGlobal(IGlobalBase):
         self.timeout = DEFAULT_TIMEOUT
         self.max_output_bytes = DEFAULT_MAX_OUTPUT_BYTES
         self.env_vars = None
-        self.allow_external_env = True
+        self.allow_external_env = False
+        self.allow_shell = False
         self.command_patterns = None
