@@ -406,3 +406,87 @@ class AccountApi:
             teamId=team_id,
             userId=user_id,
         )
+
+    # =========================================================================
+    # ENVIRONMENT
+    # =========================================================================
+
+    async def get_environment_keys(self) -> list[str]:
+        """
+        Return the merged list of ROCKETRIDE_* key names (no values).
+
+        The list includes keys from all scopes (org → team → user) merged
+        in the same precedence order the server uses for pipeline resolution.
+
+        Returns:
+            Sorted list of ROCKETRIDE_* key names.
+        """
+        body = await self._client.call(
+            'rrext_account_me',
+            subcommand='env_keys',
+        )
+        return body.get('keys', [])
+
+    async def get_env(
+        self,
+        scope: str,
+        scope_id: str | None = None,
+    ) -> dict[str, str]:
+        """
+        Read the environment dict for a scope (org, team, or user).
+
+        Args:
+            scope: One of 'org', 'team', 'user'.
+            scope_id: For org: orgId. For team: teamId. For user: omit.
+
+        Returns:
+            Decrypted key-value dict of ROCKETRIDE_* variables.
+        """
+        if scope == 'org':
+            command = 'rrext_account_org'
+            kwargs = {'subcommand': 'get_env'}
+            if scope_id:
+                kwargs['orgId'] = scope_id
+        elif scope == 'team':
+            command = 'rrext_account_teams'
+            kwargs = {'subcommand': 'get_env'}
+            if scope_id:
+                kwargs['teamId'] = scope_id
+        else:
+            command = 'rrext_account_me'
+            kwargs = {'subcommand': 'get_env'}
+
+        body = await self._client.call(command, **kwargs)
+        return body.get('env', {})
+
+    async def set_env(
+        self,
+        scope: str,
+        env: dict[str, str],
+        scope_id: str | None = None,
+    ) -> None:
+        """
+        Write the full environment dict for a scope (org, team, or user).
+
+        Replaces the entire set of keys at that scope level.
+
+        Args:
+            scope: One of 'org', 'team', 'user'.
+            env: Full key-value dict to store.
+            scope_id: For org: orgId. For team: teamId. For user: omit.
+        """
+        if scope == 'org':
+            command = 'rrext_account_org'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+            if scope_id:
+                kwargs['orgId'] = scope_id
+        elif scope == 'team':
+            command = 'rrext_account_teams'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+            if scope_id:
+                kwargs['teamId'] = scope_id
+        else:
+            command = 'rrext_account_me'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+
+        await self._client.call(command, **kwargs)
