@@ -134,12 +134,20 @@ jobs:
         if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_SIGNING_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
         run: |
-          if [ -n "${GPG_SIGNING_KEY:-}" ]; then
+          # Require BOTH secrets — the signing step pipes the passphrase to
+          # gpg via --passphrase-fd 0, so a key-only setup would hard-fail
+          # at sign time. Skip cleanly on partial setup; surface which
+          # secret is missing for faster debugging.
+          if [ -n "${GPG_SIGNING_KEY:-}" ] && [ -n "${GPG_SIGNING_PASSPHRASE:-}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::GPG_SIGNING_KEY not configured — server tarballs will be released unsigned"
+            missing=()
+            [ -z "${GPG_SIGNING_KEY:-}" ] && missing+=("GPG_SIGNING_KEY")
+            [ -z "${GPG_SIGNING_PASSPHRASE:-}" ] && missing+=("GPG_SIGNING_PASSPHRASE")
+            echo "::warning::Missing secret(s): ${missing[*]} — server tarballs will be released unsigned"
           fi
 
       - name: GPG-sign server artifacts
