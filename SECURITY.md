@@ -40,6 +40,36 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 - We request a 90-day disclosure window for non-critical issues
 - We will credit reporters (unless anonymity is requested)
 
+## Vulnerability & Alert Triage
+
+This project uses GitHub-native scanning on the `develop` branch — CodeQL (Default Setup), Secret Scanning with Push Protection, Scorecard, and Dependabot. All findings are triaged against the SLAs in [What to Expect](#what-to-expect).
+
+### Two-Person Control on Code Scanning Alert Dismissals
+
+To prevent unilateral dismissal of security findings, this repository operates under GitHub's **Delegated Alert Dismissal**, enabled at the `rocketride-org` organization level:
+
+1. **Request** — any maintainer with write access can submit a dismissal request. The request **must** include a documented justification: compensating controls, mitigation rationale, or basis for "won't fix". This justification is recorded as the dismissal comment on the alert.
+2. **Approval** — must be given by a *different* maintainer with admin permissions on the repository. The requester cannot self-approve.
+3. **Dismissal** — GitHub auto-applies the dismissal once approval lands. The full `request → approval → dismissal` trail is preserved on the alert and serves as the system-of-record for audit.
+
+Direct (one-step) dismissal is blocked at the organization level.
+
+### Triage Dispositions
+
+When closing an alert, choose one of:
+
+| Disposition | When to use | Evidence captured |
+| --- | --- | --- |
+| **Fix** | Vulnerability is exploitable in our usage | PR linking the alert (auto-closes on merge) |
+| **Mitigated** | Code path is reachable but compensating controls neutralize the risk | Two-person dismissal with controls listed in comment |
+| **False positive** | Tool flagged a non-issue (e.g., test fixture, intentional pattern) | Two-person dismissal with explanation |
+| **Won't fix** | Risk accepted by ownership | Two-person dismissal with named approver and rationale |
+
+### Secret Scanning & Dependabot
+
+- **Secret Scanning Push Protection** is enabled org-wide. Pushes containing detected secrets are blocked at push time; bypasses require committer justification and are recorded in the audit log.
+- **Dependabot alerts** are dismissed only by repository admins, with the dismissal reason and any SLA exception recorded in the dismissal comment. Fixes are tracked via Dependabot security update PRs against the SLAs above.
+
 ## Security Best Practices
 
 When using RocketRide Engine:
