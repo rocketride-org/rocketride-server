@@ -10,60 +10,46 @@ sidebar_position: 1
 
 ## What it does
 
-Executes shell commands in the host environment. Use to run scripts, manage processes, install packages, and interact with the operating system via the command line.
+Tool node that runs a command on the host and returns stdout, stderr, and exit code. Useful for build scripts, package managers, file operations, and host-installed git.
 
-Common use cases:
+By default the command is parsed into argv and executed without invoking a shell — pipes, redirects, globs, and `&&` are not interpreted, eliminating the shell-injection class. Shell mode is opt-in via node configuration.
 
-- Build scripts: `npm run build`, `python setup.py install`, `make`
-- Package management: `npm install`, `pip install`, `apt-get install`
-- Process management: starting/stopping services, checking process status
-- File operations: `cp`, `mv`, `rm`, `mkdir`, `find`, `grep`
-- Environment inspection: `env`, `echo $PATH`, `which <binary>`
-- Git operations (when git is available on the host): `git status`, `git add`, `git commit -m "message"`, `git push`, `git pull`, `git clone <url>`, `git log --oneline`, `git diff`, `git checkout -b <branch>`, `git merge <branch>`
+## As a tool
 
-> Note: For portable git operations that do not depend on the host environment having git installed, use the Git node instead.
+When connected to an agent, exposes one function under the configured server name (default: `shell`):
 
-## Tools
+| Function        | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| `shell.execute` | Run a command and return stdout, stderr, and exit code |
 
-| Tool            | Description                                                  |
-| --------------- | ------------------------------------------------------------ |
-| `shell.execute` | Run a shell command and return stdout, stderr, and exit code |
+**`shell.execute` parameters:**
 
-### shell.execute
+| Parameter             | Required | Description                                                                                                                                                             |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`             | yes      | Command to execute. By default parsed into argv and run without a shell                                                                                                 |
+| `working_dir`         | no       | Working directory for this call. Overrides the node default                                                                                                             |
+| `env`                 | no       | Object of environment variables to inject for this call                                                                                                                 |
+| `timeout`             | no       | Per-call timeout in seconds (capped by node configuration)                                                                                                              |
+| `use_shell`           | no       | If `true`, run via the host shell to enable pipes, redirects, globs, `&&`. Only honoured when the node has shell mode enabled                                           |
+| `confirm_destructive` | no       | Required to permit destructive operations (`rm -r`, `dd of=`, `mkfs`, `find -delete`, `shred`, `git clean -f`, `chmod 000`, `truncate -s 0`). Only checked in argv mode |
 
-| Parameter     | Required | Description                                                                                 |
-| ------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `command`     | yes      | Shell command to execute (interpreted by the host shell)                                    |
-| `working_dir` | no       | Working directory for this call. Overrides the node default. Must be an existing directory. |
-| `env`         | no       | Object of environment variables to inject for this call                                     |
-| `timeout`     | no       | Per-call timeout in seconds (capped by node configuration)                                  |
-
-**Response:**
-
-```json
-{
-	"stdout": "...",
-	"stderr": "...",
-	"exit_code": 0,
-	"timed_out": false,
-	"truncated": false
-}
-```
-
-`exit_code` is the process return code. `-1` indicates the command was killed due to timeout; `127` indicates the host shell could not be launched.
+`exit_code` is the process return code. `-1` indicates a timeout kill; `127` indicates the command could not be launched.
 
 ## Configuration
 
-| Field                         | Description                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool Namespace                | Prefix for the tool name (default: `shell`)                                                                                                  |
-| Default working directory     | Working directory used when the agent does not provide one. Defaults to the host process CWD                                                 |
-| Execution timeout (seconds)   | Maximum seconds a command may run (default 30, max 1800)                                                                                     |
-| Max output size (bytes)       | Cap on stdout and stderr each (default 1 MiB). Output beyond this is truncated                                                               |
-| Allow agent-supplied env vars | Whether the agent may add env vars per call (default off). Node-defined vars always take precedence when on                                  |
-| Environment variables         | Variables injected into every command                                                                                                        |
-| Command allowlist             | Regex patterns. If non-empty, the full command must match at least one pattern (re.fullmatch). Use `.*` for substring matches, e.g. `npm .*` |
+| Field                         | Default   | Description                                                                                                                                |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Default working directory     | host CWD  | Working directory used when the agent does not provide one                                                                                 |
+| Execution timeout (seconds)   | `30`      | Max seconds a command may run (max 1800). On timeout the entire process tree is killed                                                     |
+| Max output size (bytes)       | `1048576` | Per-stream cap on stdout and stderr; output beyond this is streamed and discarded so memory stays bounded                                  |
+| Allow shell mode              | off       | Permits agents to set `use_shell: true` per call. Off by default — the safer argv mode handles most use cases without shell-injection risk |
+| Allow agent-supplied env vars | off       | Whether the agent may inject env vars per call. Off by default — `LD_PRELOAD`/`PATH`/`NODE_OPTIONS` can redirect execution                 |
+| Environment variables         | —         | Variables injected into every command. Override agent-supplied vars of the same name                                                       |
+| Command allowlist             | —         | Regex patterns. If non-empty, the full command must match at least one (`re.fullmatch`). Use `.*` for substring matches                    |
 
-## Security
+## Notes
 
-This node executes commands directly on the host with the privileges of the running process. It does not sandbox the command. Use the command allowlist to restrict which commands can run, set a working directory to scope file access, and avoid deploying this node in untrusted environments.
+- Commands run directly on the host with the privileges of the running process — no sandbox. Use the allowlist to restrict commands and avoid deploying in untrusted environments.
+- The destructive-verb gate only fires in argv mode. In shell mode the gate is disabled because the shell can express equivalent operations (redirects, expansions) that flat-string analysis cannot reliably detect — operators who enable shell mode are accepting that responsibility.
+- An allowlist whose patterns all fail to compile is rejected at startup (fail-closed); individual invalid patterns are dropped with a warning.
+- For portable git operations that don't require git on the host, prefer the Git node.

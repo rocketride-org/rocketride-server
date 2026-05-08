@@ -63,6 +63,16 @@
 				[false, "No"]
 			]
 		},
+		"tool_shell.allowShell": {
+			"type": "boolean",
+			"title": "Allow shell mode",
+			"description": "When off (default), commands are parsed into argv and executed without invoking a shell — pipes, redirects, globs, and '&&' are not interpreted, eliminating the shell-injection class. Enable only if commands genuinely need shell features; once enabled, agents can request shell mode per call via use_shell=true.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
 		"tool_shell.envName": {
 			"type": "string",
 			"title": "Variable name",
@@ -105,7 +115,7 @@
 		{
 			"section": "Pipe",
 			"title": "Shell",
-			"properties": ["type", "tool_shell.workingDir", "tool_shell.timeout", "tool_shell.maxOutputBytes", "tool_shell.allowExternalEnv", "tool_shell.envVars", "tool_shell.commandAllowlist"]
+			"properties": ["type", "tool_shell.workingDir", "tool_shell.timeout", "tool_shell.maxOutputBytes", "tool_shell.allowShell", "tool_shell.allowExternalEnv", "tool_shell.envVars", "tool_shell.commandAllowlist"]
 		}
 	]
 }
