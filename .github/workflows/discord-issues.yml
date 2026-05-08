@@ -32,19 +32,27 @@ jobs:
           # Discord webhooks return 429 (rate limit, with Retry-After) and
           # transient 5xx during incidents. Without retry any blip aborts
           # the job. This wraps curl so 429/5xx are retried; non-429 4xx
-          # are returned to the caller. Sets $DISCORD_LAST_STATUS.
+          # are returned to the caller.
+          #
+          # Status sink: callers invoke discord_curl via $(...), which runs
+          # in a subshell — shell variables set inside don't propagate back.
+          # Publish the HTTP status through a step-owned temp file so callers
+          # can read it after the substitution returns.
+          DISCORD_STATUS_FILE=$(mktemp)
+          trap 'rm -f "$DISCORD_STATUS_FILE"' EXIT
+
           discord_curl() {
             local max_attempts=5 attempt=1 backoff=1
             local headers response status body retry_after
             headers=$(mktemp); trap 'rm -f "$headers"' RETURN
             while [ $attempt -le $max_attempts ]; do
               : > "$headers"
-              response=$(curl -sS -D "$headers" -w "\n%{http_code}" "$@") || true
+              response=$(curl -sS --connect-timeout 10 --max-time 60 -D "$headers" -w "\n%{http_code}" "$@") || true
               status=$(printf '%s' "$response" | tail -n 1)
               body=$(printf '%s' "$response" | sed '$d')
 
               if [ -n "$status" ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
-                DISCORD_LAST_STATUS="$status"
+                printf '%s' "$status" > "$DISCORD_STATUS_FILE"
                 printf '%s' "$body"
                 return 0
               fi
@@ -65,13 +73,13 @@ jobs:
                 sleep "$backoff"
                 backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
               else
-                DISCORD_LAST_STATUS="$status"
+                printf '%s' "$status" > "$DISCORD_STATUS_FILE"
                 printf '%s' "$body"
                 return 1
               fi
               attempt=$((attempt + 1))
             done
-            DISCORD_LAST_STATUS="${status:-000}"
+            printf '%s' "${status:-000}" > "$DISCORD_STATUS_FILE"
             printf '%s' "$body"
             return 1
           }
@@ -145,7 +153,7 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID") || true
-            PATCH_STATUS="$DISCORD_LAST_STATUS"
+            PATCH_STATUS=$(cat "$DISCORD_STATUS_FILE")
             echo "PATCH status: $PATCH_STATUS"
 
             if [ "$PATCH_STATUS" = "404" ]; then
@@ -164,7 +172,7 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               "${DISCORD_WEBHOOK_URL}?wait=true"); then
-              echo "::error::Discord POST failed (status ${DISCORD_LAST_STATUS}) after retries"
+              echo "::error::Discord POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
               exit 1
             fi
             NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
