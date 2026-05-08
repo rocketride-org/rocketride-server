@@ -1,5 +1,12 @@
 name: Release
 
+# Default least-privilege permissions for the workflow. Individual
+# release jobs below raise to write where they actually need it
+# (tag pushes, GitHub releases, package publishing).
+# Closes Scorecard TokenPermissionsID #516.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:

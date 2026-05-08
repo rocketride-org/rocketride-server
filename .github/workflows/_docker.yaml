@@ -1,5 +1,11 @@
 name: Docker
 
+# Default least-privilege permissions for the workflow. Individual jobs
+# below raise to write where they actually need it (image push to GHCR).
+# Closes Scorecard TokenPermissionsID #514.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
