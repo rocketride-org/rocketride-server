@@ -189,8 +189,26 @@ class TransportWebSocket(TransportBase):
         Called during disconnect() after _draining is set, so no new tasks
         will be added while we wait. Allows in-flight handlers to finish
         sending their responses before the socket is closed.
+
+        Excludes any task whose await-chain transitively reaches this drain
+        task itself. Including such a task in the gather would form a cycle
+        (X awaits us, we await a gather containing X) which asyncio's cancel
+        propagation recurses on until RecursionError fires.
         """
-        pending = [t for t in self._message_tasks if not t.done()]
+        me = asyncio.current_task()
+
+        def awaits_me(t: asyncio.Task) -> bool:
+            seen: set = set()
+            cur = t
+            while cur is not None and id(cur) not in seen:
+                seen.add(id(cur))
+                if cur is me:
+                    return True
+                waiter = getattr(cur, '_fut_waiter', None)
+                cur = waiter if isinstance(waiter, asyncio.Task) else None
+            return False
+
+        pending = [t for t in self._message_tasks if not t.done() and not awaits_me(t)]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
