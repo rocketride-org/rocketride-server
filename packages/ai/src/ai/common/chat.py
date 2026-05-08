@@ -507,12 +507,12 @@ class ChatBase:
                 return self._chat_stream(prompt, gated)
             except Exception as e:
                 if emitted['value']:
-                    raise self.map_exception(e)
+                    raise self.map_exception(e) from e
 
                 is_retryable = self.is_retryable_error(e)
                 if not is_retryable or attempt == max_network_retries - 1:
                     debug(f'Chat stream failed after {attempt + 1} attempts: {str(e)}')
-                    raise self.map_exception(e)
+                    raise self.map_exception(e) from e
 
                 delay = min(base_delay * (2**attempt), max_delay)
                 debug(f'Network/API error on streaming attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...')

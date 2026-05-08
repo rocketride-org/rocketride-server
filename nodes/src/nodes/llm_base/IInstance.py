@@ -67,14 +67,12 @@ class IInstanceGenericLLM(IInstanceBase):
                 )
 
         try:
-            answer = self.IGlobal._chat.chat_stream(question, lambda delta: emit(delta))
+            answer = self.IGlobal._chat.chat_stream(question, emit)
         except Exception as e:
-            # Run the exception through the provider's map_exception before
-            # surfacing to the client — raw SDK errors can contain auth
-            # tokens, server paths, or echoed prompts.
-            mapped = self.IGlobal._chat.map_exception(e)
-            emit(done=True, error=str(mapped))
-            raise mapped from e
+            # `_chat_stream_with_retries` already runs map_exception before
+            # raising, so `e` is the friendly form. Don't remap.
+            emit(done=True, error=str(e))
+            raise
 
         emit(done=True)
         return answer
