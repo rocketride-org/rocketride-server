@@ -817,6 +817,9 @@ export class RocketRideCLI {
 	private setupSignalHandlers(): void {
 		const signalHandler = () => {
 			this.cancel();
+			// Hard-exit guard: if graceful cancellation doesn't propagate within 5s,
+			// force exit with POSIX code 130 (128 + SIGINT) to prevent process hang.
+			setTimeout(() => process.exit(130), 5000).unref();
 		};
 		process.on('SIGINT', signalHandler);
 		process.on('SIGTERM', signalHandler);
