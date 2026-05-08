@@ -47,6 +47,7 @@ GitHub stores **authentication keys** and **signing keys** as separate entries. 
    - **Key type**: **Signing Key** (the dropdown — *not* "Authentication Key")
    - **Key**: paste the line printed by step 5 above
    - Click **Add SSH key**
+   - **Verify it landed in the right section**: open <https://github.com/settings/keys> and confirm your new key appears under **SSH signing keys**, not **SSH keys**. If it shows up under the wrong heading, you selected the wrong key type — delete it and re-add.
 
 2. **Verify your commit email is registered and verified on your GitHub account**
    - Open <https://github.com/settings/emails>
