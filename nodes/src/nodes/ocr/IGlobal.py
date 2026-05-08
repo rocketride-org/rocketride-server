@@ -40,6 +40,12 @@ from PIL import Image
 # img2table internally imports cv2, so this must come first
 from ai.common.opencv import cv2  # noqa: F401 - ensures correct opencv
 
+# Same reason for polars: img2table depends on polars, and the default wheel
+# crashes on x86_64 CPUs without AVX2. Importing ai.common.polars triggers
+# the polars-lts-cpu install + cleanup before img2table loads. The actual
+# `pl` symbol is imported in the methods that use it.
+import ai.common.polars  # noqa: F401 - imported for module-level install side effect
+
 # img2table 2.0 (2026-05-10) rewrote its OCR plug-in API and moved the base
 # class. Detect which version is installed so this adapter works against both.
 try:
@@ -266,7 +272,7 @@ class ModelServerOCR(OCRInstance):
             OCRDataframe object
         """
         from img2table.ocr.data import OCRDataframe
-        import polars as pl
+        from ai.common.polars import pl
 
         def _diag(msg):
             debug(msg)

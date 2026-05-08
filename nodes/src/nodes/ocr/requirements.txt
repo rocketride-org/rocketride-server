@@ -7,6 +7,10 @@
 # numpy and pillow are base engine dependencies - don't reinstall them here
 # as that can corrupt already-loaded modules in the server process.
 #
+# Pin polars-lts-cpu before img2table so pip skips the AVX2-only `polars` wheel
+# that crashes (SEH 0xc000001d / SIGILL) on x86_64 hosts without AVX2/FMA.
+# Same import name, drop-in API. Marker scopes the pin to x86_64 only.
+polars-lts-cpu; platform_machine == "x86_64" or platform_machine == "AMD64"
 img2table
 pillow
 numpy
