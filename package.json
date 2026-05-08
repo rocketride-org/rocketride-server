@@ -54,7 +54,7 @@
 		"overrides": {
 			"cross-spawn": ">=6.0.6",
 			"glob": ">=11.1.0",
-			"handlebars": ">=4.7.9",
+			"handlebars": ">=4.7.9 <5",
 			"js-yaml": ">=4.1.1",
 			"postcss": ">=8.4.31",
 			"protobufjs": ">=7.5.5 <8",
