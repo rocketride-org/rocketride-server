@@ -16,7 +16,13 @@ from pathlib import Path
 # engine runtime).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_shell'))
 
-from shell_executor import build_environment, execute_command, is_destructive_argv  # noqa: E402
+from shell_executor import (  # noqa: E402
+    build_environment,
+    execute_command,
+    is_destructive_argv,
+    is_path_inside,
+    redact_secrets,
+)
 
 
 # Use the running interpreter so the tests are cross-platform.
@@ -277,6 +283,98 @@ class TestIsDestructiveArgv:
         """`chmod 000 file` (lockout) is flagged."""
         ok, label = is_destructive_argv(['chmod', '000', 'file'])
         assert ok is True and label == 'chmod 000'
+
+
+class TestRedactSecrets:
+    """redact_secrets scrubs common secret shapes from captured output."""
+
+    def test_empty_input_returns_empty(self):
+        """Empty/None-ish input is returned unchanged."""
+        assert redact_secrets('') == ''
+
+    def test_text_without_secrets_passes_through(self):
+        """Plain output is not modified."""
+        text = 'hello world\nthis is fine'
+        assert redact_secrets(text) == text
+
+    def test_aws_access_key_redacted(self):
+        """AWS access key IDs are redacted."""
+        out = redact_secrets('Using AKIAIOSFODNN7EXAMPLE for upload')
+        assert 'AKIA' not in out
+        assert '[redacted]' in out
+
+    def test_bearer_token_redacted(self):
+        """Bearer tokens in HTTP-style output are redacted but the marker is preserved."""
+        out = redact_secrets('Authorization: Bearer eyJabcdefghijklmnop1234567890')
+        assert 'eyJabcdefghijklmnop1234567890' not in out
+        assert 'Bearer' in out
+        assert '[redacted]' in out
+
+    def test_jwt_redacted(self):
+        """JWT-shaped tokens are redacted."""
+        # Synthetic JWT-shaped string for testing the redactor; not a real token.
+        jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.signature_part_here'  # gitleaks:allow
+        out = redact_secrets(f'token={jwt}')
+        assert jwt not in out
+        assert '[redacted]' in out
+
+    def test_pem_private_key_redacted(self):
+        """PEM-formatted private key blocks are redacted including the body."""
+        pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkq...\n-----END RSA PRIVATE KEY-----'
+        out = redact_secrets(f'leaked: {pem}')
+        assert 'MIIEvQIBADANBgkq' not in out
+        assert '[redacted]' in out
+
+    def test_secret_env_var_line_redacted(self):
+        """Lines like AWS_SECRET_ACCESS_KEY=... have the value scrubbed but the key preserved."""
+        out = redact_secrets('AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY')
+        assert 'wJalrXUtnFEMI' not in out
+        assert 'AWS_SECRET_ACCESS_KEY=[redacted]' in out
+
+    def test_token_env_var_redacted(self):
+        """*_TOKEN= lines are redacted."""
+        out = redact_secrets('GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234567890')
+        assert 'ghp_abcdefghijklmnop' not in out
+        assert 'GITHUB_TOKEN=[redacted]' in out
+
+    def test_password_env_var_redacted(self):
+        """*PASSWORD* lines are redacted."""
+        out = redact_secrets('DB_PASSWORD=hunter2')
+        assert 'hunter2' not in out
+        assert 'DB_PASSWORD=[redacted]' in out
+
+    def test_non_secret_env_var_not_redacted(self):
+        """KEY=value lines without sensitive hints are kept intact."""
+        text = 'PATH=/usr/bin:/bin\nHOME=/home/agent'
+        assert redact_secrets(text) == text
+
+
+class TestIsPathInside:
+    """is_path_inside enforces the workingDir jail."""
+
+    def test_same_path_is_inside(self, tmp_path):
+        """A path equal to its parent is reported as inside."""
+        assert is_path_inside(str(tmp_path), str(tmp_path)) is True
+
+    def test_subdirectory_is_inside(self, tmp_path):
+        """A subdirectory of the jail is reported as inside."""
+        sub = tmp_path / 'sub'
+        sub.mkdir()
+        assert is_path_inside(str(sub), str(tmp_path)) is True
+
+    def test_sibling_is_not_inside(self, tmp_path):
+        """A sibling directory is not inside the jail."""
+        a = tmp_path / 'a'
+        b = tmp_path / 'b'
+        a.mkdir()
+        b.mkdir()
+        assert is_path_inside(str(b), str(a)) is False
+
+    def test_parent_is_not_inside(self, tmp_path):
+        """The jail's parent directory is not inside the jail."""
+        sub = tmp_path / 'sub'
+        sub.mkdir()
+        assert is_path_inside(str(tmp_path), str(sub)) is False
 
 
 class TestBuildEnvironment:

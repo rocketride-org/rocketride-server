@@ -33,9 +33,14 @@ class TestParseWorkingDir:
         """Missing key returns None."""
         assert parse_working_dir({}) is None
 
-    def test_strips_whitespace(self):
-        """Surrounding whitespace is trimmed."""
-        assert parse_working_dir({'workingDir': '  /tmp  '}) == '/tmp'
+    def test_strips_whitespace_and_canonicalizes(self, tmp_path):
+        """Surrounding whitespace is trimmed and the path is realpath'd."""
+        # Use tmp_path (a real directory) so realpath resolves consistently
+        # on every platform — POSIX and Windows handle '/tmp' differently.
+        import os
+
+        raw = f'  {tmp_path}  '
+        assert parse_working_dir({'workingDir': raw}) == os.path.realpath(str(tmp_path))
 
     def test_empty_string_returns_none(self):
         """Whitespace-only value collapses to None."""

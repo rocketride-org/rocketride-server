@@ -36,7 +36,7 @@ import shlex
 from rocketlib import IInstanceBase, tool_function
 
 from .IGlobal import IGlobal, MAX_TIMEOUT
-from .shell_executor import build_environment, execute_command, is_destructive_argv
+from .shell_executor import build_environment, execute_command, is_destructive_argv, is_path_inside
 
 
 class IInstance(IInstanceBase):
@@ -117,7 +117,9 @@ class IInstance(IInstanceBase):
 
         use_shell = bool(args.get('use_shell', False))
         if use_shell and not self.IGlobal.allow_shell:
-            raise ValueError('"use_shell" is not permitted by the node configuration. Enable "Allow shell mode" in the node configuration to run commands through the host shell.')
+            raise ValueError(
+                '"use_shell" is not permitted by the node configuration. Enable "Allow shell mode" in the node configuration to run commands through the host shell.'
+            )
 
         cwd = self._resolve_cwd(args.get('working_dir'))
         timeout = self._resolve_timeout(args.get('timeout'))
@@ -144,7 +146,9 @@ class IInstance(IInstanceBase):
 
             destructive, label = is_destructive_argv(argv)
             if destructive and not bool(args.get('confirm_destructive', False)):
-                raise ValueError(f'Command appears to perform a destructive operation ({label}). Pass "confirm_destructive": true in the call args to acknowledge and proceed.')
+                raise ValueError(
+                    f'Command appears to perform a destructive operation ({label}). Pass "confirm_destructive": true in the call args to acknowledge and proceed.'
+                )
             command_to_run = argv
 
         return execute_command(
@@ -154,18 +158,28 @@ class IInstance(IInstanceBase):
             timeout=timeout,
             max_output_bytes=self.IGlobal.max_output_bytes,
             use_shell=use_shell,
+            redact=self.IGlobal.redact_output,
         )
 
     def _validate_command(self, command: str) -> None:
-        """Reject commands that don't fully match any configured allowlist regex."""
+        """Reject commands that don't match the allowlist (deny-all when empty)."""
         # Use fullmatch (not search) so that an unanchored pattern like
         # "git status" cannot be smuggled past via "git status; rm -rf /".
         patterns = self.IGlobal.command_patterns or []
-        if patterns and not any(p.fullmatch(command) for p in patterns):
+        if not patterns:
+            # Empty allowlist is fail-closed by default — operators must
+            # opt into wildcard execution by setting allowAnyCommand=true.
+            if not self.IGlobal.allow_any_command:
+                raise ValueError(
+                    'No commandAllowlist patterns are configured. Add at least one regex to the allowlist, '
+                    'or enable "Allow any command" in the node configuration to opt into unrestricted execution.'
+                )
+            return
+        if not any(p.fullmatch(command) for p in patterns):
             raise ValueError('Command is not permitted by the configured allowlist.')
 
     def _resolve_cwd(self, override: object) -> str | None:
-        """Pick the per-call cwd override (validated) or fall back to the configured default."""
+        """Pick the per-call cwd override (validated + path-jailed) or fall back to the default."""
         if override is None:
             return self._validated_default_cwd()
         if not isinstance(override, str):
@@ -175,7 +189,13 @@ class IInstance(IInstanceBase):
             return self._validated_default_cwd()
         if not os.path.isdir(path):
             raise ValueError(f'working_dir does not exist or is not a directory: {path!r}')
-        return path
+        # Canonicalize to defeat symlinks; jail the per-call override inside
+        # the configured node-level workingDir if one is set.
+        resolved = os.path.realpath(path)
+        jail = self.IGlobal.working_dir
+        if jail is not None and not is_path_inside(resolved, jail):
+            raise ValueError(f'working_dir override {resolved!r} escapes the configured workingDir {jail!r}.')
+        return resolved
 
     def _validated_default_cwd(self) -> str | None:
         """Return the configured default cwd after verifying it exists, or None if unset."""

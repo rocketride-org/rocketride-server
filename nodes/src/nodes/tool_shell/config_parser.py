@@ -41,12 +41,21 @@ DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 def parse_working_dir(cfg: dict) -> str | None:
-    """Return the configured working directory, or None when unset/blank."""
+    """Return the configured working directory, or None when unset/blank.
+
+    The path is canonicalized via ``os.path.realpath`` so symlinks are
+    resolved at config time — this is what per-call overrides are jailed
+    inside, so we want one definitive form of the path.
+    """
     raw = cfg.get('workingDir')
     if raw is None:
         return None
     val = str(raw).strip()
-    return val or None
+    if not val:
+        return None
+    import os as _os
+
+    return _os.path.realpath(val)
 
 
 def parse_timeout(cfg: dict) -> int:

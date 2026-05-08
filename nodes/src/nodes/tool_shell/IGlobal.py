@@ -59,6 +59,8 @@ class IGlobal(IGlobalBase):
     env_vars: dict[str, str] | None = None
     allow_external_env: bool = False
     allow_shell: bool = False
+    allow_any_command: bool = False
+    redact_output: bool = True
     command_patterns: list[re.Pattern] | None = None
 
     def beginGlobal(self) -> None:
@@ -73,6 +75,8 @@ class IGlobal(IGlobalBase):
         self.env_vars = parse_env_vars(cfg)
         self.allow_external_env = bool(cfg.get('allowExternalEnv', False))
         self.allow_shell = bool(cfg.get('allowShell', False))
+        self.allow_any_command = bool(cfg.get('allowAnyCommand', False))
+        self.redact_output = bool(cfg.get('redactSecrets', True))
 
         invalid_pattern_errors: list[str] = []
 
@@ -96,4 +100,6 @@ class IGlobal(IGlobalBase):
         self.env_vars = None
         self.allow_external_env = False
         self.allow_shell = False
+        self.allow_any_command = False
+        self.redact_output = True
         self.command_patterns = None

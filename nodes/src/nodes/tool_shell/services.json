@@ -73,6 +73,26 @@
 				[false, "No"]
 			]
 		},
+		"tool_shell.allowAnyCommand": {
+			"type": "boolean",
+			"title": "Allow any command",
+			"description": "When off (default), an empty Command Allowlist denies all commands and the node refuses to run anything until at least one regex is configured. Enable only to opt into unrestricted execution — every command the agent passes will run on the host.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_shell.redactSecrets": {
+			"type": "boolean",
+			"title": "Redact secrets in output",
+			"description": "When on (default), captured stdout and stderr are scrubbed for common secret shapes (AWS keys, bearer tokens, JWTs, PEM private keys, KEY=value lines for password/secret/token/api_key/...) before being returned to the agent.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
 		"tool_shell.envName": {
 			"type": "string",
 			"title": "Variable name",
@@ -115,7 +135,7 @@
 		{
 			"section": "Pipe",
 			"title": "Shell",
-			"properties": ["type", "tool_shell.workingDir", "tool_shell.timeout", "tool_shell.maxOutputBytes", "tool_shell.allowShell", "tool_shell.allowExternalEnv", "tool_shell.envVars", "tool_shell.commandAllowlist"]
+			"properties": ["type", "tool_shell.workingDir", "tool_shell.timeout", "tool_shell.maxOutputBytes", "tool_shell.allowShell", "tool_shell.allowExternalEnv", "tool_shell.redactSecrets", "tool_shell.envVars", "tool_shell.commandAllowlist", "tool_shell.allowAnyCommand"]
 		}
 	]
 }
