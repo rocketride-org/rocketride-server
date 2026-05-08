@@ -161,7 +161,17 @@ jobs:
           KEY_ID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
           echo "Signing with key ${KEY_ID}"
           shopt -s nullglob
-          for f in release-assets/*.tar.gz release-assets/*.zip; do
+          # Fail loudly if invoked with no input — reaching this step
+          # means both secrets are configured, so signing is expected
+          # to happen. Silent no-ops here would ship the release
+          # unsigned without any warning.
+          files=(release-assets/*.tar.gz release-assets/*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No server archives (.tar.gz/.zip) found in release-assets/ to sign"
+            ls -la release-assets/ || true
+            exit 1
+          fi
+          for f in "${files[@]}"; do
             echo "$GPG_SIGNING_PASSPHRASE" | gpg --batch --yes \
               --pinentry-mode loopback --passphrase-fd 0 \
               --local-user "$KEY_ID" \
