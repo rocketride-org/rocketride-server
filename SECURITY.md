@@ -44,7 +44,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 This project uses GitHub-native scanning on the `develop` branch — CodeQL (Default Setup), Secret Scanning with Push Protection, Scorecard, and Dependabot. CodeQL and Scorecard findings both surface as code scanning alerts in the same GitHub UI and share the dismissal workflow described below. All findings are triaged against the SLAs in [What to Expect](#what-to-expect).
 
-### Two-Person Control on Code Scanning Alert Dismissals
+### Two-Person Control on Alert Dismissals
 
 To prevent unilateral dismissal of security findings, this repository operates under GitHub's **Delegated Alert Dismissal**, enabled at the `rocketride-org` organization level:
 
@@ -68,8 +68,11 @@ When closing an alert, choose one of:
 ### Secret Scanning & Dependabot
 
 - **Secret Scanning Push Protection** is enabled org-wide. Pushes containing detected secrets are blocked at push time; bypasses require committer justification and are recorded in the audit log.
-- **Secret Scanning alerts** for secrets already in the repository follow the same two-person Delegated Alert Dismissal flow (request, approval by a different authorized reviewer, auto-dismissal with audit trail).
-- **Dependabot alerts** follow the same two-person Delegated Alert Dismissal flow described above (request by any write-access maintainer; approval by a different organization owner, security manager, or holder of an explicitly delegated custom role). Dismissal reason and any SLA exception must be recorded in the dismissal comment. Fixes are tracked via Dependabot security update PRs against the SLAs above.
+- **Secret Scanning alerts** for secrets already in the repository follow the same two-person Delegated Alert Dismissal flow (request by any write-access maintainer; approval by a different organization owner, security manager, or holder of an explicitly delegated custom role; auto-dismissal with audit trail).
+- **Dependabot alerts** follow the same two-person Delegated Alert Dismissal flow described above:
+  - Request by any write-access maintainer; approval by a different organization owner, security manager, or holder of an explicitly delegated custom role.
+  - Dismissal reason and any SLA exception must be recorded in the dismissal comment.
+  - Fixes are tracked via Dependabot security update PRs against the SLAs above.
 
 ## Security Best Practices
 
