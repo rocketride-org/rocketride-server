@@ -684,30 +684,44 @@ class DataConn(DAPConn):
             self._reset_pipe_activity(conn_pipe)
 
             def close_sync():
+                # End the pipe and close it.  If either step throws (e.g. a
+                # node's writeText/writeAudio raised during closing flush),
+                # we still need to extract whatever results and error info
+                # the pipeline produced — so result extraction is OUTSIDE
+                # the try/except.
                 try:
-                    # End the pipe
+                    # End the pipe (sends END action to finalize streams)
                     self._end(conn_pipe)
 
-                    # Close the pipe to finalize all processing
+                    # Close the pipe to finalize all processing.
+                    # This calls closing() which may flush buffered data
+                    # through the pipeline — if a downstream node throws,
+                    # the exception is caught below.
                     pipe = conn_pipe.pipe
                     pipe.close()
 
-                    # Extract the result objects from the completed processing
-                    results = conn_pipe.entry.response.toDict()
-                    results['objectId'] = conn_pipe.entry.objectId
-
-                    # Mark pipe as closed
-                    conn_pipe.is_open = False
-
-                    # Return the results
-                    self.debug_message(f'Successfully closed pipe {conn_pipe.pipe_id}')
-                    return results
-
                 except Exception as e:
-                    # Mark pipe as failed
+                    # Pipeline error during end/close — log it but continue
+                    # to extract results so the error info reaches the client
                     conn_pipe.has_failed = True
-                    self.debug_message(f'Error in close_sync: {e}')
-                    raise
+                    self.debug_message(f'Error in close_sync end/close: {e}')
+
+                # Extract results regardless of whether end/close succeeded.
+                # If the pipeline set a completionCode (via callMethods in
+                # binder.cpp), objectFailed will be True and completionError
+                # will contain the rich error details (message, file, line, function).
+                results = conn_pipe.entry.response.toDict()
+                results['objectId'] = conn_pipe.entry.objectId
+
+                # Surface pipeline error to the client if the object failed
+                if conn_pipe.entry.objectFailed:
+                    results['error'] = conn_pipe.entry.completionError
+
+                # Mark pipe as closed
+                conn_pipe.is_open = False
+
+                self.debug_message(f'Closed pipe {conn_pipe.pipe_id} (failed={conn_pipe.has_failed})')
+                return results
 
             # Execute close operations in thread
             results = await asyncio.to_thread(close_sync)

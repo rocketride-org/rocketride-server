@@ -74,7 +74,6 @@ class IInstance(IInstanceBase):
                     debug('LlamaParse Instance: Acquired parser lock')
                     if self.IGlobal._parser:
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=self._document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -283,14 +282,12 @@ class IInstance(IInstanceBase):
                         debug('LlamaParse Instance: Processing image file')
                         # Parse image - result_type is configured in the parser
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
                     else:
                         # For documents, use the configured result_type
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -536,7 +533,7 @@ class IInstance(IInstanceBase):
                 if self.IGlobal._parser:
                     debug(f'LlamaParse Instance: Calling parser for document object: {self._current_object.fileName}')
                     result = self.IGlobal._parser.parse(
-                        pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName
+                        file_data=document_data, file_name=self._current_object.fileName
                     )
                     # Handle both old string format and new dict format
                     if isinstance(result, dict):

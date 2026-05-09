@@ -266,6 +266,7 @@ export type MonitorKey = { token: string } | { projectId: string; source: string
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
 	private _apikey?: string;
+	private _wsPath?: string;
 	private _env: Record<string, string>;
 	private _callerOnEvent?: EventCallback;
 	private _callerOnConnected?: ConnectCallback;
@@ -374,6 +375,7 @@ export class RocketRideClient extends DAPClient {
 		super(clientName, undefined, config);
 
 		// Store connection details and environment
+		this._wsPath = config.wsPath;
 		this._setUri(uri);
 		this._setAuth(auth ?? '');
 		this._env = clientEnv;
@@ -474,13 +476,14 @@ export class RocketRideClient extends DAPClient {
 	 */
 	private _getWebsocketUri(uri: string): string {
 		const httpUrl = RocketRideClient.normalizeUri(uri);
+		const path = this._wsPath ?? '/task/service';
 
 		try {
 			const url = new URL(httpUrl);
 			const wsScheme = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
-			return `${wsScheme}//${url.host}/task/service`;
+			return `${wsScheme}//${url.host}${path}`;
 		} catch {
-			return `${httpUrl}/task/service`;
+			return `${httpUrl}${path}`;
 		}
 	}
 

@@ -1117,6 +1117,9 @@ module.exports = {
 								if (options.saas) {
 									args.push('--saas');
 								}
+								if (options.modelserver) {
+									args.push(`--modelserver=${options.modelserver}`);
+								}
 
 								task.output = `Starting EaaS server: ${engine} ${args.join(' ')}`;
 

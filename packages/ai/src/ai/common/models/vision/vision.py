@@ -9,6 +9,7 @@ Vision: CLIP and ViT image embedding loaders and facades.
 import io
 import logging
 import os
+import time
 from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -217,10 +218,37 @@ def _image_to_bytes(image: Any) -> bytes:
 
 
 def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> List[float]:
-    """Run loader pipeline for a single image (local facade helper)."""
+    """
+    Run loader pipeline for a single image (local facade helper).
+
+    Times each phase for billing — reports perf counters via metrics.add_time().
+    """
+    # Preprocess phase — convert image to model input tensors
+    t0 = time.perf_counter()
     preprocessed = VisionLoader.preprocess(bundle, [image], metadata)
+    t_pre = (time.perf_counter() - t0) * 1000
+
+    # GPU inference phase — forward pass through vision model
+    t0 = time.perf_counter()
     raw = VisionLoader.inference(bundle, preprocessed, metadata)
+    t_gpu = (time.perf_counter() - t0) * 1000
+
+    # Postprocess phase — extract and normalize embeddings
+    t0 = time.perf_counter()
     results = VisionLoader.postprocess(bundle, raw, 1, ['embedding'], metadata)
+    t_post = (time.perf_counter() - t0) * 1000
+
+    # Report all perf counters — same shape as model server response
+    metrics.add_time(
+        {
+            'preprocess': t_pre,
+            'gpu': t_gpu,
+            'postprocess': t_post,
+            'queue_wait': 0,
+            'latency': t_pre + t_gpu + t_post,
+        }
+    )
+
     return results[0].get('embedding') or results[0].get('$embedding') or []
 
 
@@ -268,19 +296,23 @@ class CLIPModel:
 
     def get_image_features(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
+        # Count inference call
         metrics.counter('gpu_inference_count', 1)
-        with metrics.resource('gpu'):
-            if self._proxy_mode:
-                image_bytes = _image_to_bytes(image)
-                result = self._client.send_command(
-                    'inference',
-                    {'data': image_bytes, 'output_fields': ['embedding']},
-                )
-                results = result.get('result', [])
-                if results and isinstance(results[0], dict):
-                    return results[0].get('embedding') or results[0].get('$embedding') or []
-                return list(results[0]) if results else []
-            return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
+
+        if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
+            image_bytes = _image_to_bytes(image)
+            result = self._client.send_command(
+                'rrext_ms_inference',
+                {'data': image_bytes, 'output_fields': ['embedding']},
+            )
+            results = result.get('result', [])
+            if results and isinstance(results[0], dict):
+                return results[0].get('embedding') or results[0].get('$embedding') or []
+            return list(results[0]) if results else []
+
+        # Local mode — _extract_embedding_from_bundle handles perf timing
+        return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
 
 
 class ViTModel:
@@ -327,16 +359,20 @@ class ViTModel:
 
     def __call__(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
+        # Count inference call
         metrics.counter('gpu_inference_count', 1)
-        with metrics.resource('gpu'):
-            if self._proxy_mode:
-                image_bytes = _image_to_bytes(image)
-                result = self._client.send_command(
-                    'inference',
-                    {'data': image_bytes, 'output_fields': ['embedding']},
-                )
-                results = result.get('result', [])
-                if results and isinstance(results[0], dict):
-                    return results[0].get('embedding') or results[0].get('$embedding') or []
-                return list(results[0]) if results else []
-            return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
+
+        if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
+            image_bytes = _image_to_bytes(image)
+            result = self._client.send_command(
+                'rrext_ms_inference',
+                {'data': image_bytes, 'output_fields': ['embedding']},
+            )
+            results = result.get('result', [])
+            if results and isinstance(results[0], dict):
+                return results[0].get('embedding') or results[0].get('$embedding') or []
+            return list(results[0]) if results else []
+
+        # Local mode — _extract_embedding_from_bundle handles perf timing
+        return _extract_embedding_from_bundle(self._bundle, image, self._metadata)

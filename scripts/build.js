@@ -107,6 +107,8 @@ function parseArgs(args) {
 			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
 			process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
 			process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
+		} else if (arg.startsWith('--simulate-gpus=') || arg.startsWith('--simulate_gpus=')) {
+			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
 			options.nodownload = true;
 		} else if (arg.startsWith('--arch=')) {
@@ -121,6 +123,12 @@ function parseArgs(args) {
 			}
 		} else if (arg === '--saas') {
 			options.saas = true;
+		} else if (arg === '--modelserver') {
+			// Bare --modelserver: start a local model server, use default address
+			options.modelserver = 'localhost:5590';
+		} else if (arg.startsWith('--modelserver=')) {
+			// --modelserver=host:port: connect to an existing model server at that address
+			options.modelserver = arg.substring('--modelserver='.length);
 		} else if (arg.startsWith('--version=')) {
 			options.buildVersion = arg.substring('--version='.length);
 		} else if (arg.startsWith('--hash=')) {
@@ -216,6 +224,7 @@ Options:
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --testport=N        Use existing server on port N for tests (skip build/start)
   --log=FILE          Write output to FILE (grouped by module)
+  --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --overlay-root=DIR  Set overlay root directory
   --version=VERSION   Set full build version x.x.x.x
   --hash=HASH         Set build hash

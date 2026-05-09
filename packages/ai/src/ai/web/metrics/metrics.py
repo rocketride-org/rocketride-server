@@ -1,509 +1,263 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+Metrics collection singleton for pipeline billing and monitoring.
+
+Provides a flat, thread-safe metrics accumulator.  Multiple pipe threads
+can call ``timer()``, ``add_time()``, ``counter()``, and ``event()``
+concurrently — each method acquires the lock only briefly.
+
+Accumulated metrics are emitted to the parent process via the ``>MET*``
+stdout protocol (see ``taskhook.py``).  The parent replaces its snapshot
+on each report, so values here are cumulative totals for the current task.
+
+Architecture:
+    - One subprocess = one task.  No task_id tracking needed.
+    - Timers store accumulated milliseconds as floats.
+    - Counters store accumulated integer values.
+    - Events store structured dicts (e.g. llamaparse page counts).
+    - All mutations are protected by a single threading.Lock.
+    - ``timer()`` captures perf_counter locally; only touches shared
+      state under the lock on exit — safe for concurrent pipe threads.
+    - ``add_time()`` accepts a dict of timer values, used by ModelClient
+      to record server-reported perf counters in a single lock acquisition.
+    - ``report()`` returns a snapshot (shallow copies) without clearing.
+
+Usage:
+    Local mode (wrapper times inference locally)::
+
+        t0 = time.perf_counter()
+        preprocessed = Loader.preprocess(model, inputs, metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
+        raw_output = Loader.inference(model, preprocessed, metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
+        results = Loader.postprocess(model, raw_output, len(inputs), fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
+        metrics.counter('gpu_inference_count', 1)
+
+    Model server mode (ModelClient records server-reported perf)::
+
+        # In ModelClient.send_command(), after receiving response:
+        perf = body.get('perf')
+        if perf:
+            metrics.add_time(perf)
+
+    Node-level (nodes report what they own)::
+
+        metrics.counter('pages', page_count)
+        metrics.event({'llamaparse_pages': 10, 'mode': 'precise'})
+"""
+
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
-class Timer:
-    """
-    Timer class to measure elapsed time in milliseconds.
-
-    Supports start, stop, pause, resume, and reset operations.
-    Uses time.perf_counter() for high-resolution timing.
-    """
-
-    def __init__(self, autostart: bool = True):
-        """
-        Initialize the Timer.
-
-        Args:
-            autostart: If True, starts the timer immediately upon creation.
-        """
-        self.total_time = 0.0  # Total accumulated time in seconds
-        self.elapsed_time = 0.0  # Elapsed time since last pause/stop
-        self.paused = False
-
-        if autostart:
-            self.start_time = time.perf_counter()
-        else:
-            self.start_time = None
-
-    def start(self):
-        """Start the timer if not already started or paused."""
-        if self.start_time is None and not self.paused:
-            self.start_time = time.perf_counter()
-
-    def stop(self):
-        """Stop the timer and accumulate elapsed time."""
-        if self.start_time is not None:
-            # Compute how long we have been running since start and the total time
-            self.elapsed_time = time.perf_counter() - self.start_time
-            self.total_time += self.elapsed_time
-
-            # Reset paused state when stopping
-            self.start_time = None
-
-    def pause(self):
-        """Pause the timer and accumulate elapsed time."""
-        self.paused = True
-        self.stop()
-
-    def resume(self):
-        """Resume the timer if previously paused."""
-        self.paused = False
-        self.start()
-
-    def elapsed(self):
-        """
-        Get elapsed time in milliseconds since the last start.
-
-        Returns:
-            Total elapsed time in milliseconds, including any currently running time.
-        """
-        # Get the elapsed time since we stopped
-        elapsed_time = self.elapsed_time
-
-        # Add currently running time if timer is active
-        if self.start_time is not None:
-            elapsed_time += time.perf_counter() - self.start_time
-
-        return elapsed_time * 1000  # Convert to milliseconds
-
-    def total(self):
-        """
-        Get total time in milliseconds since we started the timer the first time.
-
-        Returns:
-            Total elapsed time in milliseconds, including any currently running time.
-        """
-        # Get the elapsed time since we stopped
-        total_time = self.total_time
-
-        # Add currently running time if timer is active
-        if self.start_time is not None:
-            total_time += time.perf_counter() - self.start_time
-
-        return total_time * 1000  # Convert to milliseconds
-
-    def reset(self):
-        """Reset the timer to initial state."""
-        self.total_time = 0.0
-        self.elapsed_time = 0.0
-        self.start_time = None
-        self.paused = False
+# ============================================================================
+# METRICS MANAGER
+# ============================================================================
 
 
 class MetricsManager:
     """
-    Central class to manage timing and counter metrics for tasks and pipes..
+    Thread-safe metrics accumulator for a single subprocess task.
 
-    Supports:
-    - Task-level metrics (with task IDs)
-    - Pipe-level metrics (per pipe)
-    - Timers for different resources
-    - Counters for numeric metrics
-    - Events for structured logging
-    - Context managers for resource timing
+    One subprocess = one task.  The parent process knows which task
+    owns the ``>MET*`` output, so no task_id tracking is needed here.
+
+    Attributes:
+        _timers: Accumulated milliseconds per named timer (e.g. 'gpu').
+        _counters: Accumulated integer values per named counter.
+        _events: List of structured event dicts.
+        _lock: Threading lock protecting all shared state.
     """
 
     def __init__(self):
-        """Initialize the MetricsManager with empty task and pipe metrics."""
-        self._task_metrics = {}  # Task ID -> metrics dict
-        self._pipe_metrics = {}  # Pipe ID -> metrics dict
+        """Initialize empty accumulators and the thread lock."""
+        # Timer accumulators — values are cumulative milliseconds
+        self._timers: Dict[str, float] = {}
+
+        # Counter accumulators — values are cumulative integers
+        self._counters: Dict[str, int] = {}
+
+        # Event log — list of structured dicts, appended in order
+        self._events: list = []
+
+        # Single lock protects all three collections
         self._lock = threading.Lock()
 
-    def _pause_all(self, pipe_metrics: Dict[str, Any]):
-        # Get the timers
-        timers = pipe_metrics.get('timers', {})
+    # ========================================================================
+    # RESET
+    # ========================================================================
 
-        # Pause all timers
-        for timer in timers.values():
-            timer.pause()
-
-    def _stop_all(self, pipe_metrics: Dict[str, Any]):
-        # Get the timers
-        timers = pipe_metrics.get('timers', {})
-
-        # Stop all timers
-        for timer in timers.values():
-            timer.stop()
-
-    def _start_all(self, pipe_metrics: Dict[str, Any]):
-        # Get the timers
-        timers = pipe_metrics.get('timers', {})
-
-        # Start all non-paused timers
-        for timer in timers.values():
-            timer.start()
-
-    def _resolve_pipe_id(self, pipe_id: Optional[int]) -> int:
+    def reset(self):
         """
-        Resolve pipe_id from explicit argument or ContextVar.
+        Clear all accumulators.
 
-        If *pipe_id* is ``None``, reads ``current_pipe_id`` from the
-        ambient ContextVar (set by ``taskMetricsObjectBegin``).  Raises
-        ``RuntimeError`` if neither source provides a value.
-        """
-        if pipe_id is not None:
-            return pipe_id
-        from . import current_pipe_id
-
-        resolved = current_pipe_id.get(None)
-        if resolved is None:
-            raise RuntimeError('No pipe_id provided and no pipeline billing context set (current_pipe_id ContextVar is None)')
-        return resolved
-
-    def _get_pipe_metrics(self, pipe_id: int) -> Dict[str, Any]:
-        # Get the pipe metrics
-        pipe_metrics = self._pipe_metrics.get(pipe_id, None)
-
-        # Make sure got it
-        if not pipe_metrics:
-            raise RuntimeError(f'Metrics not initialized for pipe: {pipe_id}')
-
-        # Return it
-        return pipe_metrics
-
-    def _merge_pipe_metrics(self, task_metrics: Dict[str, Any], pipe_metrics: Dict[str, Any]):
-        """
-        Merge another metrics dictionary into the base dictionary.
-
-        This is used for aggregating metrics from different pipes when
-        the pipe object has been completed.
-
-        Args:
-            task_metrics: The task metrics to merge into
-            pipe_metrics: The metrics from the pipe
-
-        NOTE: This must use a synchronous thread lock! Shouldn't be that big
-        of a problem since all our callers are synchronous pipe threads.
+        Called by ``taskMetricsBegin`` at the start of each task to
+        ensure a clean slate for the new task's metrics.
         """
         with self._lock:
-            metrics = task_metrics.get('metrics', {})
+            self._timers.clear()
+            self._counters.clear()
+            self._events.clear()
 
-            # Copy over all the total times
-            timers = pipe_metrics.get('timers', {})
-            for resource, timer in timers.items():
-                total = timer.total()
-                if resource not in metrics['timers']:
-                    metrics['timers'][resource] = total
-                else:
-                    metrics['timers'][resource] += total
-
-            # Copy over all the elapsed times
-            counters = pipe_metrics.get('counters', {})
-            for resource, value in counters.items():
-                if resource not in metrics['counters']:
-                    metrics['counters'][resource] = value
-                else:
-                    metrics['counters'][resource] += value
-
-            # Append all the billable events
-            events = pipe_metrics.get('events', [])
-            for event in events:
-                metrics['events'].append(event)
-
-    def _report(self, task_metrics: Dict[str, Any]):
-        pass
-
-    def report_for_billing(self, task_id: str) -> Dict[str, Any]:
-        """
-        Build a billing-ready snapshot of the current task metrics.
-
-        Returns a plain dict suitable for JSON serialisation and emission
-        via the ``>MET*`` stdout protocol.  Timer values are in
-        milliseconds; counters are raw accumulated integers.
-
-        Args:
-            task_id: The task whose metrics to report.
-
-        Returns:
-            ``{"timers": {name: ms, ...}, "counters": {name: value, ...},
-            "events": [...]}`` or ``{}`` if the task is unknown.
-        """
-        with self._lock:
-            task_metrics = self._task_metrics.get(task_id)
-            if not task_metrics:
-                return {}
-            metrics = task_metrics.get('metrics', {})
-            return {
-                'timers': {k: v for k, v in metrics.get('timers', {}).items()},
-                'counters': dict(metrics.get('counters', {})),
-                'events': list(metrics.get('events', [])),
-            }
-
-    def begin_task(self, task_id: str):
-        """
-        Initialize and start metrics tracking for a specific task.
-
-        Args:
-            task_id: Unique identifier for the task.
-
-        Raises:
-            RuntimeError: If metrics are already initialized for this task.
-        """
-        # Check if we have already started
-        if task_id in self._task_metrics:
-            raise RuntimeError(f'Metrics already initialized for task: {task_id}')
-
-        # Initialize task metrics with a total time timer
-        self._task_metrics[task_id] = {
-            'total_time': Timer(autostart=True),
-            'metrics': {
-                'timers': {},
-                'counters': {},
-                'events': [],
-            },
-        }
-
-    def end_task(self, task_id: str):
-        """
-        Stop metrics tracking for a specific task.
-
-        Args:
-            task_id: The task identifier to end tracking for.
-        """
-        # Get the task metrics
-        task_metrics = self._task_metrics.pop(task_id, None)
-
-        # If we didn't find them for this task
-        if not task_metrics:
-            raise RuntimeError(f'Metrics not initialized for task: {task_id}')
-
-        # Stop the total time timer
-        task_metrics['total_time'].stop()
-
-        # Return the report
-        return self._report(task_metrics)
-
-    def begin_object(self, task_id: str, pipe_id: int):
-        """
-        Initialize metrics tracking for the current object.
-
-        Creates a new metrics structure for the current object containing:
-        - timers: Dictionary of resource name -> Timer object
-        - counters: Dictionary of counter name -> int value
-        - events: List of structured event dictionaries
-
-        Raises:
-            RuntimeError: If metrics are already initialized for this pipe.
-        """
-        # Get the pipe metrics
-        pipe_metrics = self._pipe_metrics.get(pipe_id, None)
-
-        # If they are there, then error
-        if pipe_metrics:
-            raise RuntimeError(f'Metrics already initialized for pipe: {pipe_id}')
-
-        # Build the metrics info with an autostart cpu timer
-        metrics = {
-            'timers': {'cpu': Timer()},
-            'counters': {},  # Counter name -> int value
-            'events': [],  # List of event dictionaries
-        }
-
-        # Initialize pipe specific metrics structure
-        self._pipe_metrics[pipe_id] = metrics
-
-        # One more object being pushed through
-        self.counter('request', 1, pipe_id=pipe_id)
-
-    def end_object(self, task_id: str, pipe_id: int):
-        """
-        Stop all metrics tracking for the current object.
-
-        This stops all active timers and merges the current objects metrics
-        into the task metrics
-        """
-        # Get/remove the pipe metrics
-        pipe_metrics = self._pipe_metrics.pop(pipe_id, None)
-
-        # Make sure got it
-        if not pipe_metrics:
-            raise RuntimeError(f'Metrics not initialized for pipe: {pipe_id}')
-
-        # Stop all active timers
-        self._stop_all(pipe_metrics)
-
-        # Get the task metrics
-        task_metrics = self._task_metrics.get(task_id, None)
-
-        # If we didn't find them for this task
-        if not task_metrics:
-            raise RuntimeError(f'Metrics not initialized for task: {task_id}')
-
-        # Merge into our task
-        self._merge_pipe_metrics(task_metrics, pipe_metrics)
-
-        # Return
-        return
-
-    def counter(self, name: str, value: int, *, pipe_id: Optional[int] = None):
-        """
-        Increment a named counter by the specified value.
-
-        Args:
-            name: The name of the counter.
-            value: The value to add to the counter.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        counters = pipe_metrics['counters']
-        counters[name] = counters.get(name, 0) + value
-
-    def event(self, event: Dict[str, Any], *, pipe_id: Optional[int] = None):
-        """
-        Log a structured event with the given details.
-
-        Args:
-            event: Dictionary containing event data.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        pipe_metrics['events'].append(event)
-
-    def start_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
-        """
-        Start timing for a specific resource.
-
-        Args:
-            resource: The name of the resource being timed.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-        # Create timer if it doesn't exist, then start it
-        timer = timers.setdefault(resource, Timer(autostart=False))
-        timer.start()
-
-    def stop_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
-        """
-        Stop timing for a specific resource.
-
-        Args:
-            resource: The name of the resource to stop timing.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-
-        if resource in timers:
-            timers[resource].stop()
-
-    def pause_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
-        """
-        Pause timing for a specific resource.
-
-        Args:
-            resource: The name of the resource to pause.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-
-        if resource in timers:
-            timers[resource].pause()
-
-    def resume_timer(self, resource: str = 'cpu', *, pipe_id: Optional[int] = None):
-        """
-        Resume timing for a specific resource.
-
-        Args:
-            resource: The name of the resource to resume.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-
-        if resource in timers:
-            timers[resource].resume()
+    # ========================================================================
+    # TIMERS
+    # ========================================================================
 
     @contextmanager
-    def resource(self, name: str = 'cpu', *, pipe_id: Optional[int] = None):
+    def timer(self, name: str):
         """
-        Context manager to time a specific resource.
+        Context manager to time a block and accumulate milliseconds.
+
+        Fully thread-safe: timing is captured locally via ``perf_counter``,
+        the shared dict is only touched under the lock on exit.  Two pipe
+        threads timing ``'gpu'`` concurrently each accumulate independently.
 
         Args:
-            name: The name of the resource being timed.
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-
-        Usage:
-            with metrics.resource('gpu'):
-                ...  # code to measure
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-
-        # Create timer if it doesn't exist
-        timer = timers.setdefault(name, Timer(autostart=False))
-        timer.start()
-
-        try:
-            yield
-        finally:
-            timer.stop()
-
-    @contextmanager
-    def pause_all(self, *, pipe_id: Optional[int] = None):
-        """
-        Context manager to temporarily pause all active timers.
-
-        Args:
-            pipe_id: Explicit pipe_id, or None to read from ContextVar.
-        """
-        pipe_id = self._resolve_pipe_id(pipe_id)
-        pipe_metrics = self._get_pipe_metrics(pipe_id)
-        timers = pipe_metrics['timers']
-
-        # Pause all timers
-        for timer in timers.values():
-            if timer.start_time is not None:  # Only pause if running
-                timer.pause()
-
-        try:
-            yield
-        finally:
-            # Resume all paused timers
-            for timer in timers.values():
-                if timer.paused:
-                    timer.resume()
-
-    @contextmanager
-    def test_context(self, task_id: str = '_test', pipe_id: int = 0):
-        """
-        Context manager that sets up a full billing context for tests.
-
-        Creates task and pipe metrics, sets the ``current_pipe_id``
-        ContextVar, and tears everything down on exit.  Allows tests
-        to call model inference without a real pipeline.
+            name: Timer key (e.g. ``'gpu'``, ``'preprocess'``).
 
         Usage::
 
-            with metrics.test_context():
-                result = pipeline('classify', inputs)
+            with metrics.timer('gpu'):
+                result = model(inputs)
         """
-        from . import current_pipe_id
-
-        self.begin_task(task_id)
-        self.begin_object(task_id, pipe_id)
-        token = current_pipe_id.set(pipe_id)
+        # Capture start time locally — no shared state involved
+        start = time.perf_counter()
         try:
             yield
         finally:
-            current_pipe_id.reset(token)
-            # Only end_object if it wasn't already ended (e.g. by the code under test)
-            if pipe_id in self._pipe_metrics:
-                self.end_object(task_id, pipe_id)
-            if task_id in self._task_metrics:
-                self.end_task(task_id)
+            # Compute elapsed and accumulate under the lock
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            with self._lock:
+                self._timers[name] = self._timers.get(name, 0.0) + elapsed_ms
+
+    def add_time(self, timers: Dict[str, float]):
+        """
+        Add milliseconds to one or more timers from a dict.
+
+        Accumulates all entries in a single lock acquisition — more
+        efficient than calling ``timer()`` multiple times.  Used by:
+
+        - **Local-mode wrappers**: report ``preprocess``, ``gpu``,
+          ``postprocess``, ``queue_wait``, and ``latency`` after
+          manually timing each phase with ``perf_counter``.
+        - **ModelClient**: relay server-reported perf counters from
+          the model server's ``build_dap_result()`` response.
+
+        Args:
+            timers: ``{name: ms, ...}`` — values to accumulate into
+                    the corresponding timer keys.
+        """
+        with self._lock:
+            # Walk the dict and accumulate each timer
+            for name, ms in timers.items():
+                self._timers[name] = self._timers.get(name, 0.0) + ms
+
+    # ========================================================================
+    # COUNTERS
+    # ========================================================================
+
+    def counter(self, name: str, value: int):
+        """
+        Increment a named counter by the given value.
+
+        Args:
+            name: Counter key (e.g. ``'gpu_inference_count'``,
+                  ``'requests'``, ``'pages'``).
+            value: Amount to add (typically 1).
+        """
+        with self._lock:
+            self._counters[name] = self._counters.get(name, 0) + value
+
+    # ========================================================================
+    # EVENTS
+    # ========================================================================
+
+    def event(self, data: Dict[str, Any]):
+        """
+        Record a structured event dict.
+
+        Events are appended in order and included in every ``report()``
+        snapshot.  Used by nodes to log billable events with metadata
+        (e.g. llamaparse page counts, model names, parsing modes).
+
+        Args:
+            data: Event dict (e.g. ``{'llamaparse_pages': 10, ...}``).
+        """
+        with self._lock:
+            self._events.append(data)
+
+    # ========================================================================
+    # REPORT
+    # ========================================================================
+
+    def report(self) -> dict:
+        """
+        Return a cumulative snapshot for the ``>MET*`` protocol.
+
+        The parent process (``task_metrics.py``) replaces its previous
+        snapshot with each new report via ``merge_subprocess_metrics()``,
+        so values here must be running totals — not deltas.
+
+        The snapshot contains shallow copies of all three collections
+        so the caller can safely use/serialize them outside the lock.
+
+        Returns:
+            ``{'timers': {name: ms, ...},
+              'counters': {name: int, ...},
+              'events': [dict, ...]}``
+        """
+        with self._lock:
+            # Shallow-copy each collection so the snapshot is independent
+            return {
+                'timers': dict(self._timers),
+                'counters': dict(self._counters),
+                'events': list(self._events),
+            }
 
 
-# Global instance used throughout the application
+# ============================================================================
+# GLOBAL SINGLETON
+# ============================================================================
+
+# Single instance used throughout the subprocess by wrappers, nodes,
+# and taskhook.  Imported as: ``from ai.web.metrics import metrics``
 metrics = MetricsManager()

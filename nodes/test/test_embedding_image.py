@@ -53,11 +53,7 @@ def test_embedding_image_create_embedding():
     embedding_driver = Embedding(provider, connConfig, bag)
 
     # Node uses create_image_embedding(Image) -> List[float]
-    # Wrap in billing context so GPU timing enforcement doesn't raise
-    from ai.web.metrics import metrics
-
-    with metrics.test_context():
-        result = embedding_driver.create_image_embedding(pil_image)
+    result = embedding_driver.create_image_embedding(pil_image)
 
     assert isinstance(result, list), f'Expected list of floats, got {type(result)}'
     assert len(result) > 0, 'Embedding should not be empty'

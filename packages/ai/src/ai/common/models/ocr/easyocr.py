@@ -32,6 +32,7 @@ Output Format:
 import io
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
@@ -366,20 +367,45 @@ class EasyOCR:
         if single_input:
             images = [images]
 
+        # Count inference call — perf timing handled per-mode below
         metrics.counter('gpu_inference_count', 1)
-        with metrics.resource('gpu'):
-            if self._proxy_mode:
-                results = self._read_remote(images)
-            else:
-                results = self._read_local(images)
 
-            return results[0] if single_input else results
+        if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
+            results = self._read_remote(images)
+        else:
+            # Local mode — time each phase
+            results = self._read_local(images)
+
+        return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR."""
+        """Execute local OCR with perf timing."""
+        # Preprocess phase — decode images and prepare for model
+        t0 = time.perf_counter()
         preprocessed = EasyOCRLoader.preprocess(self._model, images, self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        # GPU inference phase — run OCR detection and recognition
+        t0 = time.perf_counter()
         raw_output = EasyOCRLoader.inference(self._model, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        # Postprocess phase — extract text and bounding boxes
+        t0 = time.perf_counter()
         results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
 
         return [self._format_result(r) for r in results]
 
@@ -390,7 +416,7 @@ class EasyOCR:
 
         for image_bytes in images:
             result = self._client.send_command(
-                'inference',
+                'rrext_ms_inference',
                 {
                     'output_fields': self.output_fields,
                     'data': image_bytes,  # Binary transfer via DAP data field

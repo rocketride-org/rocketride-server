@@ -210,6 +210,9 @@ export interface RocketRideClientConfig {
 	/** Max total time in ms to keep retrying connections. Default: undefined (forever). */
 	maxRetryTime?: number;
 
+	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
+	wsPath?: string;
+
 	/** Client module name for debugging and identification */
 	module?: string;
 
