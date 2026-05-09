@@ -42,7 +42,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ## Vulnerability & Alert Triage
 
-This project uses GitHub-native scanning on the `develop` branch — CodeQL (Default Setup), Secret Scanning with Push Protection, Scorecard, and Dependabot. All findings are triaged against the SLAs in [What to Expect](#what-to-expect).
+This project uses GitHub-native scanning on the `develop` branch — CodeQL (Default Setup), Secret Scanning with Push Protection, Scorecard, and Dependabot. CodeQL and Scorecard findings both surface as code scanning alerts in the same GitHub UI and share the dismissal workflow described below. All findings are triaged against the SLAs in [What to Expect](#what-to-expect).
 
 ### Two-Person Control on Code Scanning Alert Dismissals
 
