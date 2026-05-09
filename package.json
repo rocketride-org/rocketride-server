@@ -32,7 +32,8 @@
 		"pipeline"
 	],
 	"scripts": {
-		"prepare": "lefthook install --force"
+		"prepare": "lefthook install --force",
+		"test:scripts-lib": "node --test scripts/lib/sync.test.js"
 	},
 	"packageManager": "pnpm@10.33.0",
 	"engines": {

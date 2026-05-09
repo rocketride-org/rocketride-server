@@ -55,8 +55,11 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
     // Get source files
     const srcFiles = new Set(await glob(pattern, { cwd: src, nodir: true, ignore: ignore }));
 
-    // Get dest files
-    const destFiles = new Set(await glob(pattern, { cwd: dest, nodir: true, ignore: ignore }));
+    // Get dest files — skip glob when dest does not exist yet (clean tree / first sync).
+    // glob(..., { cwd: dest }) throws or misbehaves if cwd is missing.
+    const destFiles = (await exists(dest))
+        ? new Set(await glob(pattern, { cwd: dest, nodir: true, ignore: ignore }))
+        : new Set();
 
     // Process source files - copy new/modified
     for (const name of srcFiles) {
