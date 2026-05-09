@@ -68,6 +68,7 @@ When closing an alert, choose one of:
 ### Secret Scanning & Dependabot
 
 - **Secret Scanning Push Protection** is enabled org-wide. Pushes containing detected secrets are blocked at push time; bypasses require committer justification and are recorded in the audit log.
+- **Secret Scanning alerts** for secrets already in the repository follow the same two-person Delegated Alert Dismissal flow (request, approval by a different authorized reviewer, auto-dismissal with audit trail).
 - **Dependabot alerts** follow the same two-person Delegated Alert Dismissal flow described above (request by any write-access maintainer; approval by a different organization owner, security manager, or holder of an explicitly delegated custom role). Dismissal reason and any SLA exception must be recorded in the dismissal comment. Fixes are tracked via Dependabot security update PRs against the SLAs above.
 
 ## Security Best Practices
