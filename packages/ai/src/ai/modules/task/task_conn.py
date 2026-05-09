@@ -295,11 +295,6 @@ class TaskConn(
 
         credential = args.get('auth') or ''
 
-        if not credential:
-            self._authenticated = False
-            self._account_info = None
-            raise ValueError('Not authenticated')
-
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
             error_code, error_message = result

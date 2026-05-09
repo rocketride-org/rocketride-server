@@ -244,6 +244,7 @@ module.exports = {
 			action: () => ({
 				description: 'Test Python client',
 				steps: [
+					'server:build',
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
 					bracket({
 						name: 'py-test-server',

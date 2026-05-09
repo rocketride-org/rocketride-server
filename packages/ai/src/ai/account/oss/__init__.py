@@ -94,7 +94,7 @@ class Account(AccountBase):
         # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
         # on the server env is what we expect. Up to 3rd part and key rotation
         if oss_key and oss_key != credential:
-            # No key configured — reject the connection immediately.
+            # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
         # Credential matched — synthesise a local AccountInfo that grants the

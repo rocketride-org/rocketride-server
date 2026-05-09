@@ -124,11 +124,7 @@ function makeRunPytestAction(options = {}) {
             const port = bracket?.port || ctx.port;
             const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
-            // Install MCP test dependencies
-            task.output = 'Installing test deps (mcp, python-dotenv)...';
-            await execCommand(ENGINE, [
-                '-m', 'pip', 'install', 'mcp>=1.2.0', 'python-dotenv>=1.0.0', '--quiet'
-            ], { task, cwd: SERVER_DIR });
+            // MCP and python-dotenv are installed by server:setup-pip
 
             // Run pytest
             const buildSrcDir = path.join(BUILD_DIR, 'src');
@@ -232,6 +228,7 @@ module.exports = {
         { name: 'client-mcp:test', action: () => ({
             description: 'Test MCP client',
             steps: [
+                'server:build',
                 parallel([
                     'ai:build',
                     'nodes:build',

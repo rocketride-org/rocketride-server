@@ -757,24 +757,36 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-            // Bootstrap pip, install build tools, and test requirements (once; tracked in state).
-            // State key version bumped to force re-run on upgrade: pre-existing environments
-            // with `pipInstalled === true` from the old bootstrap would otherwise skip
-            // `pip install -r nodes/test/requirements.txt` and silently miss `pytest-xdist`.
-            const pipInstalled = await getState('server.pipInstalledV3');
+            // Bootstrap pip, then install all build, test, and runtime dependencies.
+            // uv is left for depends.py at runtime; the builder just uses pip.
+            // State key version bumped to force re-run when deps change.
+            const pipInstalled = await getState('server.pipInstalledV8');
             if (!pipInstalled) {
+                // Bootstrap pip
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
-                task.output = 'Upgrading pip...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
-                task.output = 'Installing setuptools, wheel, build...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build'], { task, cwd: DIST_DIR });
-                task.output = 'Installing test requirements...';
-                const testReqs = path.join(PROJECT_ROOT, 'nodes', 'test', 'requirements.txt');
-                await execCommand(enginePath, ['-m', 'pip', 'install', '-r', testReqs], { task, cwd: DIST_DIR });
-                await setState('server.pipInstalledV3', true);
+
+                const pipInstall = (...deps) => execCommand(enginePath, [
+                    '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
+                ], { task, cwd: DIST_DIR });
+
+                task.output = 'Installing build tools...';
+                await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');
+
+                task.output = 'Installing test and runtime dependencies...';
+                await pipInstall(
+                    // Test framework
+                    'pytest', 'pytest-asyncio', 'pytest-timeout', 'pytest-xdist',
+                    // Runtime deps needed by client-python tests and AI modules
+                    'pydantic', 'python-dotenv',
+                    // MCP client tests
+                    'mcp>=1.2.0',
+                    // Model server
+                    'huggingface_hub[hf_xet]',
+                );
+                await setState('server.pipInstalledV8', true);
             } else {
-                task.output = 'Pip and build deps already installed (skipped)';
+                task.output = 'Build and test deps already installed (skipped)';
             }
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
