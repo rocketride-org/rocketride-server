@@ -49,7 +49,7 @@ discord_curl() {
       echo "::warning::Discord ${status} (transient); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
       sleep "$backoff"
       backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
-    elif [ -z "$status" ] && [ "$retry_5xx" -eq 1 ]; then
+    elif { [ -z "$status" ] || [ "$status" = "000" ]; } && [ "$retry_5xx" -eq 1 ]; then
       echo "::warning::Discord call failed (no HTTP response); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
       sleep "$backoff"
       backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
