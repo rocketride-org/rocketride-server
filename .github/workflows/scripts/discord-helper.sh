@@ -22,7 +22,8 @@ DISCORD_STATUS_FILE=$(mktemp)
 trap 'rm -f "$DISCORD_STATUS_FILE"' EXIT
 
 discord_curl() {
-  local max_attempts=5 attempt=1 backoff=1
+  local max_attempts=5 attempt=1 backoff=1 retry_5xx=1
+  if [ "${1:-}" = "--no-retry-5xx" ]; then retry_5xx=0; shift; fi
   local headers response status body retry_after
   headers=$(mktemp); trap 'rm -f "$headers"' RETURN
   while [ $attempt -le $max_attempts ]; do
@@ -44,11 +45,11 @@ discord_curl() {
       [ "$retry_after" -gt 60 ] && retry_after=60
       echo "::warning::Discord 429 (rate limited); sleeping ${retry_after}s before retry $((attempt+1))/${max_attempts}" >&2
       sleep "$retry_after"
-    elif [ -n "$status" ] && [ "$status" -ge 500 ]; then
+    elif [ -n "$status" ] && [ "$status" -ge 500 ] && [ "$retry_5xx" -eq 1 ]; then
       echo "::warning::Discord ${status} (transient); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
       sleep "$backoff"
       backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
-    elif [ -z "$status" ]; then
+    elif [ -z "$status" ] && [ "$retry_5xx" -eq 1 ]; then
       echo "::warning::Discord call failed (no HTTP response); sleeping ${backoff}s before retry $((attempt+1))/${max_attempts}" >&2
       sleep "$backoff"
       backoff=$((backoff * 2)); [ "$backoff" -gt 30 ] && backoff=30
