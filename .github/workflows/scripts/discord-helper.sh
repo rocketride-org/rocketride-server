@@ -13,6 +13,18 @@
 # workflow's checks queue. discord_curl wraps curl so 429/5xx are retried;
 # non-429 4xx are returned to the caller unchanged.
 #
+# Non-idempotent callers (POST that creates a message) should pass
+# --no-retry-5xx as the first argument. That restricts retries to 429
+# (which guarantees the request was rejected) and surfaces 5xx and
+# network failures to the caller, avoiding duplicate Discord messages
+# on uncertain delivery. The flag name only mentions 5xx, but it also
+# disables the no-response-received retry path (000/empty status), which
+# is the correct at-most-once choice for POST.
+#
+#   CREATE_BODY=$(discord_curl --no-retry-5xx -X POST \
+#                  -H 'Content-Type: application/json' -d "$payload" \
+#                  "${DISCORD_WEBHOOK_URL}?wait=true") || true
+#
 # Status sink: callers invoke discord_curl via $(...), which runs in a
 # subshell, so shell variables set inside don't propagate back. The HTTP
 # status is published through DISCORD_STATUS_FILE (a step-owned temp file)
