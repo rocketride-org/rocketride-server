@@ -167,6 +167,20 @@ async def run(config: Dict[str, Any] = None) -> None:
 
 
 def main():
+    # Workaround for Python 3.12+ Uvicorn signal handler restoration bug
+    # where signal.signal() raises TypeError if the handler is None.
+    import signal
+    import platform
+    
+    if platform.system() == "Windows":
+        for sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGBREAK", None)):
+            if sig is not None:
+                try:
+                    if signal.getsignal(sig) is None:
+                        signal.signal(sig, signal.SIG_DFL)
+                except (ValueError, OSError):
+                    pass
+
     """Run the EaaS server."""
     try:
         asyncio.run(run())
