@@ -1,6 +1,6 @@
-colors: false
+colors: false # disabled to fix terminal corruption on Windows
 pre-commit:
-  parallel: true
+  parallel: false # sequential to avoid ruff cache write conflicts
   commands:
     gitleaks:
       tags: security
