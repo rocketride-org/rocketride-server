@@ -1,6 +1,6 @@
 # Commit Signing
 
-All commits to this repo should be SSH-signed. After setup, your commits show a green **Verified** badge on github.com and `git log --show-signature` reports `Good "git" signature` locally.
+All commits to this repo should be SSH-signed. After setup, your commits show a green **Verified** badge on GitHub.com and `git log --show-signature` reports `Good "git" signature` locally.
 
 ## Setup
 
@@ -54,7 +54,7 @@ GitHub stores **authentication keys** and **signing keys** as separate entries. 
    - The email shown by `git config --global user.email` must appear here with no "Unverified" label.
    - If it's missing, click **Add email address**, enter it, then click the verification link sent to that inbox.
 
-   *Skipping this step is the most common mistake.* Without it, GitHub returns `reason: no_user` for your signed commits — they sign correctly but show as "Unverified" on github.com.
+   *Skipping this step is the most common mistake.* Without it, GitHub returns `reason: no_user` for your signed commits — they sign correctly but show as "Unverified" on GitHub.com.
 
 ## Verifying it worked
 
@@ -66,7 +66,7 @@ gh api "repos/<owner>/<repo>/commits/${SHA}" --jq '.commit.verification.verified
 # Expect: true
 ```
 
-Or just look at the commit on github.com — it should show a green **Verified** badge.
+Or just look at the commit on GitHub.com — it should show a green **Verified** badge.
 
 ## Common gotchas
 
