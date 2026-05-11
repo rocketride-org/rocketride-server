@@ -20,62 +20,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// =============================================================================
+// PROFILER-UI — App Descriptor
+// =============================================================================
+
+import type { AppDescriptor } from 'shell-ui';
+import ProfilerApp from './ProfilerApp';
+import ProfilerSidebar from './ProfilerSidebar';
+
 /**
- * UI Build Module — aggregate tasks for all UI applications.
+ * AppDescriptor for the Profiler app.
  *
- * Provides convenience actions that clean and build all -ui apps
- * in a single command.
- *
- * Actions:
- *   ui:clean — clean all UI app build artifacts
- *   ui:build — build all UI apps (shell + remotes)
+ * Provides cProfile-based process profiling: start/stop sessions on the
+ * server process or pipeline engine subprocesses, view function-level
+ * pstats reports, and manage connections.
  */
-const { parallel } = require('./lib');
-
-// =============================================================================
-// MODULE DEFINITION
-// =============================================================================
-
-module.exports = {
-	name: 'ui',
-	description: 'All UI Applications',
-
-	actions: [
-		{
-			// Clean all UI build artifacts in parallel.
-			name: 'ui:clean',
-			action: () => ({
-				description: 'Clean all UI app build artifacts',
-				steps: [
-					parallel([
-						'shell-ui:clean',
-						'hello-ui:clean',
-						'world-ui:clean',
-						'chat-ui:clean',
-						'dropper-ui:clean',
-						'monitor-ui:clean',
-						'profiler-ui:clean',
-					], 'Clean UI apps'),
-				],
-			}),
-		},
-		{
-			// Build all UI apps. Shell builds first (host), then remotes in parallel.
-			name: 'ui:build',
-			action: () => ({
-				description: 'Build all UI apps (shell + remotes)',
-				steps: [
-					'shell-ui:build',
-					parallel([
-						'hello-ui:build',
-						'world-ui:build',
-						'chat-ui:build',
-						'dropper-ui:build',
-						'monitor-ui:build',
-						'profiler-ui:build',
-					], 'Build remote apps'),
-				],
-			}),
-		},
-	],
+const PROFILER_APP: AppDescriptor = {
+	id: 'rocketride.profiler',
+	name: 'Profiler',
+	branding: {
+		appName: 'Profiler',
+	},
+	components: {
+		App: ProfilerApp,
+		Sidebar: ProfilerSidebar,
+	},
 };
+
+export default PROFILER_APP;

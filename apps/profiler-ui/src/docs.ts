@@ -20,62 +20,44 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// =============================================================================
+// PROFILER-UI DOCUMENTS INSTANCE
+// =============================================================================
+//
+// App-owned Documents instance shared between ProfilerApp and ProfilerSidebar.
+// Created by ProfilerApp on mount.
+// All documents are static (profiler sessions per connection) — no VFS needed.
+// =============================================================================
+
+import { Documents } from 'shell-ui';
+import type { WorkspaceBinding } from 'shell-ui';
+
+/** The app's Documents instance. Set by ProfilerApp on mount. */
+let _docs: Documents | null = null;
+
 /**
- * UI Build Module — aggregate tasks for all UI applications.
- *
- * Provides convenience actions that clean and build all -ui apps
- * in a single command.
- *
- * Actions:
- *   ui:clean — clean all UI app build artifacts
- *   ui:build — build all UI apps (shell + remotes)
+ * Returns the app's Documents instance, or null if not yet initialised.
  */
-const { parallel } = require('./lib');
+export function getDocs(): Documents | null {
+	return _docs;
+}
 
-// =============================================================================
-// MODULE DEFINITION
-// =============================================================================
+/**
+ * Creates and stores the app's Documents instance.
+ * Called once by ProfilerApp on mount.
+ *
+ * @param workspace - Optional workspace binding for automatic persistence.
+ */
+export function createDocs(workspace?: WorkspaceBinding): Documents {
+	_docs = new Documents(null, workspace);
+	return _docs;
+}
 
-module.exports = {
-	name: 'ui',
-	description: 'All UI Applications',
-
-	actions: [
-		{
-			// Clean all UI build artifacts in parallel.
-			name: 'ui:clean',
-			action: () => ({
-				description: 'Clean all UI app build artifacts',
-				steps: [
-					parallel([
-						'shell-ui:clean',
-						'hello-ui:clean',
-						'world-ui:clean',
-						'chat-ui:clean',
-						'dropper-ui:clean',
-						'monitor-ui:clean',
-						'profiler-ui:clean',
-					], 'Clean UI apps'),
-				],
-			}),
-		},
-		{
-			// Build all UI apps. Shell builds first (host), then remotes in parallel.
-			name: 'ui:build',
-			action: () => ({
-				description: 'Build all UI apps (shell + remotes)',
-				steps: [
-					'shell-ui:build',
-					parallel([
-						'hello-ui:build',
-						'world-ui:build',
-						'chat-ui:build',
-						'dropper-ui:build',
-						'monitor-ui:build',
-						'profiler-ui:build',
-					], 'Build remote apps'),
-				],
-			}),
-		},
-	],
-};
+/**
+ * Destroys the app's Documents instance.
+ * Called by ProfilerApp on unmount.
+ */
+export function destroyDocs(): void {
+	_docs?.destroy();
+	_docs = null;
+}

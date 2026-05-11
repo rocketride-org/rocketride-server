@@ -25,7 +25,7 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -2147,6 +2147,61 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getDashboard(): Promise<DashboardResponse> {
 		return this.call<DashboardResponse>('rrext_dashboard', {});
+	}
+
+	// ============================================================================
+	// CPROFILE PROFILING
+	// ============================================================================
+
+	/**
+	 * Start a cProfile profiling session on the server process or a pipeline.
+	 *
+	 * @param target  - Task token to profile a pipeline subprocess, or
+	 *                  undefined/null to profile the server process itself.
+	 * @param session - Optional human-readable session name.
+	 * @returns Status object with session info and start time.
+	 */
+	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		if (session) args.session = session;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_start', args);
+	}
+
+	/**
+	 * Stop the active cProfile profiling session.
+	 *
+	 * @param target - Task token if profiling a pipeline, or undefined for server.
+	 * @returns Result with session name and runtime.
+	 */
+	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStopResponse>('rrext_cprofile_stop', args);
+	}
+
+	/**
+	 * Get the current cProfile profiling status.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Status indicating active/inactive, owner, runtime.
+	 */
+	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_status', args);
+	}
+
+	/**
+	 * Get the full cProfile report from the last completed session.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Object containing the full pstats text report.
+	 */
+	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileReportResponse>('rrext_cprofile_report', args);
 	}
 
 	// ============================================================================

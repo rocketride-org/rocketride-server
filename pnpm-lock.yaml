@@ -135,10 +135,10 @@ importers:
         version: 0.4.15
       '@rsbuild/plugin-react':
         specifier: ^0.4.0
-        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.3)
+        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.18)
       '@rsbuild/plugin-type-check':
         specifier: ^0.4.0
-        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.3)(typescript@5.9.3)
+        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.18)(typescript@5.9.3)
       '@tailwindcss/aspect-ratio':
         specifier: ^0.4.2
         version: 0.4.2(tailwindcss@3.4.19)
@@ -223,10 +223,10 @@ importers:
         version: 0.4.15
       '@rsbuild/plugin-react':
         specifier: ^0.4.0
-        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.18)
+        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.3)
       '@rsbuild/plugin-type-check':
         specifier: ^0.4.0
-        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.18)(typescript@5.9.3)
+        version: 0.4.15(@rsbuild/core@0.4.15)(@swc/helpers@0.5.3)(typescript@5.9.3)
       '@tailwindcss/aspect-ratio':
         specifier: ^0.4.2
         version: 0.4.2(tailwindcss@3.4.19)
@@ -293,6 +293,34 @@ importers:
         version: 5.9.3
 
   apps/monitor-ui:
+    dependencies:
+      '@module-federation/rsbuild-plugin':
+        specifier: ^0.9.0
+        version: 0.9.1(@rsbuild/core@1.1.0)(@rspack/core@1.7.4(@swc/helpers@0.5.18))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)(webpack@5.104.1)
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+      shared:
+        specifier: workspace:*
+        version: link:../../packages/shared-ui
+      shell-ui:
+        specifier: workspace:*
+        version: link:../shell-ui
+    devDependencies:
+      '@rsbuild/core':
+        specifier: 1.1.0
+        version: 1.1.0
+      '@rsbuild/plugin-react':
+        specifier: 1.0.7
+        version: 1.0.7(@rsbuild/core@1.1.0)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+
+  apps/profiler-ui:
     dependencies:
       '@module-federation/rsbuild-plugin':
         specifier: ^0.9.0

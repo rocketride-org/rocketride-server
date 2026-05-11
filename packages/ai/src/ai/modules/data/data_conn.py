@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, TYPE_CHECKING
 from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
+from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
 from rocketlib import (
     IServiceEndpoint,
@@ -153,6 +154,9 @@ class DataConn(DAPConn):
 
         This method stops all background tasks and cleans up pipes.
         """
+        # Release any cProfile session owned by this connection
+        profiler.release(f'data:{id(self)}')
+
         # Signal shutdown to monitoring task
         self._shutdown_event.set()
 
@@ -742,3 +746,68 @@ class DataConn(DAPConn):
             if conn_pipe.semaphore_acquired:
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
+
+    # =========================================================================
+    # CPROFILE COMMANDS
+    # =========================================================================
+
+    async def on_rrext_cprofile_start(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Start a cProfile profiling session on this engine subprocess.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.session (str, optional): Human-readable session name
+
+        Returns:
+            Dict[str, Any]: DAP response with status, session, owner, start_time
+        """
+        args = request.get('arguments', {})
+        session = args.get('session', None)
+        result = profiler.start(f'data:{id(self)}', session)
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_stop(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Stop the active cProfile session on this engine subprocess.
+
+        Only the connection that started the session can stop it.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with status, session, runtime
+        """
+        result = profiler.stop(f'data:{id(self)}')
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get cProfile profiling status for this engine subprocess.
+
+        Any connection can call this regardless of ownership.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with active, owner, session, runtime
+        """
+        result = profiler.status()
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_report(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get the full cProfile report from the last completed session.
+
+        Any connection can call this regardless of ownership.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with report text
+        """
+        result = profiler.report()
+        return self.build_response(request, body=result)

@@ -54,6 +54,7 @@ from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
+from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
 from typing import Callable, TYPE_CHECKING
 
@@ -79,6 +80,7 @@ class RocketRideClient(
     PingMixin,
     ServicesMixin,
     DashboardMixin,
+    CProfileMixin,
     StoreMixin,
     DAPClient,
 ):

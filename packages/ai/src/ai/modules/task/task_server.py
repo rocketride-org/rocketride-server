@@ -452,6 +452,10 @@ class TaskServer(DAPBase):
         connection_id = conn.get_connection_id()
         debug(f'[CONN] disconnected: id={connection_id} authenticated={getattr(conn, "_authenticated", False)}')
 
+        # Release any cProfile session owned by this connection
+        if hasattr(conn, 'release_profiler'):
+            conn.release_profiler()
+
         # Remove connection from active connections registry
         if connection_id in self._connections:
             del self._connections[connection_id]

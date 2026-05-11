@@ -6,7 +6,6 @@ ALL = frozenset(
         'data',
         'dropper',
         'pipe',
-        'profiler',
         'remote',
         'services',
         'shell',

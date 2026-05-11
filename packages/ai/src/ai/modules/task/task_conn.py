@@ -71,6 +71,7 @@ from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
+from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
@@ -97,6 +98,7 @@ class TaskConn(
     MonitorCommands,
     DebugCommands,
     MiscCommands,
+    CProfileCommands,
     AccountCommands,
     AppCommands,
     DAPConn,
@@ -130,6 +132,7 @@ class TaskConn(
     - MonitorCommands: Event subscription and monitoring
     - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
+    - CProfileCommands: cProfile process profiling (start, stop, status, report)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
     - AppCommands: App marketplace (developer, submission, catalog, admin, pricing)
     - DAPConn: Base DAP protocol implementation and transport handling
@@ -183,6 +186,7 @@ class TaskConn(
         TaskCommands.__init__(self, connection_id, server, transport, **kwargs)
         DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
+        CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
 
