@@ -25,10 +25,11 @@
 Anthropic binding for the ChatLLM.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Union
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage, HumanMessage
 
 # --- ANTI-SIGBUS PATCH: disable fast tokenizers and Claude-specific token counting ---
 # 1) Disable tokenizer parallelism
@@ -111,3 +112,29 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat(self, payload: Union[str, Any]) -> str:
+        prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
+
+        if hasattr(payload, 'getPrompt'):
+            # Split the string to separate the static instructions from the dynamic user query
+            parts = prompt_str.rsplit('### Current Task:', 1)
+            if len(parts) == 2:
+                static_str = parts[0]
+                dynamic_str = '### Current Task:' + parts[1]
+
+                # Cache the heavy static context
+                static_msg = SystemMessage(
+                    content=static_str,
+                    additional_kwargs={"cache_control": {"type": "ephemeral"}}
+                )
+                
+                # Dynamic user question without caching
+                dynamic_msg = HumanMessage(content=dynamic_str)
+
+                results = self._llm.invoke([static_msg, dynamic_msg])
+                return results.content
+
+        # Fallback for strings or un-splittable prompts
+        results = self._llm.invoke(prompt_str)
+        return results.content

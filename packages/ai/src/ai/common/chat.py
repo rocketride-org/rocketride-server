@@ -13,7 +13,7 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -104,7 +104,7 @@ class ChatBase:
         """
         return self._modelOutputTokens
 
-    def _chat(self, prompt: str) -> str:
+    def _chat(self, payload: Union[str, Question]) -> str:
         """
         Send prompt, recieve response.
 
@@ -118,7 +118,7 @@ class ChatBase:
         - Error handling for API failures
 
         Args:
-            prompt (str): The complete prompt to send to the AI model
+            payload (Union[str, Question]): The prompt payload to send to the AI model
 
         Returns:
             str: The raw response from the AI model
@@ -128,7 +128,8 @@ class ChatBase:
             errors, or other provider-specific issues
         """
         # Ask the LLM
-        results = self._llm.invoke(prompt)
+        prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
+        results = self._llm.invoke(prompt_str)
 
         # Return the results
         return results.content
@@ -273,7 +274,7 @@ class ChatBase:
         # Default to retryable for unknown errors (conservative approach)
         return True
 
-    def _chat_with_retries(self, prompt: str) -> str:
+    def _chat_with_retries(self, payload: Union[str, Question]) -> str:
         """
         Handle chat requests with retries for transient errors.
 
@@ -282,7 +283,7 @@ class ChatBase:
         using exponential backoff.
 
         Args:
-            prompt (str): The complete prompt to send to the AI model
+            payload (Union[str, Question]): The prompt payload to send to the AI model
 
         Returns:
             str: The raw response from the AI model
@@ -300,7 +301,7 @@ class ChatBase:
         for attempt in range(max_network_retries):
             try:
                 # Call the actual chat implementation provided by the subclass
-                return self._chat(prompt)
+                return self._chat(payload)
 
             except Exception as e:
                 # Determine if this is a retryable error
@@ -326,7 +327,7 @@ class ChatBase:
         # This should never be reached due to the raise in the loop
         raise Exception('Unexpected exit from retry loop')
 
-    def chat_string(self, prompt: str) -> str:
+    def chat_string(self, payload: Union[str, Question]) -> str:
         """
         Invoke the chat interface with string input, token management, and network retry handling.
 
@@ -343,7 +344,7 @@ class ChatBase:
         6. Return the result
 
         Args:
-            prompt (str): The complete prompt to send to the model
+            payload (Union[str, Question]): The prompt payload to send to the model
 
         Returns:
             str: The model's response
@@ -356,12 +357,14 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
+        prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
+
         # Validate and sanitize the prompt before processing
-        prompt = validate_prompt(prompt, self._modelTotalTokens, self.getTokens)
+        prompt_str = validate_prompt(prompt_str, self._modelTotalTokens, self.getTokens)
 
         # Count tokens in the input prompt to check against limits
         # This is important for preventing API errors and ensuring quality responses
-        prompt_tokens = self.getTokens(prompt)
+        prompt_tokens = self.getTokens(prompt_str)
 
         # Check if the prompt is too long, leaving insufficient space for response
         # We reserve 100 tokens for the response to ensure the model has room to answer
@@ -373,7 +376,7 @@ class ChatBase:
 
         # Call the chat implementation with network retry logic
         # This is where the real communication with the AI provider happens
-        result = self._chat_with_retries(prompt)
+        result = self._chat_with_retries(payload)
 
         # Count tokens in the response to check for potential truncation
         # This helps identify cases where the model's response was cut off
@@ -414,7 +417,7 @@ class ChatBase:
                       errors occur
         """
         # Use chat_string which already handles network retries and token management
-        response = self.chat_string(question.getPrompt())
+        response = self.chat_string(question)
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —
