@@ -9,5 +9,5 @@ cymem==2.0.11
 murmurhash==1.0.11
 preshed==3.0.9
 srsly==2.5.0
-thinc==8.3.4
+thinc==9.1.1
 wasabi==1.1.3
