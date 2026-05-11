@@ -70,28 +70,28 @@
 		}
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.15.0",
+		"@eslint/js": "^9.39.4",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
-		"@types/node": "^20.0.0",
+		"@types/node": "^20.19.40",
 		"adm-zip": "^0.5.16",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
-		"eslint": "^9.15.0",
+		"eslint": "^9.39.4",
 		"eslint-config-prettier": "^9.1.0",
 		"eslint-plugin-react": "^7.37.2",
 		"eslint-plugin-react-hooks": "^5.0.0",
-		"eslint-plugin-react-refresh": "^0.4.14",
+		"eslint-plugin-react-refresh": "^0.5.2",
 		"execa": "^9.6.1",
 		"gitignore-globs": "^0.1.1",
 		"glob": "^11.0.0",
 		"globals": "^15.12.0",
 		"listr2": "^9.0.5",
 		"npm-run-all": "^4.1.5",
-		"prettier": "^3.3.3",
+		"prettier": "^3.8.3",
 		"rimraf": "^5.0.5",
 		"tar": "^7.5.8",
-		"lefthook": "^2.1.4",
+		"lefthook": "^2.1.6",
 		"typescript": "^5.3.3",
-		"typescript-eslint": "^8.15.0"
+		"typescript-eslint": "^8.59.3"
 	}
 }
