@@ -439,10 +439,14 @@ class ChatBase:
         # Reset captured usage so a stale value from a prior question can't
         # leak onto this Answer if the underlying _chat fails before
         # populating it (e.g. a vendor-SDK driver that doesn't surface usage).
+        # ``accumulated_usage`` sums across JSON-retry attempts so the trace
+        # reflects every billable call, not just the final successful one.
         self._last_usage = None
+        accumulated_usage: Dict[str, Any] = {}
 
         # Use chat_string which already handles network retries and token management
         response = self.chat_string(question.getPrompt())
+        _accumulate_usage(accumulated_usage, self._last_usage)
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —
@@ -459,8 +463,8 @@ class ChatBase:
                     # Create the json answer and return it
                     answer = Answer(expectJson=True)
                     answer.setAnswer(parsed_response)
-                    if self._last_usage:
-                        answer.usage_metadata = self._last_usage
+                    if accumulated_usage:
+                        answer.usage_metadata = accumulated_usage
                     return answer
 
                 except (json.JSONDecodeError, ValueError):
@@ -471,6 +475,7 @@ class ChatBase:
                         # Retry the chat with the additional instruction
                         # This will again use chat_string with full network retry logic
                         response = self.chat_string(question.getPrompt(has_previous_json_failed=True))
+                        _accumulate_usage(accumulated_usage, self._last_usage)
                     else:
                         # Max retries reached, raise ValueError
                         error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Last response: {response[:200]}...'
@@ -484,8 +489,8 @@ class ChatBase:
 
             # Attach usage_metadata captured by _chat (None for vendor-SDK
             # drivers that bypass LangChain's standardised usage shape).
-            if self._last_usage:
-                answer.usage_metadata = self._last_usage
+            if accumulated_usage:
+                answer.usage_metadata = accumulated_usage
 
             # And return it
             return answer
@@ -518,12 +523,12 @@ def _normalize_usage(usage: Any) -> Optional[Dict[str, Any]]:
     for key in ('input_tokens', 'output_tokens', 'total_tokens'):
         val = usage.get(key)
         if isinstance(val, (int, float)):
-            out[key] = int(val)
+            out[key] = round(val)
 
     for details_key in ('input_token_details', 'output_token_details'):
         details = usage.get(details_key)
         if isinstance(details, dict):
-            converted = {k: int(v) for k, v in details.items() if isinstance(v, (int, float))}
+            converted = {k: round(v) for k, v in details.items() if isinstance(v, (int, float))}
             if converted:
                 out[details_key] = converted
 
@@ -534,6 +539,28 @@ def _normalize_usage(usage: Any) -> Optional[Dict[str, Any]]:
         out['cache_creation_input_tokens'] = input_details['cache_creation']
 
     return out or None
+
+
+def _accumulate_usage(target: Dict[str, Any], latest: Optional[Dict[str, Any]]) -> None:
+    """Add ``latest`` token counts into ``target`` in-place, summing nested detail dicts one level deep.
+
+    ``chat()`` may retry an LLM invocation up to three times when the model
+    returns malformed JSON. Each attempt is billed by the vendor and should
+    surface in the trace, so we sum across attempts rather than overwrite,
+    keeping operators' cost/cache views faithful to the real call count.
+    """
+    if not latest:
+        return
+    for key, val in latest.items():
+        if isinstance(val, int):
+            target[key] = target.get(key, 0) + val
+        elif isinstance(val, dict):
+            sub = target.setdefault(key, {})
+            if not isinstance(sub, dict):
+                continue
+            for k, v in val.items():
+                if isinstance(v, int):
+                    sub[k] = sub.get(k, 0) + v
 
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:
