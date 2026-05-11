@@ -106,6 +106,14 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
 
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
+        async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+            # Async hook for LangGraph's async path.  Bridges the blocking engine
+            # LLM RPC off the event loop so concurrent subagent LLM calls don't
+            # serialize on the orchestrator's loop.  The 3-attempt JSON-envelope
+            # retry loop stays inside _generate — LangGraph awaits one _agenerate
+            # per LLM call, retries are an implementation detail.
+            return await asyncio.to_thread(self._generate, messages, stop, run_manager, **kwargs)
+
     return RocketRideToolCallingChatModel()
 
 
