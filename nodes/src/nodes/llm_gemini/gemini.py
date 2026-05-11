@@ -24,6 +24,7 @@
 from typing import Any, Dict, Union
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.schema import Question
 from google import genai
 
 
@@ -115,7 +116,7 @@ class Chat(ChatBase):
         word_count = len(value.split())
         return int(word_count / 0.75)
 
-    def _chat(self, payload: Union[str, Any]) -> str:
+    def _chat(self, payload: Union[str, Question]) -> str:
         """
         Send a chat prompt to the Gemini model and return the response.
 

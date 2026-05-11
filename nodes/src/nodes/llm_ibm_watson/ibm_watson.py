@@ -25,6 +25,7 @@ import re
 from typing import Any, Dict, Union
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.schema import Question
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
@@ -127,7 +128,7 @@ class Chat(ChatBase):
         # Save our chat class into the bag
         bag['chat'] = self
 
-    def _chat(self, payload: Union[str, Any]) -> str:
+    def _chat(self, payload: Union[str, Question]) -> str:
         """
         Send prompt to IBM Watson and receive response.
 
