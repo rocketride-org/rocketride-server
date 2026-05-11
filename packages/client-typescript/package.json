@@ -62,5 +62,10 @@
 		"ts-jest": "^29.4.4",
 		"typescript": "^5.0.0",
 		"ws": "^8.18.3"
+	},
+	"pnpm": {
+		"overrides": {
+			"handlebars": ">=4.7.9 <5"
+		}
 	}
 }
