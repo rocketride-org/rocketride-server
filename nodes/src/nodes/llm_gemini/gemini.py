@@ -124,7 +124,7 @@ class Chat(ChatBase):
         to the configured Gemini model and returning the generated text response.
 
         Args:
-            payload (Union[str, Any]): The user's input prompt/message or Question payload
+            payload (Union[str, Question]): The user's input prompt/message or Question payload
 
         Returns:
             str: The model's text response
