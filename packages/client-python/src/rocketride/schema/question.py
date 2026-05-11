@@ -294,6 +294,7 @@ class QuestionType(str, Enum):
         KEYWORD: Uses keyword matching and text search
         GET: Retrieves specific information or data
         PROMPT: Raw prompt without additional processing
+        EXECUTE: Direct query execution against database nodes (bypasses LLM + safety checks)
     """
 
     QUESTION = 'question'  # Basic question-answering
@@ -301,6 +302,7 @@ class QuestionType(str, Enum):
     KEYWORD = 'keyword'  # Keyword-based search
     GET = 'get'  # Information retrieval
     PROMPT = 'prompt'  # Raw prompt processing
+    EXECUTE = 'execute'  # Direct DB query execution (no LLM, no safety check)
 
 
 class Question(BaseModel):

@@ -13,6 +13,7 @@ queries, and inserts data as graph nodes.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase, tool_function, error, warning
@@ -204,6 +205,31 @@ class IInstance(IInstanceBase):
             return
 
         lanes = self.instance.getListeners()
+
+        # EXECUTE: caller passes raw Cypher; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
+                return
+            try:
+                execute_result = self.IGlobal._run_query_raw(question_text)
+                rows = execute_result['rows']
+                affected = execute_result['affected_rows']
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
+
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(execute_result, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
+            return
 
         try:
             query_json = self._buildCypherQuery(question_text)

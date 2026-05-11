@@ -33,7 +33,8 @@ export enum QuestionType {
 	SEMANTIC = 'semantic',
 	KEYWORD = 'keyword',
 	GET = 'get',
-	PROMPT = 'prompt'
+	PROMPT = 'prompt',
+	EXECUTE = 'execute'
 }
 
 /**
