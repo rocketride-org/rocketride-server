@@ -104,9 +104,11 @@ def test_error_with_file_and_line():
     inner = body['error']
     assert inner['error'] == 'boom'
     assert inner['file'] == 'x.py'
-    # NOTE: response.error wraps lineno in a tuple — preserve that quirk to
-    # avoid surprising any client that already accepts the current shape.
-    assert inner['lineno'] == [42] or inner['lineno'] == 42
+    # NOTE: response.error wraps lineno in a 1-tuple — preserve that quirk
+    # to avoid surprising any client that already accepts the current shape.
+    # The tuple becomes a list after JSON serialisation, so the decoded
+    # value MUST be [42], never the bare scalar 42.
+    assert inner['lineno'] == [42]
 
 
 def test_error_custom_http_status():

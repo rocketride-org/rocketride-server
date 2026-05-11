@@ -7,52 +7,18 @@ generic ``on_command`` fallback, and finally a default success response. The
 ``send_response`` / ``send_event`` / ``send_error`` helpers wrap a transport
 ``send`` call around the corresponding builder.
 
-DAPBase, DAPClient, transports, etc. are imported from ``rocketride.core``
-inside ``ai.common.dap.__init__``. That package is not on the engine's
-sys.path, so we register stubs in ``sys.modules`` BEFORE importing DAPConn.
-We then bypass DAPBase.__init__ via ``__new__`` and attach AsyncMocks for the
-methods DAPConn delegates to (``_transport.send``, ``_call_method``,
-``build_response``, ``build_event``, ``build_error``, ``debug_message``).
+DAPBase, DAPClient, transports, etc. come from ``rocketride.core`` (bundled
+with the engine). Tests bypass DAPBase.__init__ via ``__new__`` and attach
+AsyncMocks for the methods DAPConn delegates to (``_transport.send``,
+``_call_method``, ``build_response``, ``build_event``, ``build_error``,
+``debug_message``).
 """
 
-import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Module-level stubs for rocketride / rocketride.core. Installed BEFORE the
-# DAPConn import below so ai.common.dap.__init__ resolves cleanly.
-# ---------------------------------------------------------------------------
-
-
-class _StubDAPBase:
-    """Stand-in for rocketride.core.DAPBase (only needs to be subclassable)."""
-
-    def __init__(self, *args, **kwargs):
-        """No-op constructor; tests bypass this with __new__ anyway."""
-
-
-class _StubDAPException(Exception):
-    """Stand-in exception type, sufficient for `from x import DAPException`."""
-
-
-_stub_core = MagicMock(
-    DAPBase=_StubDAPBase,
-    DAPClient=MagicMock,
-    DAPException=_StubDAPException,
-    TransportBase=MagicMock,
-    TransportWebSocket=MagicMock,
-)
-
-# Pose as both 'rocketride' (parent) and 'rocketride.core' (the from-path).
-_rocketride = MagicMock(core=_stub_core)
-sys.modules.setdefault('rocketride', _rocketride)
-sys.modules.setdefault('rocketride.core', _stub_core)
-
-# Now safe to import the module under test.
-from ai.common.dap.dap_conn import DAPConn  # noqa: E402
+from ai.common.dap.dap_conn import DAPConn
 
 
 # ---------------------------------------------------------------------------

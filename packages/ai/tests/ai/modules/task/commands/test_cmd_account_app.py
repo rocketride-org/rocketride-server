@@ -90,7 +90,7 @@ def test_account_commands_init_is_noop():
     """AccountCommands.__init__ accepts the standard args and does nothing."""
     instance = AccountCommands.__new__(AccountCommands)
     AccountCommands.__init__(instance, connection_id=1, server=None, transport=None)
-    # No attributes are added — the mixin is intentionally state-less.
+    # No attributes are added — the mixin is intentionally stateless.
 
 
 def test_app_commands_init_is_noop():

@@ -134,7 +134,7 @@ async def test_on_attach_rejects_when_already_debugging():
     way. Pin that broad behaviour, not the specific exception type.
     """
     conn = _make_conn(debug_token='tk_existing')
-    with pytest.raises(Exception):
+    with pytest.raises((RuntimeError, UnboundLocalError)):
         await DebugCommands.on_attach(conn, {'arguments': {}})
 
 

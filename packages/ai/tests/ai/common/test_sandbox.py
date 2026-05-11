@@ -117,13 +117,23 @@ def test_disallowed_import_raises_import_error():
 
 
 def test_custom_allowed_modules_extend_the_allowlist():
-    """A caller-supplied ``allowed_modules`` set is merged with the defaults."""
-    out = execute_sandboxed(
-        'import math\nresult = math.pi',
-        allowed_modules={'math'},  # already in defaults, but exercise the merge path
-    )
-    assert out['exit_code'] == 0
-    assert out['result'] == pytest.approx(3.141592653589793)
+    """A caller-supplied ``allowed_modules`` set is merged with the defaults.
+
+    Uses ``os``, which is **not** in the default allowlist, so the test
+    actually exercises the merge path: the import fails without
+    ``allowed_modules`` and succeeds once ``os`` is added.
+    """
+    # Without the extension, importing ``os`` is blocked.
+    blocked = execute_sandboxed('import os\nresult = os.name')
+    assert blocked['exit_code'] == 1
+    assert 'not allowed' in blocked['stderr']
+
+    # With ``os`` explicitly added, the import succeeds and runs.
+    import os as _os
+
+    allowed = execute_sandboxed('import os\nresult = os.name', allowed_modules={'os'})
+    assert allowed['exit_code'] == 0
+    assert allowed['result'] == _os.name
 
 
 def test_submodule_top_level_check():

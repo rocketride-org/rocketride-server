@@ -4,4 +4,4 @@
 rank_bm25
 json5
 RestrictedPython
-SQLAlchemy==2.0.43
+SQLAlchemy>=2.0,<2.1

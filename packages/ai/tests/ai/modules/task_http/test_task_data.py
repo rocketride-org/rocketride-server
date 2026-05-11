@@ -249,9 +249,11 @@ async def test_send_bytes_defaults_filename_when_missing(monkeypatch):
     proc = RequestProcessing(client, 'tk_x')
 
     await proc._send_bytes(b'x', 'text/plain', None, 'k')
-    # Either captured was set (by side-effect of the lambda) or the function
-    # accepted None and forwarded it; either way, a string is produced eventually.
-    assert captured['filename'] is None or captured['filename'].startswith('content-')
+    # The source unconditionally replaces a None filename with
+    # 'content-<uuid>' before calling getObject — so the captured name MUST
+    # be a string, never None.
+    assert isinstance(captured['filename'], str)
+    assert captured['filename'].startswith('content-')
 
 
 # ---------------------------------------------------------------------------

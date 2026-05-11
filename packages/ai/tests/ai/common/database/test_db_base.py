@@ -299,12 +299,25 @@ def test_create_table_from_data_no_engine_returns_false():
 
 
 def test_create_table_from_data_populates_schema_cache(base):
-    """After creating a table, base.schema is filled with column name → type tuples."""
+    """After creating a table, base.schema is filled with column name → (type_str, '') tuples."""
     sample = [{'col_a': 1, 'col_b': 'text'}]
     base._createTableFromData('cache_check', sample)
+
+    # Keys: data columns are present, the auto-PK 'id' is not.
     assert 'col_a' in base.schema
     assert 'col_b' in base.schema
-    assert 'id' not in base.schema  # PK is excluded from insert mappings
+    assert 'id' not in base.schema
+
+    # Values: each entry is (type_str, comment). Verify both the shape and
+    # that the inferred SQL type matches the Python type of the sample.
+    # Note: the source picks String(255) (rendered VARCHAR(255) on SQLite)
+    # for short strings, and only falls back to TEXT for values > 255 chars.
+    type_a, comment_a = base.schema['col_a']
+    type_b, comment_b = base.schema['col_b']
+    assert 'INTEGER' in type_a.upper()  # int → Integer → 'INTEGER'
+    assert 'VARCHAR' in type_b.upper() or 'TEXT' in type_b.upper()  # short str → VARCHAR(255)
+    assert comment_a == ''
+    assert comment_b == ''
 
 
 # ---------------------------------------------------------------------------

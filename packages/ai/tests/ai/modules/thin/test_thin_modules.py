@@ -101,7 +101,9 @@ async def test_pipe_validate_rejects_multiple_implied_sources(monkeypatch):
     }
     result = await pipe_validate_mod.pipe_Validate(MagicMock(), pipeline)
     body = result.body.decode() if hasattr(result, 'body') else str(result)
-    assert 'Error' in body or 'multiple source' in body.lower()
+    # Must be the specific multi-source error — a generic 'Error' envelope
+    # could come from an unrelated failure inside validatePipeline.
+    assert 'multiple source' in body.lower()
 
 
 @pytest.mark.asyncio

@@ -112,8 +112,13 @@ def test_parse_json_keeps_inner_backticks_in_string_value():
 
 
 def test_parse_json_invalid_raises():
-    """Malformed JSON still raises (after the function logs via debug)."""
-    with pytest.raises(Exception):
+    """Malformed JSON still raises (after the function logs via debug).
+
+    json.JSONDecodeError is a subclass of ValueError, so we pin to that
+    base class — narrow enough to catch the right family, broad enough
+    to survive a stdlib change of the exact subclass.
+    """
+    with pytest.raises(ValueError):
         util.parseJson('not json at all')
 
 
