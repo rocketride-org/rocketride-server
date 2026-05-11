@@ -292,8 +292,11 @@ def test_auth_callback_uses_rr_app_url_when_set(monkeypatch):
     app.get('/cb')(auth_callback_mod.auth_callback)
     r = _client(app).get('/cb')
     assert r.status_code == 200
-    assert 'https://app.example.com' in r.text
-    assert r.text.count('https://app.example.com') >= 1
+    # The URL is rendered as a JSON-encoded JS literal — assert against the
+    # quoted form so the position is anchored to its actual context (and so
+    # CodeQL's URL-substring-sanitisation check is satisfied).
+    assert '"https://app.example.com"' in r.text
+    assert r.text.count('"https://app.example.com"') >= 1
 
 
 def test_auth_callback_trailing_slash_in_rr_app_url_is_stripped(monkeypatch):
@@ -303,8 +306,10 @@ def test_auth_callback_trailing_slash_in_rr_app_url_is_stripped(monkeypatch):
     app.get('/cb')(auth_callback_mod.auth_callback)
     r = _client(app).get('/cb')
     # The page should contain the trimmed form, not the trailing-slash form.
-    assert 'app.example.com/?' not in r.text  # no `<base>/?` artefact
-    assert 'https://app.example.com' in r.text
+    assert 'app.example.com/"' not in r.text  # no `<base>/` artefact
+    # Assert against the quoted JS-literal form so the URL position is
+    # anchored (also satisfies CodeQL's URL-sanitisation check).
+    assert '"https://app.example.com"' in r.text
 
 
 def test_auth_callback_response_is_html_content_type(monkeypatch):
