@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -181,6 +182,13 @@ def _build_deepagent_tools(
                 return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
             except Exception:
                 return _safe_str(out)
+
+        async def _arun(self, **framework_args: Any) -> str:  # noqa: ANN401
+            # Async hook for LangGraph's async ToolNode (asyncio.gather fan-out).
+            # Bridges the blocking engine RPC off the event loop via to_thread so
+            # multiple concurrent tool calls don't serialize on the orchestrator's
+            # loop.  Sync _run remains the single source of truth.
+            return await asyncio.to_thread(self._run, **framework_args)
 
     tools: List[Any] = []
     for td in tool_descriptors:
