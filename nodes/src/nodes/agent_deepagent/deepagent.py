@@ -370,9 +370,22 @@ class DeepAgentDriver(AgentBase):
                 subagents=subagents_list if subagents_list else None,
             )
             stage = 'invoke'
-            state = agent.invoke(
-                {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
-                config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+            # Drive LangGraph via its async executor so multiple `task` tool_calls
+            # in one orchestrator turn fan out concurrently (asyncio.gather inside
+            # the async ToolNode).  HostTool._arun and
+            # RocketRideToolCallingChatModel._agenerate bridge the blocking engine
+            # RPCs off the event loop via asyncio.to_thread.
+            #
+            # asyncio.run is safe here because the caller chain is sync:
+            # AgentBase.run_agent -> IInstance.writeQuestions (plain def, called
+            # from the engine's C++ side).  If a future change makes any caller
+            # async, this needs to switch to `await agent.ainvoke(...)` and _run
+            # itself must become async.
+            state = asyncio.run(
+                agent.ainvoke(
+                    {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
+                    config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+                )
             )
         except Exception as e:
             raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {_safe_str(e)}') from e
