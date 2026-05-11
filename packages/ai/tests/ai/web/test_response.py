@@ -215,9 +215,9 @@ def test_format_exception_internal_formatted_branch():
             self.line = 11
 
     e = _CustomError()
-    # The class attribute is mangled when read from outside; set the instance
-    # attribute that hasattr(e, '__formatted') actually probes for.
-    setattr(e, '_test_response__formatted', True)
+    # Bypass Python's name-mangling rule by going through object.__setattr__
+    # so the literal attribute name '__formatted' is set on the instance —
+    # which is exactly what hasattr(e, '__formatted') in formatException probes for.
     object.__setattr__(e, '__formatted', True)
 
     content = formatException(e)
