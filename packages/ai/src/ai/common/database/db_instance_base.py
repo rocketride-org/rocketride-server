@@ -434,18 +434,28 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Uses ``engine.begin()`` so writes auto-commit. Returns
         ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
         (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+
+        SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
+        large query from exhausting worker memory. ``rowcount`` is normalized
+        to a non-negative int — some dialects return -1 when unknown.
         """
         try:
             with self.IGlobal.engine.begin() as conn:
                 result = conn.execute(text(query))
                 if result.returns_rows:
-                    rows = result.fetchall()
+                    max_rows = self.IGlobal.max_execute_rows
+                    rows = result.fetchmany(max_rows + 1)
+                    if len(rows) > max_rows:
+                        error(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+                        return None
                     column_names = result.keys()
                     return {
                         'rows': [dict(zip(column_names, row)) for row in rows],
                         'affected_rows': 0,
                     }
-                return {'rows': [], 'affected_rows': result.rowcount}
+                rowcount = result.rowcount
+                affected = rowcount if isinstance(rowcount, int) and rowcount >= 0 else 0
+                return {'rows': [], 'affected_rows': affected}
 
         except SQLAlchemyError as e:
             error(f'Error executing raw SQL query: {e}')
@@ -489,24 +499,31 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
         if question.type == QuestionType.EXECUTE:
-            execute_result = self._executeRawQuery(question_text)
-            if execute_result is None:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
                 return
+            try:
+                execute_result = self._executeRawQuery(question_text)
+                if execute_result is None:
+                    return
 
-            rows = execute_result['rows']
-            affected = execute_result['affected_rows']
-            markdown = self._formatResultAsMarkdown(rows) if rows else None
+                rows = [self._sanitize_row(row) for row in execute_result['rows']]
+                affected = execute_result['affected_rows']
+                payload = {'rows': rows, 'affected_rows': affected}
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
 
-            if 'text' in lanes:
-                self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
 
-            if 'table' in lanes and rows:
-                self.instance.writeTable(markdown)
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
 
-            if 'answers' in lanes:
-                answer = Answer()
-                answer.setAnswer(json.dumps(execute_result))
-                self.instance.writeAnswers(answer)
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(payload, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
             return
 
         try:

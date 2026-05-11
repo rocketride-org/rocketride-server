@@ -71,6 +71,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     schema: Dict[str, Tuple[str, str]] = {}
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
+    allow_execute: bool = False
+    max_execute_rows: int = 25000
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -442,6 +444,15 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # they're available to the instance as soon as beginGlobal returns.
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
         self.db_description = (self._db_description(raw) or '').strip()
+
+        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
+        # the LLM translation + is_sql_safe gate, so the node owner must
+        # explicitly enable the capability.
+        self.allow_execute = bool(raw.get('allow_execute', False))
+        try:
+            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', 25000)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = 25000
 
         self.database = params['database']
         self.table = params['table']

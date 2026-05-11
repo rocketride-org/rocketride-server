@@ -76,7 +76,15 @@ class DatabaseApi:
         Returns:
             PIPELINE_RESULT: The pipeline response. The ``answers`` lane carries
             a JSON-encoded payload of shape ``{"rows": [...], "affected_rows": N}``.
+
+        Raises:
+            ValueError: If ``token`` or ``sql`` is empty or whitespace-only.
         """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError('sql must be a non-empty string')
+
         question = Question(type=QuestionType.EXECUTE)
         question.addQuestion(sql)
         return await self._client.chat(token=token, question=question, on_sse=on_sse)
