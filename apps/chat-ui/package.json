@@ -23,7 +23,7 @@
 		"ws": "^8.18.3"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "^0.4.0",
+		"@rsbuild/core": "^2.0.5",
 		"@rsbuild/plugin-react": "^0.4.0",
 		"@rsbuild/plugin-type-check": "^0.4.0",
 		"@tailwindcss/aspect-ratio": "^0.4.2",
