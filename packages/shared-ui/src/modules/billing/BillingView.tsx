@@ -11,7 +11,7 @@
  * and top-up purchases.
  *
  * This component is host-agnostic: all data is received as props and all
- * mutations are delegated via async callbacks. The host (cloud-ui or
+ * mutations are delegated via async callbacks. The host (shell-ui or
  * VS Code) is responsible for fetching data and executing API calls.
  */
 

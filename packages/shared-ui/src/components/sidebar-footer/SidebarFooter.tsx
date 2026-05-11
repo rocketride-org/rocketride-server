@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * SidebarFooter — unified footer for both cloud-ui and VS Code sidebars.
+ * SidebarFooter — unified footer for both shell-ui and VS Code sidebars.
  *
  * Renders (top to bottom):
  *   1. Documentation button (optional, driven by onOpenDocs)
@@ -215,7 +215,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const flyoutRef = useRef<HTMLDivElement>(null);
 
 	// ── Portal container for popups (escapes overflow:hidden ancestors) ─────
-	// The host (VS Code webview entry, cloud-ui shell) must create a
+	// The host (VS Code webview entry, shell-ui shell) must create a
 	// <div id="rr-popup-portal"> on document.body before React mounts.
 	// Looked up on every render (not cached) because React 18 concurrent
 	// mode can re-invoke the component in contexts where a cached ref

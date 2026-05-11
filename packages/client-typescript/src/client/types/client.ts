@@ -367,6 +367,90 @@ export interface ConnectResult {
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
 	capabilities: string[];
+
+	/**
+	 * Apps the authenticated user is entitled to see.
+	 *
+	 * Replaces the pre-auth public app list with the full entitled set
+	 * based on the user's org/team memberships and subscriptions.
+	 */
+	apps?: AppManifestEntry[];
+}
+
+/**
+ * A single app entry in the server-provided manifest.
+ *
+ * Same shape as the build-time apps.json entries, extended with
+ * optional pricing and visibility metadata for SaaS deployments.
+ */
+export interface AppManifestEntry {
+	/** Unique app identifier (e.g. "rocketride.pipeBuilder"). */
+	id: string;
+
+	/** Module Federation remote name (e.g. "rocketride_pipeBuilder"). */
+	moduleId: string;
+
+	/** Human-readable app name. */
+	name: string;
+
+	/** Short description of the app. */
+	description?: string;
+
+	/** URL path to the app's icon (e.g. "/shell/apps/rocket-ui/icon.svg"). */
+	icon?: string;
+
+	/** Category tags for filtering (e.g. ["pipelines", "ai"]). */
+	categories?: string[];
+
+	/** App-specific setting definitions. */
+	settings?: unknown[];
+
+	/** URL to the app's Module Federation remote entry file. */
+	entry: string;
+
+	/** App version string (semver). */
+	version?: string;
+
+	/** Visibility scope: "public", "org", "team", or "user". */
+	ownerType?: string;
+
+	/** Whether the app UI requires authentication to render. Default true. */
+	authenticated?: boolean;
+
+	/** Whether to show the header bar when this app is active. Default true. */
+	showHeader?: boolean;
+
+	/** Whether to show the status bar when this app is active. Default true. */
+	showStatusBar?: boolean;
+
+	/** Whether the app is visible to unauthenticated users. Default true. */
+	public?: boolean;
+
+	/** Stripe product ID (SaaS paid apps only). */
+	stripeProductId?: string;
+
+	/** Available pricing tiers (SaaS paid apps only). */
+	stripePrices?: StripePriceEntry[];
+}
+
+/**
+ * A Stripe pricing tier for a paid app.
+ */
+export interface StripePriceEntry {
+	/** Stripe price ID (price_*). */
+	priceId: string;
+
+	/** Human-readable label (e.g. "Monthly"). */
+	nickname: string;
+
+	/** Price in smallest currency unit (cents). */
+	amountCents: number;
+
+	/** ISO 4217 currency code (e.g. "usd"). */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
+	interval: string;
 }
 
 /**
@@ -385,4 +469,12 @@ export interface ServerInfoResult {
 
 	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
 	platform?: string;
+
+	/**
+	 * Public apps visible without authentication.
+	 *
+	 * Returned by the pre-auth probe so the shell can render
+	 * public apps (e.g. landing page) before login.
+	 */
+	apps?: AppManifestEntry[];
 }

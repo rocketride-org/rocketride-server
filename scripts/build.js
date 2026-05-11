@@ -208,31 +208,33 @@ Actions:`);
 
 	console.log(`
 Options:
-  --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
-  --force, -f         Force rebuild (ignore cache/state)
-  --verbose, -v       Show detailed output
-  --sequential, -s    Run modules sequentially (default: parallel)
-  --nodownload        Force compile from source (skip prebuilt download)
   --arch=arm|intel    Target architecture (macOS cross-compile)
-  --pytest="args"           Pass arguments to pytest (can be repeated)
-  --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
-  --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated, e.g. "dep1>=10,dep2")
-  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
-  --models="args"     Pass arguments to sync_models (can be repeated)
-  --jest="args"             Pass arguments to Jest (can be repeated)
+  --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
-  --trace="a,b,c"     Enable trace output (passed to engine/tests)
-  --testport=N        Use existing server on port N for tests (skip build/start)
-  --log=FILE          Write output to FILE (grouped by module)
-  --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
-  --overlay-root=DIR  Set overlay root directory
-  --version=VERSION   Set full build version x.x.x.x
+  --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
-  --stamp=STAMP       Set build stamp
-  --list-modules      List all registered modules
+  --help, -h          Show this help message
+  --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
-  --help, -h          Show this help message
+  --list-modules      List all registered modules
+  --log=FILE          Write output to FILE (grouped by module)
+  --models="args"     Pass arguments to sync_models (can be repeated)
+  --modelserver[=HOST:PORT]  Start or connect to a model server (default: localhost:5590)
+  --nodownload        Force compile from source (skip prebuilt download)
+  --overlay-root=DIR  Set overlay root directory
+  --pytest="args"     Pass arguments to pytest (can be repeated)
+  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
+  --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
+  --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
+  --saas              Enable SaaS mode
+  --sequential, -s    Run modules sequentially (default: parallel)
+  --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
+  --stamp=STAMP       Set build stamp
+  --testport=N        Use existing server on port N for tests (skip build/start)
+  --trace="a,b,c"     Enable trace output (passed to engine/tests)
+  --verbose, -v       Show detailed output
+  --version=VERSION   Set full build version x.x.x.x
 
 Examples:
   builder server:build             # Build server

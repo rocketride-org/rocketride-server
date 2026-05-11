@@ -261,6 +261,47 @@ class ConnectResult(TypedDict, total=False):
     defaultTeam: str
     organizations: list[OrgInfo]
     capabilities: list[str]
+    apps: list['AppManifestEntry']
+
+
+class AppManifestEntry(TypedDict, total=False):
+    """
+    A single app entry in the server-provided manifest.
+
+    Same shape as the build-time apps.json entries, extended with
+    optional pricing and visibility metadata for SaaS deployments.
+
+    Attributes:
+        id (str): Unique app identifier (e.g. "rocketride.pipeBuilder").
+        moduleId (str): Module Federation remote name.
+        name (str): Human-readable app name.
+        description (str): Short description.
+        icon (str): URL path to the app's icon.
+        categories (list[str]): Category tags for filtering.
+        settings (list): App-specific setting definitions.
+        entry (str): URL to the app's MF remote entry file.
+        version (str): Semver version string.
+        ownerType (str): Visibility scope — "public", "org", "team", or "user".
+        authenticated (bool): Whether the app UI requires auth to render.
+        public (bool): Whether the app is visible to unauthenticated users.
+        stripeProductId (str): Stripe product ID (SaaS paid apps only).
+        stripePrices (list): Available pricing tiers (SaaS paid apps only).
+    """
+
+    id: str
+    moduleId: str
+    name: str
+    description: str
+    icon: str
+    categories: list[str]
+    settings: list
+    entry: str
+    version: str
+    ownerType: str
+    authenticated: bool
+    public: bool
+    stripeProductId: str
+    stripePrices: list[dict]
 
 
 class ServerInfoResult(TypedDict, total=False):
@@ -276,8 +317,10 @@ class ServerInfoResult(TypedDict, total=False):
         capabilities (list[str]): Capability tags — ``['oss']`` for open-source,
             ``['saas']`` for cloud.
         platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
+        apps (list[AppManifestEntry]): Public apps visible without authentication.
     """
 
     version: str
     capabilities: list[str]
     platform: str
+    apps: list[AppManifestEntry]

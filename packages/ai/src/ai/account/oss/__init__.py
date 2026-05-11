@@ -227,6 +227,65 @@ class Account(AccountBase):
         self._saas_only()
 
     # =========================================================================
+    # APP MANIFEST — read from static apps.json
+    # =========================================================================
+
+    async def get_public_apps(self) -> list:
+        """
+        Return apps visible to unauthenticated users.
+
+        Reads ``dist/server/static/apps.json`` from disk and returns only
+        entries where ``public`` is not explicitly ``False``.
+
+        Returns:
+            List of app manifest dicts.
+        """
+        return self._read_apps_json(public_only=True)
+
+    async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
+        """
+        Return all apps for an authenticated OSS user.
+
+        In OSS mode, APIKEY grants full access — all apps are returned
+        regardless of the ``public`` flag.
+
+        Args:
+            user_id:       Internal user ID (always 'local' in OSS).
+            organizations: List of org dicts (single 'local' org in OSS).
+
+        Returns:
+            List of all app manifest dicts.
+        """
+        return self._read_apps_json(public_only=False)
+
+    def _read_apps_json(self, public_only: bool = False) -> list:
+        """
+        Read and parse the static apps.json manifest from disk.
+
+        Args:
+            public_only: If True, filter out entries with ``public: False``.
+
+        Returns:
+            List of app manifest dicts, or empty list if the file is missing.
+        """
+        import sys
+        import json
+
+        # apps.json is written by registerApp.js during the build
+        apps_path = os.path.join(os.path.dirname(sys.executable), 'static', 'apps.json')
+        try:
+            with open(apps_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+        apps = data.get('apps', [])
+        if public_only:
+            # Default is public (True) — only exclude explicitly private apps
+            apps = [a for a in apps if a.get('public', True)]
+        return apps
+
+    # =========================================================================
     # HANDLE ACCOUNT — env-only support for OSS
     # =========================================================================
 

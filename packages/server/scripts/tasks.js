@@ -1110,37 +1110,40 @@ module.exports = {
 		{
 			name: 'server:dev',
 			action: (options = {}) => ({
-				description: 'Start EaaS development server (dist/server/engine ai/eaas.py)',
+				description: 'Start EaaS development server + shell-ui rsbuild dev server',
 				steps: [
 					'server:build',
-					{
-						name: 'server:run-eaas',
-						action: () => ({
-							run: async (_ctx, task) => {
-								// Use the pre-built engine binary from the assembled dist directory.
-								const exeExt = isWindows() ? '.exe' : '';
-								const engine = path.join(DIST_DIR, 'engine' + exeExt);
-
-								// Forward --trace=... and --saas from the CLI to the eaas.py process.
-								const args = ['ai/eaas.py'];
-								if (options.trace?.length) {
-									args.push(`--trace=${options.trace.join(',')}`);
-								}
-								if (options.saas) {
-									args.push('--saas');
-								}
-								if (options.modelserver) {
-									args.push(`--modelserver=${options.modelserver}`);
-								}
-
-								task.output = `Starting EaaS server: ${engine} ${args.join(' ')}`;
-
-								// Run with cwd=DIST_DIR so relative module paths in eaas.py resolve correctly.
-								await execCommand(engine, args, { task, cwd: DIST_DIR });
-							},
-						}),
-					},
+					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
 				],
+			}),
+		},
+		{
+			// Internal action — starts the EaaS Python server process.
+			// Separated so it can be run in parallel with shell-ui:dev.
+			name: 'server:run-eaas',
+			action: (options = {}) => ({
+				run: async (_ctx, task) => {
+					// Use the pre-built engine binary from the assembled dist directory.
+					const exeExt = isWindows() ? '.exe' : '';
+					const engine = path.join(DIST_DIR, 'engine' + exeExt);
+
+					// Forward --trace=... and --saas from the CLI to the eaas.py process.
+					const args = ['ai/eaas.py'];
+					if (options.trace?.length) {
+						args.push(`--trace=${options.trace.join(',')}`);
+					}
+					if (options.saas) {
+						args.push('--saas');
+					}
+					if (options.modelserver) {
+						args.push(`--modelserver=${options.modelserver}`);
+					}
+
+					task.output = `Starting EaaS server: ${engine} ${args.join(' ')}`;
+
+					// Run with cwd=DIST_DIR so relative module paths in eaas.py resolve correctly.
+					await execCommand(engine, args, { task, cwd: DIST_DIR });
+				},
 			}),
 		},
 		{ name: 'server:build', action: makeBuildAction },

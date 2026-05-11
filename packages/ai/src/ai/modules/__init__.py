@@ -9,6 +9,7 @@ ALL = frozenset(
         'profiler',
         'remote',
         'services',
+        'shell',
         'task',
         'task_http',
     }

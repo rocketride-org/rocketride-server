@@ -131,6 +131,35 @@ class AccountBase(ABC):
         """
         pass
 
+    async def get_public_apps(self) -> list:
+        """
+        Return apps visible to unauthenticated users.
+
+        OSS reads ``dist/server/static/apps.json`` and filters by
+        ``public !== false``.  SaaS queries the DB for ``owner_type='public'``.
+
+        Returns:
+            List of app manifest dicts (same shape as apps.json entries).
+        """
+        return []
+
+    async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
+        """
+        Return all apps the authenticated user is entitled to see.
+
+        OSS returns all apps (APIKEY grants full access).
+        SaaS queries the DB filtered by ``can_access_app()`` using the
+        user's org/team memberships.
+
+        Args:
+            user_id:       Internal user ID from the ConnectResult.
+            organizations: List of org dicts with nested teams (from ConnectResult).
+
+        Returns:
+            List of app manifest dicts.
+        """
+        return []
+
     async def handle_account(self, conn, request):
         """
         Dispatch an ``rrext_account_*`` DAP command to the account handler.

@@ -278,10 +278,12 @@ class TaskConn(
         # Does not count toward auth attempts or change connection state.
         if args.get('infoOnly'):
             account = self._server._server.account
+            # Return server metadata + public apps for pre-auth shell bootstrap
             info = {
                 'version': getVersion(),
                 'capabilities': account.capabilities,
                 'platform': sys.platform,
+                'apps': await account.get_public_apps(),
             }
             return self.build_response(request, body=info)
 
@@ -347,7 +349,15 @@ class TaskConn(
             user_id=self._account_info.userId,
         )
 
-        return self.build_response(request, body=result.to_connect_result())
+        # Build the connect result and include the user's entitled apps.
+        # This replaces the pre-auth public apps with the full set.
+        account = self._server._server.account
+        connect_result = result.to_connect_result()
+        connect_result['apps'] = await account.get_apps_for_user(
+            user_id=result.userId,
+            organizations=result.organizations,
+        )
+        return self.build_response(request, body=connect_result)
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the authenticated user has the given permission for their default team."""
