@@ -90,3 +90,29 @@ markers = [
     "integration: marks tests as integration tests",
 ]
 asyncio_mode = "auto"
+
+# =============================================================================
+# Coverage configuration (consumed by pytest-cov / coverage.py)
+#
+# Source path is NOT set here. It is passed on the command line in
+# packages/ai/scripts/tasks.js as an absolute filesystem path
+# (packages/ai/src/ai). Two copies of the ai package live on disk
+# (packages/ai/src/ai and dist/server/ai) and the package-name form
+# (`source = ["ai"]`) resolves to the wrong copy at startup, producing 0 %
+# coverage. The absolute-path form bypasses that resolution.
+# =============================================================================
+[tool.coverage.run]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
