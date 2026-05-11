@@ -22,7 +22,7 @@
 # =============================================================================
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Union
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ibm_watsonx_ai import Credentials
@@ -127,7 +127,7 @@ class Chat(ChatBase):
         # Save our chat class into the bag
         bag['chat'] = self
 
-    def _chat(self, prompt: str) -> str:
+    def _chat(self, payload: Union[str, Any]) -> str:
         """
         Send prompt to IBM Watson and receive response.
 
@@ -135,12 +135,13 @@ class Chat(ChatBase):
         communication with the IBM Watson API.
 
         Args:
-            prompt (str): The complete prompt to send to the model
+            payload (Union[str, Any]): The complete prompt payload to send to the model
 
         Returns:
             str: The generated text response from the model
         """
-        messages = [{'role': 'user', 'content': prompt}]
+        prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
+        messages = [{'role': 'user', 'content': prompt_str}]
 
         response = self._llm.chat(messages=messages)
 

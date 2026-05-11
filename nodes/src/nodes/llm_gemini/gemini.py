@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Dict
+from typing import Any, Dict, Union
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from google import genai
@@ -115,7 +115,7 @@ class Chat(ChatBase):
         word_count = len(value.split())
         return int(word_count / 0.75)
 
-    def _chat(self, prompt: str) -> str:
+    def _chat(self, payload: Union[str, Any]) -> str:
         """
         Send a chat prompt to the Gemini model and return the response.
 
@@ -123,7 +123,7 @@ class Chat(ChatBase):
         to the configured Gemini model and returning the generated text response.
 
         Args:
-            prompt (str): The user's input prompt/message
+            payload (Union[str, Any]): The user's input prompt/message or Question payload
 
         Returns:
             str: The model's text response
@@ -136,8 +136,10 @@ class Chat(ChatBase):
             This method assumes self._model is set by the parent class.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
+        prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
+        
         # Generate content using the configured model
-        response = self._client.models.generate_content(model=self._model, contents=prompt)
+        response = self._client.models.generate_content(model=self._model, contents=prompt_str)
 
         # Extract and return the text response
         return response.text

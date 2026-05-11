@@ -30,6 +30,7 @@ from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
+from ai.common.schema import Question
 
 # --- ANTI-SIGBUS PATCH: disable fast tokenizers and Claude-specific token counting ---
 # 1) Disable tokenizer parallelism
@@ -110,13 +111,16 @@ class Chat(ChatBase):
         # Get the LLM
         self._llm = ChatAnthropic(model=model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
+        # Initialize caching configuration
+        self._caching_enabled = config.get('caching', True) and config.get('anthropic_prompt_caching', True)
+
         # Save our chat class into the bag
         bag['chat'] = self
 
-    def _chat(self, payload: Union[str, Any]) -> str:
+    def _chat(self, payload: Union[str, Question]) -> str:
         prompt_str = payload.getPrompt() if hasattr(payload, 'getPrompt') else payload
 
-        if hasattr(payload, 'getPrompt'):
+        if self._caching_enabled and hasattr(payload, 'getPrompt'):
             # Split the string to separate the static instructions from the dynamic user query
             parts = prompt_str.rsplit('### Current Task:', 1)
             if len(parts) == 2:
@@ -125,8 +129,13 @@ class Chat(ChatBase):
 
                 # Cache the heavy static context
                 static_msg = SystemMessage(
-                    content=static_str,
-                    additional_kwargs={"cache_control": {"type": "ephemeral"}}
+                    content=[
+                        {
+                            "type": "text",
+                            "text": static_str,
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ]
                 )
                 
                 # Dynamic user question without caching
