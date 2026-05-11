@@ -196,6 +196,12 @@ export interface ShellConnectionEventMap {
 	 * for the new theme.
 	 */
 	'shell:themeChange': { tokens: Record<string, string> };
+
+	// ── App-defined events ───────────────────────────────────────────────
+	// Apps may emit their own events through the connection manager's event
+	// bus (e.g. 'home:browsingChange'). The index signature allows any
+	// string key so apps don't need to cast custom event names.
+	[key: string]: unknown;
 }
 
 // =============================================================================
