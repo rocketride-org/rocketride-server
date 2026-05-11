@@ -72,6 +72,11 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._debug_port = None
     t._idle_time = 5
     t._status_updated = False
+    t.public_auth = 'pk_test'
+    t.info = {}
+    # debug_message is normally inherited from DAPBase and requires
+    # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
+    t.debug_message = MagicMock()
     return t
 
 
@@ -364,3 +369,310 @@ def test_send_scheduled_updates_flips_the_flag():
     assert t._status_updated is False
     Task.send_scheduled_updates(t)
     assert t._status_updated is True
+
+
+def test_on_metrics_updated_flips_status_updated_flag():
+    """_on_metrics_updated flips ``_status_updated`` to True."""
+    t = _task()
+    assert t._status_updated is False
+    Task._on_metrics_updated(t)
+    assert t._status_updated is True
+
+
+# ---------------------------------------------------------------------------
+# _update_status — dispatch over event types
+# ---------------------------------------------------------------------------
+
+
+def _make_status_for_update():
+    """Build a status namespace with the attributes _update_status touches."""
+    return SimpleNamespace(
+        name='',
+        state=0,
+        exitMessage='',
+        status='',
+        notes=[],
+        currentObject=None,
+        currentSize=0,
+        totalSize=0,
+        totalCount=0,
+        completedSize=0,
+        completedCount=0,
+        failedSize=0,
+        failedCount=0,
+        wordsSize=0,
+        wordsCount=0,
+        rateSize=0,
+        rateCount=0,
+        errors=[],
+        warnings=[],
+        metrics={},
+    )
+
+
+def test_update_status_object_event_sets_current_object_and_size():
+    """An ``apaevt_status_object`` event sets ``currentObject`` and ``currentSize``."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_object',
+            'body': {'object': 'file.txt', 'size': 1024},
+        },
+    )
+    assert t._status.currentObject == 'file.txt'
+    assert t._status.currentSize == 1024
+
+
+def test_update_status_counts_event_populates_every_counter():
+    """An ``apaevt_status_counts`` event writes every counter field on the status."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_counts',
+            'body': {
+                'totalSize': 1,
+                'totalCount': 2,
+                'completedSize': 3,
+                'completedCount': 4,
+                'failedSize': 5,
+                'failedCount': 6,
+                'wordsSize': 7,
+                'wordsCount': 8,
+                'rateSize': 9,
+                'rateCount': 10,
+            },
+        },
+    )
+    assert t._status.totalSize == 1
+    assert t._status.totalCount == 2
+    assert t._status.completedSize == 3
+    assert t._status.completedCount == 4
+    assert t._status.failedSize == 5
+    assert t._status.failedCount == 6
+    assert t._status.wordsSize == 7
+    assert t._status.wordsCount == 8
+    assert t._status.rateSize == 9
+    assert t._status.rateCount == 10
+
+
+def test_update_status_error_event_appends_to_errors():
+    """An ``apaevt_status_error`` event appends to ``status.errors``."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_error',
+            'body': {'message': 'disk full'},
+        },
+    )
+    assert t._status.errors == ['disk full']
+
+
+def test_update_status_errors_buffer_trims_to_50():
+    """Error buffer keeps only the most recent 50 entries."""
+    t = _task(status=_make_status_for_update())
+    t._status.errors = [f'err-{i}' for i in range(50)]
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_error',
+            'body': {'message': 'err-new'},
+        },
+    )
+    assert len(t._status.errors) == 50
+    assert t._status.errors[-1] == 'err-new'
+    assert 'err-0' not in t._status.errors  # oldest evicted
+
+
+def test_update_status_warning_event_appends_and_trims():
+    """An ``apaevt_status_warning`` event appends to warnings with the same 50-cap."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_warning',
+            'body': {'message': 'memory pressure'},
+        },
+    )
+    assert t._status.warnings == ['memory pressure']
+
+
+def test_update_status_download_event_sets_status_string():
+    """An ``apaevt_status_download`` event sets a human-readable status string."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_download',
+            'body': {'info': {'name': 'whisper-tiny'}},
+        },
+    )
+    assert 'Downloading' in t._status.status
+    assert 'whisper-tiny' in t._status.status
+
+
+def test_update_status_message_event_sets_status_field():
+    """An ``apaevt_status_message`` event copies the message into ``status.status``."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_message',
+            'body': {'message': 'processing 50%'},
+        },
+    )
+    assert t._status.status == 'processing 50%'
+
+
+def test_update_status_user_event_with_empty_notes_clears_notes():
+    """An ``apaevt_status_user`` event with empty notes resets ``status.notes``."""
+    t = _task(status=_make_status_for_update())
+    t._status.notes = ['old note']
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_user',
+            'body': {'notes': []},
+        },
+    )
+    assert t._status.notes == []
+
+
+def test_update_status_user_event_replaces_token_placeholders_in_strings():
+    """String notes have {token} / {public_auth} placeholders substituted."""
+    t = _task(status=_make_status_for_update())
+    t.token = 'tk_x'
+    t.public_auth = 'pk_x'
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_user',
+            'body': {'notes': ['use {token} with {public_auth}']},
+        },
+    )
+    assert t._status.notes == ['use tk_x with pk_x']
+
+
+def test_update_status_user_event_replaces_placeholders_in_dict_values():
+    """Dict notes have placeholders replaced in every string value, keeping other types."""
+    t = _task(status=_make_status_for_update())
+    t.token = 'tk_x'
+    t.public_auth = 'pk_x'
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_user',
+            'body': {'notes': [{'msg': 'token is {token}', 'count': 42}]},
+        },
+    )
+    assert t._status.notes == [{'msg': 'token is tk_x', 'count': 42}]
+
+
+def test_update_status_user_event_keeps_unknown_note_types_as_is():
+    """A non-string, non-dict note (e.g. int) is appended without modification."""
+    t = _task(status=_make_status_for_update())
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_user',
+            'body': {'notes': [42]},
+        },
+    )
+    assert t._status.notes == [42]
+
+
+def test_update_status_info_event_merges_into_info_dict():
+    """An ``apaevt_status_info`` event merges the body into ``self.info``."""
+    t = _task(status=_make_status_for_update())
+    t.info = {'existing': 'value'}
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_info',
+            'body': {'info': {'new_key': 'new_value'}},
+        },
+    )
+    assert t.info == {'existing': 'value', 'new_key': 'new_value'}
+
+
+def test_update_status_unknown_event_is_silently_ignored():
+    """An event not in the dispatch table leaves status untouched."""
+    t = _task(status=_make_status_for_update())
+    original_status = t._status.status
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_unknown_event',
+            'body': {'whatever': 'data'},
+        },
+    )
+    assert t._status.status == original_status
+
+
+# ---------------------------------------------------------------------------
+# _forward_task_event
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_forward_task_event_debugger_routes_to_debugger_send_event():
+    """A DEBUGGER event is sent directly to ``self._debugger.send_event``."""
+    from rocketride import EVENT_TYPE
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._debugger = MagicMock()
+    t._debugger.send_event = AsyncMock()
+    t.id = 'task-1'
+
+    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output', 'body': {'x': 1}})
+    t._debugger.send_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_forward_task_event_debugger_skipped_when_no_debugger_attached():
+    """If ``_debugger`` is None, DEBUGGER events are dropped."""
+    from rocketride import EVENT_TYPE
+
+    t = _task()
+    t._debugger = None
+    # Should not raise.
+    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+
+
+@pytest.mark.asyncio
+async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
+    """A non-DEBUGGER event is routed through the TaskServer broadcast API."""
+    from rocketride import EVENT_TYPE
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._debugger = None
+    server = MagicMock()
+    server.broadcast_task_event = AsyncMock()
+    t._server = server
+    t.token = 'tk_x'
+
+    payload = {'event': 'summary', 'body': {}}
+    await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, payload)
+
+    server.broadcast_task_event.assert_awaited_once()
+    args = server.broadcast_task_event.await_args
+    assert args.kwargs['token'] == 'tk_x'
+    assert args.kwargs['event'] == payload
+
+
+@pytest.mark.asyncio
+async def test_forward_task_event_debugger_swallows_send_failure():
+    """A failed send_event call is logged but does not propagate."""
+    from rocketride import EVENT_TYPE
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._debugger = MagicMock()
+    t._debugger.send_event = AsyncMock(side_effect=RuntimeError('socket broken'))
+
+    # Should not raise.
+    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})

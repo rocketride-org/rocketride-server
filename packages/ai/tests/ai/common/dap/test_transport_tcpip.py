@@ -319,3 +319,162 @@ async def test_receive_loop_eof_marks_graceful_disconnect():
     args, kwargs = t._transport_disconnected.await_args
     assert kwargs.get('has_error') is False
     assert t._connected is False
+
+
+# ---------------------------------------------------------------------------
+# listen — URI validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_listen_rejects_non_tcp_uri():
+    """listen() requires a tcp:// URI; anything else raises ValueError."""
+    t = _make_transport()
+    t._uri = 'http://localhost:8080'
+    # The function raises ValueError before any I/O happens; the body catches
+    # everything in a generic try/except and re-wraps it as ConnectionError.
+    with pytest.raises((ConnectionError, ValueError)):
+        await TransportTCP.listen(t)
+
+
+@pytest.mark.asyncio
+async def test_listen_returns_actual_uri_with_resolved_port(monkeypatch):
+    """A successful listen() returns the URI with the kernel-assigned port."""
+    t = _make_transport()
+    t._uri = 'tcp://localhost:0'
+
+    fake_socket = MagicMock()
+    fake_socket.getsockname = MagicMock(return_value=('127.0.0.1', 54321))
+    fake_server = MagicMock()
+    fake_server.sockets = [fake_socket]
+
+    async def _fake_start_server(_handler, _host, _port):
+        """Return a fake server whose port resolves to 54321."""
+        return fake_server
+
+    monkeypatch.setattr(asyncio, 'start_server', _fake_start_server)
+
+    actual_uri = await TransportTCP.listen(t)
+    assert actual_uri == 'tcp://127.0.0.1:54321'
+    assert t._is_waiting_for_connection is True
+
+
+# ---------------------------------------------------------------------------
+# connect — URI validation + open_connection mocking
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_connect_rejects_non_tcp_uri():
+    """connect() requires a tcp:// URI."""
+    t = _make_transport(connected=False)
+    t._uri = 'ws://localhost:8080'
+    with pytest.raises((ConnectionError, ValueError)):
+        await TransportTCP.connect(t)
+
+
+@pytest.mark.asyncio
+async def test_connect_calls_open_connection_and_starts_receive(monkeypatch):
+    """A successful connect() sets _reader/_writer, starts receive task, fires on_connected."""
+    t = _make_transport(connected=False)
+    t._uri = 'tcp://localhost:7777'
+
+    fake_reader = MagicMock()
+    fake_writer = MagicMock()
+
+    async def _fake_open(_host, _port):
+        """Return a fake reader/writer pair."""
+        return (fake_reader, fake_writer)
+
+    monkeypatch.setattr(asyncio, 'open_connection', _fake_open)
+    # Replace _receive_loop with a no-op coroutine so the background task
+    # exits immediately rather than blocking on the fake reader.
+    monkeypatch.setattr(t, '_receive_loop', AsyncMock(return_value=None))
+
+    await TransportTCP.connect(t)
+    assert t._connected is True
+    assert t._reader is fake_reader
+    assert t._writer is fake_writer
+    t._transport_connected.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# accept — validation + happy path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_accept_rejects_non_tuple():
+    """accept() requires a (reader, writer) tuple; everything else raises."""
+    t = _make_transport(connected=False)
+    with pytest.raises((ConnectionError, ValueError)):
+        await TransportTCP.accept(t, 'not-a-tuple')
+
+
+@pytest.mark.asyncio
+async def test_accept_rejects_wrong_reader_type():
+    """accept() validates that the first element is an asyncio.StreamReader."""
+    t = _make_transport(connected=False)
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    writer.get_extra_info = MagicMock(return_value=('127.0.0.1', 1234))
+    with pytest.raises((ConnectionError, ValueError)):
+        await TransportTCP.accept(t, ('not-a-reader', writer))
+
+
+@pytest.mark.asyncio
+async def test_accept_runs_receive_loop_until_eof(monkeypatch):
+    """A valid (reader, writer) tuple drives _receive_loop until completion."""
+    t = _make_transport(connected=False)
+
+    reader = asyncio.StreamReader()
+    reader.feed_eof()
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    writer.get_extra_info = MagicMock(return_value=('127.0.0.1', 5566))
+
+    # Replace _receive_loop with a no-op so accept() returns immediately.
+    monkeypatch.setattr(t, '_receive_loop', AsyncMock(return_value=None))
+
+    await TransportTCP.accept(t, (reader, writer))
+    assert t._reader is reader
+    assert t._writer is writer
+    t._transport_connected.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# disconnect
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disconnect_is_noop_when_not_connected():
+    """disconnect() on a transport that isn't connected returns immediately."""
+    t = _make_transport(connected=False)
+    t._writer = None
+    await TransportTCP.disconnect(t)
+    t._transport_disconnected.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_writer_and_clears_state():
+    """disconnect() closes the writer, clears _reader/_writer, and fires the callback."""
+    t = _make_transport(connected=True)
+    fake_writer = MagicMock()
+    fake_writer.close = MagicMock()
+
+    async def _wait_closed():
+        """Stand-in for StreamWriter.wait_closed (just returns)."""
+        return None
+
+    fake_writer.wait_closed = _wait_closed
+    t._writer = fake_writer
+    t._receive_task = None
+
+    await TransportTCP.disconnect(t)
+
+    fake_writer.close.assert_called_once()
+    assert t._connected is False
+    assert t._reader is None
+    assert t._writer is None
+    t._transport_disconnected.assert_awaited_once()
+    kwargs = t._transport_disconnected.await_args.kwargs
+    assert kwargs.get('has_error') is False

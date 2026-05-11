@@ -485,3 +485,91 @@ def test_constructor_with_subprocess_argument():
     fake_proc = object()  # any sentinel — TransportBase does not introspect it
     transport = TransportStdio(subprocess=fake_proc)
     assert transport._process is fake_proc
+
+
+# ---------------------------------------------------------------------------
+# connect — type validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_connect_rejects_non_subprocess():
+    """connect() rejects a subprocess argument that is not an asyncio.subprocess.Process."""
+    transport = TransportStdio(subprocess=object())  # not a real Process
+    with pytest.raises(ValueError, match='asyncio.subprocess.Process'):
+        await transport.connect()
+
+
+# ---------------------------------------------------------------------------
+# send — protocol framing + error paths
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_writes_json_with_newline(monkeypatch):
+    """send() JSON-encodes the message and appends a newline before writing to stdin."""
+    transport = TransportStdio()
+    transport._connected = True
+
+    written = []
+
+    class _Stdin:
+        """In-memory stdin double that records what was written."""
+
+        def write(self, data):
+            """Record the bytes written so the test can inspect them."""
+            written.append(data)
+
+        async def drain(self):
+            """No-op — matches asyncio.StreamWriter.drain signature."""
+
+    # Bypass is_connected() — it checks self._process.returncode by default.
+    monkeypatch.setattr(transport, 'is_connected', lambda: True)
+
+    fake_proc = type('P', (), {})()
+    fake_proc.stdin = _Stdin()
+    transport._process = fake_proc
+
+    await transport.send({'command': 'pause', 'n': 1})
+
+    assert len(written) == 1
+    assert written[0].endswith(b'\n')
+    payload = json.loads(written[0].decode('utf-8').strip())
+    assert payload == {'command': 'pause', 'n': 1}
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_not_connected():
+    """If the transport is not connected, send() raises ConnectionError."""
+    transport = TransportStdio()
+    transport._connected = False
+    with pytest.raises(ConnectionError, match='not connected'):
+        await transport.send({'command': 'whatever'})
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_stdin_missing(monkeypatch):
+    """A connected transport with no stdin yields a clear ConnectionError."""
+    transport = TransportStdio()
+    transport._connected = True
+    monkeypatch.setattr(transport, 'is_connected', lambda: True)
+    fake_proc = type('P', (), {})()
+    fake_proc.stdin = None
+    transport._process = fake_proc
+
+    with pytest.raises(ConnectionError, match='stdin not available'):
+        await transport.send({'command': 'x'})
+
+
+# ---------------------------------------------------------------------------
+# disconnect — cleans up tasks and process state
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disconnect_is_safe_when_already_disconnected():
+    """disconnect() on an unconnected transport is a no-op."""
+    transport = TransportStdio()
+    transport._connected = False
+    await transport.disconnect()  # must not raise
+    assert transport._process is None

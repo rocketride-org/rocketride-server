@@ -20,6 +20,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -403,3 +404,227 @@ def test_store_property_creates_once_and_caches(monkeypatch):
     assert s1 is fake_store
     assert s2 is fake_store
     create_mock.assert_called_once()  # cached
+
+
+# ---------------------------------------------------------------------------
+# _cleanup_tasks / _monitor_ttl — one-iteration tests
+# ---------------------------------------------------------------------------
+
+
+class _LoopBreak(BaseException):
+    """Sentinel BaseException used to break out of background loops.
+
+    The bodies of ``_cleanup_tasks`` and ``_monitor_ttl`` wrap each
+    iteration in ``except Exception`` to keep the server resilient. We need
+    to escape the loop without being caught — BaseException subclasses
+    (like ``KeyboardInterrupt``) bypass ``except Exception``.
+    """
+
+
+@pytest.mark.asyncio
+async def test_cleanup_tasks_removes_completed_expired_task(monkeypatch):
+    """
+    A completed task whose endTime is older than the grace window is removed.
+
+    The loop normally runs forever; we patch ``asyncio.sleep`` to raise
+    ``StopAsyncIteration`` after one cycle so the test terminates.
+    """
+    from ai.modules.task import task_server as ts_mod
+
+    # End the loop after one iteration.
+    async def _stop_after_one(_delay):
+        """Sleep stub that raises to break the otherwise-infinite loop."""
+        raise _LoopBreak
+
+    monkeypatch.setattr(ts_mod.asyncio, 'sleep', _stop_after_one)
+    monkeypatch.setattr(ts_mod.time, 'time', lambda: 10_000.0)
+    monkeypatch.setattr(ts_mod, 'CONST_CLEANUP_DELAY_TIME', 60.0)
+
+    ts = _make_server()
+    ts.remove_task = AsyncMock()
+
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=True)
+    # endTime well in the past: 10000 - 200 -> grace window expired
+    task.get_status = MagicMock(return_value=SimpleNamespace(endTime=9_000.0))
+    ts._task_control['tk_old'] = _make_control(token='tk_old', task=task)
+
+    with pytest.raises(_LoopBreak):
+        await TaskServer._cleanup_tasks(ts)
+
+    ts.remove_task.assert_awaited_once_with('tk_old')
+
+
+@pytest.mark.asyncio
+async def test_cleanup_tasks_skips_running_task(monkeypatch):
+    """A still-running (incomplete) task is NOT removed by the cleanup loop."""
+    from ai.modules.task import task_server as ts_mod
+
+    async def _stop_after_one(_delay):
+        """Stop the loop after the first iteration."""
+        raise _LoopBreak
+
+    monkeypatch.setattr(ts_mod.asyncio, 'sleep', _stop_after_one)
+
+    ts = _make_server()
+    ts.remove_task = AsyncMock()
+
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=False)
+    ts._task_control['tk_run'] = _make_control(token='tk_run', task=task)
+
+    with pytest.raises(_LoopBreak):
+        await TaskServer._cleanup_tasks(ts)
+
+    ts.remove_task.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _monitor_ttl — one-iteration test
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_terminates_idle_task(monkeypatch):
+    """A task whose idle_time crosses ``_ttl`` is terminated by the TTL monitor."""
+    from ai.modules.task import task_server as ts_mod
+
+    counter = {'n': 0}
+
+    async def _sleep_one_then_stop(_delay):
+        """Sleep once, then raise to break the loop on the next iteration."""
+        counter['n'] += 1
+        if counter['n'] > 1:
+            raise _LoopBreak
+
+    monkeypatch.setattr(ts_mod.asyncio, 'sleep', _sleep_one_then_stop)
+    monkeypatch.setattr(ts_mod, 'CONST_TTL_CHECK', 60)
+
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=False)
+    task._ttl = 100
+    task._idle_time = 50  # 50 + 60 (check interval) > 100 -> terminate
+    ts._task_control['tk_idle'] = _make_control(token='tk_idle', task=task)
+
+    with pytest.raises(_LoopBreak):
+        await TaskServer._monitor_ttl(ts)
+
+    ts.stop_task.assert_awaited_once_with('tk_idle')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
+    """A task with ``_ttl == 0`` has no timeout and is never terminated."""
+    from ai.modules.task import task_server as ts_mod
+
+    counter = {'n': 0}
+
+    async def _sleep_one_then_stop(_delay):
+        """Sleep once, then raise to break the loop."""
+        counter['n'] += 1
+        if counter['n'] > 1:
+            raise _LoopBreak
+
+    monkeypatch.setattr(ts_mod.asyncio, 'sleep', _sleep_one_then_stop)
+
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=False)
+    task._ttl = 0
+    task._idle_time = 999_999
+    ts._task_control['tk_immortal'] = _make_control(token='tk_immortal', task=task)
+
+    with pytest.raises(_LoopBreak):
+        await TaskServer._monitor_ttl(ts)
+
+    ts.stop_task.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# remove_task
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_remove_task_calls_stop_and_broadcasts():
+    """remove_task pops the control, stops the task, and broadcasts a dashboard event."""
+    ts = _make_server()
+    ts.broadcast_server_event = AsyncMock()
+
+    task = MagicMock()
+    task.stop_task = AsyncMock()
+    control = SimpleNamespace(
+        id='task-name',
+        token='tk_rm',
+        userId='u1',
+        teamId='t1',
+        task=task,
+        project_id='proj-1',
+        source='src-1',
+        apikey='ak_x',
+    )
+    ts._task_control['tk_rm'] = control
+
+    result = await TaskServer.remove_task(ts, 'tk_rm')
+
+    assert result is control
+    assert 'tk_rm' not in ts._task_control
+    task.stop_task.assert_awaited_once()
+    ts.broadcast_server_event.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# push_account_update
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_push_account_update_skips_other_users(monkeypatch):
+    """Connections owned by a different user are not notified."""
+    from ai.modules.task import task_server as ts_mod
+
+    fresh_info = MagicMock()
+    fresh_info.to_connect_result = MagicMock(return_value={'user_id': 'u1'})
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock(return_value=fresh_info)
+    fake_account = SimpleNamespace(_service=service)
+    monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
+    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
+
+    ts = _make_server()
+    other = MagicMock()
+    other._account_info = SimpleNamespace(userId='u-other', auth='ak_o')
+    other.send_event = AsyncMock()
+    other.get_connection_id = MagicMock(return_value=99)
+    ts._connections = {99: other}
+
+    await TaskServer.push_account_update(ts, 'u1')
+    other.send_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_push_account_update_swallows_send_errors(monkeypatch):
+    """If account refresh raises, the loop logs and moves on (no propagation)."""
+    from ai.modules.task import task_server as ts_mod
+
+    service = MagicMock()
+    service.get_authentication_result = AsyncMock(side_effect=RuntimeError('refresh fail'))
+    fake_account = SimpleNamespace(_service=service)
+    monkeypatch.setitem(sys.modules, 'ai.account.account', fake_account)
+    monkeypatch.setattr(ts_mod, 'account', fake_account, raising=False)
+
+    ts = _make_server()
+    target = MagicMock()
+    target._account_info = SimpleNamespace(userId='u1', auth='ak_a')
+    target.send_event = AsyncMock()
+    target.get_connection_id = MagicMock(return_value=1)
+    ts._connections = {1: target}
+
+    await TaskServer.push_account_update(ts, 'u1')
+    target.send_event.assert_not_awaited()
+    ts.debug_message.assert_called()
