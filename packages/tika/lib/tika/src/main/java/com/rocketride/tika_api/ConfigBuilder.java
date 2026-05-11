@@ -513,6 +513,11 @@ public class ConfigBuilder {
 		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.CompositeExternalParser");
 		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.ExternalParser");
 
+		// Replace Tika's junrar-backed RarParser (RAR4-only; throws on RAR5) with our
+		// 7-Zip-JBinding-backed parser, which handles both RAR4 and RAR5.
+		removeParser(doc, "org.apache.tika.parser.pkg.RarParser");
+		findOrAddParser(doc, "com.rocketride.tika_api.parsers.rar.RarSevenZipParser");
+
 		// Output the xml
 		logger.debug(xmlToString(doc, 4));
 

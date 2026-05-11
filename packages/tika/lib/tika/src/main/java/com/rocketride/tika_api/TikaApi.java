@@ -39,6 +39,8 @@ import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.extractor.EmbeddedDocumentExtractor;
 
+import net.sf.sevenzipjbinding.SevenZip;
+
 import com.rocketride.tika_api.parsers.email.CustomRFC822Parser;
 import com.rocketride.tika_api.EmbeddedContentExtractor.EmbeddedContentProcessor;
 
@@ -317,6 +319,18 @@ public final class TikaApi {
 
 		logger.log(Level.INFO, "Initializing TikaAPI ...");
 		logger.log(Level.INFO, "Aspose parsers available: " + asposeAvailable);
+
+		// Initialize 7-Zip-JBinding once for the JVM. Required by RarSevenZipParser;
+		// the call extracts the platform-specific native lib from the bundled jar
+		// and loads it. Failures are logged but not fatal — non-RAR parsing still works.
+		try {
+			if (!SevenZip.isInitializedSuccessfully()) {
+				SevenZip.initSevenZipFromPlatformJAR();
+				logger.log(Level.INFO, "7-Zip-JBinding initialized: " + SevenZip.getSevenZipVersion().version);
+			}
+		} catch (Throwable t) {
+			logger.log(Level.WARNING, "Failed to initialize 7-Zip-JBinding; RAR parsing will fail", t);
+		}
 
 		// Get a new encoding detector
 		// encodingDetector = initEncodingDetector();
