@@ -81,7 +81,7 @@ CONST_WS_PING_INTERVAL = 15
 # WebSocket ping timeout in seconds
 # If no pong response is received within this period after a ping,
 # the connection is considered dead and will be closed
-CONST_WS_PING_TIMEOUT = 60
+CONST_WS_PING_TIMEOUT = 600
 
 # Default store directory for project pipeline files.
 # Use this constant instead of hardcoding '.projects'.

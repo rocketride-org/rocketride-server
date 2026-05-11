@@ -1,0 +1,182 @@
+{
+	"title": "Detect",
+	"protocol": "detect://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.detect",
+	"prefix": "detect",
+	"description": ["Per-frame open-vocabulary detection using YOLO-World. Unlike fixed-class detectors (DETR, YOLOS), ", "YOLO-World accepts any text prompt at runtime - 'monster . npc . door' - with no fixed class list. ", "Image in, bounding boxes + labels + centroids out. Runs in real-time on CPU, MPS, and CUDA. ", "Use as a fast per-frame gate before heavier models. For pixel masks use Detect & Segment. ", "For video segment capture with pre/post roll, use the video detection gate node instead."],
+	"icon": "util-image.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Prompt: ${parameters.detect.prompt}"],
+	"lanes": {
+		"image": ["documents", "text", "image"],
+		"video": ["documents", "text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to run detection on.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream - pipe to any node accepting image input."
+				},
+				{
+					"lane": "documents",
+					"description": "Annotated image as document - pipe to response or downstream vision nodes."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of detections: [{label, score, box, centroid}]."
+				}
+			]
+		},
+		{
+			"lane": "video",
+			"description": "Raw video file - frames extracted and detected at the configured interval.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated frames as raw stream."
+				},
+				{
+					"lane": "documents",
+					"description": "Annotated frames as documents, one per frame."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of detections per frame: [{label, score, box, centroid}]."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "small",
+		"profiles": {
+			"small": {
+				"title": "YOLO-World Small - fast, lightweight",
+				"model": "yolov8s-worldv2",
+				"threshold": 0.3,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			},
+			"medium": {
+				"title": "YOLO-World Medium - balanced",
+				"model": "yolov8m-worldv2",
+				"threshold": 0.3,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			},
+			"large": {
+				"title": "YOLO-World Large - most accurate",
+				"model": "yolov8l-worldv2",
+				"threshold": 0.3,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			},
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"threshold": 0.3,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			}
+		}
+	},
+	"fields": {
+		"detect.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "YOLO-World model variant filename (without .pt extension)",
+			"minLength": 2,
+			"maxLength": 256
+		},
+		"detect.threshold": {
+			"type": "number",
+			"title": "Confidence threshold",
+			"description": "Minimum confidence score (0.0–1.0) to include a detection",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"detect.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Detection prompt",
+			"description": "Objects to detect, period or comma-separated (e.g. 'person . car . dog')"
+		},
+		"detect.interval": {
+			"type": "number",
+			"title": "Frame interval (seconds)",
+			"description": "Time between extracted frames for video input",
+			"default": 1
+		},
+		"detect.max_frames": {
+			"type": "number",
+			"title": "Max frames (0 = unlimited)",
+			"description": "Maximum number of frames to extract from a video file",
+			"default": 0
+		},
+		"detect.maxVideoSizeMB": {
+			"type": "number",
+			"title": "Max video size (MB)",
+			"description": "Videos exceeding this size are rejected",
+			"default": 500
+		},
+		"detect.video": {
+			"object": "video",
+			"title": "Video settings",
+			"properties": ["detect.interval", "detect.max_frames", "detect.maxVideoSizeMB"]
+		},
+		"detect.custom": {
+			"object": "custom",
+			"properties": ["detect.model", "detect.threshold", "detect.prompt", "detect.video"]
+		},
+		"detect.profile": {
+			"title": "Model",
+			"description": "YOLO-World variant - smaller is faster, larger is more accurate",
+			"type": "string",
+			"default": "small",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{ "value": "small", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
+				{ "value": "medium", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
+				{ "value": "large", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
+				{ "value": "custom", "properties": ["detect.custom"] }
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Fast Detection",
+			"properties": ["detect.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["small"],
+		"outputs": ["documents", "text"],
+		"timeout": 60,
+		"cases": [
+			{
+				"name": "Detect objects in image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"documents": { "notEmpty": true },
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	}
+}

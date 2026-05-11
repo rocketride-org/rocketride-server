@@ -233,6 +233,19 @@ class RocketRideClient(
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
 
     # =========================================================================
+    # ASYNC CONTEXT MANAGER
+    # =========================================================================
+
+    async def __aenter__(self):
+        """Enter async context."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        await self.disconnect()
+
+    # =========================================================================
     # CALL — PUBLIC DAP COMMAND INTERFACE
     # =========================================================================
 

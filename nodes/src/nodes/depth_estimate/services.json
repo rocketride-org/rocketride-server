@@ -1,0 +1,168 @@
+{
+	"title": "Depth Estimate",
+	"protocol": "depth_estimate://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.depth_estimate",
+	"prefix": "depth_estimate",
+	"description": ["Monocular depth estimation — infers how far away objects are from a single image or video frame. ", "Outputs a colorized depth map (red = near, blue = far) and depth statistics (min, max, mean). ", "Useful for spatial reasoning in agent pipelines: pair with the Detect node to get distance ", "to detected objects. Runs on CPU, Apple Silicon (MPS), and CUDA."],
+	"icon": "util-image.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.depth_estimate.profile}"],
+	"lanes": {
+		"image": ["documents", "text", "image"],
+		"documents": ["documents", "text", "image"],
+		"video": ["documents", "text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to estimate depth from.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Colorized depth map as raw stream — pipe to any node accepting image input."
+				},
+				{
+					"lane": "documents",
+					"description": "Colorized depth map as document — red is near, blue is far."
+				},
+				{
+					"lane": "text",
+					"description": "JSON depth statistics: {min, max, mean}."
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to estimate depth from (e.g. from frame_grabber).",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Colorized depth map as raw stream."
+				},
+				{
+					"lane": "documents",
+					"description": "Colorized depth map as document — red is near, blue is far."
+				},
+				{
+					"lane": "text",
+					"description": "JSON depth statistics: {min, max, mean}."
+				}
+			]
+		},
+		{
+			"lane": "video",
+			"description": "Raw video file — depth estimated per frame at the configured interval.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Colorized depth maps as raw stream, one per frame."
+				},
+				{
+					"lane": "documents",
+					"description": "Colorized depth maps as documents, one per frame."
+				},
+				{
+					"lane": "text",
+					"description": "JSON depth statistics per frame."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "v2-small",
+		"profiles": {
+			"da3-small": {
+				"title": "DA3 Small — latest, fast, CPU-friendly",
+				"model": "depth-anything/DA3-SMALL",
+				"interval": 1,
+				"maxVideoSizeMB": 500
+			},
+			"da3-large": {
+				"title": "DA3 Large — latest, higher quality",
+				"model": "depth-anything/DA3-LARGE-1.1",
+				"interval": 1,
+				"maxVideoSizeMB": 500
+			},
+			"v2-small": {
+				"title": "V2 Small — proven, 1.9M downloads",
+				"model": "depth-anything/Depth-Anything-V2-Small-hf",
+				"interval": 1,
+				"maxVideoSizeMB": 500
+			},
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"interval": 1,
+				"maxVideoSizeMB": 500
+			}
+		}
+	},
+	"fields": {
+		"depth_estimate.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "HuggingFace model identifier for depth estimation",
+			"minLength": 2,
+			"maxLength": 256
+		},
+		"depth_estimate.interval": {
+			"type": "number",
+			"title": "Frame interval (seconds)",
+			"description": "Time between extracted frames for video input",
+			"default": 1
+		},
+		"depth_estimate.maxVideoSizeMB": {
+			"type": "number",
+			"title": "Max video size (MB)",
+			"default": 500
+		},
+		"depth_estimate.video": {
+			"object": "video",
+			"title": "Video settings",
+			"properties": ["depth_estimate.interval", "depth_estimate.maxVideoSizeMB"]
+		},
+		"depth_estimate.custom": {
+			"object": "custom",
+			"properties": ["depth_estimate.model", "depth_estimate.video"]
+		},
+		"depth_estimate.profile": {
+			"title": "Model",
+			"description": "Depth Anything model variant",
+			"type": "string",
+			"default": "da3-small",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{ "value": "da3-small", "properties": ["depth_estimate.video"] },
+				{ "value": "da3-large", "properties": ["depth_estimate.video"] },
+				{ "value": "v2-small", "properties": ["depth_estimate.video"] },
+				{ "value": "custom", "properties": ["depth_estimate.custom"] }
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Depth Estimation",
+			"properties": ["depth_estimate.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["v2-small"],
+		"outputs": ["documents", "text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Estimate depth from image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"documents": { "notEmpty": true },
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	}
+}

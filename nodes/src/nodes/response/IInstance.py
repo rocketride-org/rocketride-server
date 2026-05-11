@@ -77,6 +77,7 @@ class IInstance(IInstanceBase):
         """
         self.text = ''  # Reset the text buffer
         self.image = bytearray()
+        self.video = bytearray()
 
     def close(self):
         """
@@ -206,18 +207,29 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(info)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('video')
+        if aviAction == AVI_ACTION.BEGIN:
+            self.video = bytearray()
 
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
+        elif aviAction == AVI_ACTION.WRITE:
+            self.video += data
 
-        # Create the tracking info
-        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
+        elif aviAction == AVI_ACTION.END:
+            key = self._getkey('video')
 
-        # Add the documents
-        self.instance.currentObject.response[key].append(info)
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+
+            import base64
+
+            video_str = base64.b64encode(bytes(self.video)).decode('utf-8')
+            self.video = bytearray()
+
+            self.instance.currentObject.response[key].append(
+                {
+                    'mime_type': mimeType,
+                    'video': video_str,
+                }
+            )
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action

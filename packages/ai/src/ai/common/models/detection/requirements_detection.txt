@@ -1,0 +1,14 @@
+# SAM3 object detection and segmentation
+# torch via ai.common.torch
+#
+# sam3 must be installed from GitHub — not available on PyPI.
+# Requires CUDA 12.6+ and Python 3.12+. Does not run on macOS.
+#
+# Installation:
+#   git clone https://github.com/facebookresearch/sam3.git
+#   cd sam3 && pip install -e .
+#
+# Also requires HF_TOKEN with approved access to facebook/sam3.1:
+#   https://huggingface.co/facebook/sam3.1
+
+Pillow
