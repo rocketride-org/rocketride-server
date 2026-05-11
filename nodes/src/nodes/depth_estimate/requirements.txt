@@ -1,0 +1,8 @@
+transformers
+accelerate
+
+# depth-anything-3 conflicts with opencv-contrib-python on numpy (DA3 needs <2, opencv needs >=2).
+# Install manually after server start:
+#   pip install depth-anything-3 --no-deps
+#   pip install timm einops huggingface-hub
+# Then use a DA3 profile. Default profile uses V2 which installs cleanly.

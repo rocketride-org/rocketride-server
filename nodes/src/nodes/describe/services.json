@@ -1,0 +1,147 @@
+{
+	"title": "Describe",
+	"protocol": "describe://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.describe",
+	"prefix": "describe",
+	"description": ["All-in-one image understanding using Florence-2. Captions scenes, detects objects, ", "reads text, and grounds natural language phrases to image regions — all from a single model. ", "Runs locally on CPU, Apple Silicon (MPS), and CUDA with no API key required. ", "For text reading in production pipelines, use the dedicated OCR node. ", "For real-time per-frame detection, use the Detect node."],
+	"icon": "util-image.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Task: ${parameters.describe.task}"],
+	"lanes": {
+		"image": ["text", "documents", "image"],
+		"documents": ["text", "documents", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to describe.",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Task result — caption string, JSON boxes, or OCR text depending on selected task."
+				},
+				{
+					"lane": "documents",
+					"description": "Annotated image for visual tasks (OD, grounding, dense regions). Original image for caption and OCR tasks."
+				},
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream — pipe to any node accepting image input."
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to describe (e.g. from frame_grabber).",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Task result — caption string, JSON boxes, or OCR text depending on selected task."
+				},
+				{
+					"lane": "documents",
+					"description": "Annotated image for visual tasks (OD, grounding, dense regions). Original image for caption and OCR tasks."
+				},
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream — pipe to any node accepting image input."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "base",
+		"profiles": {
+			"base": {
+				"title": "Florence-2 Base — lightweight, works on CPU",
+				"model": "microsoft/Florence-2-base",
+				"task": "caption",
+				"phrase": ""
+			},
+			"large": {
+				"title": "Florence-2 Large — more accurate, more GPU",
+				"model": "microsoft/Florence-2-large",
+				"task": "caption",
+				"phrase": ""
+			},
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"task": "caption",
+				"phrase": ""
+			}
+		}
+	},
+	"fields": {
+		"describe.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "HuggingFace model identifier",
+			"minLength": 2,
+			"maxLength": 256
+		},
+		"describe.task": {
+			"title": "Task",
+			"description": "What Florence-2 should do with the image",
+			"type": "string",
+			"default": "caption",
+			"enum": ["caption", "detailed_caption", "more_detailed_caption", "detect", "dense_regions", "ground", "ocr", "ocr_with_regions"],
+			"enumNames": ["Caption — short description", "Detailed caption", "More detailed caption", "Detect objects — returns JSON boxes", "Dense region captions — describes every region", "Ground phrase — finds text phrase in image (requires phrase field)", "Read text (OCR) — convenience path, use OCR node for production", "Read text with location"]
+		},
+		"describe.phrase": {
+			"type": "string",
+			"title": "Phrase (grounding only)",
+			"description": "The phrase to locate in the image. Only used when task is set to Ground phrase.",
+			"default": ""
+		},
+		"describe.base": {
+			"object": "base",
+			"properties": ["describe.task", "describe.phrase"]
+		},
+		"describe.large": {
+			"object": "large",
+			"properties": ["describe.task", "describe.phrase"]
+		},
+		"describe.custom": {
+			"object": "custom",
+			"properties": ["describe.model", "describe.task", "describe.phrase"]
+		},
+		"describe.profile": {
+			"title": "Model",
+			"description": "Florence-2 variant — base runs on CPU, large needs more GPU",
+			"type": "string",
+			"default": "base",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{ "value": "base", "properties": ["describe.base"] },
+				{ "value": "large", "properties": ["describe.large"] },
+				{ "value": "custom", "properties": ["describe.custom"] }
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Image Understanding",
+			"properties": ["describe.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["base"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Caption image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	}
+}

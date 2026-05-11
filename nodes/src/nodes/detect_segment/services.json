@@ -1,0 +1,230 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Detect & Segment",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "detect_segment://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["gpu", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.detect_segment",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "detect_segment",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["⚠️ NOT YET FUNCTIONAL — requires manual setup before use. ", "Grounded detection + pixel-level segmentation using SAM 3.1 (Segment Anything Model 3). ", "Three blockers must be resolved before this node runs: ", "(1) Install SAM3 from GitHub: git clone https://github.com/facebookresearch/sam3 && pip install -e . ", "(2) Upgrade model server to CUDA 12.6+ and PyTorch 2.10 (currently on CUDA 12.1). ", "(3) Set HF_TOKEN with approved access to facebook/sam3.1 on HuggingFace. ", "(4) Register DetectionLoader in rocketride-saas model_manager.py. ", "Once unblocked: image+video in, annotated image + JSON detections out (red boxes)."],
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "util-image.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Rendering hints indicating which fields to display on the canvas tile
+	//
+	"tile": ["Prompt: ${parameters.detect_segment.prompt}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": ["documents", "text"],
+		"video": ["documents", "text"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to run object detection on (e.g. from frame_grabber).",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Annotated image with bounding boxes drawn for each detection."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of detections: [{label, score, box, centroid}]."
+				}
+			]
+		},
+		{
+			"lane": "video",
+			"description": "Raw video file — frames are extracted at the configured interval and detected.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Annotated frames with bounding boxes drawn, one doc per frame."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of detections per frame: [{label, score, box, centroid}]."
+				}
+			]
+		}
+	],
+	//
+	// Optional:
+	//		Profile section — configuration options used by the driver
+	//
+	"preconfig": {
+		"default": "sam3",
+		"profiles": {
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"threshold": 0.5,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			},
+			"sam3": {
+				"title": "SAM 3.1 (facebook/sam3.1)",
+				"model": "facebook/sam3.1",
+				"threshold": 0.5,
+				"prompt": "",
+				"interval": 1,
+				"max_frames": 0,
+				"maxVideoSizeMB": 500
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions for this service
+	//
+	"fields": {
+		"detect_segment.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "HuggingFace model ID (requires HF_TOKEN with approved access)",
+			"minLength": 2,
+			"maxLength": 256
+		},
+		"detect_segment.threshold": {
+			"type": "number",
+			"title": "Confidence threshold",
+			"description": "Minimum confidence score (0.0–1.0) to include a detection",
+			"default": 0.5,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"detect_segment.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Detection prompt",
+			"description": "Objects to detect, period-separated (e.g. 'person . car . dog')"
+		},
+		"detect_segment.interval": {
+			"type": "number",
+			"title": "Frame interval (seconds)",
+			"description": "Time between extracted frames for video input",
+			"default": 1
+		},
+		"detect_segment.max_frames": {
+			"type": "number",
+			"title": "Max frames (0 = unlimited)",
+			"description": "Maximum number of frames to extract from a video file",
+			"default": 0
+		},
+		"detect_segment.maxVideoSizeMB": {
+			"type": "number",
+			"title": "Max video size (MB)",
+			"description": "Videos exceeding this size are rejected",
+			"default": 500
+		},
+		"detect_segment.video": {
+			"object": "video",
+			"title": "Video settings",
+			"properties": ["detect_segment.interval", "detect_segment.max_frames", "detect_segment.maxVideoSizeMB"]
+		},
+		"detect_segment.custom": {
+			"object": "custom",
+			"properties": ["detect_segment.model", "detect_segment.threshold", "detect_segment.prompt", "detect_segment.video"]
+		},
+		"detect_segment.sam3": {
+			"object": "sam3",
+			"properties": ["detect_segment.threshold", "detect_segment.prompt", "detect_segment.video"]
+		},
+		"detect_segment.profile": {
+			"title": "Detection Model",
+			"description": "Select the object detection model",
+			"type": "string",
+			"default": "sam3",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": ["detect_segment.custom"]
+				},
+				{
+					"value": "sam3",
+					"properties": ["detect_segment.sam3"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Object Detection",
+			"properties": ["detect_segment.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["sam3"],
+		"outputs": ["documents"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Detect objects in image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}

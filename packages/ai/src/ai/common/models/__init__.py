@@ -40,6 +40,9 @@ from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
 # Vision (CLIP / ViT) image embedding
 from .vision import VisionLoader, CLIPModel, ViTModel
 
+# Detection (SAM3 grounded segmentation)
+from .detection import DetectionLoader, Sam3Model
+
 __all__ = [
     # Base
     'BaseLoader',
@@ -70,4 +73,7 @@ __all__ = [
     'VisionLoader',
     'CLIPModel',
     'ViTModel',
+    # Detection
+    'DetectionLoader',
+    'Sam3Model',
 ]
