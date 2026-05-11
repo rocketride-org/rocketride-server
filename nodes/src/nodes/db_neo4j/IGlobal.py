@@ -60,6 +60,7 @@ class IGlobal(IGlobalBase):
     # label: str = 'Row'
     db_description: str = ''
     max_validation_attempts: int = 5
+    allow_execute: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -79,6 +80,11 @@ class IGlobal(IGlobalBase):
             self.max_validation_attempts = int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             self.max_validation_attempts = 5
+
+        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
+        # the LLM translation + _is_cypher_safe gate, so the node owner must
+        # explicitly enable the capability.
+        self.allow_execute = bool(config.get('allow_execute', False))
 
         auth = self._build_auth(config)
 

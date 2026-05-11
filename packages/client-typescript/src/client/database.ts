@@ -66,6 +66,13 @@ export class DatabaseApi {
 		sql: string;
 		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 	}): Promise<PIPELINE_RESULT> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		if (typeof options.sql !== 'string' || options.sql.trim() === '') {
+			throw new Error('sql must be a non-empty string');
+		}
+
 		const question = new Question({ type: QuestionType.EXECUTE });
 		question.addQuestion(options.sql);
 		return this.client.chat({ token: options.token, question, onSSE: options.onSSE });
