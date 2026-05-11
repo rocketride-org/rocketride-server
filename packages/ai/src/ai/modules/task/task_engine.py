@@ -530,7 +530,9 @@ class Task(DAPBase):
                     stop=stop_after_attempt(10),
                     wait=wait_fixed(0.15),
                     reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'),
+                    before_sleep=lambda retry_state: self.debug_message(
+                        f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
+                    ),
                 )
                 async def _connect_data_client():
                     # Don't retry if subprocess has died
@@ -1232,7 +1234,9 @@ class Task(DAPBase):
 
             # Check sliding timeout (resets on events)
             if time_since_last_event >= CONST_MAX_READY_TIME:
-                raise TimeoutError(f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)')
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)'
+                )
 
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
@@ -1430,7 +1434,9 @@ class Task(DAPBase):
             # Start fresh (full initialization)
             await self.start_task()
 
-            self._server.debug_message(f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})')
+            self._server.debug_message(
+                f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
+            )
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')

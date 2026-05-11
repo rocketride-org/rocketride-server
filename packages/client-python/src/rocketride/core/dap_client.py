@@ -41,9 +41,12 @@ Key Features:
 
 import asyncio
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from .dap_base import DAPBase
 from .exceptions import AuthenticationException
+
+if TYPE_CHECKING:
+    from ..types.client import ConnectResult
 
 
 class DAPClient(DAPBase):
@@ -85,6 +88,8 @@ class DAPClient(DAPBase):
         self._request_timeout: Optional[float] = kwargs.get('request_timeout', None)
         # True only after auth has succeeded (set in connect(), cleared in on_disconnected)
         self._authenticated: bool = False
+        # Auth response body from the last successful connect. Set before on_connected fires.
+        self._connect_result: Optional['ConnectResult'] = None
 
     async def _send(self, message: Dict[str, Any]) -> None:
         """
@@ -352,6 +357,9 @@ class DAPClient(DAPBase):
 
         # Only now are we connected (transport up + authenticated)
         self._authenticated = True
+        # Set _connect_result before on_connected so get_account_info()
+        # is available inside user callbacks (e.g. sidebar 'connected' listener).
+        self._connect_result = auth_body  # type: ignore[assignment]
         connection_info = self._transport.get_connection_info()
         await self.on_connected(connection_info)
         return auth_body

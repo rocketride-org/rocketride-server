@@ -74,6 +74,9 @@ function parseArgs(args) {
 			options.listDeps = true;
 		} else if (arg === '--list-modules') {
 			options.listModules = true;
+		} else if (arg.startsWith('--models=')) {
+			options.models = options.models || [];
+			options.models.push(arg.substring('--models='.length));
 		} else if (arg.startsWith('--pytest=')) {
 			options.pytest = options.pytest || [];
 			options.pytest.push(arg.substring('--pytest='.length));
@@ -81,6 +84,8 @@ function parseArgs(args) {
 			options.pytestPattern = arg.substring('--pytest-pattern='.length);
 		} else if (arg.startsWith('--pytest-preinstall=')) {
 			options.pytestPreinstall = arg.substring('--pytest-preinstall='.length);
+		} else if (arg.startsWith('--pytest-parallel=')) {
+			options.pytestParallel = arg.substring('--pytest-parallel='.length);
 		} else if (arg.startsWith('--jest=')) {
 			options.jest = options.jest || [];
 			options.jest.push(arg.substring('--jest='.length));
@@ -204,6 +209,8 @@ Options:
   --pytest="args"           Pass arguments to pytest (can be repeated)
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated, e.g. "dep1>=10,dep2")
+  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
+  --models="args"     Pass arguments to sync_models (can be repeated)
   --jest="args"             Pass arguments to Jest (can be repeated)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
   --trace="a,b,c"     Enable trace output (passed to engine/tests)

@@ -112,6 +112,9 @@ export interface IFlowProps {
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
 
+	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
+	isSubscribed?: boolean;
+
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
 
@@ -129,7 +132,7 @@ export interface IFlowProps {
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, isDirty, isNew, onSave }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -195,6 +198,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					onOpenStatus={onOpenStatus}
 					serverHost={serverHost}
 					isConnected={isConnected}
+					isSubscribed={isSubscribed}
 					initialViewport={initialViewport}
 					isDirty={isDirty}
 					isNew={isNew}

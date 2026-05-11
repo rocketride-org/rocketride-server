@@ -30,60 +30,60 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     """
     Instance handler for NER node.
-    
+
     Processes individual documents and text, extracting named entities
     and adding them to document metadata.
     """
-    
+
     IGlobal: IGlobal  # Reference to global context with NER recognizer
-    
+
     # Current object context
     current_text: str = ''
     current_entities: List[dict] = []
-    
+
     def open(self, obj: Entry):
         """Initialize instance for a new object."""
         self.current_text = ''
         self.current_entities = []
-    
+
     def writeText(self, text: str):
         """
         Process text and extract named entities.
-        
+
         Args:
             text: Text to process
         """
         # Store the text
         self.current_text += text
-        
+
         # Extract entities from the text
         entities = self.IGlobal.recognizer.extract_entities(text)
         self.current_entities.extend(entities)
-        
+
         # Pass through the original text
         self.instance.writeText(text)
-    
+
     def writeDocuments(self, documents: List[Doc]):
         """
         Process documents and extract named entities.
-        
+
         Args:
             documents: List of documents to process
         """
         enriched_docs = []
-        
+
         for doc in documents:
             # Extract entities from document content
             entities = self.IGlobal.recognizer.extract_entities(doc.page_content)
-            
+
             # Create a copy to avoid modifying the original
             enriched_doc = doc.model_copy()
-            
+
             # Store entities in metadata if configured
             if self.IGlobal.recognizer.store_in_metadata:
                 if enriched_doc.metadata is None:
                     enriched_doc.metadata = {}
-                
+
                 # Group entities by type
                 entities_by_type = {}
                 for entity in entities:
@@ -91,26 +91,25 @@ class IInstance(IInstanceBase):
                     if entity_type not in entities_by_type:
                         entities_by_type[entity_type] = []
                     entities_by_type[entity_type].append(entity['word'])
-                
+
                 # Add to metadata (deduplicate and sort)
                 for entity_type, words in entities_by_type.items():
                     unique_words = sorted(list(set(words)))
                     enriched_doc.metadata[f'entities_{entity_type.lower()}'] = unique_words
-                
+
                 # Also store total count
                 enriched_doc.metadata['entities_count'] = len(entities)
-            
+
             enriched_docs.append(enriched_doc)
-        
+
         # Write enriched documents
         self.instance.writeDocuments(enriched_docs)
-    
+
     def closing(self):
         """Called before close, finalize any pending operations."""
         pass
-    
+
     def close(self):
         """Clean up instance state."""
         self.current_text = ''
         self.current_entities = []
-

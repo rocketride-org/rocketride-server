@@ -143,7 +143,9 @@ class IInstance(IInstanceBase):
             q.addContext(f'Description: {description}')
 
         q.addGoal(
-            'Generate a Chart.js v4 configuration for the provided data' + (f' as a {chart_type} chart' if chart_type else '') + '.',
+            'Generate a Chart.js v4 configuration for the provided data'
+            + (f' as a {chart_type} chart' if chart_type else '')
+            + '.',
         )
         q.addQuestion(
             description or 'Generate the Chart.js configuration JSON for the data above.',

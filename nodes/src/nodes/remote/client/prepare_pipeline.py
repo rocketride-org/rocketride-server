@@ -98,7 +98,12 @@ def prepareRemotePipeline(pipeline: dict, remote: dict) -> dict:
     remote_comps = set(comp['id'] for comp in remote_pipeline['components'])
 
     # Get the remote input lanes from the local pipeline
-    remote_inputs = list(input_ for comp in remote_pipeline['components'] for input_ in comp.get('input', []) if input_['from'] in local_comps)
+    remote_inputs = list(
+        input_
+        for comp in remote_pipeline['components']
+        for input_ in comp.get('input', [])
+        if input_['from'] in local_comps
+    )
 
     # Update local-to-remote lanes as follow:
     #   before : local component -> remote component
@@ -111,7 +116,9 @@ def prepareRemotePipeline(pipeline: dict, remote: dict) -> dict:
         remote_input['from'] = 'remote_server'
 
     # Get the local input lanes from the remote pipeline
-    local_inputs = list(input_ for comp in pipeline['components'] for input_ in comp.get('input', []) if input_['from'] in remote_comps)
+    local_inputs = list(
+        input_ for comp in pipeline['components'] for input_ in comp.get('input', []) if input_['from'] in remote_comps
+    )
 
     # Update remote-to-local lanes as follow:
     #   before : remote component -> local component
@@ -122,7 +129,9 @@ def prepareRemotePipeline(pipeline: dict, remote: dict) -> dict:
 
     # Create a remote source stub in the remote pipeline
     remote_pipeline['source'] = 'remote_source_stub'
-    remote_pipeline['components'].insert(0, {'id': 'remote_source_stub', 'provider': 'remote_source_stub', 'config': {}})
+    remote_pipeline['components'].insert(
+        0, {'id': 'remote_source_stub', 'provider': 'remote_source_stub', 'config': {}}
+    )
 
     # Emplace the remote server node to the remote pipeline
     remote_pipeline['components'].insert(1, remote_server)

@@ -33,9 +33,8 @@ requests, reviews, releases, workflows, orgs, users, and code search.
 from __future__ import annotations
 
 import base64
-import json
 
-from rocketlib import IInstanceBase, tool_function, warning
+from rocketlib import IInstanceBase, normalize_tool_input, require_int, require_str, tool_function
 
 from .github_client import (
     call,
@@ -88,16 +87,22 @@ class IInstance(IInstanceBase):
             'required': ['path'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'path': {'type': 'string', 'description': 'File path in the repository, e.g. "src/nodes/llm_openai/services.json"'},
-                'ref': {'type': 'string', 'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)'},
+                'path': {
+                    'type': 'string',
+                    'description': 'File path in the repository, e.g. "src/nodes/llm_openai/services.json"',
+                },
+                'ref': {
+                    'type': 'string',
+                    'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)',
+                },
             },
         },
         description='Get the decoded content and metadata of a single file from a GitHub repository.',
     )
     def file_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        path = _require_str(args, 'path', 'file_get')
+        path = require_str(args, 'path', tool_name='file_get')
         params = {'ref': args['ref']} if args.get('ref') else None
         data = call(self._token(), 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
         if isinstance(data, list):
@@ -126,7 +131,7 @@ class IInstance(IInstanceBase):
         description='List files and directories at a path in a GitHub repository.',
     )
     def file_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = (args.get('path') or '').strip().lstrip('/')
         params = {'ref': args['ref']} if args.get('ref') else None
@@ -142,7 +147,10 @@ class IInstance(IInstanceBase):
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'path': {'type': 'string', 'description': 'File path to create, e.g. "docs/nodes/llm_openai.md"'},
-                'content': {'type': 'string', 'description': 'Plain text file content (will be base64-encoded automatically)'},
+                'content': {
+                    'type': 'string',
+                    'description': 'Plain text file content (will be base64-encoded automatically)',
+                },
                 'message': {'type': 'string', 'description': 'Commit message'},
                 'branch': {'type': 'string', 'description': 'Branch to commit to (default: repo default branch)'},
             },
@@ -150,14 +158,14 @@ class IInstance(IInstanceBase):
         description='Create a new file in a GitHub repository.',
     )
     def file_create(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        path = _require_str(args, 'path', 'file_create')
+        path = require_str(args, 'path', tool_name='file_create')
         content = args.get('content')
         if content is None:
             raise ValueError('file_create: "content" is required')
-        message = _require_str(args, 'message', 'file_create')
+        message = require_str(args, 'message', tool_name='file_create')
         body: dict = {
             'message': message,
             'content': base64.b64encode(content.encode('utf-8')).decode('ascii'),
@@ -165,7 +173,11 @@ class IInstance(IInstanceBase):
         if args.get('branch'):
             body['branch'] = args['branch']
         data = call(self._token(), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
-        return {'path': path, 'sha': (data.get('content') or {}).get('sha'), 'commit_sha': (data.get('commit') or {}).get('sha')}
+        return {
+            'path': path,
+            'sha': (data.get('content') or {}).get('sha'),
+            'commit_sha': (data.get('commit') or {}).get('sha'),
+        }
 
     @tool_function(
         input_schema={
@@ -183,15 +195,15 @@ class IInstance(IInstanceBase):
         description='Update an existing file in a GitHub repository. Requires the current file SHA (get it from file_get first).',
     )
     def file_edit(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        path = _require_str(args, 'path', 'file_edit')
+        path = require_str(args, 'path', tool_name='file_edit')
         content = args.get('content')
         if content is None:
             raise ValueError('file_edit: "content" is required')
-        message = _require_str(args, 'message', 'file_edit')
-        sha = _require_str(args, 'sha', 'file_edit')
+        message = require_str(args, 'message', tool_name='file_edit')
+        sha = require_str(args, 'sha', tool_name='file_edit')
         body: dict = {
             'message': message,
             'content': base64.b64encode(content.encode('utf-8')).decode('ascii'),
@@ -200,7 +212,11 @@ class IInstance(IInstanceBase):
         if args.get('branch'):
             body['branch'] = args['branch']
         data = call(self._token(), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
-        return {'path': path, 'sha': (data.get('content') or {}).get('sha'), 'commit_sha': (data.get('commit') or {}).get('sha')}
+        return {
+            'path': path,
+            'sha': (data.get('content') or {}).get('sha'),
+            'commit_sha': (data.get('commit') or {}).get('sha'),
+        }
 
     @tool_function(
         input_schema={
@@ -217,12 +233,12 @@ class IInstance(IInstanceBase):
         description='Delete a file from a GitHub repository. Requires the current file SHA (get it from file_get first).',
     )
     def file_delete(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        path = _require_str(args, 'path', 'file_delete')
-        message = _require_str(args, 'message', 'file_delete')
-        sha = _require_str(args, 'sha', 'file_delete')
+        path = require_str(args, 'path', tool_name='file_delete')
+        message = require_str(args, 'message', tool_name='file_delete')
+        sha = require_str(args, 'sha', tool_name='file_delete')
         body: dict = {'message': message, 'sha': sha}
         if args.get('branch'):
             body['branch'] = args['branch']
@@ -245,9 +261,9 @@ class IInstance(IInstanceBase):
         description='Get a single GitHub issue by number.',
     )
     def issue_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        num = _require_int(args, 'issue_number', 'issue_get')
+        num = require_int(args, 'issue_number', tool_name='issue_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/issues/{num}')
         if data.get('pull_request'):
             raise ValueError(f'#{num} is a pull request — use pr_get instead')
@@ -258,7 +274,11 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'state': {'type': 'string', 'enum': ['open', 'closed', 'all'], 'description': 'Filter by state (default: open)'},
+                'state': {
+                    'type': 'string',
+                    'enum': ['open', 'closed', 'all'],
+                    'description': 'Filter by state (default: open)',
+                },
                 'labels': {'type': 'string', 'description': 'Comma-separated label names to filter by'},
                 'assignee': {'type': 'string', 'description': 'Filter by assignee login'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
@@ -268,7 +288,7 @@ class IInstance(IInstanceBase):
         description='List issues in a repository. Excludes pull requests.',
     )
     def issue_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
             'state': args.get('state', 'open'),
@@ -296,10 +316,10 @@ class IInstance(IInstanceBase):
         description='Create a new issue in a GitHub repository.',
     )
     def issue_create(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        body: dict = {'title': _require_str(args, 'title', 'issue_create')}
+        body: dict = {'title': require_str(args, 'title', tool_name='issue_create')}
         if args.get('body'):
             body['body'] = args['body']
         if args.get('labels'):
@@ -322,11 +342,11 @@ class IInstance(IInstanceBase):
         description='Post a comment on a GitHub issue.',
     )
     def issue_comment(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        num = _require_int(args, 'issue_number', 'issue_comment')
-        body = _require_str(args, 'body', 'issue_comment')
+        num = require_int(args, 'issue_number', tool_name='issue_comment')
+        body = require_str(args, 'body', tool_name='issue_comment')
         data = call(self._token(), 'POST', f'/repos/{repo}/issues/{num}/comments', body={'body': body})
         return {'id': data.get('id'), 'html_url': data.get('html_url'), 'created_at': data.get('created_at')}
 
@@ -340,17 +360,25 @@ class IInstance(IInstanceBase):
                 'title': {'type': 'string', 'description': 'New title'},
                 'body': {'type': 'string', 'description': 'New body (markdown)'},
                 'state': {'type': 'string', 'enum': ['open', 'closed'], 'description': 'New state'},
-                'labels': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Replace all labels with this list'},
-                'assignees': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Replace all assignees with this list'},
+                'labels': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Replace all labels with this list',
+                },
+                'assignees': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Replace all assignees with this list',
+                },
             },
         },
         description='Edit an existing GitHub issue (title, body, state, labels, assignees).',
     )
     def issue_edit(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        num = _require_int(args, 'issue_number', 'issue_edit')
+        num = require_int(args, 'issue_number', tool_name='issue_edit')
         body = {k: args[k] for k in ('title', 'body', 'state', 'labels', 'assignees') if args.get(k) is not None}
         if not body:
             raise ValueError('issue_edit: provide at least one field to update')
@@ -364,16 +392,20 @@ class IInstance(IInstanceBase):
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'issue_number': {'type': 'integer', 'description': 'Issue number to lock'},
-                'lock_reason': {'type': 'string', 'enum': ['off-topic', 'too heated', 'resolved', 'spam'], 'description': 'Reason for locking'},
+                'lock_reason': {
+                    'type': 'string',
+                    'enum': ['off-topic', 'too heated', 'resolved', 'spam'],
+                    'description': 'Reason for locking',
+                },
             },
         },
         description='Lock a GitHub issue to prevent further comments.',
     )
     def issue_lock(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        num = _require_int(args, 'issue_number', 'issue_lock')
+        num = require_int(args, 'issue_number', tool_name='issue_lock')
         body: dict = {}
         if args.get('lock_reason'):
             body['lock_reason'] = args['lock_reason']
@@ -396,9 +428,9 @@ class IInstance(IInstanceBase):
         description='Get a single pull request by number.',
     )
     def pr_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        num = _require_int(args, 'pr_number', 'pr_get')
+        num = require_int(args, 'pr_number', tool_name='pr_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}')
         return clean_pr(data)
 
@@ -407,7 +439,11 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'state': {'type': 'string', 'enum': ['open', 'closed', 'all'], 'description': 'Filter by state (default: open)'},
+                'state': {
+                    'type': 'string',
+                    'enum': ['open', 'closed', 'all'],
+                    'description': 'Filter by state (default: open)',
+                },
                 'base': {'type': 'string', 'description': 'Filter by base branch name'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
@@ -416,7 +452,7 @@ class IInstance(IInstanceBase):
         description='List pull requests in a repository.',
     )
     def pr_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
             'state': args.get('state', 'open'),
@@ -443,13 +479,13 @@ class IInstance(IInstanceBase):
         description='Create a new pull request.',
     )
     def pr_create(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         body: dict = {
-            'title': _require_str(args, 'title', 'pr_create'),
-            'head': _require_str(args, 'head', 'pr_create'),
-            'base': _require_str(args, 'base', 'pr_create'),
+            'title': require_str(args, 'title', tool_name='pr_create'),
+            'head': require_str(args, 'head', tool_name='pr_create'),
+            'base': require_str(args, 'base', tool_name='pr_create'),
         }
         if args.get('body'):
             body['body'] = args['body']
@@ -470,24 +506,33 @@ class IInstance(IInstanceBase):
                 'repo': {'type': 'string', 'description': _REPO_DESC},
                 'pr_number': {'type': 'integer', 'description': 'Pull request number'},
                 'body': {'type': 'string', 'description': 'Review summary comment'},
-                'event': {'type': 'string', 'enum': ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'], 'description': 'Review action'},
+                'event': {
+                    'type': 'string',
+                    'enum': ['APPROVE', 'REQUEST_CHANGES', 'COMMENT'],
+                    'description': 'Review action',
+                },
             },
         },
         description='Submit a review on a pull request (approve, request changes, or comment).',
     )
     def review_create(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        num = _require_int(args, 'pr_number', 'review_create')
-        event = _require_str(args, 'event', 'review_create').upper()
+        num = require_int(args, 'pr_number', tool_name='review_create')
+        event = require_str(args, 'event', tool_name='review_create').upper()
         if event not in ('APPROVE', 'REQUEST_CHANGES', 'COMMENT'):
             raise ValueError('review_create: event must be APPROVE, REQUEST_CHANGES, or COMMENT')
         body: dict = {'event': event}
         if args.get('body'):
             body['body'] = args['body']
         data = call(self._token(), 'POST', f'/repos/{repo}/pulls/{num}/reviews', body=body)
-        return {'id': data.get('id'), 'state': data.get('state'), 'submitted_at': data.get('submitted_at'), 'html_url': data.get('html_url')}
+        return {
+            'id': data.get('id'),
+            'state': data.get('state'),
+            'submitted_at': data.get('submitted_at'),
+            'html_url': data.get('html_url'),
+        }
 
     @tool_function(
         input_schema={
@@ -503,12 +548,24 @@ class IInstance(IInstanceBase):
         description='List all reviews on a pull request.',
     )
     def review_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        num = _require_int(args, 'pr_number', 'review_list')
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        num = require_int(args, 'pr_number', tool_name='review_list')
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}/reviews', params=params)
-        return [{'id': r.get('id'), 'state': r.get('state'), 'body': r.get('body'), 'user': clean_user(r.get('user')), 'submitted_at': r.get('submitted_at')} for r in data]
+        return [
+            {
+                'id': r.get('id'),
+                'state': r.get('state'),
+                'body': r.get('body'),
+                'user': clean_user(r.get('user')),
+                'submitted_at': r.get('submitted_at'),
+            }
+            for r in data
+        ]
 
     @tool_function(
         input_schema={
@@ -523,12 +580,18 @@ class IInstance(IInstanceBase):
         description='Get a single review on a pull request.',
     )
     def review_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        num = _require_int(args, 'pr_number', 'review_get')
-        rid = _require_int(args, 'review_id', 'review_get')
+        num = require_int(args, 'pr_number', tool_name='review_get')
+        rid = require_int(args, 'review_id', tool_name='review_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}/reviews/{rid}')
-        return {'id': data.get('id'), 'state': data.get('state'), 'body': data.get('body'), 'user': clean_user(data.get('user')), 'submitted_at': data.get('submitted_at')}
+        return {
+            'id': data.get('id'),
+            'state': data.get('state'),
+            'body': data.get('body'),
+            'user': clean_user(data.get('user')),
+            'submitted_at': data.get('submitted_at'),
+        }
 
     @tool_function(
         input_schema={
@@ -544,12 +607,12 @@ class IInstance(IInstanceBase):
         description='Update the body of a pending review on a pull request.',
     )
     def review_update(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        num = _require_int(args, 'pr_number', 'review_update')
-        rid = _require_int(args, 'review_id', 'review_update')
-        body = _require_str(args, 'body', 'review_update')
+        num = require_int(args, 'pr_number', tool_name='review_update')
+        rid = require_int(args, 'review_id', tool_name='review_update')
+        body = require_str(args, 'body', tool_name='review_update')
         data = call(self._token(), 'PUT', f'/repos/{repo}/pulls/{num}/reviews/{rid}', body={'body': body})
         return {'id': data.get('id'), 'state': data.get('state'), 'body': data.get('body')}
 
@@ -567,7 +630,7 @@ class IInstance(IInstanceBase):
         description='Get metadata for a GitHub repository (stars, forks, language, default branch, etc.).',
     )
     def repo_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         data = call(self._token(), 'GET', f'/repos/{repo}')
         return clean_repo(data)
@@ -588,9 +651,12 @@ class IInstance(IInstanceBase):
         description='List releases for a repository.',
     )
     def release_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/releases', params=params)
         return [clean_release(r) for r in data]
 
@@ -606,9 +672,9 @@ class IInstance(IInstanceBase):
         description='Get a single release by ID.',
     )
     def release_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        rid = _require_int(args, 'release_id', 'release_get')
+        rid = require_int(args, 'release_id', tool_name='release_get')
         return clean_release(call(self._token(), 'GET', f'/repos/{repo}/releases/{rid}'))
 
     @tool_function(
@@ -627,12 +693,12 @@ class IInstance(IInstanceBase):
         description='Create a new release in a repository.',
     )
     def release_create(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         body: dict = {
-            'tag_name': _require_str(args, 'tag_name', 'release_create'),
-            'name': _require_str(args, 'name', 'release_create'),
+            'tag_name': require_str(args, 'tag_name', tool_name='release_create'),
+            'name': require_str(args, 'name', tool_name='release_create'),
         }
         for k in ('body', 'draft', 'prerelease'):
             if args.get(k) is not None:
@@ -656,10 +722,10 @@ class IInstance(IInstanceBase):
         description='Update an existing release.',
     )
     def release_update(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        rid = _require_int(args, 'release_id', 'release_update')
+        rid = require_int(args, 'release_id', tool_name='release_update')
         body = {k: args[k] for k in ('tag_name', 'name', 'body', 'draft', 'prerelease') if args.get(k) is not None}
         if not body:
             raise ValueError('release_update: provide at least one field to update')
@@ -677,10 +743,10 @@ class IInstance(IInstanceBase):
         description='Delete a release from a repository.',
     )
     def release_delete(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        rid = _require_int(args, 'release_id', 'release_delete')
+        rid = require_int(args, 'release_id', tool_name='release_delete')
         call(self._token(), 'DELETE', f'/repos/{repo}/releases/{rid}')
         return {'deleted': True, 'release_id': rid}
 
@@ -700,9 +766,12 @@ class IInstance(IInstanceBase):
         description='List all workflows in a repository.',
     )
     def workflow_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', f'/repos/{repo}/actions/workflows', params=params)
         return [clean_workflow(w) for w in (data.get('workflows') or [])]
 
@@ -712,15 +781,18 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")'},
+                'workflow_id': {
+                    'type': ['string', 'integer'],
+                    'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")',
+                },
             },
         },
         description='Get a single workflow by ID or filename.',
     )
     def workflow_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        wid = _require_str(args, 'workflow_id', 'workflow_get')
+        wid = require_str(args, 'workflow_id', tool_name='workflow_get')
         return clean_workflow(call(self._token(), 'GET', f'/repos/{repo}/actions/workflows/{wid}'))
 
     @tool_function(
@@ -729,19 +801,26 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id', 'ref'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename (e.g. "ci.yml")'},
+                'workflow_id': {
+                    'type': ['string', 'integer'],
+                    'description': 'Workflow ID or filename (e.g. "ci.yml")',
+                },
                 'ref': {'type': 'string', 'description': 'Branch or tag to run the workflow on'},
-                'inputs': {'type': 'object', 'description': 'Key-value inputs defined by the workflow', 'additionalProperties': {'type': 'string'}},
+                'inputs': {
+                    'type': 'object',
+                    'description': 'Key-value inputs defined by the workflow',
+                    'additionalProperties': {'type': 'string'},
+                },
             },
         },
         description='Trigger a workflow_dispatch event to manually run a workflow.',
     )
     def workflow_dispatch(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        wid = _require_str(args, 'workflow_id', 'workflow_dispatch')
-        ref = _require_str(args, 'ref', 'workflow_dispatch')
+        wid = require_str(args, 'workflow_id', tool_name='workflow_dispatch')
+        ref = require_str(args, 'ref', tool_name='workflow_dispatch')
         body: dict = {'ref': ref}
         if args.get('inputs'):
             body['inputs'] = args['inputs']
@@ -760,10 +839,10 @@ class IInstance(IInstanceBase):
         description='Enable a previously disabled workflow.',
     )
     def workflow_enable(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        wid = _require_str(args, 'workflow_id', 'workflow_enable')
+        wid = require_str(args, 'workflow_id', tool_name='workflow_enable')
         call(self._token(), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/enable')
         return {'enabled': True, 'workflow_id': wid}
 
@@ -779,10 +858,10 @@ class IInstance(IInstanceBase):
         description='Disable a workflow so it will not run.',
     )
     def workflow_disable(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
-        wid = _require_str(args, 'workflow_id', 'workflow_disable')
+        wid = require_str(args, 'workflow_id', tool_name='workflow_disable')
         call(self._token(), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/disable')
         return {'disabled': True, 'workflow_id': wid}
 
@@ -798,9 +877,9 @@ class IInstance(IInstanceBase):
         description='Get billable minutes and run counts for a workflow.',
     )
     def workflow_get_usage(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        wid = _require_str(args, 'workflow_id', 'workflow_get_usage')
+        wid = require_str(args, 'workflow_id', tool_name='workflow_get_usage')
         return call(self._token(), 'GET', f'/repos/{repo}/actions/workflows/{wid}/timing')
 
     # =======================================================================
@@ -813,7 +892,11 @@ class IInstance(IInstanceBase):
             'required': ['org'],
             'properties': {
                 'org': {'type': 'string', 'description': 'Organization login (e.g. "acme-corp")'},
-                'type': {'type': 'string', 'enum': ['all', 'public', 'private', 'forks', 'sources', 'member'], 'description': 'Repository type filter (default: all)'},
+                'type': {
+                    'type': 'string',
+                    'enum': ['all', 'public', 'private', 'forks', 'sources', 'member'],
+                    'description': 'Repository type filter (default: all)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -821,8 +904,8 @@ class IInstance(IInstanceBase):
         description='List repositories belonging to a GitHub organization.',
     )
     def org_list_repos(self, args):
-        args = _normalize(args)
-        org = _require_str(args, 'org', 'org_list_repos')
+        args = normalize_tool_input(args, tool_name='tool_github')
+        org = require_str(args, 'org', tool_name='org_list_repos')
         params = {
             'type': args.get('type', 'all'),
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
@@ -839,8 +922,15 @@ class IInstance(IInstanceBase):
         input_schema={
             'type': 'object',
             'properties': {
-                'username': {'type': 'string', 'description': 'GitHub username. Omit to list repos for the authenticated user.'},
-                'type': {'type': 'string', 'enum': ['all', 'owner', 'member'], 'description': 'Repository type filter (default: owner)'},
+                'username': {
+                    'type': 'string',
+                    'description': 'GitHub username. Omit to list repos for the authenticated user.',
+                },
+                'type': {
+                    'type': 'string',
+                    'enum': ['all', 'owner', 'member'],
+                    'description': 'Repository type filter (default: owner)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -848,7 +938,7 @@ class IInstance(IInstanceBase):
         description="List repositories for a user. Omit username to list the authenticated user's repos.",
     )
     def user_get_repos(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         username = (args.get('username') or '').strip()
         params = {
             'type': args.get('type', 'owner'),
@@ -866,19 +956,28 @@ class IInstance(IInstanceBase):
             'properties': {
                 'org': {'type': 'string', 'description': 'Organization login'},
                 'email': {'type': 'string', 'description': 'Email address to invite'},
-                'role': {'type': 'string', 'enum': ['admin', 'direct_member', 'billing_manager'], 'description': 'Role for the new member (default: direct_member)'},
+                'role': {
+                    'type': 'string',
+                    'enum': ['admin', 'direct_member', 'billing_manager'],
+                    'description': 'Role for the new member (default: direct_member)',
+                },
             },
         },
         description='Invite a user to a GitHub organization by email.',
     )
     def user_invite(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
-        org = _require_str(args, 'org', 'user_invite')
-        email = _require_str(args, 'email', 'user_invite')
+        org = require_str(args, 'org', tool_name='user_invite')
+        email = require_str(args, 'email', tool_name='user_invite')
         body: dict = {'email': email, 'role': args.get('role', 'direct_member')}
         data = call(self._token(), 'POST', f'/orgs/{org}/invitations', body=body)
-        return {'id': data.get('id'), 'email': data.get('email'), 'role': data.get('role'), 'created_at': data.get('created_at')}
+        return {
+            'id': data.get('id'),
+            'email': data.get('email'),
+            'role': data.get('role'),
+            'created_at': data.get('created_at'),
+        }
 
     # =======================================================================
     # SEARCH & DISCOVERY
@@ -889,8 +988,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['query'],
             'properties': {
-                'query': {'type': 'string', 'description': 'Search query. Supports GitHub code search syntax (e.g. "mcp_client transport extension:py")'},
-                'repo': {'type': 'string', 'description': 'Scope search to a specific repo (owner/repo). Omit to search all accessible repos.'},
+                'query': {
+                    'type': 'string',
+                    'description': 'Search query. Supports GitHub code search syntax (e.g. "mcp_client transport extension:py")',
+                },
+                'repo': {
+                    'type': 'string',
+                    'description': 'Scope search to a specific repo (owner/repo). Omit to search all accessible repos.',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -898,12 +1003,16 @@ class IInstance(IInstanceBase):
         description='Search code across GitHub repositories. Returns matching file paths, repo, and a snippet.',
     )
     def search_code(self, args):
-        args = _normalize(args)
-        q = _require_str(args, 'query', 'search_code')
+        args = normalize_tool_input(args, tool_name='tool_github')
+        q = require_str(args, 'query', tool_name='search_code')
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
-        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'q': q,
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', '/search/code', params=params)
         return [
             {
@@ -920,8 +1029,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['query'],
             'properties': {
-                'query': {'type': 'string', 'description': 'Search query. Supports GitHub issue search syntax (e.g. "mcp timeout is:issue is:open")'},
-                'repo': {'type': 'string', 'description': 'Scope search to a specific repo. Omit to search all accessible repos.'},
+                'query': {
+                    'type': 'string',
+                    'description': 'Search query. Supports GitHub issue search syntax (e.g. "mcp timeout is:issue is:open")',
+                },
+                'repo': {
+                    'type': 'string',
+                    'description': 'Scope search to a specific repo. Omit to search all accessible repos.',
+                },
                 'state': {'type': 'string', 'enum': ['open', 'closed'], 'description': 'Filter by issue state'},
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
@@ -930,14 +1045,18 @@ class IInstance(IInstanceBase):
         description='Search issues and pull requests across GitHub. Useful for finding bug reports and edge cases related to a node.',
     )
     def search_issues(self, args):
-        args = _normalize(args)
-        q = _require_str(args, 'query', 'search_issues')
+        args = normalize_tool_input(args, tool_name='tool_github')
+        q = require_str(args, 'query', tool_name='search_issues')
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
         if args.get('state'):
             q = f'{q} is:{args["state"]}'
-        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
+        params = {
+            'q': q,
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
+        }
         data = call(self._token(), 'GET', '/search/issues', params=params)
         results = []
         for i in data.get('items') or []:
@@ -952,8 +1071,14 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'path': {'type': 'string', 'description': 'Filter commits to those that touched this file or directory'},
-                'sha': {'type': 'string', 'description': 'Branch, tag, or commit SHA to start from (default: repo default branch)'},
+                'path': {
+                    'type': 'string',
+                    'description': 'Filter commits to those that touched this file or directory',
+                },
+                'sha': {
+                    'type': 'string',
+                    'description': 'Branch, tag, or commit SHA to start from (default: repo default branch)',
+                },
                 'per_page': {'type': 'integer', 'description': _PER_PAGE_DESC},
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
@@ -961,7 +1086,7 @@ class IInstance(IInstanceBase):
         description='List commits in a repository, optionally filtered to a specific file path. Useful for understanding what changed recently.',
     )
     def commit_list(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
             'path': args.get('path'),
@@ -984,62 +1109,25 @@ class IInstance(IInstanceBase):
         description='Get a single commit including its diff stats and changed files.',
     )
     def commit_get(self, args):
-        args = _normalize(args)
+        args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        sha = _require_str(args, 'sha', 'commit_get')
+        sha = require_str(args, 'sha', tool_name='commit_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/commits/{sha}')
         result = clean_commit(data)
         stats = data.get('stats') or {}
-        result['stats'] = {'additions': stats.get('additions'), 'deletions': stats.get('deletions'), 'total': stats.get('total')}
-        result['files'] = [{'filename': f.get('filename'), 'status': f.get('status'), 'additions': f.get('additions'), 'deletions': f.get('deletions'), 'patch': f.get('patch')} for f in (data.get('files') or [])]
+        result['stats'] = {
+            'additions': stats.get('additions'),
+            'deletions': stats.get('deletions'),
+            'total': stats.get('total'),
+        }
+        result['files'] = [
+            {
+                'filename': f.get('filename'),
+                'status': f.get('status'),
+                'additions': f.get('additions'),
+                'deletions': f.get('deletions'),
+                'patch': f.get('patch'),
+            }
+            for f in (data.get('files') or [])
+        ]
         return result
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
-
-def _normalize(input_obj):
-    """Normalise tool input to a plain dict (handles Pydantic models, JSON strings, nested wrappers)."""
-    if input_obj is None:
-        return {}
-    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
-        input_obj = input_obj.model_dump()
-    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
-        input_obj = input_obj.dict()
-    if isinstance(input_obj, str):
-        try:
-            parsed = json.loads(input_obj)
-            if isinstance(parsed, dict):
-                input_obj = parsed
-        except (json.JSONDecodeError, TypeError):
-            pass
-    if not isinstance(input_obj, dict):
-        warning(f'tool_github: unexpected input type {type(input_obj).__name__}')
-        return {}
-    if 'input' in input_obj:
-        inner = input_obj['input']
-        if not isinstance(inner, dict):
-            inner = _normalize(inner)
-        extras = {k: v for k, v in input_obj.items() if k != 'input'}
-        input_obj = {**inner, **extras}
-    input_obj.pop('security_context', None)
-    return input_obj
-
-
-def _require_str(args: dict, key: str, fn: str) -> str:
-    val = (args.get(key) or '').strip()
-    if not val:
-        raise ValueError(f'{fn}: "{key}" is required')
-    return val
-
-
-def _require_int(args: dict, key: str, fn: str) -> int:
-    val = args.get(key)
-    if val is None:
-        raise ValueError(f'{fn}: "{key}" is required')
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        raise ValueError(f'{fn}: "{key}" must be an integer')

@@ -95,7 +95,9 @@ def _create_llm_component() -> Dict[str, Any]:
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     else:
-        raise RuntimeError('No LLM API key found. Please set one of the following environment variables:\n- ROCKETRIDE_OPENAI_KEY (for OpenAI GPT-4)\n- ROCKETRIDE_ANTHROPIC_KEY (for Anthropic Claude)\n- ROCKETRIDE_GEMINI_KEY (for Google Gemini)\n- ROCKETRIDE_OLLAMA_HOST (for Ollama)')
+        raise RuntimeError(
+            'No LLM API key found. Please set one of the following environment variables:\n- ROCKETRIDE_OPENAI_KEY (for OpenAI GPT-4)\n- ROCKETRIDE_ANTHROPIC_KEY (for Anthropic Claude)\n- ROCKETRIDE_GEMINI_KEY (for Google Gemini)\n- ROCKETRIDE_OLLAMA_HOST (for Ollama)'
+        )
 
 
 def get_chat_pipeline() -> Dict[str, Any]:

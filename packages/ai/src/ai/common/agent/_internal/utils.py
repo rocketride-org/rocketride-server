@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 
-
 def new_run_id() -> str:
     """Return a new UUID string for an agent run."""
     return str(uuid.uuid4())
@@ -34,6 +33,7 @@ def safe_str(value: Any) -> str:
         return str(value)
     except Exception:
         return ''
+
 
 # ---------------------------------------------------------------------------
 # Tool invocation payload normalization
@@ -111,6 +111,7 @@ def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str
             return {**inner, **extras}
 
     return payload
+
 
 # ---------------------------------------------------------------------------
 # LLM transcript/text normalization

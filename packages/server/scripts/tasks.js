@@ -757,21 +757,25 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-			const pipInstalled = await getState('server.pipInstalledV2');
-			if (!pipInstalled) {
-				task.output = 'Bootstrapping pip...';
-				await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
-				task.output = 'Upgrading pip...';
-				await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
-				task.output = 'Installing setuptools, wheel, build...';
-				await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build'], { task, cwd: DIST_DIR });
-				task.output = 'Installing test requirements...';
-				const testReqs = path.join(PROJECT_ROOT, 'nodes', 'test', 'requirements.txt');
-				await execCommand(enginePath, ['-m', 'pip', 'install', '-r', testReqs], { task, cwd: DIST_DIR });
-				await setState('server.pipInstalledV2', true);
-			} else {
-				task.output = 'Pip and build deps already installed (skipped)';
-			}
+            // Bootstrap pip, install build tools, and test requirements (once; tracked in state).
+            // State key version bumped to force re-run on upgrade: pre-existing environments
+            // with `pipInstalled === true` from the old bootstrap would otherwise skip
+            // `pip install -r nodes/test/requirements.txt` and silently miss `pytest-xdist`.
+            const pipInstalled = await getState('server.pipInstalledV3');
+            if (!pipInstalled) {
+                task.output = 'Bootstrapping pip...';
+                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
+                task.output = 'Upgrading pip...';
+                await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
+                task.output = 'Installing setuptools, wheel, build...';
+                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build'], { task, cwd: DIST_DIR });
+                task.output = 'Installing test requirements...';
+                const testReqs = path.join(PROJECT_ROOT, 'nodes', 'test', 'requirements.txt');
+                await execCommand(enginePath, ['-m', 'pip', 'install', '-r', testReqs], { task, cwd: DIST_DIR });
+                await setState('server.pipInstalledV3', true);
+            } else {
+                task.output = 'Pip and build deps already installed (skipped)';
+            }
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
 			if (preinstall) {
@@ -958,10 +962,46 @@ function makeTestAction() {
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
+	};
+}
+
+// Pytest runner for the rocketlib Python package
+// (packages/server/engine-lib/rocketlib-python). Lives in the ``server``
+// namespace because ``server:setup-python`` is what makes ``rocketlib``
+// importable in dist — the test step is just the natural follow-up.
+//
+// Mirrors the structure of ``syncRocketlibPythonLib`` above: a single
+// top-level function, source path inlined, early-return on missing source.
+// ``rocketlib-python/lib`` has already been synced into ``dist/server`` by
+// the time we run, so ``from rocketlib import ...`` resolves at runtime —
+// the only thing pytest still needs from the source tree is the ``tests/``
+// directory itself (not copied to dist).
+function makeRocketlibPythonTestAction(options = {}) {
+	return {
+		run: async (_ctx, task) => {
+			const rocketrideTests = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python', 'tests');
+			const exeExt = isWindows() ? '.exe' : '';
+			const engine = path.join(DIST_DIR, 'engine' + exeExt);
+
+			if (!(await exists(rocketrideTests))) {
+				task.output = 'rocketlib tests not found, skipping';
+				return;
+			}
+
+			const pytestArgs = ['-m', 'pytest', rocketrideTests, '-v'];
+			if (options.pytest) {
+				const tokens = typeof options.pytest === 'string'
+					? options.pytest.split(/\s+/).filter(Boolean)
+					: options.pytest.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
+				pytestArgs.push(...tokens);
+			}
+
+			await execCommand(engine, pytestArgs, { task, cwd: DIST_DIR });
+		},
 	};
 }
 
@@ -1051,6 +1091,7 @@ module.exports = {
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
+		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean', action: makeCleanServerAction },
 
 		// Public actions (have descriptions, shown in help)

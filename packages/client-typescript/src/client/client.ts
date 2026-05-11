@@ -24,7 +24,7 @@
 
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, TraceType } from './types/index.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
@@ -281,15 +281,14 @@ export class RocketRideClient extends DAPClient {
 	private _persist: boolean = false;
 	private _reconnectTimeout?: ReturnType<typeof setTimeout>;
 	private _manualDisconnect: boolean = false;
+	/** Set when auth is rejected; prevents onDisconnected from scheduling reconnect. */
+	private _authRejected: boolean = false;
 	private _maxRetryTime?: number;
 	private _retryStartTime?: number;
 	private _currentReconnectDelay: number = 500;
 
 	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
 	private _didNotifyConnected: boolean = false;
-
-	/** Stored ConnectResult from the last successful connect(). */
-	private _connectResult?: ConnectResult;
 
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
@@ -430,6 +429,46 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Probe a server for its capabilities without authenticating.
+	 *
+	 * Creates a temporary connection, sends an `auth` request with
+	 * `infoOnly: true`, and returns the server metadata. The server
+	 * responds without requiring credentials.
+	 *
+	 * @param uri - Server URI (e.g. `"localhost:5565"`, `"https://cloud.rocketride.ai"`)
+	 * @param timeout - Optional timeout in ms for the entire operation
+	 * @returns Server info including version and capability tags
+	 * @throws Error if the server is unreachable or does not support info probes
+	 *
+	 * @example
+	 * ```typescript
+	 * const info = await RocketRideClient.getServerInfo('localhost:5565');
+	 * if (info.capabilities.includes('saas')) {
+	 *   // Show cloud sign-in options
+	 * }
+	 * ```
+	 */
+	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
+		const client = new RocketRideClient({ uri, persist: false, auth: '' });
+		try {
+			// Open the transport without the normal auth handshake
+			await client._internalConnect_transportOnly(timeout);
+
+			// Send auth with infoOnly flag — server returns metadata without authenticating
+			const message = client.buildRequest('auth', { arguments: { infoOnly: true } });
+			const response = await client.request(message, timeout);
+
+			if (response.success === false) {
+				throw new Error(response.message || 'Server info request failed');
+			}
+
+			return (response.body ?? {}) as unknown as ServerInfoResult;
+		} finally {
+			await client.disconnect();
+		}
+	}
+
+	/**
 	 * Normalize a user-provided URI into a fully-formed WebSocket address.
 	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
 	 */
@@ -478,12 +517,24 @@ export class RocketRideClient extends DAPClient {
 	 * calls DAPClient.connect (transport connect + auth handshake + onConnected).
 	 * Returns the auth response body (ConnectResult) on success.
 	 */
-	private async _internalConnect(timeout?: number): Promise<Record<string, unknown>> {
+	private async _internalConnect(timeout?: number): Promise<ConnectResult> {
 		if (!this._transport) {
 			const transport = new TransportWebSocket(this._uri, this._apikey!);
 			this._bindTransport(transport);
 		}
 		return super._dapConnect(timeout);
+	}
+
+	/**
+	 * Opens the transport (WebSocket) without sending the auth handshake.
+	 * Used by getServerInfo() to send a custom auth request with infoOnly.
+	 */
+	private async _internalConnect_transportOnly(timeout?: number): Promise<void> {
+		if (!this._transport) {
+			const transport = new TransportWebSocket(this._uri, this._apikey!);
+			this._bindTransport(transport);
+		}
+		await this._transport!.connect(timeout);
 	}
 
 	/**
@@ -503,8 +554,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	private async _attemptConnection(timeout?: number): Promise<ConnectResult | undefined> {
 		try {
-			const body = await this._internalConnect(timeout);
-			this._connectResult = body as unknown as ConnectResult;
+			await this._internalConnect(timeout);
 			// In persist mode, keep userToken for automatic reconnect
 			if (this._connectResult?.userToken) {
 				this._apikey = this._connectResult.userToken;
@@ -518,6 +568,7 @@ export class RocketRideClient extends DAPClient {
 			await this.onConnectError(err);
 
 			if (error instanceof AuthenticationException) {
+				this._authRejected = true;
 				return undefined;
 			}
 
@@ -602,6 +653,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		this._manualDisconnect = false;
+		this._authRejected = false;
 		this._currentReconnectDelay = 500;
 		this._retryStartTime = undefined;
 
@@ -610,21 +662,18 @@ export class RocketRideClient extends DAPClient {
 			await this._internalDisconnect();
 		}
 
-		let result: ConnectResult | undefined;
 		if (this._persist) {
 			this._clearReconnectTimeout();
-			result = await this._attemptConnection(options?.timeout);
+			await this._attemptConnection(options?.timeout);
 		} else {
-			const body = await this._internalConnect(options?.timeout);
-			result = body as unknown as ConnectResult;
-			this._connectResult = result;
-			// Store userToken for reconnect in persist mode
-			if (result?.userToken) {
-				this._apikey = result.userToken;
+			await this._internalConnect(options?.timeout);
+			// Store userToken for reconnect
+			if (this._connectResult?.userToken) {
+				this._apikey = this._connectResult.userToken;
 			}
 		}
 
-		return result ?? ({} as ConnectResult);
+		return this._connectResult ?? ({} as ConnectResult);
 	}
 
 	/**
@@ -1473,8 +1522,9 @@ export class RocketRideClient extends DAPClient {
 			await super.onDisconnected(reason, hasError);
 		}
 
-		// Schedule reconnection if persist is enabled and not a manual disconnect
-		if (this._persist && !this._manualDisconnect) {
+		// Schedule reconnection if persist is enabled, not a manual disconnect,
+		// and not an auth rejection (retrying with the same bad key is pointless)
+		if (this._persist && !this._manualDisconnect && !this._authRejected) {
 			this._scheduleReconnect();
 		}
 	}

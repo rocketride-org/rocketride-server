@@ -14,6 +14,7 @@ import pytest
 _INJECTED_MODULES: list[str] = []
 _ORIGINAL_AI_WEB_SERVER = sys.modules.get('ai.web.server')
 
+
 def _inject(name: str, module: object) -> None:
     """Insert *module* into sys.modules under *name* if absent, tracking it."""
     if name not in sys.modules:
@@ -77,6 +78,7 @@ def teardown_module() -> None:
         sys.modules.pop('ai.web.server', None)
     else:
         sys.modules['ai.web.server'] = _ORIGINAL_AI_WEB_SERVER
+
 
 # ============================================================================
 # ALLOWED_MODULES constant tests

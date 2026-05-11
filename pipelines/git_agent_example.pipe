@@ -1,0 +1,166 @@
+{
+  "name": "Git Agent",
+  "description": "A general-purpose git agent. Tell it what you want done in plain English and it will use the available git tools to carry it out.",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Trigger",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_langchain_1",
+      "provider": "agent_langchain",
+      "name": "Git Agent",
+      "config": {
+        "instructions": [
+          "You are a git agent with access to a pre-configured repository via the ROCKETRIDE_GIT_REPO_PATH environment variable.",
+          "",
+          "Carry out whatever the user asks using the available git tools. Use your judgement to decide which tools to call and in what order.",
+          "",
+          "A few hard rules:",
+          "- If you write or modify files, always stage and commit the changes. A commit that exists only locally is not done — push it.",
+          "- When pushing, report the branch name and commit SHA only after git.push returns status='pushed'.",
+          "- If the user's request is ambiguous, make a reasonable assumption and state it before proceeding."
+        ],
+        "max_waves": 30,
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 86
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_gemini_1",
+      "provider": "llm_gemini",
+      "name": "Gemini LLm",
+      "config": {
+        "profile": "custom",
+        "custom": {
+          "model": "gemini-3.1-flash-lite-preview",
+          "modelTotalTokens": 1000000,
+          "outputTokens": 8192,
+          "apikey": "${ROCKETRIDE_GEMINI_KEY}"
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 380
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_langchain_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_git_1",
+      "provider": "tool_git",
+      "name": "Git",
+      "config": {
+        "type": "tool_git",
+        "repoPath": "${ROCKETRIDE_GIT_REPO_PATH}",
+        "authType": "token",
+        "username": "git",
+        "token": "${ROCKETRIDE_GITHUB_TOKEN}",
+        "sshKey": "",
+        "sshPassphrase": "",
+        "safeMode": true
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 380
+        },
+        "measured": {
+          "width": 150,
+          "height": 37
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_langchain_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 447,
+          "y": 222
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_langchain_1"
+        }
+      ]
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "e502a611-60f3-4fda-bd2f-446c33309a33",
+  "viewport": {
+    "x": 15.5,
+    "y": -120.9,
+    "zoom": 1.04
+  },
+  "version": 1,
+  "docRevision": 9
+}

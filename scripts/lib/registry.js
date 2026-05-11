@@ -22,7 +22,7 @@ class ModuleRegistry {
 		const gitignorePath = path.join(rootDir, '.gitignore');
 		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
 
-		const taskFiles = await glob(['{packages,apps,nodes,examples,extension}/**/scripts/tasks.js', 'scripts/tasks.js'], {
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools}/**/scripts/tasks.js', 'scripts/tasks.js'], {
 			cwd: rootDir,
 			ignore: gitignore,
 			absolute: true,
@@ -41,18 +41,27 @@ class ModuleRegistry {
 			// Clear require cache for hot reloading during development
 			delete require.cache[require.resolve(filePath)];
 
-			const mod = require(filePath);
+			const exported = require(filePath);
 
-			if (!mod.name) {
-				console.warn(`  Warning: ${filePath} missing 'name' property, skipping`);
-				return;
+			// A tasks.js may export either a single module object {name, actions}
+			// or an array of such objects. Array form lets one file register
+			// several modules under different action prefixes — useful when an
+			// overlay (e.g. extension/) wants to expose multiple action namespaces
+			// without spawning a `<sub>/scripts/tasks.js` per namespace.
+			const mods = Array.isArray(exported) ? exported : [exported];
+
+			for (const mod of mods) {
+				if (!mod || !mod.name) {
+					console.warn(`  Warning: ${filePath} entry missing 'name' property, skipping`);
+					continue;
+				}
+
+				// Store the module's directory for context
+				mod._path = path.dirname(filePath);
+				mod._file = filePath;
+
+				this.modules.set(mod.name, mod);
 			}
-
-			// Store the module's directory for context
-			mod._path = path.dirname(filePath);
-			mod._file = filePath;
-
-			this.modules.set(mod.name, mod);
 		} catch (err) {
 			console.warn(`  Warning: Could not load ${filePath}: ${err.message}`);
 		}

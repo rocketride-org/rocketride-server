@@ -80,6 +80,7 @@ class IGlobal(IGlobalBase):
         """Install ``en_core_web_sm`` matching the installed spaCy version (GitHub wheel)."""
         try:
             import en_core_web_sm  # noqa: F401
+
             return
         except ImportError:
             pass

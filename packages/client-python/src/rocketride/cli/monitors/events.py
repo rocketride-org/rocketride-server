@@ -169,7 +169,9 @@ class EventsMonitor(BoxMonitor):
                         # We have some complete events, try to partially show this one
                         remaining_lines = available_height - lines_used
                         if remaining_lines > 1:  # Need at least header line
-                            events_to_display.insert(0, {'partial': True, 'remaining_lines': remaining_lines, **event_entry})
+                            events_to_display.insert(
+                                0, {'partial': True, 'remaining_lines': remaining_lines, **event_entry}
+                            )
                     break
 
             # Now format the events we can display (oldest to newest)
@@ -182,7 +184,9 @@ class EventsMonitor(BoxMonitor):
 
                 # Format event header with timestamp, index, and type
                 event_type = message.get('event', 'unknown')
-                header_line = f'{ANSI_BLUE}[{timestamp}]{ANSI_RESET} Event {index}: {ANSI_GREEN}{event_type}{ANSI_RESET}'
+                header_line = (
+                    f'{ANSI_BLUE}[{timestamp}]{ANSI_RESET} Event {index}: {ANSI_GREEN}{event_type}{ANSI_RESET}'
+                )
                 event_lines.append(header_line)
 
                 lines_added = 1
@@ -230,7 +234,9 @@ class EventsMonitor(BoxMonitor):
 
                 # Check if we're showing all events or just a subset
                 if oldest_shown > 0 or newest_shown < total_received - 1:
-                    event_lines.insert(0, f'... (showing events {oldest_shown}-{newest_shown} of {total_received} total)')
+                    event_lines.insert(
+                        0, f'... (showing events {oldest_shown}-{newest_shown} of {total_received} total)'
+                    )
                     event_lines.insert(1, '')
 
         # Display events box

@@ -96,7 +96,9 @@ class IGlobal(IGlobalBase):
             # Vision heuristic: warn and skip probe if model looks like a vision model
             model_lower = model.lower()
             if any(hint in model_lower for hint in self._VISION_HINTS):
-                warning('This model appears to be a vision/multimodal model. For image input, use a vision node instead.')
+                warning(
+                    'This model appears to be a vision/multimodal model. For image input, use a vision node instead.'
+                )
                 # Skip the probe — vision models may reject text-only requests,
                 # which would produce a misleading error on top of this warning.
                 return

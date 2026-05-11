@@ -79,6 +79,7 @@ class VisionLoader(BaseLoader):
 
         if variant == 'clip':
             from transformers import CLIPModel as HFCLIPModel, AutoProcessor
+
             model = HFCLIPModel.from_pretrained(model_name, **kwargs)
             processor = AutoProcessor.from_pretrained(model_name)
             bundle = {'model': model, 'processor': processor, 'variant': 'clip'}
@@ -87,6 +88,7 @@ class VisionLoader(BaseLoader):
                 output_spec = [('image_features', None, None, None, True)]
         else:
             from transformers import ViTModel as HFViTModel, AutoImageProcessor
+
             model = HFViTModel.from_pretrained(model_name, **kwargs)
             processor = AutoImageProcessor.from_pretrained(model_name)
             bundle = {'model': model, 'processor': processor, 'variant': 'vit'}
@@ -121,7 +123,6 @@ class VisionLoader(BaseLoader):
         metadata: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Prepare images for inference. inputs: list of image bytes or PIL Images."""
-        import numpy as np
         from PIL import Image
 
         # Server passes ModelInstanceWrapper (model.model_obj = bundle); local uses bundle dict

@@ -61,6 +61,8 @@ class Account(AccountBase):
     Account mgmt:     Not available — all methods raise NotImplementedError.
     """
 
+    capabilities = ('oss',)
+
     # =========================================================================
     # AUTH
     # =========================================================================
@@ -122,11 +124,22 @@ class Account(AccountBase):
                         {
                             'id': 'local',
                             'name': 'Development',
-                            'permissions': ['team.admin', 'read', 'write', 'execute', 'task.control', 'task.data', 'task.monitor', 'task.debug', 'task.store'],
+                            'permissions': [
+                                'team.admin',
+                                'read',
+                                'write',
+                                'execute',
+                                'task.control',
+                                'task.data',
+                                'task.monitor',
+                                'task.debug',
+                                'task.store',
+                            ],
                         }
                     ],
                 }
             ],
+            capabilities=self.capabilities,
         )
 
     # =========================================================================

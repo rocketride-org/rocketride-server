@@ -46,8 +46,16 @@ class ApplicationPermissions:
             'Display Name': 'Read and write files in all site collections',
             'Description': 'Allows the app to read, create, update and delete all files in all site collections without a signed in user.',
         },
-        'df021288-bdef-4463-88db-98f22de89214': {'roleName': 'User.Read.All', 'Display Name': "Read all users' full profiles", 'Description': 'Allows the app to read user profiles without a signed in user.'},
-        '741f803b-c850-494e-b5df-cde7c675a1ca': {'roleName': 'User.ReadWrite.All', 'Display Name': "Read and write all users' full profiles", 'Description': 'Allows the app to read and update user profiles without a signed in user.'},
+        'df021288-bdef-4463-88db-98f22de89214': {
+            'roleName': 'User.Read.All',
+            'Display Name': "Read all users' full profiles",
+            'Description': 'Allows the app to read user profiles without a signed in user.',
+        },
+        '741f803b-c850-494e-b5df-cde7c675a1ca': {
+            'roleName': 'User.ReadWrite.All',
+            'Display Name': "Read and write all users' full profiles",
+            'Description': 'Allows the app to read and update user profiles without a signed in user.',
+        },
         '5b567255-7703-4780-807c-7be8301ae99b': {
             'roleName': 'Group.Read.All',
             'Display Name': 'Read all groups',
@@ -57,7 +65,11 @@ class ApplicationPermissions:
                 'All of these operations can be performed by the app without a signed-in user.'
             ),
         },
-        '62a82d76-70ea-41e2-9197-370581804d09': {'roleName': 'Group.ReadWrite.All', 'Display Name': 'Read and write all groups', 'Description': 'Allows the app to read and update user profiles without a signed in user.'},
+        '62a82d76-70ea-41e2-9197-370581804d09': {
+            'roleName': 'Group.ReadWrite.All',
+            'Display Name': 'Read and write all groups',
+            'Description': 'Allows the app to read and update user profiles without a signed in user.',
+        },
         '332a536c-c7ef-4017-ab91-336970924f0d': {
             'roleName': 'Sites.Read.All',
             'Display Name': 'Read items in all site collections',
@@ -73,11 +85,17 @@ class ApplicationPermissions:
             'Display Name': 'Create, edit, and delete items and lists in all site collections',
             'Description': 'Allows the app to create or delete document libraries and lists in all site collections without a signed in user.',
         },
-        'Sites.FullControl.All': {'id': 'a82116e5-55eb-4c41-a434-62fe8a61c773', 'Display Name': 'Have full control of all site collections', 'Description': 'Allows the app to have full control of all site collections without a signed in user.'},
+        'Sites.FullControl.All': {
+            'id': 'a82116e5-55eb-4c41-a434-62fe8a61c773',
+            'Display Name': 'Have full control of all site collections',
+            'Description': 'Allows the app to have full control of all site collections without a signed in user.',
+        },
     }
 
     @staticmethod
-    def check_for_sharepoint(request_wrapper: HttpRequestWrapper, client_id: str, read_only: bool, permissions_scan_enabled: bool) -> tuple:
+    def check_for_sharepoint(
+        request_wrapper: HttpRequestWrapper, client_id: str, read_only: bool, permissions_scan_enabled: bool
+    ) -> tuple:
         """
         Check if the application has the required permisions to work with SharePoint Online.
 
@@ -89,11 +107,15 @@ class ApplicationPermissions:
         :param permissions_scan_enabled: The permissions scan flag.
         :return: Tuple of (bool, set) indicating if all required permissions are present and the set of missing permissions.
         """
-        required_perms = ApplicationPermissions._get_required_permissions_for_sharepoint(read_only, permissions_scan_enabled)
+        required_perms = ApplicationPermissions._get_required_permissions_for_sharepoint(
+            read_only, permissions_scan_enabled
+        )
         return ApplicationPermissions._check_required_permissions(request_wrapper, client_id, required_perms)
 
     @staticmethod
-    def check_for_onedrive(request_wrapper: HttpRequestWrapper, client_id: str, read_only: bool, permissions_scan_enabled: bool) -> tuple:
+    def check_for_onedrive(
+        request_wrapper: HttpRequestWrapper, client_id: str, read_only: bool, permissions_scan_enabled: bool
+    ) -> tuple:
         """
         Check if the application has the required permisions to work with OneDrive.
 
@@ -105,11 +127,15 @@ class ApplicationPermissions:
         :param permissions_scan_enabled: The permissions scan flag.
         :return: Tuple of (bool, set) indicating if all required permissions are present and the set of missing permissions.
         """
-        required_perms = ApplicationPermissions._get_required_permissions_for_onedrive(read_only, permissions_scan_enabled)
+        required_perms = ApplicationPermissions._get_required_permissions_for_onedrive(
+            read_only, permissions_scan_enabled
+        )
         return ApplicationPermissions._check_required_permissions(request_wrapper, client_id, required_perms)
 
     @staticmethod
-    def _check_required_permissions(request_wrapper: HttpRequestWrapper, client_id: str, required_permissions: dict) -> tuple:
+    def _check_required_permissions(
+        request_wrapper: HttpRequestWrapper, client_id: str, required_permissions: dict
+    ) -> tuple:
         """
         Check if the given permission is valid.
 
@@ -127,7 +153,13 @@ class ApplicationPermissions:
 
             url = f'/v1.0/servicePrincipals/{app_id}/appRoleAssignments'
             perms_info = request_wrapper.send('get', url)
-            real_permissions = set([ApplicationPermissions.PERMISSIONS.get(perm.get('appRoleId'), {}).get('roleName') for perm in perms_info.json().get('value', []) if perm.get('appRoleId')])
+            real_permissions = set(
+                [
+                    ApplicationPermissions.PERMISSIONS.get(perm.get('appRoleId'), {}).get('roleName')
+                    for perm in perms_info.json().get('value', [])
+                    if perm.get('appRoleId')
+                ]
+            )
             real_permissions.discard(None)
 
             # Check if the required permissions are valid

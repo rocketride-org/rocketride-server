@@ -1,5 +1,12 @@
 name: Release
 
+# Default least-privilege permissions for the workflow. Individual
+# release jobs below raise to write where they actually need it
+# (tag pushes, GitHub releases, package publishing).
+# Closes Scorecard TokenPermissionsID #516.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -200,11 +207,35 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
       # --- Tag and GitHub Release ---
+      #
+      # IMPORTANT: tag push uses WORKFLOW_PAT (a Personal Access Token with
+      # `repo` + `workflow` scopes) instead of the default GITHUB_TOKEN.
+      #
+      # GitHub rejects any tag push from GITHUB_TOKEN whose target commit
+      # modifies files under `.github/workflows/`, with the error:
+      #
+      #   refusing to allow a GitHub App to create or update workflow
+      #   `.github/workflows/<file>` without `workflows` permission
+      #
+      # `workflows` is a token-level scope, not a YAML permission, so the
+      # only fix is to swap to a credential that has it. WORKFLOW_PAT is
+      # that credential. Without this, every nightly that lands on a
+      # workflow-touching commit silently bricks the prerelease pipeline:
+      # the cleanup job runs first and deletes existing -prerelease tags,
+      # then all 5 prerelease creation jobs fail to push the new ones,
+      # leaving the repo with zero prereleases until the next clean
+      # commit.
       - name: Create tag
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Swap the remote URL to authenticate with WORKFLOW_PAT for the
+          # push. This affects only this step's git config and goes away
+          # when the runner tears down.
+          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "${{ inputs.prerelease }}" = "true" ]; then
             git tag -f "${{ matrix.tag_name }}"
             git push -f origin "${{ matrix.tag_name }}"

@@ -102,6 +102,9 @@ class AccountInfo(BaseModel):
     # with no paid subscriptions.
     subscribedApps: list[SubscribedApp] = []
 
+    # Server capability tags — 'oss' or 'saas' depending on the account provider
+    capabilities: list[str] = []
+
     def to_connect_result(self) -> dict:
         """
         Serialize to ConnectResult dict sent to the client (excludes auth).

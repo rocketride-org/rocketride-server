@@ -358,4 +358,28 @@ export interface ConnectResult {
 	 * Empty for free-tier orgs with no paid app subscriptions.
 	 */
 	subscribedApps: string[];
+
+	/**
+	 * Server capability tags describing the account provider in use.
+	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
+	 */
+	capabilities: string[];
+}
+
+/**
+ * Server metadata returned by the pre-auth info probe.
+ *
+ * Obtained via {@link RocketRideClient.getServerInfo} which sends an
+ * `auth` request with `infoOnly: true`. The server responds without
+ * requiring credentials.
+ */
+export interface ServerInfoResult {
+	/** Server engine version string. */
+	version: string;
+
+	/** Capability tags: `['oss']` for open-source, `['saas']` for cloud. */
+	capabilities: string[];
+
+	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
+	platform?: string;
 }

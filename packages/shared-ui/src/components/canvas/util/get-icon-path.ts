@@ -110,6 +110,7 @@ import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 import githubIcon from '../../../assets/nodes/github.svg';
 import telegramIcon from '../../../assets/nodes/telegram.svg';
+import gitIcon from '../../../assets/nodes/git.svg';
 import pipetoolIcon from '../../../assets/nodes/pipetool.svg';
 
 /**
@@ -202,6 +203,7 @@ const iconMap: Record<string, string> = {
 	twelvelabs: twelvelabsIcon,
 	'bland-ai': blandAiIcon,
 	github: githubIcon,
+	git: gitIcon,
 	telegram: telegramIcon,
 	pipetool: pipetoolIcon,
 };

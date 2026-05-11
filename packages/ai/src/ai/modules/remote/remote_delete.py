@@ -3,7 +3,11 @@ from ai.web import error, exception, Header, Query, Request, response, Result
 from .remote import pipes
 
 
-def remote_delete(request: Request, pipe: str = Query(None, description='The name of the pipeline to create'), authorization: str = Header(..., description='Bearer API key in the Authorization header')) -> Result:
+def remote_delete(
+    request: Request,
+    pipe: str = Query(None, description='The name of the pipeline to create'),
+    authorization: str = Header(..., description='Bearer API key in the Authorization header'),
+) -> Result:
     """
     Delete an existing pipeline.
 

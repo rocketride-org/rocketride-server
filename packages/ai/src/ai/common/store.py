@@ -468,9 +468,13 @@ class DocumentStoreBase(ABC):
                     if not doc.embedding_model:
                         raise Exception('You must run your documents through an embedding filter')
                     if doc.embedding_model != self.modelName:
-                        raise Exception(f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}')
+                        raise Exception(
+                            f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
+                        )
                     if len(doc.embedding) != self.vectorSize:
-                        raise Exception(f'The collection uses a vector size of {self.vectorSize} but the document has {len(doc.embedding)} vector size')
+                        raise Exception(
+                            f'The collection uses a vector size of {self.vectorSize} but the document has {len(doc.embedding)} vector size'
+                        )
                 return True
 
             # If no documents are provided, exit early
@@ -522,9 +526,13 @@ class DocumentStoreBase(ABC):
                 if not doc.embedding_model:
                     raise Exception('You must run your documents through an embedding filter')
                 if doc.embedding_model != modelName:
-                    raise Exception(f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}')
+                    raise Exception(
+                        f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'
+                    )
                 if len(doc.embedding) != vectorSize:
-                    raise Exception(f'The collection uses a vector size of {vectorSize} but the document has {len(doc.embedding)} vector size')
+                    raise Exception(
+                        f'The collection uses a vector size of {vectorSize} but the document has {len(doc.embedding)} vector size'
+                    )
 
         # Collection successfully created and validated
         return True

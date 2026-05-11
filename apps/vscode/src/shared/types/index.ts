@@ -25,3 +25,6 @@ export * from './connection';
 export * from './events';
 export * from './protocol';
 export * from './taskStatus';
+
+/** App ID for the RocketRide pipeline builder — used for subscription gating. */
+export const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
