@@ -6,6 +6,8 @@ All commits to this repo should be SSH-signed. After setup, your commits show a 
 
 Run on macOS or Linux (Windows: use WSL or Git-Bash). Steps assume you already have a GitHub account with access to this repo.
 
+> **Note:** Commit signing is independent of how you push. The SSH key generated below is used only for *signing* — your `origin` URL can be `https://github.com/...` or `git@github.com:...` and the steps are identical. If you push via HTTPS, see [If you push via HTTPS](#if-you-push-via-https-windows-or-linux) below for auth setup notes.
+
 ```bash
 # 1. Make sure you have an ed25519 SSH key. Reuse your existing one if you do.
 ls ~/.ssh/*.pub 2>/dev/null
@@ -55,6 +57,70 @@ GitHub stores **authentication keys** and **signing keys** as separate entries. 
    - If it's missing, click **Add email address**, enter it, then click the verification link sent to that inbox.
 
    *Skipping this step is the most common mistake.* Without it, GitHub returns `reason: no_user` for your signed commits — they sign correctly but show as "Unverified" on GitHub.com.
+
+## If you push via HTTPS (Windows or Linux)
+
+The signing setup above is **the same** whether you push via SSH or HTTPS — the SSH key on disk is used only to sign. This section covers HTTPS push authentication, which is a separate concern from signing.
+
+If `git push` already works for you via HTTPS (you have a credential manager, `gh auth login` cached, or a PAT in your config), nothing else is needed — your next signed commit will push and verify normally.
+
+If you don't yet have HTTPS auth set up, pick one of:
+
+**Option A — GitHub CLI (recommended):**
+
+```bash
+# Linux (Debian/Ubuntu):
+#   sudo apt install gh
+# Linux (Fedora/RHEL):
+#   sudo dnf install gh
+# Windows:
+#   winget install --id GitHub.cli
+#   or: choco install gh
+
+gh auth login -p https -h github.com
+# Choose: Login with a web browser → follow the device-code flow.
+# When asked "Authenticate Git with your GitHub credentials?", answer Yes.
+```
+
+`gh auth login` writes a token into Git's credential helper, so subsequent `git push` calls reuse it without prompting.
+
+**Option B — Personal access token + credential helper:**
+
+1. Create a fine-grained PAT at <https://github.com/settings/personal-access-tokens> with at least **Contents: Read and write** for the repo(s) you'll push to.
+
+2. Cache it via a credential helper:
+
+   - **Linux / Git Bash on Windows:**
+     ```bash
+     git config --global credential.helper store
+     ```
+     The first `git push` after this prompts for username (your GitHub login) and password (paste the PAT). The helper stores it for future pushes.
+
+   - **Windows native (PowerShell or CMD):** [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager) is bundled with Git for Windows and configured by default. The first `git push` opens a browser window for OAuth; no manual PAT needed unless you prefer.
+
+### Verify HTTPS push works before adding signing
+
+If you're new to HTTPS push, confirm auth works on its own first:
+
+```bash
+# Clone via HTTPS:
+git clone https://github.com/<owner>/<repo>.git
+cd <repo>
+# Make a trivial change, commit (signing not yet required for this test), and push:
+git commit --allow-empty -m "https-push-test"
+git push
+# If this succeeds without an auth prompt, HTTPS push is ready.
+# Now proceed with the signing setup above.
+```
+
+### Windows path notes
+
+The Bash commands in this guide use `~/.ssh/id_ed25519.pub` and `~/.config/git/allowed_signers`. These resolve correctly inside **Git Bash** and **WSL**. If you're running PowerShell directly, either:
+
+- Run the setup from Git Bash instead (simplest), or
+- Substitute `$env:USERPROFILE\.ssh\id_ed25519.pub` and `$env:USERPROFILE\.config\git\allowed_signers` for the `~/...` paths, and translate `mkdir -p` to `New-Item -ItemType Directory -Force <path> | Out-Null`.
+
+The signing config commands (`git config --global ...`) work identically in any shell.
 
 ## Verifying it worked
 
