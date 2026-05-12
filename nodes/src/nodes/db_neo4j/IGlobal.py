@@ -61,6 +61,7 @@ class IGlobal(IGlobalBase):
     db_description: str = ''
     max_validation_attempts: int = 5
     allow_execute: bool = False
+    max_execute_rows: int = 25000
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -83,8 +84,18 @@ class IGlobal(IGlobalBase):
 
         # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
         # the LLM translation + _is_cypher_safe gate, so the node owner must
-        # explicitly enable the capability.
-        self.allow_execute = bool(config.get('allow_execute', False))
+        # explicitly enable the capability. Strings like 'false' / '0' must
+        # not be truthy here, so don't use bool() directly.
+        allow_execute = config.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
+
+        try:
+            self.max_execute_rows = max(1, int(config.get('max_execute_rows', 25000)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = 25000
 
         auth = self._build_auth(config)
 
@@ -155,9 +166,12 @@ class IGlobal(IGlobalBase):
         Raises:
             neo4j.exceptions.Neo4jError: Caught at the IInstance handler per precedent.
         """
+        max_rows = self.max_execute_rows
         with self.driver.session(database=self.database) as session:
             result = session.run(neo4j.Query(cypher, timeout=timeout))
-            rows = [_record_to_dict(record) for record in result]
+            rows = [_record_to_dict(record) for _, record in zip(range(max_rows + 1), result)]
+            if len(rows) > max_rows:
+                raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
             counters = result.consume().counters
             affected = (
                 counters.nodes_created

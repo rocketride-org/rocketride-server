@@ -447,8 +447,13 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
         # the LLM translation + is_sql_safe gate, so the node owner must
-        # explicitly enable the capability.
-        self.allow_execute = bool(raw.get('allow_execute', False))
+        # explicitly enable the capability. Strings like 'false' / '0' must
+        # not be truthy here, so don't use bool() directly.
+        allow_execute = raw.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
         try:
             self.max_execute_rows = max(1, int(raw.get('max_execute_rows', 25000)))
         except (TypeError, ValueError):
