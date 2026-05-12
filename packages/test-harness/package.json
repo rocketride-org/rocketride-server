@@ -11,7 +11,9 @@
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
-		"clean": "rimraf lib"
+		"clean": "rimraf lib",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"dependencies": {
 		"rocketride": "workspace:*",
@@ -21,6 +23,7 @@
 		"@types/node": "^20.0.0",
 		"@types/ws": "^8.18.1",
 		"rimraf": "^5.0.5",
-		"typescript": "^5.3.3"
+		"typescript": "^5.3.3",
+		"vitest": "^2.1.5"
 	}
 }

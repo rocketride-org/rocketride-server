@@ -22,7 +22,7 @@ import { fetchServices } from './coverage/services';
 import { renderMarkdown, writeReports } from './report/markdown';
 import { emptyCoverageFrom, type PipelineSummary, type RunReport } from './report/schema';
 import { TraceCollector } from './runner/collector';
-import { ensureRunDir, isoStamp, loadTraces, pipelineSlugToFile } from './runner/persist';
+import { ensureRunDir, isoStamp, loadTraces, pipelineSlugToFile, pruneRuns } from './runner/persist';
 import { runPipeline, type PipelineDef } from './runner/runPipeline';
 import type { TraceFile } from './runner/schema';
 import { startHarnessServer, type ServerHandle } from './server/lifecycle';
@@ -222,6 +222,12 @@ async function runTiersCommand(tiers: TierName[], config: HarnessConfig, tierLab
 		process.stdout.write(
 			`[harness] done: ${report.summary.pass} pass / ${failures} non-pass / ${report.summary.total} total; gaps=${gaps}\n`,
 		);
+
+		const removed = pruneRuns(config.runsDir, config.retainRuns);
+		if (removed.length > 0) {
+			process.stdout.write(`[harness] pruned ${removed.length} old run dir(s) (keeping last ${config.retainRuns})\n`);
+		}
+
 		return failures > 0 || gaps > 0 ? 1 : 0;
 	} finally {
 		process.stdout.write('[harness] stopping server\n');
