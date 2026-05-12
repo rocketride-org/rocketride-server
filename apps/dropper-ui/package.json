@@ -19,7 +19,7 @@
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",
 		"web-vitals": "^5.2.0",
-		"ws": "^8.20.0"
+		"ws": "^8.20.1"
 	},
 	"devDependencies": {
 		"@rsbuild/core": "^0.4.0",
