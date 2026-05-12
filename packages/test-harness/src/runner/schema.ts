@@ -58,5 +58,8 @@ export type TraceFile = {
 	result: PipelineResultBucket;
 	infra_signature?: string;
 	error?: { message: string; raw?: unknown };
+	/** Provider class names exercised (matches /services registry). */
 	exercised_nodes: string[];
+	/** Raw component IDs from apaevt_flow.body.pipes[-1]; preserved for forensics. */
+	exercised_components: string[];
 };

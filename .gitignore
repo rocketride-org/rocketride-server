@@ -149,7 +149,10 @@ vcpkg_installed/
 # -----------------------------------------------------------------------------
 # Test and Coverage
 # -----------------------------------------------------------------------------
-coverage/
+# Tool-generated jest/nyc coverage report dirs only — anchor to repo root so we
+# don't accidentally ignore packages/test-harness/src/coverage/ (real source).
+/coverage/
+**/jest-coverage/
 *.lcov
 .nyc_output/
 testdata/cache/

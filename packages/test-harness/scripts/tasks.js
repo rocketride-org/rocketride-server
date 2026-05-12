@@ -49,15 +49,15 @@ function makeCompileAction() {
 	};
 }
 
-function makeRunAction(tier, extraEnv = {}) {
+function makeRunAction(subcommand, extraEnv = {}, extraArgs = []) {
 	return {
 		run: async (ctx, task) => {
 			if (!(await exists(CLI_ENTRY))) {
 				throw new Error(`Test harness not built. Run: builder harness:build`);
 			}
 			const env = { ...process.env, ...extraEnv };
-			await execCommand('node', [CLI_ENTRY, tier], { task, cwd: PACKAGE_DIR, env });
-			task.output = `Harness ${tier} completed`;
+			await execCommand('node', [CLI_ENTRY, subcommand, ...extraArgs], { task, cwd: PACKAGE_DIR, env });
+			task.output = `Harness ${subcommand} completed`;
 		},
 	};
 }
@@ -100,6 +100,28 @@ module.exports = {
 				description: 'Run all tiers with real APIs (requires keys)',
 				steps: ['server:build', 'harness:build'],
 				run: (ctx, task) => makeRunAction('all', { HARNESS_MOCK_LLM: '0' }).run(ctx, task),
+			}),
+		},
+		{
+			name: 'harness:report',
+			action: (options = {}) => ({
+				description: 'Re-render report.md from an existing run dir (pass --runDir=...)',
+				steps: ['harness:build'],
+				run: (ctx, task) => {
+					const runDir = options.runDir || ctx.options?.runDir;
+					if (!runDir) {
+						throw new Error('harness:report requires --runDir=<path>');
+					}
+					return makeRunAction('report', {}, [runDir]).run(ctx, task);
+				},
+			}),
+		},
+		{
+			name: 'harness:scaffold-exclusions',
+			action: () => ({
+				description: 'Write starter coverage-exclusions.json from /services',
+				steps: ['server:build', 'harness:build'],
+				run: (ctx, task) => makeRunAction('scaffold-exclusions', { HARNESS_MOCK_LLM: '1' }).run(ctx, task),
 			}),
 		},
 		{
