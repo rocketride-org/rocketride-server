@@ -1,0 +1,29 @@
+{
+	"source": "webhook_1",
+	"project_id": "a1b2c3d4-0000-4000-8000-000000000030",
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "type": "webhook" }
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [{ "lane": "tags", "from": "webhook_1" }]
+		},
+		{
+			"id": "embedding_transformer_1",
+			"provider": "embedding_transformer",
+			"config": {},
+			"input": [{ "lane": "documents", "from": "parse_1" }]
+		},
+		{
+			"id": "response_1",
+			"provider": "response",
+			"config": { "lanes": [] },
+			"input": [{ "lane": "documents", "from": "embedding_transformer_1" }]
+		}
+	]
+}

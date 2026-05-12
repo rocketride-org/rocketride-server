@@ -1,0 +1,485 @@
+{
+	"version": 1,
+	"exclusions": [
+		{
+			"node": "accessibility_describe",
+			"reason": "Gemini Vision-backed image describer; requires real image fixture and vendor API access not configured under ROCKETRIDE_MOCK.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_crewai",
+			"reason": "CrewAI agent requires real LLM tool-use plumbing; current mock SDKs do not return structured tool-call envelopes.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_crewai_manager",
+			"reason": "CrewAI manager-agent variant; same tool-use mocking gap as agent_crewai.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_crewai_subagent",
+			"reason": "CrewAI subagent variant; same tool-use mocking gap as agent_crewai.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_deepagent",
+			"reason": "DeepAgent fan-out requires tool-call mocking and parallel subagent dispatch not yet supported by harness mocks.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_deepagent_subagent",
+			"reason": "DeepAgent subagent variant; same tool-use mocking gap as agent_deepagent.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_langchain",
+			"reason": "LangChain agent requires real LLM tool-use plumbing; current mock SDKs do not return structured tool calls.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "agent_rocketride",
+			"reason": "RocketRide-native agent requires tool-call mocking and multi-step orchestration not yet supported.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "anonymize_text",
+			"reason": "PII anonymizer; smoke pipeline wiring deferred until input lane shape and downstream consumer are sorted out.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "astra_db",
+			"reason": "Requires running AstraDB instance with seeded collection; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "audio_player",
+			"reason": "Audio playback sink; requires media file fixture not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "audio_transcribe",
+			"reason": "Whisper/vendor transcription; requires real audio input and vendor API access not under ROCKETRIDE_MOCK.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "audio_tts",
+			"reason": "Text-to-speech requires vendor API access (ElevenLabs/OpenAI TTS) not mocked.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "chat",
+			"reason": "Source-mode component that originates pipelines; never appears as a leaf in apaevt_flow.body.pipes[]. Verified indirectly via every chat-sourced smoke pipeline.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "chroma",
+			"reason": "Requires running Chroma instance with seeded collection; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "db_mysql",
+			"reason": "Requires running MySQL with seeded schema; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "db_neo4j",
+			"reason": "Requires running Neo4j with seeded graph; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "db_postgres",
+			"reason": "Requires running Postgres with seeded schema; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "dictionary",
+			"reason": "Dictionary lookup node; smoke pipeline wiring deferred until input lane and dictionary fixtures are defined.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "dropper",
+			"reason": "Source-mode component that originates pipelines from dropped files; never appears as a leaf in apaevt_flow.body.pipes[].",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "elasticsearch",
+			"reason": "Requires running Elasticsearch instance with seeded index; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "embedding_image",
+			"reason": "Image embedding; requires real image input not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "embedding_openai",
+			"reason": "OpenAI embedding; smoke wiring needs paired vector-store downstream which requires DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "embedding_video",
+			"reason": "Video embedding; requires real video input not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "extract_data",
+			"reason": "Structured-extraction node requires LLM downstream wiring and schema; smoke pipeline deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "filesys",
+			"reason": "Source-mode component reading from filesystem; never appears as a leaf in apaevt_flow.body.pipes[].",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "frame_grabber",
+			"reason": "Extracts frames from video input; requires real video fixture not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "guardrails",
+			"reason": "Guardrails policy enforcement requires paired LLM downstream and policy fixtures; smoke wiring deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "hash",
+			"reason": "Content hashing node; smoke pipeline wiring deferred until input lane shape is verified.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "image_cleanup",
+			"reason": "Image preprocessing; requires real image input not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "image_vision_mistral",
+			"reason": "Mistral vision API requires real image fixture and live API access; no in-process mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "image_vision_ollama",
+			"reason": "Ollama vision endpoint requires real image fixture and running Ollama server.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llamaparse",
+			"reason": "LlamaParse cloud document parser requires real API key and document fixture; no mock SDK.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_gmi_cloud",
+			"reason": "GMI Cloud LLM requires real API key and live endpoint; no in-process mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_mistral",
+			"reason": "Mistral cloud LLM requires real API key; no in-process mock SDK module under nodes/test/mocks/.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_openai_api",
+			"reason": "Generic OpenAI-compatible endpoint requires user-provided serverbase + key; not covered by ROCKETRIDE_MOCK.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_qwen",
+			"reason": "Qwen cloud LLM requires real API key; no in-process mock SDK module under nodes/test/mocks/.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_vertex-enterprise",
+			"reason": "Google Vertex enterprise endpoint requires GCP credentials and project setup not configured under ROCKETRIDE_MOCK.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "llm_vertex-personal",
+			"reason": "Google Vertex personal endpoint requires GCP credentials; coverage deferred until smoke wiring is verified against the mock.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "local-text-output",
+			"reason": "Output sink that writes text results to a local file; not represented as a leaf node in flow events.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "mcp_client",
+			"reason": "MCP client requires a running MCP server endpoint; out of scope for the offline mock tier.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "memory_internal",
+			"reason": "In-memory state source seeded externally; coverage path differs from leaf-pipe tracking used by the harness.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "milvus",
+			"reason": "Requires running Milvus instance with seeded collection; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "mongodb+srv",
+			"reason": "Source-mode MongoDB connector reading from external Atlas cluster; not exercised as a leaf node.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "ner",
+			"reason": "Named-entity recognition node; smoke pipeline wiring deferred until input lane shape and tagger fixtures are defined.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "ocr",
+			"reason": "Optical character recognition; requires real image fixture not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "opensearch",
+			"reason": "Requires running OpenSearch instance with seeded index; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "pinecone",
+			"reason": "Requires running Pinecone index with vendor API access; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "postgres",
+			"reason": "Postgres source connector requires running database with seeded data; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "preprocessor_code",
+			"reason": "Code preprocessor; smoke pipeline wiring deferred until input lane shape is verified.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "preprocessor_langchain",
+			"reason": "LangChain text splitter; smoke pipeline wiring deferred until input shape and chunk-config are verified.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "preprocessor_llm",
+			"reason": "LLM-driven preprocessor requires paired downstream LLM and prompt config; smoke wiring deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "prompt",
+			"reason": "Prompt-template node; smoke pipeline wiring deferred until paired LLM downstream is configured.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "qdrant",
+			"reason": "Requires running Qdrant instance with seeded collection; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "question",
+			"reason": "Question-rephrasing node; smoke pipeline wiring deferred until paired LLM downstream is configured.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "reducto",
+			"reason": "Reducto document parser requires real API key and document fixture; no mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "remote",
+			"reason": "Source-mode remote-source connector; never appears as a leaf in apaevt_flow.body.pipes[].",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "response_audio",
+			"reason": "Audio response sink; requires real audio fixture upstream not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "response_documents",
+			"reason": "Documents response sink; requires parsed-document fixture upstream not yet wired in the harness.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "response_image",
+			"reason": "Image response sink; requires real image fixture upstream not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "response_table",
+			"reason": "Table response sink; requires structured table fixture upstream not yet wired in the harness.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "response_video",
+			"reason": "Video response sink; requires real video fixture upstream not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "search_exa",
+			"reason": "Exa search API requires real API key; no in-process mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "summarization",
+			"reason": "Summarization node requires paired downstream LLM and prompt config; smoke wiring deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "telegram",
+			"reason": "Source-mode Telegram bot connector; never appears as a leaf in apaevt_flow.body.pipes[].",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "text-output",
+			"reason": "Output sink that writes text results externally; not represented as a leaf node in flow events.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "thumbnail",
+			"reason": "Thumbnail generator; requires real image fixture not yet supported by harness pipe abstraction.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_bland_ai",
+			"reason": "Bland AI voice tool requires real API key and phone-call infrastructure; out of scope for offline mock tier.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_chartjs",
+			"reason": "Chart.js renderer requires structured table input and downstream agent wiring; smoke pipeline deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_exa_search",
+			"reason": "Exa search tool requires real API key; no in-process mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_filesystem",
+			"reason": "Filesystem tool reads/writes real files; out of scope for the offline mock tier.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_firecrawl",
+			"reason": "Firecrawl web scraper requires real API key and live endpoint.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_git",
+			"reason": "Git tool requires real git repository and shell access; out of scope for the offline mock tier.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_github",
+			"reason": "GitHub API tool requires real API token and live endpoint.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_http_request",
+			"reason": "HTTP request tool requires real network access; out of scope for the offline mock tier.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_pipe",
+			"reason": "Pipe tool invokes nested pipelines; smoke wiring deferred until nested-pipeline fixture loader exists.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "tool_python",
+			"reason": "Python sandbox executor requires sandboxed runtime and downstream agent wiring; smoke pipeline deferred.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "twelvelabs",
+			"reason": "Twelve Labs video understanding requires real API key and video fixture; no mock SDK module.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "weaviate",
+			"reason": "Requires running Weaviate instance with seeded class; defer until harness gains DB fixture support.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		},
+		{
+			"node": "webhook",
+			"reason": "Source-mode webhook receiver; never appears as a leaf in apaevt_flow.body.pipes[]. Verified indirectly via every webhook-sourced smoke pipeline.",
+			"owner": "joshua",
+			"added": "2026-05-12"
+		}
+	]
+}

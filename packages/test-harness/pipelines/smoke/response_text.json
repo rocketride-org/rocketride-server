@@ -1,0 +1,17 @@
+{
+	"source": "webhook_1",
+	"project_id": "a1b2c3d4-0000-4000-8000-000000000020",
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "type": "webhook" }
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": {},
+			"input": [{ "lane": "text", "from": "webhook_1" }]
+		}
+	]
+}
