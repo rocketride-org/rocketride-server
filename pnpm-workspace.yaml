@@ -33,6 +33,9 @@ packages:
   # Client libraries
   - 'packages/client-typescript'
 
+  # Test infrastructure
+  - 'packages/test-harness'
+
   # Applications
   - 'apps/chat-ui'
   - 'apps/dropper-ui'

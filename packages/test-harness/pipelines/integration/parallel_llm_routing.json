@@ -1,0 +1,38 @@
+{
+	"source": "chat_1",
+	"project_id": "a1b2c3d4-0000-4000-8000-000000000101",
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "type": "chat" }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-5",
+				"openai-5": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": { "apikey": "sk-ant-${ROCKETRIDE_ANTHROPIC_KEY}" }
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "response_1",
+			"provider": "response",
+			"config": { "lanes": [] },
+			"input": [
+				{ "lane": "answers", "from": "llm_openai_1" },
+				{ "lane": "answers", "from": "llm_anthropic_1" }
+			]
+		}
+	]
+}

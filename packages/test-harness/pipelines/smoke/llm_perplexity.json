@@ -1,0 +1,26 @@
+{
+	"source": "chat_1",
+	"project_id": "a1b2c3d4-0000-4000-8000-000000000014",
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "type": "chat" }
+		},
+		{
+			"id": "llm_perplexity_1",
+			"provider": "llm_perplexity",
+			"config": {
+				"profile": "sonar",
+				"sonar": { "apikey": "%perplexity_apikey%" }
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "response_1",
+			"provider": "response",
+			"config": { "lanes": [] },
+			"input": [{ "lane": "answers", "from": "llm_perplexity_1" }]
+		}
+	]
+}

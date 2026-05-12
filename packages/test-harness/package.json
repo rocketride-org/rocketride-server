@@ -1,0 +1,29 @@
+{
+	"name": "@rocketride/test-harness",
+	"version": "0.1.0",
+	"description": "Pipeline test harness: smoke + integration tiers with apaevt trace capture",
+	"private": true,
+	"license": "MIT",
+	"type": "commonjs",
+	"main": "./lib/cli.js",
+	"bin": {
+		"rocketride-harness": "./lib/cli.js"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"clean": "rimraf lib",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"rocketride": "workspace:*",
+		"ws": "^8.20.0"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"@types/ws": "^8.18.1",
+		"rimraf": "^5.0.5",
+		"typescript": "^5.3.3",
+		"vitest": "^2.1.5"
+	}
+}
