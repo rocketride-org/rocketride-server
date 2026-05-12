@@ -1,0 +1,4 @@
+lib/
+.harness-runs/
+*.log
+dist/

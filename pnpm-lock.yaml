@@ -636,6 +636,28 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/test-harness:
+    dependencies:
+      rocketride:
+        specifier: workspace:*
+        version: link:../client-typescript
+      ws:
+        specifier: ^8.20.0
+        version: 8.20.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.30
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
 packages:
 
   '@alloc/quick-lru@5.2.0':
