@@ -78,6 +78,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # npm — packages/shared-ui
@@ -100,6 +103,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # npm — apps/dropper-ui
@@ -122,6 +128,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # npm — apps/chat-ui
@@ -144,6 +153,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # Python — root pyproject.toml (covers most ai/nodes deps via workspace)
@@ -166,6 +178,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # Python — published SDK
@@ -182,6 +197,9 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # Python — MCP client SDK
@@ -198,6 +216,9 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # Python — pipeline node deps (ML/AI runtime)
@@ -222,6 +243,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # GitHub Actions — workflow file SHA pin updates
@@ -247,3 +271,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
