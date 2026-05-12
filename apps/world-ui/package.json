@@ -10,6 +10,7 @@
     "name": "Hello World",
     "description": "A simple Hello World demo application",
     "categories": ["demo"],
+    "mode": "free",
     "authenticated": false
   },
   "scripts": {

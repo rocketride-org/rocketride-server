@@ -10,6 +10,7 @@
     "name": "Server Monitor",
     "description": "Real-time server dashboard showing connections, tasks, and activity",
     "categories": ["tools"],
+    "mode": "free",
     "authenticated": true,
     "showStatusBar": true
   },

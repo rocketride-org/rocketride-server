@@ -41,6 +41,8 @@ import type { ShellThemeConfig, ShellAccountConfig } from '../../workspace/types
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import { useSubscriptions } from '../../hooks/useSubscriptions';
+import RocketRideMark from '../../icons/RocketRideMark';
+import RocketRideWordmark from '../../icons/RocketRideWordmark';
 
 // =============================================================================
 // CONSTANTS
@@ -166,7 +168,7 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	const branding = loadedApps[activeAppId]?.branding;
 	const showHeader = activeManifest?.showHeader !== false;
 
-	// Resolve icon: branding theme-aware → branding generic → manifest URL → monogram
+	// Resolve icon: branding theme-aware → branding generic → manifest URL → RocketRide mark
 	const resolveIcon = (size: number): React.ReactNode => {
 		// Step 1: branding iconDark / iconLight
 		const themed = paletteMode === 'dark' ? branding?.iconDark : branding?.iconLight;
@@ -178,15 +180,11 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 		// Step 3: manifest icon URL
 		if (!isHome && activeManifest?.icon) return <img src={activeManifest.icon} alt="" style={{ width: size, height: size, flexShrink: 0 }} />;
 
-		// Step 4: monogram fallback
-		return (
-			<span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.04em', color: 'var(--rr-brand)' }}>
-				{isHome ? 'RC' : (activeManifest?.name.slice(0, 2).toUpperCase() ?? '??')}
-			</span>
-		);
+		// Step 4: RocketRide mark
+		return <RocketRideMark size={size} color="var(--rr-brand)" />;
 	};
 
-	// Collapsed: always show icon regardless of showHeader
+	// Collapsed: show RocketRide mark centered
 	if (collapsed) {
 		return (
 			<div style={{
@@ -194,7 +192,7 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 				display: 'flex', alignItems: 'center', justifyContent: 'center',
 				color: 'var(--rr-brand)',
 			}}>
-				{resolveIcon(20)}
+				<RocketRideMark size={20} color="var(--rr-brand)" />
 			</div>
 		);
 	}
@@ -202,14 +200,18 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	// Expanded but showHeader is false: app owns its own header, render nothing
 	if (!showHeader) return null;
 
+	// App name for display
+	const appLabel = isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '');
+
 	return (
-		<div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, padding: '2px 4px' }}>
-			{resolveIcon(16)}
+		<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, padding: '4px 4px 2px' }}>
+			<RocketRideWordmark height={22} color={paletteMode === 'dark' ? '#FAFBF8' : '#1E1A34'} />
 			<span style={{
-				fontSize: 14, fontWeight: 800, letterSpacing: '0.06em',
-				color: 'var(--rr-brand)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+				fontSize: 9, fontWeight: 800, letterSpacing: '0.12em',
+				color: 'var(--rr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+				textAlign: 'center', maxWidth: '100%',
 			}}>
-				{isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '')}
+				{appLabel}
 			</span>
 		</div>
 	);
@@ -229,7 +231,7 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher, onOverlay }) => {
 	const identity = useContext(ShellIdentityContext);
 	const { prefs, updatePrefs, setTheme, themeOptions, activeAppId, loadedApps, appManifest } = useWorkspace();
-	const { subscribedAppIds } = useSubscriptions();
+	const { isOnDesktop } = useSubscriptions();
 
 	// --- Collapse / resize state ---------------------------------------------
 
@@ -352,7 +354,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 				id: 'apps', label: 'Switch App', icon: BxGridAlt, dividerBefore: true,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
-					.filter((a) => subscribedAppIds.has(a.id) || !a.categories?.includes('paid'))
+					.filter((a) => isOnDesktop(a.id))
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
 						id: app.id, label: app.name, checked: activeAppId === app.id,
@@ -364,7 +366,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: !showAppSwitcher, onClick: () => account.onLogout?.() });
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, subscribedAppIds, account, handleThemeSelect, onOverlay]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
 
 	// --- Don't render sidebar when not authenticated -------------------------
 

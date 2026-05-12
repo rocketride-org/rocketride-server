@@ -77,8 +77,8 @@ export interface ConnectResult {
 	userId?: string;
 	/** Organizations the user belongs to. */
 	organizations?: { id: string; name: string }[];
-	/** Apps the user is subscribed to. */
-	subscribedApps?: (string | { appId: string; status: string })[];
+	/** Apps on the user's desktop — full manifest entries with subscription status. */
+	apps?: { id: string; moduleId: string; name: string; entry: string; subscriptionStatus?: string; [key: string]: unknown }[];
 	/** Open-ended additional fields. */
 	[key: string]: unknown;
 }

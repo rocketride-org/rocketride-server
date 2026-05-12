@@ -32,7 +32,7 @@ import { registerRemotes, loadRemote } from '@module-federation/runtime';
 import type { AppManifestEntry, AppDescriptor, AppSettingDefinition } from '../workspace/types';
 
 /**
- * Shape of an app entry from the server (infoOnly probe or ConnectResult).
+ * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
  * Matches the AppManifestEntry from the client SDK but without the load() function.
  */
 export interface ServerAppEntry {

@@ -29,11 +29,13 @@
 from pydantic import BaseModel
 from typing import TypedDict
 
+from rocketride.types.client import AppManifestEntry
+
 
 # =============================================================================
 # NESTED SHAPES
 # Lightweight TypedDicts documenting the element shape of AccountInfo's
-# ``organizations`` and ``subscribedApps`` lists. Mirrors the public
+# ``organizations`` and ``apps`` lists. Mirrors the public
 # ``OrgInfo`` / ``TeamInfo`` defined in ``rocketride.types.client`` but kept
 # local to avoid a server→client cross-package import.
 # =============================================================================
@@ -54,14 +56,6 @@ class OrgInfo(TypedDict):
     name: str
     permissions: list[str]
     teams: list[TeamInfo]
-
-
-class SubscribedApp(TypedDict):
-    """Shape of an entry inside ``AccountInfo.subscribedApps``."""
-
-    appId: str
-    # One of: 'active', 'trialing', 'past_due', 'incomplete'
-    status: str
 
 
 # =============================================================================
@@ -98,9 +92,10 @@ class AccountInfo(BaseModel):
     # Full org/team/permissions structure — all permission checks resolve through this
     organizations: list[OrgInfo] = []
 
-    # Subscribed apps for the user's primary org. Empty list for free-tier orgs
-    # with no paid subscriptions.
-    subscribedApps: list[SubscribedApp] = []
+    # Apps on the user's desktop — full manifest entries with subscription status.
+    # OSS: all apps with subscriptionStatus="free".
+    # SaaS: populated from app_users table, enriched with full manifest + subscription info.
+    apps: list[AppManifestEntry] = []
 
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []

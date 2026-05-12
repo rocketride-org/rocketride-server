@@ -407,11 +407,6 @@ export class ConnectionManager implements IConnectionManager {
 		// Publish identity to all listeners
 		this.emit('shell:login', { user: result });
 
-		// Broadcast entitled apps if returned
-		if (result.apps?.length) {
-			this.emit('shell:appsUpdated', { apps: result.apps });
-		}
-
 		// Restore saved theme from workspace file
 		if (config?.onThemeChange) {
 			try {
@@ -504,11 +499,6 @@ export class ConnectionManager implements IConnectionManager {
 
 			// Emit login event
 			this.emit('shell:login', { user: result });
-
-			// Broadcast entitled apps if returned
-			if (result.apps?.length) {
-				this.emit('shell:appsUpdated', { apps: result.apps });
-			}
 
 			return result;
 		} catch (error) {

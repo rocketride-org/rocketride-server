@@ -186,3 +186,40 @@ class AccountBase(ABC):
             request: Raw DAP request dict.
         """
         raise NotImplementedError('App marketplace requires SaaS mode')
+
+    async def handle_public(self, conn, request):
+        """
+        Dispatch an ``rrext_public_*`` DAP command.
+
+        Available on both authenticated and unauthenticated connections.
+        The ``rrext_public_probe`` command is handled directly by
+        ``PublicCommands``; this method handles ``rrext_public_catalog``
+        and any future public commands that need account-layer logic.
+
+        OSS returns the static apps.json catalog.
+        SaaS queries the marketplace DB with pagination and optional
+        subscription overlay for authenticated callers.
+
+        Args:
+            conn:    ``TaskConn`` instance.
+            request: Raw DAP request dict.
+        """
+        # Default OSS implementation: return public apps from static manifest
+        args = request.get('arguments') or {}
+        offset = args.get('offset', 0)
+        limit = min(args.get('limit', 20), 100)
+        apps = await self.get_public_apps()
+
+        # Basic client-side pagination for OSS
+        total = len(apps)
+        page = apps[offset : offset + limit]
+
+        return conn.build_response(
+            request,
+            body={
+                'apps': page,
+                'total': total,
+                'offset': offset,
+                'limit': limit,
+            },
+        )

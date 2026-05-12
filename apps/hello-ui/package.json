@@ -11,6 +11,7 @@
     "description": "Landing page and dashboard",
     "icon": "./src/icon.svg",
     "categories": ["built-in"],
+    "mode": "free",
     "authenticated": false,
     "showStatusBar": true
   },

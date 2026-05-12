@@ -225,6 +225,56 @@ class OrgInfo(TypedDict):
     teams: list[TeamInfo]
 
 
+class AppManifestEntry(TypedDict, total=False):
+    """
+    A single app entry in the server-provided manifest.
+
+    Same shape as the build-time apps.json entries, extended with
+    optional pricing and visibility metadata for SaaS deployments.
+    When returned as a desktop app in ConnectResult.apps, also includes
+    subscription status fields.
+
+    Attributes:
+        id (str): Unique app identifier (e.g. "rocketride.pipeBuilder").
+        moduleId (str): Module Federation remote name.
+        name (str): Human-readable app name.
+        description (str): Short description.
+        icon (str): URL path to the app's icon.
+        categories (list[str]): Category tags for filtering.
+        settings (list): App-specific setting definitions.
+        entry (str): URL to the app's MF remote entry file.
+        version (str): Semver version string.
+        ownerType (str): Visibility scope — "public", "org", "team", or "user".
+        authenticated (bool): Whether the app UI requires auth to render.
+        public (bool): Whether the app is visible to unauthenticated users.
+        stripeProductId (str): Stripe product ID (SaaS paid apps only).
+        stripePrices (list): Available pricing tiers (SaaS paid apps only).
+        subscriptionStatus (str): Subscription status (present on desktop apps).
+        seats (int): Total seats on the subscription.
+        seatsUsed (int): Seats currently occupied in this org.
+        features (list[str]): Feature flags enabled by the subscribed plan.
+    """
+
+    id: str
+    moduleId: str
+    name: str
+    description: str
+    icon: str
+    categories: list[str]
+    settings: list
+    entry: str
+    version: str
+    ownerType: str
+    authenticated: bool
+    public: bool
+    stripeProductId: str
+    stripePrices: list[dict]
+    subscriptionStatus: str
+    seats: int
+    seatsUsed: int
+    features: list[str]
+
+
 class ConnectResult(TypedDict, total=False):
     """
     Full identity payload returned by the server after a successful authentication handshake.
@@ -245,6 +295,7 @@ class ConnectResult(TypedDict, total=False):
         locale (str): BCP-47 locale tag (e.g. "en-US").
         defaultTeam (str): ID of the team selected as the default context.
         organizations (list[OrgInfo]): All organisations the user belongs to.
+        apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
     """
 
     userToken: str
@@ -261,47 +312,7 @@ class ConnectResult(TypedDict, total=False):
     defaultTeam: str
     organizations: list[OrgInfo]
     capabilities: list[str]
-    apps: list['AppManifestEntry']
-
-
-class AppManifestEntry(TypedDict, total=False):
-    """
-    A single app entry in the server-provided manifest.
-
-    Same shape as the build-time apps.json entries, extended with
-    optional pricing and visibility metadata for SaaS deployments.
-
-    Attributes:
-        id (str): Unique app identifier (e.g. "rocketride.pipeBuilder").
-        moduleId (str): Module Federation remote name.
-        name (str): Human-readable app name.
-        description (str): Short description.
-        icon (str): URL path to the app's icon.
-        categories (list[str]): Category tags for filtering.
-        settings (list): App-specific setting definitions.
-        entry (str): URL to the app's MF remote entry file.
-        version (str): Semver version string.
-        ownerType (str): Visibility scope — "public", "org", "team", or "user".
-        authenticated (bool): Whether the app UI requires auth to render.
-        public (bool): Whether the app is visible to unauthenticated users.
-        stripeProductId (str): Stripe product ID (SaaS paid apps only).
-        stripePrices (list): Available pricing tiers (SaaS paid apps only).
-    """
-
-    id: str
-    moduleId: str
-    name: str
-    description: str
-    icon: str
-    categories: list[str]
-    settings: list
-    entry: str
-    version: str
-    ownerType: str
-    authenticated: bool
-    public: bool
-    stripeProductId: str
-    stripePrices: list[dict]
+    apps: list[AppManifestEntry]
 
 
 class ServerInfoResult(TypedDict, total=False):
@@ -309,8 +320,8 @@ class ServerInfoResult(TypedDict, total=False):
     Server metadata returned by the pre-auth info probe.
 
     Obtained via :meth:`RocketRideClient.get_server_info` which sends an
-    ``auth`` request with ``infoOnly: True``. The server responds without
-    requiring credentials.
+    ``rrext_public_probe`` command on a public connection. The server
+    responds without requiring credentials.
 
     Attributes:
         version (str): Server engine version string.

@@ -93,18 +93,20 @@ export interface StripePlan {
 // =============================================================================
 
 /**
- * Current credit balance for an organisation's compute wallet.
+ * Multi-resource credit balance for an organisation's wallet.
  * Returned by the `credits_balance` subcommand.
+ *
+ * Each field is a dict keyed by resource type (e.g. ``{ tokens: 4200, video: 80 }``).
  */
 export interface CreditBalance {
-	/** Current unspent credit balance for the org. */
-	balance: number;
+	/** Current unspent balances per resource type. */
+	balances: Record<string, number>;
 
-	/** Total credits ever purchased — useful for ledger display. */
-	lifetimePurchased: number;
+	/** Total purchased per resource type — useful for ledger display. */
+	lifetimePurchased: Record<string, number>;
 
-	/** Total credits ever consumed — useful for ledger display. */
-	lifetimeConsumed: number;
+	/** Total consumed per resource type — useful for ledger display. */
+	lifetimeConsumed: Record<string, number>;
 }
 
 /**

@@ -13,7 +13,7 @@
  *   4. Payment   → Stripe Elements <PaymentElement> collects card details
  *   5. Submit    → stripe.confirmPayment() (redirect: 'if_required')
  *   6. Confirm   → onConfirmPending notifies server
- *   7. Success   → onSuccess — host closes modal, server pushes updated subscribedApps
+ *   7. Success   → onSuccess — host closes modal, server pushes updated ConnectResult.apps
  *
  * All server communication flows through callback props — no SDK imports.
  */
@@ -236,7 +236,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 	/**
 	 * Confirms the Stripe payment, then notifies the server.
 	 * The server push (from confirm_pending and the webhook) will update
-	 * subscribedApps automatically.
+	 * ConnectResult.apps automatically.
 	 */
 	const handleSubmit = useCallback(
 		async (e: React.FormEvent) => {
@@ -268,7 +268,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 					// Non-fatal — the webhook will still update the DB
 				}
 
-				// Step 3: Close the modal. The server push will update subscribedApps.
+				// Step 3: Close the modal. The server push will update ConnectResult.apps.
 				onSuccess();
 			} catch (err: any) {
 				onError(err.message ?? 'An unexpected error occurred.');

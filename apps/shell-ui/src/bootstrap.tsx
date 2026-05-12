@@ -8,7 +8,7 @@
  * registers Module Federation remotes, creates the popup portal container,
  * and renders the shell.
  *
- * All apps are loaded from the server probe (DAP infoOnly) — there are no
+ * All apps are loaded from the server probe (rrext_public_probe) — there are no
  * built-in apps hardcoded here. After authentication, the shell receives the
  * user's full entitled app set via the ConnectResult.
  */

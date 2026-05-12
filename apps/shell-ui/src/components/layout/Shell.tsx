@@ -36,15 +36,14 @@
 //   - OverlayManager — Account/Settings modal dialogs
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { ConnectResult } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { WorkspaceProvider } from '../../workspace/WorkspaceContext';
-import type { ShellConfig, AppManifestEntry } from '../../workspace/types';
+import type { ShellConfig } from '../../workspace/types';
 import { registerAndMapApps } from '../../lib/appLoader';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
@@ -153,7 +152,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
-	const [apps, setApps] = useState<AppManifestEntry[]>(config.apps);
 	const [activeAppId, setActiveAppId] = useState<string | null>(null);
 	const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
 	const [apiKeyError] = useState<string | null>(null);
@@ -162,6 +160,14 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// ── Connection state ──────────────────────────────────────────────────
 	const { client, isConnected, statusMessage } = useShellConnection();
+
+	// ── Desktop apps — derived from identity, falls back to static config ──
+	const apps = useMemo(() => {
+		if (identity?.apps?.length) {
+			return registerAndMapApps(identity.apps as Parameters<typeof registerAndMapApps>[0]);
+		}
+		return config.apps;
+	}, [identity?.apps, config.apps]);
 
 	// =====================================================================
 	// BOOTSTRAP — one-time auth sequence on mount
@@ -215,15 +221,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
 			if (result.userToken) cm.saveToken(result.userToken);
 			if (mountedRef.current) setIdentity(result);
-		});
-	}, [cm]);
-
-	// Update app list on shell:appsUpdated
-	useEffect(() => {
-		return cm.on('shell:appsUpdated', ({ apps: serverApps }: { apps: unknown[] }) => {
-			if (!mountedRef.current) return;
-			const mapped = registerAndMapApps(serverApps as Parameters<typeof registerAndMapApps>[0]);
-			setApps(mapped);
 		});
 	}, [cm]);
 

@@ -21,7 +21,8 @@ import type { RocketRideClient } from 'rocketride';
  * - Server is not SaaS (capabilities doesn't include 'saas')
  *
  * Gated when:
- * - Connected to a SaaS server AND subscribedApps doesn't include the appId
+ * - Connected to a SaaS server AND the app is not on the user's desktop
+ *   with an active subscription (or is "free"/"unsubscribed" paywall)
  *
  * @param client - The RocketRide client instance (may be undefined if disconnected).
  * @param appId  - App identifier to check (e.g. PIPE_BUILDER_APP_ID).
@@ -37,11 +38,13 @@ export function isSubscribed(client: RocketRideClient | undefined, appId: string
 	const capabilities: string[] = info.capabilities ?? [];
 	if (!capabilities.includes('saas')) return true;
 
-	// Check subscribedApps — entries may be plain strings or { appId, status } objects
-	const apps: unknown[] = info.subscribedApps ?? [];
-	return apps.some((entry) => {
-		if (typeof entry === 'string') return entry === appId;
-		if (entry && typeof entry === 'object' && 'appId' in entry) return (entry as { appId: string }).appId === appId;
-		return false;
-	});
+	// Check ConnectResult.apps for the desktop app entry
+	const apps: { appId: string; subscriptionStatus: string }[] =
+		(info as Record<string, unknown>).apps as { appId: string; subscriptionStatus: string }[] ?? [];
+	const entry = apps.find((a) => a.appId === appId);
+	if (!entry) return false;
+
+	// Allow launch for free, active, trialing, and unsubscribed (paywall base features)
+	const allowed = ['free', 'active', 'trialing', 'unsubscribed'];
+	return allowed.includes(entry.subscriptionStatus);
 }

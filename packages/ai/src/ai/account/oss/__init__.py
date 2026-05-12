@@ -139,6 +139,12 @@ class Account(AccountBase):
                     ],
                 }
             ],
+            # OSS: all apps are on the desktop with subscriptionStatus="free"
+            apps=[
+                {'appId': a.get('id', ''), 'subscriptionStatus': 'free'}
+                for a in self._read_apps_json(public_only=False)
+                if a.get('id')
+            ],
             capabilities=self.capabilities,
         )
 

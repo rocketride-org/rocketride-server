@@ -145,13 +145,14 @@ export declare function useAuthUser(): ConnectResult | null;
 export declare function useLogout(): (() => void) | null;
 
 /**
- * Access the user's subscription state.
+ * Access the user's desktop apps and subscription state.
  *
- * @returns Object with subscribedAppIds (Set) and subscriptionStatuses (Map).
+ * @returns Object with desktopApps array, isOnDesktop lookup, and getStatus lookup.
  */
 export declare function useSubscriptions(): {
-	subscribedAppIds: Set<string>;
-	subscriptionStatuses: Map<string, string>;
+	desktopApps: { appId: string; subscriptionStatus: string; seats?: number; seatsUsed?: number; features?: string[] }[];
+	isOnDesktop: (appId: string) => boolean;
+	getStatus: (appId: string) => string | undefined;
 };
 
 // =============================================================================

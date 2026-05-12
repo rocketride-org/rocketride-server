@@ -201,6 +201,13 @@ export interface RocketRideClientConfig {
 	/** Optional function to output a debug message */
 	onDebugMessage?: (message: string) => void;
 
+	/**
+	 * Open a public (unauthenticated) connection.
+	 * Only ``rrext_public_*`` commands may be sent. The connection is
+	 * permanently public — call connect() on a separate client to authenticate.
+	 */
+	public?: boolean;
+
 	/** Maintain the connection */
 	persist?: boolean;
 
@@ -306,6 +313,8 @@ export interface OrgInfo {
  * an `apaext_account` event (e.g. after a plan change). The `userToken`
  * field is used for subsequent reconnects in persist mode.
  */
+
+
 export interface ConnectResult {
 	/**
 	 * Short-lived RocketRide session token (`rr_…`) that can be replayed on
@@ -356,25 +365,17 @@ export interface ConnectResult {
 	organizations: OrgInfo[];
 
 	/**
-	 * App IDs the user's primary organisation is currently subscribed to.
-	 * Only includes subscriptions with status `active`, `trialing`, or `past_due`.
-	 * Empty for free-tier orgs with no paid app subscriptions.
+	 * Apps on the user's desktop with subscription status.
+	 * OSS: all apps with ``subscriptionStatus: "free"``.
+	 * SaaS: populated from the ``app_users`` table, enriched with subscription info.
 	 */
-	subscribedApps: string[];
+	apps: AppManifestEntry[];
 
 	/**
 	 * Server capability tags describing the account provider in use.
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
 	capabilities: string[];
-
-	/**
-	 * Apps the authenticated user is entitled to see.
-	 *
-	 * Replaces the pre-auth public app list with the full entitled set
-	 * based on the user's org/team memberships and subscriptions.
-	 */
-	apps?: AppManifestEntry[];
 }
 
 /**
@@ -431,6 +432,18 @@ export interface AppManifestEntry {
 
 	/** Available pricing tiers (SaaS paid apps only). */
 	stripePrices?: StripePriceEntry[];
+
+	/** Subscription status (present on desktop apps from ConnectResult.apps). */
+	subscriptionStatus?: string;
+
+	/** Total seats on the subscription (only for subscribed paid apps). */
+	seats?: number;
+
+	/** Seats currently occupied in this org (only for subscribed paid apps). */
+	seatsUsed?: number;
+
+	/** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
+	features?: string[];
 }
 
 /**

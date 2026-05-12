@@ -278,6 +278,9 @@ export class RocketRideClient extends DAPClient {
 	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
 	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
+	/** When true the connection is permanently unauthenticated — only rrext_public_* commands. */
+	private _public: boolean = false;
+
 	// Persistence properties for automatic reconnection
 	private _persist: boolean = false;
 	private _reconnectTimeout?: ReturnType<typeof setTimeout>;
@@ -387,6 +390,9 @@ export class RocketRideClient extends DAPClient {
 		if (onConnectError) this._callerOnConnectError = onConnectError;
 		if (config.onTrace) this._onTrace = config.onTrace;
 
+		// Public mode — permanently unauthenticated, only rrext_public_* commands
+		this._public = config.public ?? false;
+
 		// Set up persistence options
 		this._persist = persist ?? false;
 		this._maxRetryTime = maxRetryTime;
@@ -433,14 +439,14 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Probe a server for its capabilities without authenticating.
 	 *
-	 * Creates a temporary connection, sends an `auth` request with
-	 * `infoOnly: true`, and returns the server metadata. The server
-	 * responds without requiring credentials.
+	 * Creates a temporary public connection and sends an
+	 * ``rrext_public_probe`` command. The server responds with version,
+	 * capabilities, platform, and public apps without requiring credentials.
 	 *
-	 * @param uri - Server URI (e.g. `"localhost:5565"`, `"https://cloud.rocketride.ai"`)
+	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://cloud.rocketride.ai"``)
 	 * @param timeout - Optional timeout in ms for the entire operation
 	 * @returns Server info including version and capability tags
-	 * @throws Error if the server is unreachable or does not support info probes
+	 * @throws Error if the server is unreachable or does not support probes
 	 *
 	 * @example
 	 * ```typescript
@@ -451,13 +457,13 @@ export class RocketRideClient extends DAPClient {
 	 * ```
 	 */
 	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
-		const client = new RocketRideClient({ uri, persist: false, auth: '' });
+		const client = new RocketRideClient({ uri, persist: false, public: true });
 		try {
-			// Open the transport without the normal auth handshake
-			await client._internalConnect_transportOnly(timeout);
+			// Open a public connection (no auth handshake)
+			await client._internalConnect(timeout);
 
-			// Send auth with infoOnly flag — server returns metadata without authenticating
-			const message = client.buildRequest('auth', { arguments: { infoOnly: true } });
+			// Send rrext_public_probe — allowed on unauthenticated connections
+			const message = client.buildRequest('rrext_public_probe', {});
 			const response = await client.request(message, timeout);
 
 			if (response.success === false) {
@@ -525,19 +531,14 @@ export class RocketRideClient extends DAPClient {
 			const transport = new TransportWebSocket(this._uri, this._apikey!);
 			this._bindTransport(transport);
 		}
-		return super._dapConnect(timeout);
-	}
 
-	/**
-	 * Opens the transport (WebSocket) without sending the auth handshake.
-	 * Used by getServerInfo() to send a custom auth request with infoOnly.
-	 */
-	private async _internalConnect_transportOnly(timeout?: number): Promise<void> {
-		if (!this._transport) {
-			const transport = new TransportWebSocket(this._uri, this._apikey!);
-			this._bindTransport(transport);
+		// Public connections open the transport but skip the auth handshake
+		if (this._public) {
+			await this._transport!.connect(timeout);
+			return {} as ConnectResult;
 		}
-		await this._transport!.connect(timeout);
+
+		return super._dapConnect(timeout);
 	}
 
 	/**

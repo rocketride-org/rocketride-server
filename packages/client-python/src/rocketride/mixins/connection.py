@@ -133,10 +133,20 @@ class ConnectionMixin(DAPClient):
         """
         Create transport if needed, connect, send auth, and notify on_connected.
         Returns the auth response body (ConnectResult fields). Raises on failure.
+
+        When ``_public`` is True the transport is opened but no auth command
+        is sent — the connection stays permanently unauthenticated and only
+        ``rrext_public_*`` commands may be issued.
         """
         if self._transport is None:
             self._transport = TransportWebSocket(uri=self._uri, auth=self._apikey)
             self._bind_transport(self._transport)
+
+        # Public connections open the transport but skip the auth handshake
+        if getattr(self, '_public', False):
+            await self._transport.connect(timeout)
+            self._connect_result = {}
+            return {}
 
         return await DAPClient.connect(self, timeout)
 

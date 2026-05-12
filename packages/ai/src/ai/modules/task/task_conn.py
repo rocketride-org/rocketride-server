@@ -59,11 +59,9 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
-import sys
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
-from rocketlib import getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
@@ -74,6 +72,7 @@ from .commands.cmd_misc import MiscCommands
 from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
+from .commands.cmd_public import PublicCommands
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -101,6 +100,7 @@ class TaskConn(
     CProfileCommands,
     AccountCommands,
     AppCommands,
+    PublicCommands,
     DAPConn,
 ):
     """
@@ -240,8 +240,11 @@ class TaskConn(
 
     async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
-        Intercept DAP dispatch: whitelist auth and login pre-authentication;
-        reject and disconnect all other commands until authenticated.
+        Intercept DAP dispatch: allow auth and rrext_public_* commands
+        before authentication; reject everything else until authenticated.
+
+        The rrext_public_* prefix convention lets public commands (catalog
+        browsing, server probe) bypass auth without maintaining a whitelist.
         """
         if message is None:
             message = {}
@@ -249,18 +252,15 @@ class TaskConn(
         self._last_activity = time.time()
         cmd = message.get('command', '')
 
-        # auth is always allowed before authentication:
-        #   auth  — authenticates the connection with a credential (access_token or user key)
-        if message.get('type') == 'request' and cmd in ('auth',):
+        # auth and rrext_public_* commands are allowed before authentication
+        if message.get('type') == 'request' and (cmd == 'auth' or cmd.startswith('rrext_public_')):
             await super().on_receive(message)
             return
 
         if not self._authenticated:
-            # Send an error message
+            # Send an error and schedule disconnect
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
-
-            # Schedules the disconnect after we return
             self._transport.disconnect()
             return
 
@@ -277,19 +277,6 @@ class TaskConn(
         the counter: the cap is a per-connection lifetime limit.
         """
         args = request.get('arguments') or {}
-
-        # Info-only probe: return server metadata without authenticating.
-        # Does not count toward auth attempts or change connection state.
-        if args.get('infoOnly'):
-            account = self._server._server.account
-            # Return server metadata + public apps for pre-auth shell bootstrap
-            info = {
-                'version': getVersion(),
-                'capabilities': account.capabilities,
-                'platform': sys.platform,
-                'apps': await account.get_public_apps(),
-            }
-            return self.build_response(request, body=info)
 
         # Count every call (including empty/deauth and re-auth) toward the cap.
         self._auth_attempts += 1
@@ -353,15 +340,9 @@ class TaskConn(
             user_id=self._account_info.userId,
         )
 
-        # Build the connect result and include the user's entitled apps.
-        # This replaces the pre-auth public apps with the full set.
-        account = self._server._server.account
-        connect_result = result.to_connect_result()
-        connect_result['apps'] = await account.get_apps_for_user(
-            user_id=result.userId,
-            organizations=result.organizations,
-        )
-        return self.build_response(request, body=connect_result)
+        # Apps are already populated in AccountInfo by the account service
+        # (desktop apps with full manifest + subscription status).
+        return self.build_response(request, body=result.to_connect_result())
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the authenticated user has the given permission for their default team."""

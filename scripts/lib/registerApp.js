@@ -12,8 +12,17 @@
  *     "name": "RocketRide",
  *     "description": "Visual AI pipeline editor",
  *     "icon": "./src/icon.svg",
- *     "categories": ["pipelines", "ai"]
+ *     "categories": ["pipelines", "ai"],
+ *     "mode": "free",
+ *     "shells": ["saas", "vscode"]
  *   }
+ *
+ * mode must be one of "free", "subscription", or "paywall".
+ * "subscription" and "paywall" require stripeProductId to be set.
+ * Default: "free" if no stripeProductId, "subscription" if stripeProductId present.
+ *
+ * shells is an optional array of compatible shells: "saas", "oss", "vscode".
+ * Omitted means compatible with all shells.
  *
  * moduleId is derived from id by replacing non-identifier characters
  * with underscores (e.g. 'rocketride.pipeBuilder' → 'rocketride_pipeBuilder').
@@ -132,6 +141,40 @@ function registerApp(appRoot) {
 			// Derive moduleId from appId
 			const moduleId = appManifest.moduleId ?? toModuleId(appManifest.id);
 
+			// Resolve app mode — default based on stripeProductId presence
+			const mode = appManifest.mode
+				?? (appManifest.stripeProductId ? 'subscription' : 'free');
+
+			// Validate: subscription and paywall modes require a stripeProductId
+			if ((mode === 'subscription' || mode === 'paywall') && !appManifest.stripeProductId) {
+				throw new Error(
+					`App "${appManifest.id}" has mode="${mode}" but no stripeProductId. `
+					+ 'Paid modes require a Stripe product.'
+				);
+			}
+
+			// Validate mode value
+			if (!['free', 'subscription', 'paywall'].includes(mode)) {
+				throw new Error(
+					`App "${appManifest.id}" has invalid mode="${mode}". `
+					+ 'Must be "free", "subscription", or "paywall".'
+				);
+			}
+
+			// Resolve shells — optional array of compatible shells
+			const shells = appManifest.shells ?? null;
+			if (shells !== null) {
+				const valid = ['saas', 'oss', 'vscode'];
+				for (const s of shells) {
+					if (!valid.includes(s)) {
+						throw new Error(
+							`App "${appManifest.id}" has invalid shell="${s}". `
+							+ `Must be one of: ${valid.join(', ')}.`
+						);
+					}
+				}
+			}
+
 			// Copy icon to the app's build output dir
 			let icon = '';
 			if (appManifest.icon) {
@@ -145,6 +188,19 @@ function registerApp(appRoot) {
 				}
 			}
 
+			// Copy readme to the app's build output dir
+			let readme = '';
+			if (appManifest.readme) {
+				const readmeSrc = path.resolve(appRoot, appManifest.readme);
+				try {
+					fs.mkdirSync(buildDir, { recursive: true });
+					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
+					readme = `/shell/${APPS_BASE}/${dirName}/README.md`;
+				} catch {
+					task.output = `Warning: readme not found at ${appManifest.readme}`;
+				}
+			}
+
 			// Build the apps.json entry
 			const appEntry = {
 				id:            appManifest.id,
@@ -152,11 +208,15 @@ function registerApp(appRoot) {
 				publisher:     appManifest.publisher ?? '',
 				name:          appManifest.name,
 				description:   appManifest.description ?? '',
-				readme:        appManifest.readme ?? '',
+				readme,
 				icon,
 				categories:    appManifest.categories ?? [],
 				settings:      appManifest.settings ?? [],
 				entry:         `/shell/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				// App monetization mode
+				mode,
+				// Shell compatibility filter (omitted = all shells)
+				...(shells ? { shells } : {}),
 				// Include authenticated only when explicitly false
 				...(appManifest.authenticated === false ? { authenticated: false } : {}),
 				// Include showHeader only when explicitly false

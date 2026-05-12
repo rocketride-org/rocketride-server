@@ -21,59 +21,55 @@
 // SOFTWARE.
 
 // =============================================================================
-// useSubscriptions — reads subscribed app IDs and statuses from ConnectResult
+// useSubscriptions — reads desktop apps from ConnectResult.apps
 // =============================================================================
 
 import { useMemo } from 'react';
+import type { AppManifestEntry } from '../workspace/types';
 import { useAuthUser } from './useAuthUser';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export type SubscriptionStatus = 'active' | 'trialing' | 'past_due' | 'incomplete';
-
-interface SubscriptionEntry {
-	appId: string;
-	status: SubscriptionStatus;
-}
+/** Subscription status values from the server. */
+export type SubscriptionStatus = 'free' | 'unsubscribed' | 'active' | 'trialing' | 'past_due' | 'incomplete' | 'canceled';
 
 // =============================================================================
 // HOOK
 // =============================================================================
 
 /**
- * Returns the set of app IDs the current user's primary organisation
- * is subscribed to, plus a status map for checking individual app states.
+ * Returns the user's desktop apps from ``ConnectResult.apps``.
  *
- * The data comes from `ConnectResult.subscribedApps` which is populated
- * by the server (no additional network request). Each entry is an object
- * with `{ appId, status }` where status is one of:
- * - `active` / `trialing` / `past_due` — fully accessible
- * - `incomplete` — payment pending, shown as "Pending" in the UI
+ * Single source of truth for which apps are on the desktop and their
+ * subscription status. Data arrives with the auth handshake and is
+ * pushed live via ``apaext_account`` events.
  */
 export function useSubscriptions(): {
-	subscribedAppIds: Set<string>;
-	subscriptionStatuses: Map<string, SubscriptionStatus>;
+	desktopApps: AppManifestEntry[];
+	/** Quick lookup: is this appId on the desktop? */
+	isOnDesktop: (appId: string) => boolean;
+	/** Quick lookup: what's this app's subscription status? */
+	getStatus: (appId: string) => SubscriptionStatus | undefined;
 } {
 	const identity = useAuthUser();
 
 	return useMemo(() => {
-		const raw: (string | SubscriptionEntry)[] = identity?.subscribedApps ?? [];
-		const ids = new Set<string>();
-		const statuses = new Map<string, SubscriptionStatus>();
+		const raw: AppManifestEntry[] = identity?.apps ?? [];
 
+		// Build a lookup map for fast access
+		const statusMap = new Map<string, SubscriptionStatus>();
 		for (const entry of raw) {
-			if (typeof entry === 'string') {
-				// Backwards compat: plain string means active
-				ids.add(entry);
-				statuses.set(entry, 'active');
-			} else if (entry && typeof entry === 'object' && entry.appId) {
-				ids.add(entry.appId);
-				statuses.set(entry.appId, entry.status ?? 'active');
+			if (entry?.id) {
+				statusMap.set(entry.id, (entry.subscriptionStatus ?? 'free') as SubscriptionStatus);
 			}
 		}
 
-		return { subscribedAppIds: ids, subscriptionStatuses: statuses };
-	}, [identity?.subscribedApps]);
+		return {
+			desktopApps: raw,
+			isOnDesktop: (appId: string) => statusMap.has(appId),
+			getStatus: (appId: string) => statusMap.get(appId),
+		};
+	}, [identity?.apps]);
 }
