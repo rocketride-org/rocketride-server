@@ -1,0 +1,35 @@
+{
+	"source": "chat_1",
+	"project_id": "a1b2c3d4-0000-4000-8000-000000000102",
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "type": "chat" }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-5",
+				"openai-5": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "llm_deepseek_1",
+			"provider": "llm_deepseek",
+			"config": {
+				"profile": "cloud-reasoner",
+				"cloud-reasoner": { "apikey": "${ROCKETRIDE_DEEPSEEK_KEY}", "serverbase": "https://mock-deepseek.invalid/v1" }
+			},
+			"input": [{ "lane": "questions", "from": "llm_openai_1" }]
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": {},
+			"input": [{ "lane": "answers", "from": "llm_deepseek_1" }]
+		}
+	]
+}
