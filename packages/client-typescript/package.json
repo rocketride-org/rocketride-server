@@ -60,7 +60,7 @@
 		"jest-jasmine2": "^30.2.0",
 		"rimraf": "^5.0.5",
 		"ts-jest": "^29.4.4",
-		"typescript": "^5.0.0",
+		"typescript": "^6.0.3",
 		"ws": "^8.20.0"
 	},
 	"pnpm": {
