@@ -10,7 +10,7 @@
 		"rocketride": "workspace:*",
 		"@textea/json-viewer": "^4.0.1",
 		"@types/ws": "^8.18.1",
-		"lucide-react": "^0.540.0",
+		"lucide-react": "^0.577.0",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
 		"react-markdown": "^10.1.0",
@@ -18,8 +18,8 @@
 		"recharts": "^2.8.0",
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",
-		"web-vitals": "^5.1.0",
-		"ws": "^8.18.3"
+		"web-vitals": "^5.2.0",
+		"ws": "^8.20.0"
 	},
 	"devDependencies": {
 		"@rsbuild/core": "^0.4.0",

@@ -103,7 +103,7 @@
 		"./constants/*": "./src/constants/*"
 	},
 	"dependencies": {
-		"lucide-react": "^0.540.0",
+		"lucide-react": "^0.577.0",
 		"@cfworker/json-schema": "^4.1.1"
 	}
 }
