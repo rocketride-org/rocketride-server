@@ -7,15 +7,25 @@ from rocketlib import getServiceDefinition
 class AccountPipelineValidation:
     def validate(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """
-        Validate the user has the correct plan for a pipeline.
+        Validate the user has the correct subscribed app for a pipeline.
+
+        Fix F-03: was reading account_info.plans which does not exist on
+        AccountInfo. The correct field is account_info.subscribedApps, a
+        list of SubscribedApp objects with 'appId' and 'status' keys.
         """
         required_plans = self._get_pipeline_required_plans(pipeline)
 
-        # Check if user has required plan for pipeline
         if len(required_plans):
-            account_plans = set(account_info.plans)
+            # Build a set of active/trialing subscribed app IDs from the
+            # correct AccountInfo field (was incorrectly `account_info.plans`).
+            active_statuses = {'active', 'trialing'}
+            account_app_ids = {
+                s['appId']
+                for s in (account_info.subscribedApps or [])
+                if s.get('status') in active_statuses
+            }
             for required_plan in required_plans:
-                if required_plan not in account_plans:
+                if required_plan not in account_app_ids:
                     return False
 
         return True
@@ -37,7 +47,6 @@ class AccountPipelineValidation:
         nodes = {component['id']: component for component in components}
         node_children: Dict[str, List[str]] = {}
 
-        # Build node traversal maps
         for component in components:
             for lane in component.get('input', []):
                 node_children.setdefault(lane['from'], []).append(component['id'])
@@ -45,7 +54,6 @@ class AccountPipelineValidation:
         visited = set()
         queue = deque([source])
 
-        # BFS traversal collecting plans from components in source path
         while queue:
             id = queue.popleft()
             if id in visited:

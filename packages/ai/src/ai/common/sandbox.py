@@ -1,24 +1,6 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2024 RocketRide Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 # =============================================================================
 
 """
@@ -34,20 +16,19 @@ Runs agent-supplied code via RestrictedPython inside a controlled namespace with
 
 3. **Allowlist-only ``__import__``** — a gated ``__import__`` is injected that
    only permits modules explicitly listed in ``allowed_modules``.  Everything
-   else raises ``ImportError``.
+   else raises ``ImportError``.  Auto-install via pip has been removed (F-01).
 
 4. **stdout capture** via a ``StringIO``-backed ``print()`` override.
 
-5. **Timeout enforcement** via a daemon thread with ``thread.join(timeout)``.
+5. **Timeout enforcement** via ``multiprocessing.Process`` with
+   ``process.terminate()`` / ``process.kill()`` so timed-out scripts are
+   actually killed rather than left running (F-09).
 """
 
 from __future__ import annotations
 
-import importlib
-import subprocess
+import multiprocessing
 import operator
-import sys
-import threading
 import traceback
 from typing import Any, Dict, Set
 
@@ -64,6 +45,9 @@ _MAX_OUTPUT = 51200  # 50 KB
 
 # ── Default allowed modules ─────────────────────────────────────────────────
 # Safe, pure-computation modules with no filesystem, network, or OS access.
+# To add a module, pre-install it in the container image and add it here.
+# Do NOT add modules at runtime — all allowed modules must be present at
+# container build time (pip auto-install removed, see F-01).
 _DEFAULT_ALLOWED_MODULES = frozenset(
     {
         'math',
@@ -104,8 +88,6 @@ _DEFAULT_ALLOWED_MODULES = frozenset(
 
 
 # ── Extra builtins added on top of RestrictedPython's safe_builtins ───────
-# safe_builtins is intentionally minimal (no dict, list, enumerate, etc.).
-# These are non-dangerous builtins agents need for everyday data work.
 _EXTRA_SAFE_BUILTINS = frozenset(
     {
         'all',
@@ -158,78 +140,58 @@ def _guarded_getitem(obj: Any, key: Any) -> Any:
     return obj[key]
 
 
-def execute_sandboxed(
-    code: str,
-    *,
-    allowed_modules: Set[str] | None = None,
-    timeout: int | None = None,
-) -> Dict[str, Any]:
-    """Run *code* in a RestrictedPython sandbox and return the result.
+# ── Module-level worker function (must be top-level for pickling) ──────────
 
-    Returns a dict with ``stdout``, ``stderr``, ``exit_code``, ``timed_out``,
-    and ``result`` (the value of a variable named ``result`` if set by the
-    code).
-
-    *allowed_modules*, if provided, is merged with ``_DEFAULT_ALLOWED_MODULES``
-    to form the full allowlist.  Only modules in this set can be imported.
+def _sandbox_worker(code: str, allowlist: frozenset, result_queue: multiprocessing.Queue) -> None:
     """
-    # ── 0. Compile with RestrictedPython ───────────────────────────────
-    try:
-        compiled = compile_restricted(
-            code,
-            filename='<agent_script>',
-            mode='exec',
-        )
-    except SyntaxError as exc:
-        return {
-            'stdout': '',
-            'stderr': str(exc),
-            'exit_code': 1,
-            'timed_out': False,
-        }
+    Worker function executed in a child process.
 
-    # compile_restricted returns None when it encounters policy violations
+    Compiles and executes *code* inside a RestrictedPython sandbox, then
+    puts the result dict into *result_queue*.  Runs in an isolated process
+    so that ``process.terminate()`` can forcibly kill it on timeout.
+    """
+    import builtins as _builtins
+    import traceback as _traceback
+
+    # ── Compile ────────────────────────────────────────────────────────────
+    try:
+        compiled = compile_restricted(code, filename='<agent_script>', mode='exec')
+    except SyntaxError as exc:
+        result_queue.put({'stdout': '', 'stderr': str(exc), 'exit_code': 1, 'timed_out': False})
+        return
+
     if compiled is None:
-        return {
+        result_queue.put({
             'stdout': '',
             'stderr': 'Code blocked by RestrictedPython compilation policy.',
             'exit_code': 1,
             'timed_out': False,
-        }
+        })
+        return
 
-    allowlist = _DEFAULT_ALLOWED_MODULES | (allowed_modules or set())
-
-    # ── 1. Build safe builtins ─────────────────────────────────────────
-    # RestrictedPython's safe_builtins is very minimal — it omits common
-    # data-processing builtins that agents need (dict, list, enumerate, etc.).
-    # We add back the ones that are safe for sandboxed computation.
+    # ── Build safe builtins ────────────────────────────────────────────────
     sandbox_builtins: Dict[str, Any] = dict(safe_builtins)
-    import builtins as _builtins
-
     for _name in _EXTRA_SAFE_BUILTINS:
         sandbox_builtins[_name] = getattr(_builtins, _name)
 
-    # ── 2. Inject allowlist-only __import__ ────────────────────────────
-    original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+    # ── Allowlist-only __import__ — NO auto-install (F-01 fix) ────────────
+    original_import = _builtins.__import__
 
     def restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
         top_level = name.split('.')[0]
         if top_level not in allowlist:
-            raise ImportError(f"Import of '{name}' is not allowed. Allowed modules: {', '.join(sorted(allowlist))}")
-        try:
-            return original_import(name, *args, **kwargs)
-        except ModuleNotFoundError:
-            # Module is allowed but not installed — auto-install via pip
-            if top_level not in _DEFAULT_ALLOWED_MODULES:
-                _pip_install(top_level)
-                return original_import(name, *args, **kwargs)
-            raise
+            raise ImportError(
+                f"Import of '{name}' is not allowed in the sandbox. "
+                f"Allowed modules: {', '.join(sorted(allowlist))}. "
+                f"To add a module, it must be pre-installed in the server image and "
+                f"added to the operator's allowedModules configuration."
+            )
+        # Module must already be installed — no runtime pip install.
+        return original_import(name, *args, **kwargs)
 
     sandbox_builtins['__import__'] = restricted_import
 
-    # ── 3. Execution namespace with RestrictedPython guards ──────────
-    # RestrictedPython transforms print() calls to use PrintCollector.
-    # After execution, the collected output is in the ``printed`` variable.
+    # ── Execution namespace ────────────────────────────────────────────────
     sandbox_globals: Dict[str, Any] = {
         '__builtins__': sandbox_builtins,
         '_getattr_': safer_getattr,
@@ -244,50 +206,32 @@ def execute_sandboxed(
         '__name__': '<agent_script>',
     }
 
-    # ── 5. Run in a daemon thread with timeout ─────────────────────────
-    timed_out = False
     stderr = ''
     exit_code = 0
 
-    def _run() -> None:
-        nonlocal stderr, exit_code
-        try:
-            exec(compiled, sandbox_globals)  # noqa: S102
-        except SystemExit as e:
-            if e.code is None:
-                exit_code = 0
-            elif isinstance(e.code, int):
-                exit_code = e.code
-            else:
-                stderr = f'SystemExit: {e.code}'
-                exit_code = 1
-        except Exception:
-            stderr = traceback.format_exc()
+    try:
+        exec(compiled, sandbox_globals)  # noqa: S102
+    except SystemExit as e:
+        if e.code is None:
+            exit_code = 0
+        elif isinstance(e.code, int):
+            exit_code = e.code
+        else:
+            stderr = f'SystemExit: {e.code}'
             exit_code = 1
+    except Exception:
+        stderr = _traceback.format_exc()
+        exit_code = 1
 
-    effective_timeout = timeout if timeout is not None else _TIMEOUT
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    thread.join(timeout=effective_timeout)
-
-    if thread.is_alive():
-        timed_out = True
-        stderr = f'[Execution timed out after {effective_timeout}s]'
-        exit_code = -1
-
-    # ── 6. Collect output ──────────────────────────────────────────────
-    # RestrictedPython stores the PrintCollector instance as '_print';
-    # calling it returns the collected text.
     _print_collector = sandbox_globals.get('_print')
-    stdout = _truncate(_print_collector() if callable(_print_collector) else '')
-    stderr = _truncate(stderr)
+    stdout = _print_collector() if callable(_print_collector) else ''
 
     result_val = sandbox_globals.get('result')
     response: Dict[str, Any] = {
-        'stdout': stdout,
-        'stderr': stderr,
+        'stdout': _truncate(stdout),
+        'stderr': _truncate(stderr),
         'exit_code': exit_code,
-        'timed_out': timed_out,
+        'timed_out': False,
     }
 
     if result_val is not None:
@@ -300,19 +244,67 @@ def execute_sandboxed(
         except Exception:
             response['result'] = repr(result_val)
 
-    return response
+    result_queue.put(response)
 
 
-def _pip_install(package: str) -> None:
-    """Auto-install a package via pip. Only called for non-default allowlisted modules."""
-    subprocess.check_call(
-        [sys.executable, '-m', 'pip', 'install', '--quiet', package],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        timeout=60,
+def execute_sandboxed(
+    code: str,
+    *,
+    allowed_modules: Set[str] | None = None,
+    timeout: int | None = None,
+) -> Dict[str, Any]:
+    """Run *code* in a RestrictedPython sandbox and return the result.
+
+    Returns a dict with ``stdout``, ``stderr``, ``exit_code``, ``timed_out``,
+    and ``result`` (the value of a variable named ``result`` if set by the
+    code).
+
+    *allowed_modules*, if provided, is merged with ``_DEFAULT_ALLOWED_MODULES``
+    to form the full allowlist.  Only modules in this set can be imported.
+
+    All allowed modules must be pre-installed in the container image.
+    Runtime pip installation has been removed (security fix F-01).
+
+    Execution runs in a child *process* (not a thread) so that timed-out
+    scripts can be forcibly terminated (security fix F-09).
+    """
+    allowlist = _DEFAULT_ALLOWED_MODULES | (allowed_modules or set())
+    effective_timeout = timeout if timeout is not None else _TIMEOUT
+
+    # Use a multiprocessing Queue to receive the result from the child process.
+    result_queue: multiprocessing.Queue = multiprocessing.Queue()
+
+    proc = multiprocessing.Process(
+        target=_sandbox_worker,
+        args=(code, allowlist, result_queue),
+        daemon=True,
     )
-    # Clear the import cache so the freshly installed module is found
-    importlib.invalidate_caches()
+    proc.start()
+    proc.join(timeout=effective_timeout)
+
+    if proc.is_alive():
+        # Timed out — forcibly kill the child process (F-09 fix).
+        proc.terminate()
+        proc.join(timeout=2)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=1)
+        return {
+            'stdout': '',
+            'stderr': f'[Execution timed out after {effective_timeout}s]',
+            'exit_code': -1,
+            'timed_out': True,
+        }
+
+    if result_queue.empty():
+        return {
+            'stdout': '',
+            'stderr': '[Sandbox process exited without producing a result]',
+            'exit_code': proc.exitcode if proc.exitcode is not None else -1,
+            'timed_out': False,
+        }
+
+    return result_queue.get_nowait()
 
 
 def _truncate(text: str, max_size: int = _MAX_OUTPUT) -> str:

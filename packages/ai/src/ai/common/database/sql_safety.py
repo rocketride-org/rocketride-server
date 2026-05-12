@@ -1,24 +1,6 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 # =============================================================================
 
 """
@@ -40,6 +22,10 @@ def is_sql_safe(sql: str) -> bool:
     allowed.  Everything else is rejected.  This is safer than a blacklist
     because new or uncommon SQL commands (SET, COPY, PREPARE/EXECUTE, DO,
     HANDLER, etc.) are blocked by default.
+
+    Fix F-04: added WITH to allowed_pattern so that CTE queries (which start
+    with the WITH keyword) are correctly permitted instead of being silently
+    rejected.
     """
     # Strip comments first so embedded keywords in comments don't fool the
     # patterns, and so comment-based bypasses (e.g. /*!DROP*/) are neutralised.
@@ -47,15 +33,21 @@ def is_sql_safe(sql: str) -> bool:
     sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)  # Remove block comments
 
     # Split on semicolons to check each individual statement separately.
-    # A single input may contain multiple statements chained with ';'.
     statements = [s.strip() for s in re.split(r';\s*', sql.strip()) if s.strip()]
 
     # Only SELECT and WITH (common-table-expression leading into SELECT) are
     # allowed.  EXPLAIN is permitted as a prefix to either.
-    allowed_pattern = re.compile(r'^\s*(explain\s+)?(select)\b', re.IGNORECASE)
+    # F-04 fix: WITH was missing from allowed_pattern despite being documented.
+    allowed_pattern = re.compile(r'^\s*(explain\s+)?(select|with)\b', re.IGNORECASE)
+
+    # Guard against CTEs that front DML (e.g. WITH cte AS (...) DELETE ...).
+    # A statement starting with WITH must eventually resolve to a SELECT, not
+    # INSERT / UPDATE / DELETE / MERGE.
+    cte_dml_pattern = re.compile(
+        r'\b(insert|update|delete|merge)\b', re.IGNORECASE
+    )
 
     for stmt in statements:
-        # Every statement must start with an allowed keyword.
         if not allowed_pattern.match(stmt):
             return False
 
@@ -64,6 +56,10 @@ def is_sql_safe(sql: str) -> bool:
         # SELECT ... INTO OUTFILE / INTO DUMPFILE can write arbitrary files on
         # the database server — block it even though it starts with SELECT.
         if re.search(r'\bselect\b.*\binto\s+(outfile|dumpfile)\b', stmt_lower, re.DOTALL):
+            return False
+
+        # WITH ... INSERT/UPDATE/DELETE/MERGE — CTE fronting a DML statement.
+        if stmt_lower.lstrip().startswith('with') and cte_dml_pattern.search(stmt_lower):
             return False
 
     return True
