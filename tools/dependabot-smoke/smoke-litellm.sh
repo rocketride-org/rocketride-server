@@ -30,6 +30,12 @@ echo "==> Installing tools/requirements.txt"
 echo "==> Smoke: litellm import + core APIs"
 "$VENV/bin/python" - <<'PY'
 import litellm
+from importlib.metadata import version as _pkg_version
+
+# litellm >=1.83 dropped the module-level __version__ attribute and raises
+# AttributeError on access via its custom __getattr__. Use the standard
+# importlib.metadata route instead so this smoke test works across versions.
+litellm_version = _pkg_version("litellm")
 
 # 1. model_cost is the big lookup table sync_models.py reads
 assert hasattr(litellm, "model_cost"), "litellm.model_cost missing"
@@ -43,7 +49,7 @@ assert isinstance(info, dict), f"get_model_info returned {type(info).__name__}, 
 assert "max_input_tokens" in info or "max_tokens" in info, \
     f"get_model_info missing context-window key; got {sorted(info.keys())}"
 
-print(f"litellm {litellm.__version__}: model_cost={len(litellm.model_cost)} entries; get_model_info OK")
+print(f"litellm {litellm_version}: model_cost={len(litellm.model_cost)} entries; get_model_info OK")
 PY
 
 echo "==> Smoke: project consumer imports + calls"

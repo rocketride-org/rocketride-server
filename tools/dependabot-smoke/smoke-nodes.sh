@@ -77,13 +77,21 @@ for node_dir in "${!NODE_IMPORTS[@]}"; do
     fi
   done
 
-  # Smoke import each expected module.
+  # Smoke import each expected module. Use importlib.metadata for the
+  # version (some packages — e.g. PyMySQL — set a misleading __version__
+  # constant on the module that doesn't match the installed package).
   for module in $imports; do
     if "$VENV/bin/python" -c '
 import sys
+from importlib.metadata import version, PackageNotFoundError
 mod = sys.argv[1]
 m = __import__(mod)
-ver = getattr(m, "__version__", "<no __version__>")
+# Map import name -> pip package name for the cases where they differ.
+pip_name = {"opensearchpy": "opensearch-py", "psycopg2": "psycopg2-binary"}.get(mod, mod)
+try:
+    ver = version(pip_name)
+except PackageNotFoundError:
+    ver = getattr(m, "__version__", "<unknown>")
 print(f"  OK: import {mod}={ver}")
 ' "$module"; then
       :
