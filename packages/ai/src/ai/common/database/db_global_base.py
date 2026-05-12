@@ -60,6 +60,8 @@ from sqlalchemy.exc import DBAPIError
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
 
+DEFAULT_MAX_EXECUTE_ROWS = 25000
+
 
 class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
@@ -72,7 +74,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
     allow_execute: bool = False
-    max_execute_rows: int = 25000
+    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -455,9 +457,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         else:
             self.allow_execute = bool(allow_execute)
         try:
-            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', 25000)))
+            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
         except (TypeError, ValueError):
-            self.max_execute_rows = 25000
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
 
         self.database = params['database']
         self.table = params['table']

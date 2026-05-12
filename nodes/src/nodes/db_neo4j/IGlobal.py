@@ -41,6 +41,8 @@ from ai.common.config import Config
 
 from .utils import _is_cypher_safe
 
+DEFAULT_MAX_EXECUTE_ROWS = 25000
+
 
 class IGlobal(IGlobalBase):
     """Neo4J-specific global connection state."""
@@ -61,7 +63,7 @@ class IGlobal(IGlobalBase):
     db_description: str = ''
     max_validation_attempts: int = 5
     allow_execute: bool = False
-    max_execute_rows: int = 25000
+    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -93,9 +95,9 @@ class IGlobal(IGlobalBase):
             self.allow_execute = bool(allow_execute)
 
         try:
-            self.max_execute_rows = max(1, int(config.get('max_execute_rows', 25000)))
+            self.max_execute_rows = max(1, int(config.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
         except (TypeError, ValueError):
-            self.max_execute_rows = 25000
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
 
         auth = self._build_auth(config)
 
