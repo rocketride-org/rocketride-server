@@ -1118,8 +1118,27 @@ module.exports = {
 			}),
 		},
 		{
+			name: 'server:run',
+			action: (options = {}) => {
+				// --modelserver (bare/true) → start local model server alongside task server
+				// --modelserver=addr → use existing remote model server
+				const startLocalModelServer = options.modelserver === true;
+				const servers = ['server:run-eaas'];
+				if (startLocalModelServer) {
+					servers.push('model_server:run-process');
+				}
+				return {
+					description: 'Build and run EaaS server (no dev tools)',
+					steps: [
+						'server:build',
+						parallel(servers, 'Start servers'),
+					],
+				};
+			},
+		},
+		{
 			// Internal action — starts the EaaS Python server process.
-			// Separated so it can be run in parallel with shell-ui:dev.
+			// Separated so it can be run in parallel with shell-ui:dev or model_server.
 			name: 'server:run-eaas',
 			action: (options = {}) => ({
 				run: async (_ctx, task) => {
@@ -1135,7 +1154,11 @@ module.exports = {
 					if (options.saas) {
 						args.push('--saas');
 					}
-					if (options.modelserver) {
+
+					// --modelserver: true means local (default address), string means use given address
+					if (options.modelserver === true) {
+						args.push('--modelserver=localhost:5590');
+					} else if (options.modelserver) {
 						args.push(`--modelserver=${options.modelserver}`);
 					}
 

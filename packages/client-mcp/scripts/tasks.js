@@ -37,7 +37,8 @@ const {
     mkdir, copyFile, exists,
     hasSourceChanged, saveSourceHash, setState,
     startServer, stopServer,
-    bracket, parallel
+    bracket, parallel,
+    parseServerAddress
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -149,10 +150,12 @@ function makeRunPytestAction(options = {}) {
 function makeStartTestServerAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            if (options.testport) {
-                ctx.port = options.testport;
-                task.output = `Using existing server on port ${ctx.port}`;
-                return { port: ctx.port, server: null };
+            const taskserver = options.taskserver || ctx.options?.taskserver;
+            if (taskserver) {
+                const parsed = parseServerAddress(taskserver);
+                ctx.port = parsed.port;
+                task.output = `Using existing server at ${parsed.uri}`;
+                return { port: parsed.port, server: null, serverUri: parsed.uri };
             }
             const envUri = process.env.ROCKETRIDE_URI;
             if (envUri) {

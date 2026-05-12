@@ -95,8 +95,8 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--trace=')) {
 			options.trace = options.trace || [];
 			options.trace.push(arg.substring('--trace='.length));
-		} else if (arg.startsWith('--testport=')) {
-			options.testport = parseInt(arg.substring('--testport='.length), 10);
+		} else if (arg.startsWith('--taskserver=')) {
+			options.taskserver = arg.substring('--taskserver='.length);
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
@@ -124,10 +124,10 @@ function parseArgs(args) {
 		} else if (arg === '--saas') {
 			options.saas = true;
 		} else if (arg === '--modelserver') {
-			// Bare --modelserver: start a local model server, use default address
-			options.modelserver = 'localhost:5590';
+			// Bare --modelserver: start a local model server
+			options.modelserver = true;
 		} else if (arg.startsWith('--modelserver=')) {
-			// --modelserver=host:port: connect to an existing model server at that address
+			// --modelserver=host:port or port: use an existing model server at that address
 			options.modelserver = arg.substring('--modelserver='.length);
 		} else if (arg.startsWith('--version=')) {
 			options.buildVersion = arg.substring('--version='.length);
@@ -220,7 +220,7 @@ Options:
   --list-modules      List all registered modules
   --log=FILE          Write output to FILE (grouped by module)
   --models="args"     Pass arguments to sync_models (can be repeated)
-  --modelserver[=HOST:PORT]  Start or connect to a model server (default: localhost:5590)
+  --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
   --nodownload        Force compile from source (skip prebuilt download)
   --overlay-root=DIR  Set overlay root directory
   --pytest="args"     Pass arguments to pytest (can be repeated)
@@ -231,7 +231,7 @@ Options:
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --stamp=STAMP       Set build stamp
-  --testport=N        Use existing server on port N for tests (skip build/start)
+  --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --verbose, -v       Show detailed output
   --version=VERSION   Set full build version x.x.x.x
