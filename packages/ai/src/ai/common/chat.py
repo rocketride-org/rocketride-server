@@ -13,7 +13,12 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+import threading
+from typing import Dict, Any, Optional
+
+class CircuitBreakerTrippedError(Exception):
+    """Exception raised when the LLM provider circuit breaker trips."""
+    pass
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -39,6 +44,9 @@ class ChatBase:
         _model (str): The model identifier/name being used
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
+
+    _cb_state: Dict[str, Dict[str, Any]] = {}
+    _cb_lock = threading.Lock()
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -273,6 +281,31 @@ class ChatBase:
         # Default to retryable for unknown errors (conservative approach)
         return True
 
+    def _extract_retry_after(self, error: Exception) -> Optional[float]:
+        """Extract the Retry-After header from an API exception."""
+        try:
+            if hasattr(error, 'response') and hasattr(error.response, 'headers'):
+                val = error.response.headers.get('retry-after') or error.response.headers.get('Retry-After')
+                if val:
+                    try:
+                        return float(val)
+                    except ValueError:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            import datetime
+                            dt = parsedate_to_datetime(val)
+                            # Calculate seconds from now (in UTC)
+                            delay = (dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+                            return max(0.0, delay)
+                        except ImportError:
+                            # Gracefully handle missing standard library modules
+                            pass
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return None
+
     def _chat_with_retries(self, prompt: str) -> str:
         """
         Handle chat requests with retries for transient errors.
@@ -296,11 +329,24 @@ class ChatBase:
         max_network_retries = CONST_CHAT_MAX_RETRIES
         base_delay = CONST_CHAT_BASE_DELAY
         max_delay = CONST_CHAT_MAX_DELAY
+        
+        # Pre-check circuit breaker state
+        with self._cb_lock:
+            state = self._cb_state.setdefault(self._model, {"failures": 0, "open_until": 0.0})
+            if time.time() < state["open_until"]:
+                debug(f'Circuit breaker is open for {self._model}, failing fast.')
+                raise CircuitBreakerTrippedError(f'Circuit Breaker open for {self._model}')
 
         for attempt in range(max_network_retries):
             try:
                 # Call the actual chat implementation provided by the subclass
-                return self._chat(prompt)
+                result = self._chat(prompt)
+                
+                # Reset circuit breaker on success
+                with self._cb_lock:
+                    self._cb_state[self._model]["failures"] = 0
+                    
+                return result
 
             except Exception as e:
                 # Determine if this is a retryable error
@@ -309,12 +355,22 @@ class ChatBase:
                 if not is_retryable or attempt == max_network_retries - 1:
                     # Non-retryable error or max retries reached
                     debug(f'Chat failed after {attempt + 1} attempts: {str(e)}')
+                    
+                    # Update circuit breaker on hard failure
+                    with self._cb_lock:
+                        self._cb_state[self._model]["failures"] += 1
+                        # Trip circuit breaker after 3 consecutive hard failures
+                        if self._cb_state[self._model]["failures"] >= 3:
+                            self._cb_state[self._model]["open_until"] = time.time() + 60.0
+                            debug(f'Circuit breaker tripped for {self._model}')
 
                     # Map to a friendlier exception if possible
                     raise self.map_exception(e)
 
-                # Calculate exponential backoff delay
-                delay = min(base_delay * (2**attempt), max_delay)
+                # Calculate delay with intelligent backoff
+                retry_after = self._extract_retry_after(e)
+                exp_backoff = min(base_delay * (2**attempt), max_delay)
+                delay = max(retry_after, exp_backoff) if retry_after is not None else exp_backoff
 
                 debug(
                     f'Network/API error on attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...'
