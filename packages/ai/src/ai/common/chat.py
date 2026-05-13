@@ -15,6 +15,7 @@ import json
 import importlib
 import threading
 import datetime
+import math
 from email.utils import parsedate_to_datetime
 from typing import Dict, Any, Optional
 
@@ -294,7 +295,10 @@ class ChatBase:
                 val = error.response.headers.get('retry-after') or error.response.headers.get('Retry-After')
                 if val:
                     try:
-                        return float(val)
+                        f_val = float(val)
+                        if math.isfinite(f_val) and f_val >= 0:
+                            return f_val
+                        raise ValueError()
                     except ValueError:
                         try:
                             dt = parsedate_to_datetime(val)
@@ -334,14 +338,14 @@ class ChatBase:
         cb_threshold = self._config.get('circuit_breaker_threshold', 3)
         cb_timeout = self._config.get('circuit_breaker_timeout_seconds', 60.0)
         
-        # Pre-check circuit breaker state
-        with self._cb_lock:
-            state = self._cb_state.setdefault(self._cb_key, {"failures": 0, "open_until": 0.0})
-            if time.time() < state["open_until"]:
-                debug(f'Circuit breaker is open for {self._cb_key}, failing fast.')
-                raise CircuitBreakerTrippedError(f'Circuit Breaker open for {self._cb_key}')
-
         for attempt in range(max_network_retries):
+            # Pre-check circuit breaker state
+            with self._cb_lock:
+                state = self._cb_state.setdefault(self._cb_key, {"failures": 0, "open_until": 0.0})
+                if time.time() < state["open_until"]:
+                    debug(f'Circuit breaker is open for {self._cb_key}, failing fast.')
+                    raise CircuitBreakerTrippedError(f'Circuit Breaker open for {self._cb_key}')
+
             try:
                 # Call the actual chat implementation provided by the subclass
                 result = self._chat(prompt)
