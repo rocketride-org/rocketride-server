@@ -140,8 +140,8 @@ export interface IAccountViewProps {
 	creditBalance: CreditBalance | null;
 	/** Available credit packs for purchase. */
 	creditPacks: CreditPack[];
-	/** Map of appId → display name for subscription rows. */
-	appNames?: Record<string, string>;
+	/** App manifest entries for resolving display names, icons, etc. from appId. */
+	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 
 	// -- Billing callbacks -----------------------------------------------------
 	/** Cancel a subscription. Host re-fetches and updates subscriptions prop. */
@@ -232,7 +232,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, appNames, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, onLoadEnv, onSaveEnv, refreshSignal } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, onLoadEnv, onSaveEnv, refreshSignal } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -240,6 +240,13 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 
 	/** The primary organization's ID (used for org-scoped env calls). */
 	const orgId = profile?.organizations?.[0]?.id;
+
+	// Build appId → app lookup for display name resolution
+	const appMap = useMemo(() => {
+		const map: Record<string, { name: string }> = {};
+		for (const a of apps ?? []) map[a.id] = a;
+		return map;
+	}, [apps]);
 
 	/** True when the current user has org.admin on their primary organization. */
 	const isOrgAdmin = useMemo(() => {
@@ -733,7 +740,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			billing: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} appNames={appNames} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},
@@ -1118,7 +1125,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					}
 				>
 					<p style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
-						Are you sure you want to cancel <strong style={{ color: 'var(--rr-text-primary)' }}>{cancelSubAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
+						Are you sure you want to cancel <strong style={{ color: 'var(--rr-text-primary)' }}>{appMap[cancelSubAppId]?.name ?? cancelSubAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
 					</p>
 					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
 				</Modal>

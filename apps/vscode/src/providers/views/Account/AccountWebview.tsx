@@ -326,6 +326,7 @@ const AccountWebview: React.FC = () => {
 			billingError={billingError}
 			creditBalance={creditBalance}
 			creditPacks={creditPacks}
+			apps={authUser?.apps ?? profile?.apps}
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
 			onBuyCredits={handleBuyCredits}
