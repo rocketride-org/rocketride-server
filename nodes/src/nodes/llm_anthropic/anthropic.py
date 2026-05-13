@@ -26,7 +26,7 @@ Anthropic binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, ChatResponse
 from ai.common.config import Config
 from langchain_anthropic import ChatAnthropic
 
@@ -111,3 +111,9 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat(self, prompt: str) -> ChatResponse:
+        results = self._llm.invoke(prompt)
+        meta = getattr(results, 'usage_metadata', None) or getattr(results, 'response_metadata', {})
+        usage_dict = meta.get('usage', {}) if 'usage' in meta else meta
+        return ChatResponse(content=results.content, metadata={'usage': usage_dict})

@@ -13,12 +13,19 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+from typing import Dict, Any, Union
+from dataclasses import dataclass, field
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
+
+
+@dataclass
+class ChatResponse:
+    content: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class ChatBase:
@@ -300,7 +307,8 @@ class ChatBase:
         for attempt in range(max_network_retries):
             try:
                 # Call the actual chat implementation provided by the subclass
-                return self._chat(prompt)
+                raw_result = self._chat(prompt)
+                return raw_result if isinstance(raw_result, ChatResponse) else ChatResponse(content=raw_result)
 
             except Exception as e:
                 # Determine if this is a retryable error
@@ -374,10 +382,13 @@ class ChatBase:
         # Call the chat implementation with network retry logic
         # This is where the real communication with the AI provider happens
         result = self._chat_with_retries(prompt)
+        
+        # Extract response content safely for token math
+        response_content = result.content if isinstance(result, ChatResponse) else result
 
         # Count tokens in the response to check for potential truncation
         # This helps identify cases where the model's response was cut off
-        result_tokens = self.getTokens(result)
+        result_tokens = self.getTokens(response_content)
 
         # Check if the total token usage suggests the response was truncated
         # We use a small buffer (5 tokens) to account for tokenization differences
@@ -425,12 +436,16 @@ class ChatBase:
 
             for retry_count in range(max_retries):
                 try:
+                    # Extract response content safely
+                    response_content = response.content if isinstance(response, ChatResponse) else response
                     # Parse (and strip any markdown fences) — reuse the result below
-                    parsed_response = parseJson(response)
+                    parsed_response = parseJson(response_content)
 
                     # Create the json answer and return it
                     answer = Answer(expectJson=True)
                     answer.setAnswer(parsed_response)
+                    if isinstance(response, ChatResponse):
+                        answer.usage = response.metadata.get('usage')
                     return answer
 
                 except (json.JSONDecodeError, ValueError):
@@ -448,9 +463,13 @@ class ChatBase:
                         raise ValueError(error_msg)
 
         else:
+            # Extract response content safely
+            response_content = response.content if isinstance(response, ChatResponse) else response
             # Create the answer and assign the text
             answer = Answer(expectJson=False)
-            answer.setAnswer(response)
+            answer.setAnswer(response_content)
+            if isinstance(response, ChatResponse):
+                answer.usage = response.metadata.get('usage')
 
             # And return it
             return answer

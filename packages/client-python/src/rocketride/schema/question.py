@@ -85,6 +85,7 @@ class Answer(BaseModel):
 
     answer: Optional[Union[str, dict, list]] = None
     expectJson: bool = False
+    usage: Optional[dict] = Field(default=None, description="Token usage metadata")
 
     @field_validator('answer', mode='before')
     @classmethod
