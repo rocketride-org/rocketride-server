@@ -23,95 +23,118 @@
 
 /**
  * Chat UI Build Module
- * 
+ *
  * React-based chat interface application.
  */
 const path = require('path');
 const {
-    execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT,
-    hasSourceChanged, saveSourceHash, setState, exists
+	execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT,
+	hasBuildInputChanged, saveSourceHash, setState, exists,
 } = require('../../../scripts/lib');
+const { PROJECT_ROOT } = require('../../../scripts/lib/paths');
 
 // Paths
-const APP_ROOT = path.join(__dirname, '..');
-const SRC_DIR = path.join(APP_ROOT, 'src');
-const BUILD_DIR = path.join(BUILD_ROOT, 'chat-ui');
+const APP_ROOT          = path.join(__dirname, '..');
+const BUILD_DIR         = path.join(BUILD_ROOT, 'chat-ui');
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'chat');
 
-// State key for source fingerprint
-const SRC_HASH_KEY = 'chat-ui.srcHash';
+// Build inputs: own src + MF host + shared package + package.json
+const SRC_DIR       = path.join(APP_ROOT, 'src');
+const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell-ui', 'src');
+const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const PKG_JSON      = path.join(APP_ROOT, 'package.json');
+const BUILD_HASH_KEY = 'chat-ui.buildHash';
 
 // =============================================================================
-// Action Factories
+// ACTION FACTORIES
 // =============================================================================
 
-function makeBuildChatUiAction() {
-    return {
-        run: async (ctx, task) => {
-            // Check if source changed
-            const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
-            const outputExists = await exists(BUILD_DIR);
+/**
+ * Bundles the chat-ui app via rsbuild with build-input caching.
+ */
+function makeBundleAction() {
+	return {
+		run: async (ctx, task) => {
+			// Check if any build inputs changed; skip when nothing moved.
+			if (!ctx.options.force) {
+				const { changed } = await hasBuildInputChanged(
+					BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
+				const outputExists = await exists(BUILD_DIR);
+				if (!changed && outputExists) {
+					task.output = 'No changes detected';
+					return;
+				}
+			}
 
-            if (!changed && outputExists) {
-                task.output = 'No changes detected';
-                return;
-            }
+			// Clean build output before rebuilding to prevent stale chunks
+			await removeDir(BUILD_DIR);
+			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
 
-            await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
-
-            // Save hash after successful build
-            await saveSourceHash(SRC_HASH_KEY, hash);
-        }
-    };
+			// Persist the hash so the next run can skip if nothing changed
+			const { hash } = await hasBuildInputChanged(
+				BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
+			await saveSourceHash(BUILD_HASH_KEY, hash);
+		},
+	};
 }
 
-function makeCopyChatUiAction() {
-    return {
-        run: async (ctx, task) => {
-            const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { package: true });
-            task.output = formatSyncStats(stats);
-        }
-    };
+/**
+ * Copies the built output to the server's static directory.
+ */
+function makeCopyAction() {
+	return {
+		run: async (ctx, task) => {
+			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { package: true });
+			task.output = formatSyncStats(stats);
+		},
+	};
 }
 
 // =============================================================================
-// Module Definition
+// MODULE DEFINITION
 // =============================================================================
 
 module.exports = {
-    name: 'chat-ui',
-    description: 'Chat Interface Application',
+	name: 'chat-ui',
+	description: 'Chat Interface Application',
 
-    actions: [
-        // Internal actions
-        { name: 'chat-ui:bundle', action: makeBuildChatUiAction },
-        { name: 'chat-ui:copy', action: makeCopyChatUiAction },
+	actions: [
+		{ name: 'chat-ui:bundle', action: makeBundleAction },
+		{ name: 'chat-ui:copy',   action: makeCopyAction },
 
-        // Public actions (have descriptions)
-        { name: 'chat-ui:build', action: () => ({
-            description: 'Build chat UI',
-            steps: [
-                'client-typescript:build',
-                'chat-ui:bundle',
-                'chat-ui:copy'
-            ]
-        })},
-        { name: 'chat-ui:dev', action: () => ({
-            description: 'Dev chat UI',
-            run: async (ctx, task) => {
-                task.output = 'Starting development server on http://localhost:3000';
-                await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
-            }
-        })},
-        { name: 'chat-ui:clean', action: () => ({
-            description: 'Clean chat UI',
-            run: async (ctx, task) => {
-                await removeDir(BUILD_DIR);
-                await removeDir(SERVER_STATIC_DIR);
-                await removeDir(path.join(APP_ROOT, 'dist'));
-                await setState(SRC_HASH_KEY, null);
-                task.output = 'Cleaned chat-ui';
-            }
-        })}
-    ]
+		{
+			name: 'chat-ui:build',
+			action: () => ({
+				description: 'Build chat-ui',
+				steps: [
+					'client-typescript:build',
+					'chat-ui:bundle',
+					'chat-ui:copy',
+				],
+			}),
+		},
+		{
+			name: 'chat-ui:dev',
+			action: () => ({
+				description: 'Starting chat-ui (dev)',
+				run: async (ctx, task) => {
+					task.output = 'Starting development server on http://localhost:3000';
+					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
+				},
+			}),
+		},
+		{
+			name: 'chat-ui:clean',
+			action: () => ({
+				description: 'Cleaning chat-ui',
+				run: async (ctx, task) => {
+					await removeDir(BUILD_DIR);
+					await removeDir(SERVER_STATIC_DIR);
+					await removeDir(path.join(APP_ROOT, 'dist'));
+					await setState(BUILD_HASH_KEY, null);
+					task.output = 'Cleaned chat-ui';
+				},
+			}),
+		},
+	],
 };

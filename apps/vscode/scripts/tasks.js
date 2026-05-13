@@ -268,21 +268,21 @@ module.exports = {
 		{
 			name: 'vscode:compile',
 			action: () => ({
-				description: 'Compile VSCode extension',
+				description: 'Compiling vscode',
 				steps: ['client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
 			}),
 		},
 		{
 			name: 'vscode:build',
 			action: () => ({
-				description: 'Build VSCode extension',
+				description: 'Build vscode',
 				steps: ['client-typescript:build', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{
 			name: 'vscode:clean',
 			action: () => ({
-				description: 'Clean VSCode extension',
+				description: 'Cleaning vscode',
 				run: async (ctx, task) => {
 					await removeDirs([BUILD_DIR, path.join(APP_ROOT, 'dist'), path.join(APP_ROOT, 'out'), VSCODE_DIST_DIR]);
 					await removeMatching(APP_ROOT, '.vsix');

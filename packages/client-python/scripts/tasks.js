@@ -246,14 +246,14 @@ module.exports = {
 		{
 			name: 'client-python:build',
 			action: () => ({
-				description: 'Build Python client',
+				description: 'Build client-python',
 				steps: ['server:build', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
 			}),
 		},
 		{
 			name: 'client-python:test',
 			action: () => ({
-				description: 'Test Python client',
+				description: 'Testing client-python',
 				steps: [
 					'server:build',
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
@@ -269,7 +269,7 @@ module.exports = {
 		{
 			name: 'client-python:clean',
 			action: () => ({
-				description: 'Clean Python client',
+				description: 'Cleaning client-python',
 				run: async (ctx, task) => {
 					await removeDirs([path.join(PACKAGE_DIR, 'build'), path.join(PACKAGE_DIR, 'dist')]);
 					await removeDirAndParents(PROJECT_ROOT, [BUILD_DIR, DIST_DIR, SERVER_CLIENTS_DIR, SERVER_STATIC_DIR]);

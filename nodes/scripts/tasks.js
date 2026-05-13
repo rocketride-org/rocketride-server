@@ -236,7 +236,7 @@ function makeRunContractTestsAction() {
 
 function makeTestAction(options = {}) {
     return {
-        description: 'Test pipeline nodes (full integration)',
+        description: 'Testing nodes',
         steps: [
             'server:build',
             parallel([
@@ -278,17 +278,17 @@ module.exports = {
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
-            description: 'Build pipeline nodes',
+            description: 'Build nodes',
             steps: ['server:build', 'nodes:sync']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
         { name: 'nodes:test-contracts', action: () => ({
-            description: 'Test node contracts',
+            description: 'Testing nodes (contracts)',
             steps: ['server:build', 'nodes:run-contracts']
         })},
         { name: 'nodes:clean', action: () => ({
-            description: 'Clean pipeline nodes',
+            description: 'Cleaning nodes',
             run: async (ctx, task) => {
                 await removeDir(DIST_DIR);
                 task.output = 'Cleaned nodes';

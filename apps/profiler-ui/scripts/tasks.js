@@ -24,99 +24,12 @@
  * Profiler UI Build Module
  *
  * cProfile process profiler — start/stop sessions and view reports.
- *
- * Actions:
- *   profiler-ui:bundle   — run rsbuild build
- *   profiler-ui:register — register app in apps.json manifest
- *   profiler-ui:copy     — sync build output to dist/server/static/apps/profiler-ui
- *   profiler-ui:build    — full build: client-typescript → bundle → register → copy
- *   profiler-ui:clean    — remove build artifacts
  */
 const path = require('path');
-const {
-	execCommand,
-	syncDir,
-	formatSyncStats,
-	removeDir,
-	BUILD_ROOT,
-	DIST_ROOT,
-} = require('../../../scripts/lib');
-const { registerApp } = require('../../../scripts/lib/registerApp');
+const { createAppModule } = require('../../../scripts/lib/appModule');
 
-// Paths
-const APP_ROOT          = path.join(__dirname, '..');
-const BUILD_DIR         = path.join(BUILD_ROOT, 'apps', 'profiler-ui');
-const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell', 'apps', 'profiler-ui');
-
-// =============================================================================
-// ACTION FACTORIES
-// =============================================================================
-
-/**
- * Bundles the profiler-ui app via rsbuild.
- *
- * @returns {object} Action with run function.
- */
-function makeBundleAction() {
-	return {
-		run: async (ctx, task) => {
-			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
-		},
-	};
-}
-
-/**
- * Copies the built output to the server's static directory.
- *
- * @returns {object} Action with run function.
- */
-function makeCopyAction() {
-	return {
-		run: async (ctx, task) => {
-			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR);
-			task.output = formatSyncStats(stats);
-		},
-	};
-}
-
-// =============================================================================
-// MODULE DEFINITION
-// =============================================================================
-
-module.exports = {
+module.exports = createAppModule({
 	name: 'profiler-ui',
 	description: 'cProfile Process Profiler',
-
-	actions: [
-		// Internal actions (no description)
-		{ name: 'profiler-ui:bundle',   action: makeBundleAction },
-		{ name: 'profiler-ui:register', action: () => registerApp(APP_ROOT) },
-		{ name: 'profiler-ui:copy',     action: makeCopyAction },
-
-		{
-			// Full build: compile TS client SDK, bundle, register in apps.json, copy to dist.
-			name: 'profiler-ui:build',
-			action: () => ({
-				description: 'Build production bundle',
-				steps: [
-					'client-typescript:build',
-					'profiler-ui:bundle',
-					'profiler-ui:register',
-					'profiler-ui:copy',
-				],
-			}),
-		},
-		{
-			name: 'profiler-ui:clean',
-			action: () => ({
-				description: 'Clean build artifacts',
-				run: async (ctx, task) => {
-					await removeDir(BUILD_DIR);
-					await removeDir(SERVER_STATIC_DIR);
-					await removeDir(path.join(APP_ROOT, 'dist'));
-					task.output = 'Cleaned profiler-ui';
-				},
-			}),
-		},
-	],
-};
+	appRoot: path.join(__dirname, '..'),
+});

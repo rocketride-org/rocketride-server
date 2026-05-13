@@ -43,12 +43,23 @@ const {
 	BUILD_ROOT,
 	DIST_ROOT,
 	isWindows,
+	hasBuildInputChanged,
+	saveSourceHash,
+	setState,
+	exists,
 } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const BUILD_DIR = path.join(BUILD_ROOT, 'shell-ui');
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
+
+// Source directories and files that affect the shell build output.
+// Shell bundles shared-ui with eager: true, so shared-ui changes require a rebuild.
+const SRC_DIR       = path.join(APP_ROOT, 'src');
+const SHARED_UI_SRC = path.join(APP_ROOT, '..', '..', 'packages', 'shared-ui', 'src');
+const PKG_JSON      = path.join(APP_ROOT, 'package.json');
+const BUILD_HASH_KEY = 'shell-ui.buildHash';
 
 // =============================================================================
 // HELPERS
@@ -98,7 +109,25 @@ async function killPort(port) {
 function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
+			// Check if any build inputs changed; skip rebuild when nothing moved.
+			if (!ctx.options.force) {
+				const { changed, hash } = await hasBuildInputChanged(
+					BUILD_HASH_KEY, [SRC_DIR, SHARED_UI_SRC], [PKG_JSON]);
+				const outputExists = await exists(BUILD_DIR);
+				if (!changed && outputExists) {
+					task.output = 'No changes detected';
+					return;
+				}
+			}
+
+			// Clean build output before rebuilding to prevent stale chunks
+			await removeDir(BUILD_DIR);
 			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
+
+			// Persist the hash so the next run can skip if nothing changed
+			const { hash } = await hasBuildInputChanged(
+				BUILD_HASH_KEY, [SRC_DIR, SHARED_UI_SRC], [PKG_JSON]);
+			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
 	};
 }
@@ -136,7 +165,7 @@ module.exports = {
 			// Full build: compile TS client SDK, bundle shell, copy to dist.
 			name: 'shell-ui:build',
 			action: () => ({
-				description: 'Build production shell bundle',
+				description: 'Build shell-ui',
 				steps: [
 					'client-typescript:build',
 					'shell-ui:bundle',
@@ -148,7 +177,7 @@ module.exports = {
 			// Start the rsbuild dev server with HTTPS on port 3000.
 			name: 'shell-ui:dev',
 			action: () => ({
-				description: 'Start development server',
+				description: 'Starting shell-ui (dev)',
 				run: async (_ctx, task) => {
 					// Kill any stale process holding port 3000 before starting rsbuild.
 					task.output = 'Clearing port 3000...';
@@ -161,11 +190,12 @@ module.exports = {
 		{
 			name: 'shell-ui:clean',
 			action: () => ({
-				description: 'Clean build artifacts',
+				description: 'Cleaning shell-ui',
 				run: async (_ctx, task) => {
 					await removeDir(BUILD_DIR);
 					await removeDir(SERVER_STATIC_DIR);
 					await removeDir(path.join(APP_ROOT, 'dist'));
+					await setState(BUILD_HASH_KEY, null);
 					task.output = 'Cleaned shell-ui';
 				},
 			}),

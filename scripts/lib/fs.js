@@ -604,6 +604,56 @@ async function saveSourceHash(stateKey, hash) {
     await setState(stateKey, hash);
 }
 
+/**
+ * Compute a combined MD5 hash of multiple source directories and individual files.
+ * Uses fingerprint() (mtime+size) for speed.  Produces a single cache key for
+ * build actions that depend on several inputs (e.g. own src/ + shared-ui/src +
+ * package.json).
+ *
+ * @param {string[]} dirs   - Directories to fingerprint.
+ * @param {string[]} [files] - Individual files to include (e.g. package.json).
+ * @returns {Promise<string>} Combined hex digest.
+ */
+async function buildInputHash(dirs, files = []) {
+    const hash = crypto.createHash('md5');
+
+    // Fingerprint each source directory
+    for (const dir of dirs) {
+        const fp = await fingerprint(dir);
+        hash.update(dir);
+        hash.update(fp ?? 'missing');
+    }
+
+    // Include individual files by size + mtime
+    for (const file of files) {
+        try {
+            const st = await fsp.stat(file);
+            hash.update(file);
+            hash.update(`${st.size}:${st.mtimeMs}`);
+        } catch {
+            hash.update(file);
+            hash.update('missing');
+        }
+    }
+
+    return hash.digest('hex');
+}
+
+/**
+ * Check if any build inputs have changed since last build.
+ *
+ * @param {string}   stateKey - Key in state.json (e.g. 'models-ui.buildHash').
+ * @param {string[]} dirs     - Source directories to fingerprint.
+ * @param {string[]} [files]  - Individual files to include.
+ * @returns {Promise<{changed: boolean, hash: string}>}
+ */
+async function hasBuildInputChanged(stateKey, dirs, files = []) {
+    const { getState } = require('./state');
+    const currentHash = await buildInputHash(dirs, files);
+    const savedHash = await getState(stateKey);
+    return { changed: currentHash !== savedHash, hash: currentHash };
+}
+
 module.exports = {
     // Existence
     exists,
@@ -661,5 +711,7 @@ module.exports = {
     fingerprint,
     contentHash,
     hasSourceChanged,
-    saveSourceHash
+    saveSourceHash,
+    buildInputHash,
+    hasBuildInputChanged
 };

@@ -106,7 +106,7 @@ module.exports = {
 		{
 			name: 'models:update',
 			action: () => ({
-				description: 'Sync LLM model lists from provider APIs and format JSON files',
+				description: 'Updating models',
 				steps: ['models:run-sync', 'models:prettier'],
 			}),
 		},

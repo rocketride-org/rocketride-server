@@ -116,13 +116,13 @@ module.exports = {
         // Public actions (have descriptions)
         {
             name: 'ai:build', action: () => ({
-                description: 'Build AI modules',
+                description: 'Build ai',
                 steps: ['server:build', 'ai:sync']
             })
         },
         {
             name: 'ai:test', action: () => ({
-                description: 'Test AI modules',
+                description: 'Testing ai',
                 steps: [
                     'ai:build',
                     'ai:run-pytest'
@@ -131,7 +131,7 @@ module.exports = {
         },
         {
             name: 'ai:clean', action: () => ({
-                description: 'Clean AI modules',
+                description: 'Cleaning ai',
                 run: async (ctx, task) => {
                     const { removeDir } = require('../../../scripts/lib');
                     await removeDir(DIST_DIR);

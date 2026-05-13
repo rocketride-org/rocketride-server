@@ -899,7 +899,7 @@ function makeBuildCoreAction() {
 
 function makeBuildAction() {
 	return {
-		description: 'Build server',
+		description: 'Build server (core)',
 		steps: [
 			'server:build-core',
 			'server:setup-pip',
@@ -913,7 +913,7 @@ function makeBuildAction() {
 
 function makeCleanServerAction() {
 	return {
-		description: 'Clean server',
+		description: 'Cleaning server',
 		run: async (ctx, task) => {
 			await setState('server', {});
 			await setState('package', null);
@@ -938,7 +938,7 @@ function makeCleanServerAction() {
 
 function makeBuildAllAction() {
 	return {
-		description: 'Build server and modules',
+		description: 'Build server (all modules)',
 		steps: [
 			'server:build',
 			// Build external modules
@@ -949,21 +949,21 @@ function makeBuildAllAction() {
 
 function makeCompileAction() {
 	return {
-		description: 'Compile server',
+		description: 'Compiling server',
 		steps: ['server:configure', 'server:setup-python', 'server:compile-engine'],
 	};
 }
 
 function makeConfigureAction() {
 	return {
-		description: 'Configure server',
+		description: 'Configuring server',
 		steps: ['server:setup-tools', 'server:configure'],
 	};
 }
 
 function makeTestAction() {
 	return {
-		description: 'Test server',
+		description: 'Testing server',
 		steps: [
 			'server:build',
 			whenNot({
@@ -1019,7 +1019,7 @@ function makeRocketlibPythonTestAction(options = {}) {
 
 function makePackageAction(options = {}) {
 	return {
-		description: 'Package server distribution',
+		description: 'Packaging server',
 		run: async (_ctx, _task) => {
 			const { manifestFilename, distFilename, symDistFilename, distFile, symDistFile } = await getPackageInfo(options);
 			const symFilename = isWindows() ? 'engine.pdb' : null;
@@ -1074,7 +1074,7 @@ function makePackageAction(options = {}) {
 
 function makeCleanAction() {
 	return {
-		description: 'Clean all',
+		description: 'Cleaning server (all)',
 		steps: ['server:clean', 'vcpkg:submodule-clean', 'java:submodule-clean', 'tika:submodule-clean'],
 	};
 }
@@ -1110,7 +1110,7 @@ module.exports = {
 		{
 			name: 'server:dev',
 			action: (options = {}) => ({
-				description: 'Start EaaS development server + shell-ui rsbuild dev server',
+				description: 'Starting server (dev)',
 				steps: [
 					'server:build',
 					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
@@ -1128,7 +1128,7 @@ module.exports = {
 					servers.push('model_server:run-process');
 				}
 				return {
-					description: 'Build and run EaaS server (no dev tools)',
+					description: 'Running server',
 					steps: [
 						'server:build',
 						parallel(servers, 'Start servers'),
