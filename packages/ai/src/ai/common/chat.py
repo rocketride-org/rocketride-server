@@ -78,7 +78,11 @@ class ChatBase:
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits
         self._model = validate_model_name(config.get('model'))
-        self._cb_key = f"{self._provider}::{self._model}::{self._config.get('circuit_breaker_threshold', 3)}::{self._config.get('circuit_breaker_timeout_seconds', 60.0)}"
+        
+        # Normalize and store circuit breaker configuration
+        self._cb_threshold = int(self._config.get('circuit_breaker_threshold', 3))
+        self._cb_timeout = float(self._config.get('circuit_breaker_timeout_seconds', 60.0))
+        self._cb_key = f"{self._provider}::{self._model}::{self._cb_threshold}::{self._cb_timeout}"
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
 
@@ -335,9 +339,6 @@ class ChatBase:
         base_delay = CONST_CHAT_BASE_DELAY
         max_delay = CONST_CHAT_MAX_DELAY
         
-        cb_threshold = self._config.get('circuit_breaker_threshold', 3)
-        cb_timeout = self._config.get('circuit_breaker_timeout_seconds', 60.0)
-        
         for attempt in range(max_network_retries):
             # Pre-check circuit breaker state
             with self._cb_lock:
@@ -369,8 +370,8 @@ class ChatBase:
                         with self._cb_lock:
                             self._cb_state[self._cb_key]["failures"] += 1
                             # Trip circuit breaker after consecutive hard failures
-                            if self._cb_state[self._cb_key]["failures"] >= cb_threshold:
-                                self._cb_state[self._cb_key]["open_until"] = time.time() + cb_timeout
+                            if self._cb_state[self._cb_key]["failures"] >= self._cb_threshold:
+                                self._cb_state[self._cb_key]["open_until"] = time.time() + self._cb_timeout
                                 debug(f'Circuit breaker tripped for {self._cb_key}')
 
                     # Map to a friendlier exception if possible
