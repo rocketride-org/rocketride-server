@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -58,8 +59,8 @@ class _TestStore(DocumentStoreBase):
 
     def __init__(
         self,
-        semantic_fn: Optional[Callable] = None,
-        keyword_fn: Optional[Callable] = None,
+        semantic_fn: Callable | None = None,
+        keyword_fn: Callable | None = None,
     ) -> None:
         # Bypass real __init__ (needs connConfig / bag)
         self.vectorSize = 0
@@ -80,28 +81,28 @@ class _TestStore(DocumentStoreBase):
     def count_documents(self) -> int:
         return 0
 
-    def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
+    def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> list[Doc]:
         return self._keyword_fn(query, docFilter)
 
-    def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
+    def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> list[Doc]:
         return self._semantic_fn(query, docFilter)
 
-    def get(self, docFilter: DocFilter, **_kwargs) -> List[Doc]:
+    def get(self, docFilter: DocFilter, **_kwargs) -> list[Doc]:
         return []
 
-    def getPaths(self, parent=None, offset=0, limit=1000) -> Dict[str, str]:
+    def getPaths(self, parent=None, offset=0, limit=1000) -> dict[str, str]:
         return {}
 
-    def addChunks(self, chunks: List[Doc], **_kwargs) -> None:
+    def addChunks(self, chunks: list[Doc], **_kwargs) -> None:
         pass
 
-    def remove(self, objectIds: List[str]) -> None:
+    def remove(self, objectIds: list[str]) -> None:
         pass
 
-    def markDeleted(self, objectIds: List[str]) -> None:
+    def markDeleted(self, objectIds: list[str]) -> None:
         pass
 
-    def markActive(self, objectIds: List[str]) -> None:
+    def markActive(self, objectIds: list[str]) -> None:
         pass
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
@@ -120,7 +121,7 @@ def _make_doc(object_id: str, chunk_id: int = 0, score: float = 0.9) -> Doc:
     return doc
 
 
-def _make_semantic_question(texts: List[str]) -> Question:
+def _make_semantic_question(texts: list[str]) -> Question:
     """Build a SEMANTIC Question with N sub-questions, each with a fake embedding."""
     q = Question()
     q.type = QuestionType.SEMANTIC
@@ -134,7 +135,7 @@ def _make_semantic_question(texts: List[str]) -> Question:
     return q
 
 
-def _make_keyword_question(texts: List[str]) -> Question:
+def _make_keyword_question(texts: list[str]) -> Question:
     q = Question()
     q.type = QuestionType.KEYWORD
     q.filter = DocFilter()
@@ -178,7 +179,7 @@ class TestParallelSemanticFanOut:
             [_make_doc('obj-c', score=0.70)],
         ]
 
-        def _semantic(q: QuestionText, f: DocFilter) -> List[Doc]:
+        def _semantic(q: QuestionText, f: DocFilter) -> list[Doc]:
             with lock:
                 idx = call_index['n']
                 call_index['n'] += 1
@@ -211,7 +212,7 @@ class TestParallelSemanticFanOut:
         # reach it in milliseconds.
         barrier = threading.Barrier(n_queries, timeout=5)
 
-        def _semantic(q: QuestionText, f: DocFilter) -> List[Doc]:
+        def _semantic(q: QuestionText, f: DocFilter) -> list[Doc]:
             # Reaching this line from all threads simultaneously proves
             # the executor dispatched all futures before any returned.
             barrier.wait()  # raises BrokenBarrierError if serial
@@ -266,7 +267,7 @@ class TestParallelSemanticFanOut:
     def test_sub_query_exception_propagates(self) -> None:
         """If one sub-query raises, the exception surfaces to the caller."""
 
-        def _boom(q: QuestionText, f: DocFilter) -> List[Doc]:
+        def _boom(q: QuestionText, f: DocFilter) -> list[Doc]:
             if q.text == 'q2':
                 raise RuntimeError('vector DB unreachable')
             return [_make_doc('obj-ok')]
@@ -284,7 +285,7 @@ class TestParallelSemanticFanOut:
         call_index = {'n': 0}
         lock = threading.Lock()
 
-        def _semantic(q: QuestionText, f: DocFilter) -> List[Doc]:
+        def _semantic(q: QuestionText, f: DocFilter) -> list[Doc]:
             with lock:
                 idx = call_index['n']
                 call_index['n'] += 1
@@ -345,9 +346,9 @@ class TestPreFlightAuditRegressions:
     Regression tests for the three production defects identified in the
     hostile pre-flight audit.  These must NEVER be deleted.
 
-    Defect 1 (FIXED): Empty SEMANTIC query list → ThreadPoolExecutor(max_workers=0)
+    Defect 1 (FIXED): Empty SEMANTIC query list -> ThreadPoolExecutor(max_workers=0)
                        raised ValueError.
-    Defect 2 (FIXED): Empty KEYWORD query list → same ValueError crash.
+    Defect 2 (FIXED): Empty KEYWORD query list -> same ValueError crash.
     Defect 3 (FIXED): GET type silently unreachable because GET was chained as
                        'elif' off the KEYWORD 'if', making it unreachable when
                        KEYWORD matched with zero queries and fell to else:pass.
@@ -435,7 +436,7 @@ class TestPreFlightAuditRegressions:
         get_doc = _make_doc('get-obj-1', score=0.88)
 
         class _GetStore(_TestStore):
-            def get(self, docFilter: DocFilter, **_kw) -> List[Doc]:
+            def get(self, docFilter: DocFilter, **_kw) -> list[Doc]:
                 return [get_doc]
 
         store = _GetStore()
@@ -456,7 +457,7 @@ class TestPreFlightAuditRegressions:
         get_called = {'n': 0}
 
         class _SpyGetStore(_TestStore):
-            def get(self, docFilter: DocFilter, **_kw) -> List[Doc]:
+            def get(self, docFilter: DocFilter, **_kw) -> list[Doc]:
                 get_called['n'] += 1
                 return [_make_doc('should-not-appear')]
 

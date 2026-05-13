@@ -20,13 +20,49 @@ Design:
 Pattern mirrors: nodes/test/astra_db/test_convert_filter.py
 """
 
-from __future__ import annotations
-
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-from nodes.agent_rocketride.rocketride_agent import RocketRideDriver
+# ---------------------------------------------------------------------------
+# Minimal rocketlib stub — must be in sys.modules before the RocketRideDriver
+# import chain triggers IInstance.py -> agent.py -> host.py which calls
+#   from rocketlib import IInstanceBase, tool_function
+#   from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
+# We satisfy these with no-op objects so __new__ can instantiate the class
+# without a live server process.  Nothing in _prune_wave_context touches them.
+# ---------------------------------------------------------------------------
+
+import sys
+import types
+
+_rocketlib = types.ModuleType('rocketlib')
+
+
+class _IInstanceBase:
+    pass
+
+
+def _tool_function(fn=None, **_kwargs):
+    """No-op decorator stub for @tool_function."""
+    if fn is not None:
+        return fn
+    return lambda f: f
+
+
+_rocketlib.IInstanceBase = _IInstanceBase  # type: ignore[attr-defined]
+_rocketlib.tool_function = _tool_function  # type: ignore[attr-defined]
+sys.modules.setdefault('rocketlib', _rocketlib)
+
+# rocketlib.types sub-module — must be registered separately
+_rocketlib_types = types.ModuleType('rocketlib.types')
+for _name in ('IInvokeOp', 'IInvokeTool', 'IInvokeMemory'):
+    setattr(_rocketlib_types, _name, object)
+sys.modules.setdefault('rocketlib.types', _rocketlib_types)
+_rocketlib.types = _rocketlib_types  # type: ignore[attr-defined]
+
+from nodes.agent_rocketride.rocketride_agent import RocketRideDriver  # noqa: E402
+
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +86,7 @@ def _driver(
     return driver
 
 
-def _wave(wave_num: int, summary_chars: int = 100) -> Dict[str, Any]:
+def _wave(wave_num: int, summary_chars: int = 100) -> dict[str, Any]:
     """Build a synthetic wave entry with a deterministic summary length."""
     return {
         'wave_num': wave_num,
@@ -65,7 +101,7 @@ def _wave(wave_num: int, summary_chars: int = 100) -> Dict[str, Any]:
     }
 
 
-def _build_session(n: int, summary_chars: int = 100) -> List[Dict[str, Any]]:
+def _build_session(n: int, summary_chars: int = 100) -> list[dict[str, Any]]:
     return [_wave(i, summary_chars) for i in range(n)]
 
 
@@ -98,7 +134,7 @@ class TestReturnsCopy:
     def test_master_list_never_mutated_by_budget_eviction(self) -> None:
         """Character-budget eviction must only affect the returned copy."""
         driver = _driver(context_window_waves=10, wave_context_budget_chars=150)
-        # 3 waves × 100 chars = 300 chars → budget eviction will fire
+        # 3 waves * 100 chars = 300 chars -> budget eviction will fire
         waves = _build_session(3, summary_chars=100)
         original_ids = [w['wave_num'] for w in waves]
 
@@ -175,18 +211,18 @@ class TestSlidingWindow:
 class TestCharacterBudget:
 
     def test_under_budget_no_eviction(self) -> None:
-        """3 waves × 100 chars = 300 chars < 1_000 budget → no eviction."""
+        """3 waves * 100 chars = 300 chars < 1_000 budget -> no eviction."""
         driver = _driver(context_window_waves=10, wave_context_budget_chars=1_000)
         waves = _build_session(3, summary_chars=100)
         result = driver._prune_wave_context(waves)
         assert len(result) == 3
 
     def test_over_budget_evicts_oldest_first(self) -> None:
-        """3 waves × 300 chars = 900 > 500 budget → evict until ≤ 500."""
+        """3 waves * 300 chars = 900 > 500 budget -> evict until <= 500."""
         driver = _driver(context_window_waves=10, wave_context_budget_chars=500)
         waves = _build_session(3, summary_chars=300)
         result = driver._prune_wave_context(waves)
-        # 1 wave × 300 chars = 300 ≤ 500
+        # 1 wave * 300 chars = 300 <= 500
         assert len(result) == 1
         assert result[0]['wave_num'] == 2  # newest
 
@@ -205,9 +241,9 @@ class TestCharacterBudget:
         assert len(result) == 1
 
     def test_exactly_at_budget_no_eviction(self) -> None:
-        """Total chars == budget → no eviction (boundary condition)."""
+        """Total chars == budget -> no eviction (boundary condition)."""
         driver = _driver(context_window_waves=10, wave_context_budget_chars=300)
-        waves = _build_session(3, summary_chars=100)  # 3 × 100 = 300
+        waves = _build_session(3, summary_chars=100)  # 3 * 100 = 300
         result = driver._prune_wave_context(waves)
         assert len(result) == 3
 
@@ -222,8 +258,8 @@ class TestCombinedStrategies:
     def test_window_applied_before_budget(self) -> None:
         """Window must reduce list before budget calculation.
 
-        window=2, budget=400, 5 waves × 200 chars each:
-          After window: 2 waves = 400 chars → exactly at budget, no budget eviction.
+        window=2, budget=400, 5 waves * 200 chars each:
+          After window: 2 waves = 400 chars -> exactly at budget, no budget eviction.
         """
         driver = _driver(context_window_waves=2, wave_context_budget_chars=400)
         waves = _build_session(5, summary_chars=200)
@@ -234,7 +270,7 @@ class TestCombinedStrategies:
     def test_large_session_context_stays_bounded(self) -> None:
         """Simulate 10 sequential plan iterations, each appending one wave."""
         driver = _driver(context_window_waves=5, wave_context_budget_chars=12_000)
-        master_waves: List[Dict[str, Any]] = []
+        master_waves: list[dict[str, Any]] = []
 
         for i in range(10):
             master_waves.append(_wave(i, summary_chars=500))
@@ -250,7 +286,7 @@ class TestCombinedStrategies:
     def test_trace_grows_while_context_stays_bounded(self) -> None:
         """Key invariant: master list grows, planning copy stays within window."""
         driver = _driver(context_window_waves=3, wave_context_budget_chars=0)
-        master_waves: List[Dict[str, Any]] = []
+        master_waves: list[dict[str, Any]] = []
 
         for i in range(10):
             master_waves.append(_wave(i))
