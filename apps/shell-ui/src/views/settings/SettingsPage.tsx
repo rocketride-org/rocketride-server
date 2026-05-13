@@ -527,20 +527,31 @@ const SettingsPage: React.FC = () => {
 					placeholder="Search settings…"
 					style={styles.searchInput as CSSProperties}
 				/>
-				<button
-					onClick={handleSave}
-					disabled={!isDirty}
-					style={{
-						...commonStyles.buttonPrimary,
-						fontWeight: 600,
-						fontFamily: 'var(--rr-font-family)',
-						...(isDirty ? {} : commonStyles.buttonDisabled),
-					} as CSSProperties}
-				>
-					Save
-				</button>
 				{saved && (
 					<span style={{ fontSize: 13, color: 'var(--rr-color-success)' }}>Saved</span>
+				)}
+				{isDirty && (
+					<>
+						<button
+							onClick={() => { setDraft({}); setSaved(false); }}
+							style={{
+								...commonStyles.buttonSecondary,
+								fontFamily: 'var(--rr-font-family)',
+							} as CSSProperties}
+						>
+							Cancel
+						</button>
+						<button
+							onClick={handleSave}
+							style={{
+								...commonStyles.buttonPrimary,
+								fontWeight: 600,
+								fontFamily: 'var(--rr-font-family)',
+							} as CSSProperties}
+						>
+							Save
+						</button>
+					</>
 				)}
 			</div>
 

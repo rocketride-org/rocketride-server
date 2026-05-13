@@ -32,6 +32,9 @@ interface IntegrationSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
 }
 
 type BooleanKeys<T> = { [K in keyof T]: T[K] extends boolean ? K : never }[keyof T];
@@ -77,10 +80,10 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 // COMPONENT
 // ============================================================================
 
-export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
+export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange, onSave, onCancel, dirty, saved }) => {
 	return (
 		<div style={S.card}>
-			<SettingsCardHeader title="Integrations" onSave={onSave} />
+			<SettingsCardHeader title="Integrations" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
 				<div style={S.formGrid}>
