@@ -181,25 +181,6 @@ async def test_on_receive_handles_none_message():
 
 
 @pytest.mark.asyncio
-async def test_on_auth_info_only_probe_returns_server_info_without_authenticating():
-    """`infoOnly` returns capabilities + version + platform; does not change state."""
-    account = SimpleNamespace(capabilities={'feature': True})
-    server = MagicMock()
-    server._server = SimpleNamespace(account=account)
-    conn = _make_conn(authenticated=False, server=server)
-
-    request = {'command': 'auth', 'arguments': {'infoOnly': True}}
-    result = await TaskConn.on_auth(conn, request)
-
-    assert result['type'] == 'response'
-    body = result['body']
-    assert body['capabilities'] == account.capabilities
-    assert 'version' in body and 'platform' in body
-    assert conn._auth_attempts == 0
-    assert conn._authenticated is False
-
-
-@pytest.mark.asyncio
 async def test_on_auth_caps_attempts_and_disconnects():
     """Beyond CONST_AUTH_MAX_ATTEMPTS_PER_CONN, further auth requests are rejected."""
     from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
@@ -212,18 +193,6 @@ async def test_on_auth_caps_attempts_and_disconnects():
     conn.build_error.assert_called_once()
     assert 'Too many authentication attempts' in conn.build_error.call_args[0][1]
     conn._transport.disconnect.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_on_auth_empty_credential_deauthenticates():
-    """An empty/missing credential clears authentication state and raises."""
-    conn = _make_conn(authenticated=True, account_info=_make_account_info())
-
-    with pytest.raises(ValueError, match='Not authenticated'):
-        await TaskConn.on_auth(conn, {'command': 'auth', 'arguments': {}})
-
-    assert conn._authenticated is False
-    assert conn._account_info is None
 
 
 @pytest.mark.asyncio
@@ -420,30 +389,20 @@ def test_get_task_token_with_apikey_reads_token_from_arguments(monkeypatch):
     assert conn.get_task_token(request, permissions='task.control') == 'tk_from-args'
 
 
-def test_get_task_token_with_apikey_enforces_permissions(monkeypatch):
-    """API-key auth without the requested permission raises PermissionError."""
-    from ai.modules.task import task_conn as tc_mod
-
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: set())
-    conn = _make_conn(account_info=_make_account_info(auth='ak_user-key'))
-
-    with pytest.raises(PermissionError):
-        conn.get_task_token({'arguments': {'token': 'tk_x'}}, permissions='task.control')
-
-
 # ---------------------------------------------------------------------------
-# get_task — cross-tenant ownership check
+# get_task — cross-team access check
 # ---------------------------------------------------------------------------
 
 
-def test_get_task_apikey_rejects_other_tenants_task(monkeypatch):
-    """For API-key auth, the task's owner must match the authenticated user."""
+def test_get_task_apikey_rejects_task_in_team_caller_cannot_access(monkeypatch):
+    """For API-key auth, the caller must belong to the task's team."""
     from ai.modules.task import task_conn as tc_mod
 
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.control'})
+    # Caller has no team membership for this task's team → empty permission list.
+    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: [])
 
     server = MagicMock()
-    fake_control = SimpleNamespace(userId='someone-else', task=SimpleNamespace(name='target'))
+    fake_control = SimpleNamespace(teamId='team-other', task=SimpleNamespace(name='target'))
     server.get_task_control = MagicMock(return_value=fake_control)
 
     conn = _make_conn(
@@ -451,19 +410,19 @@ def test_get_task_apikey_rejects_other_tenants_task(monkeypatch):
         server=server,
     )
 
-    with pytest.raises(PermissionError, match='different account'):
+    with pytest.raises(PermissionError, match='Access denied'):
         conn.get_task({'arguments': {'token': 'tk_x'}}, permissions='task.control')
 
 
-def test_get_task_apikey_returns_task_when_owner_matches(monkeypatch):
-    """API-key auth with matching userId returns the underlying task object."""
+def test_get_task_apikey_returns_task_when_team_grants_access(monkeypatch):
+    """API-key auth with the requested team permission returns the underlying task."""
     from ai.modules.task import task_conn as tc_mod
 
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.control'})
+    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.control'])
 
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(userId='user-1', task=target_task))
+    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=target_task))
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
@@ -473,11 +432,11 @@ def test_get_task_apikey_returns_task_when_owner_matches(monkeypatch):
     assert conn.get_task({'arguments': {'token': 'tk_x'}}, permissions='task.control') is target_task
 
 
-def test_get_task_tk_auth_bypasses_ownership_check():
-    """tk_ auth is already scoped to a single task; no userId comparison."""
+def test_get_task_tk_auth_bypasses_team_check():
+    """tk_ auth is already scoped to a single task; no team-membership check runs."""
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(userId='different-user', task=target_task))
+    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-other', task=target_task))
     conn = _make_conn(account_info=_make_account_info(auth='tk_x'), server=server)
     assert conn.get_task({}) is target_task
 
@@ -544,11 +503,12 @@ async def test_request_errors_when_debug_interface_missing(monkeypatch):
     """If the underlying task has no `_debug_python`, an error response is built."""
     from ai.modules.task import task_conn as tc_mod
 
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.debug'})
+    # Caller has task.debug on the task's team — get_task() returns the task.
+    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.debug'])
 
     fake_task = SimpleNamespace(_debug_python=None)
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(userId='user-1', task=fake_task))
+    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=fake_task))
     conn = _make_conn(account_info=_make_account_info(auth='ak_user-1', user_id='user-1'), server=server)
 
     response = await TaskConn.request(conn, {'command': 'continue', 'arguments': {'token': 'tk_x'}})

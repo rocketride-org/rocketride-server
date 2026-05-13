@@ -280,9 +280,21 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     """The dashboard only includes tasks owned by the caller."""
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
-    caller_account = SimpleNamespace(userId='user-1', auth='ak_caller', userToken='ak_caller_secret_token')
+    # Caller is a member of team-1 only; team-other is invisible to them.
+    caller_account = SimpleNamespace(
+        userId='user-1',
+        auth='ak_caller',
+        userToken='ak_caller_secret_token',
+        organizations=[
+            {
+                'id': 'org-1',
+                'permissions': [],
+                'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+            }
+        ],
+    )
 
-    # Server state: two task controls, one for caller and one for another user.
+    # Server state: one task in caller's team, one in a team they cannot see.
     own_status = SimpleNamespace(
         name='task.reader',
         startTime=900.0,
@@ -304,6 +316,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     own_control = SimpleNamespace(
         id='task-1',
         userId='user-1',
+        teamId='team-1',
         token='tk_1',
         source='reader',
         project_id='proj-1',
@@ -314,6 +327,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     other_control = SimpleNamespace(
         id='task-2',
         userId='other-user',
+        teamId='team-other',
         token='tk_2',
         source='other-source',
         project_id='proj-2',
@@ -341,13 +355,26 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
     """Task-token (tk_*) auth restricts the view to just that task."""
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
-    caller_account = SimpleNamespace(userId='user-1', auth='tk_my-only-task', userToken='tk_token')
+    # Both tasks belong to caller's team; the tk_ auth filter narrows further.
+    caller_account = SimpleNamespace(
+        userId='user-1',
+        auth='tk_my-only-task',
+        userToken='tk_token',
+        organizations=[
+            {
+                'id': 'org-1',
+                'permissions': [],
+                'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+            }
+        ],
+    )
 
     def _make_control(token):
         """Build a minimal task control with the matching token."""
         return SimpleNamespace(
             id=token,
             userId='user-1',
+            teamId='team-1',
             token=token,
             source='s',
             project_id='p',

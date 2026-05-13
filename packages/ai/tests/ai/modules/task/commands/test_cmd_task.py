@@ -203,19 +203,20 @@ async def test_on_rrext_get_token_returns_token_from_server():
 
 @pytest.mark.asyncio
 async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
-    """The list includes only RUNNING tasks owned by the calling user."""
+    """The list includes only RUNNING tasks the caller has team access to."""
     from rocketride import TASK_STATE
 
     running_status = SimpleNamespace(state=TASK_STATE.RUNNING.value, status='running')
     completed_status = SimpleNamespace(state=TASK_STATE.COMPLETED.value, status='completed')
 
-    def _ctrl(token, user_id, status):
-        """Build a TASK_CONTROL stub with the given user_id + status."""
+    def _ctrl(token, team_id, status):
+        """Build a TASK_CONTROL stub with the given team_id + status."""
         task = MagicMock()
         task.get_status = MagicMock(return_value=status)
         return SimpleNamespace(
             token=token,
-            userId=user_id,
+            userId='user-1',
+            teamId=team_id,
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
@@ -223,12 +224,20 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
 
     server = MagicMock()
     server._task_control = {
-        'tk_running_mine': _ctrl('tk_running_mine', 'user-1', running_status),
-        'tk_done_mine': _ctrl('tk_done_mine', 'user-1', completed_status),
-        'tk_running_other': _ctrl('tk_running_other', 'someone-else', running_status),
+        'tk_running_mine': _ctrl('tk_running_mine', 'team-1', running_status),
+        'tk_done_mine': _ctrl('tk_done_mine', 'team-1', completed_status),
+        'tk_running_other': _ctrl('tk_running_other', 'team-other', running_status),
     }
 
-    conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
+    # Caller has access to team-1 only; team-other is invisible.
+    organizations = [
+        {
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+        }
+    ]
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
 
     tokens = [t['token'] for t in response['body']['tasks']]
@@ -244,12 +253,26 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     status = SimpleNamespace(state=TASK_STATE.RUNNING.value, status='running')
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
-    control = SimpleNamespace(token='tk_1', userId='user-1', source='my-source', pipeline=None, task=task)
+    control = SimpleNamespace(
+        token='tk_1',
+        userId='user-1',
+        teamId='team-1',
+        source='my-source',
+        pipeline=None,
+        task=task,
+    )
 
     server = MagicMock()
     server._task_control = {'tk_1': control}
 
-    conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
+    organizations = [
+        {
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+        }
+    ]
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
     assert response['body']['tasks'][0]['name'] == 'my-source'
     assert response['body']['tasks'][0]['description'] == 'RocketRide DTC MCP Tool'
