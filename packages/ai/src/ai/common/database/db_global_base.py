@@ -38,7 +38,6 @@ Everything else — schema reflection, type inference, table auto-creation,
 session lifecycle — is handled here and is dialect-agnostic.
 """
 
-import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -462,7 +461,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # pipeline is configured to write to a brand-new table.
         table_schema = self._getTableSchema(self.table)
         if table_schema is None:
-            warning(f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.')
+            warning(
+                f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.'
+            )
             self.schema = {}
         else:
             # Store as {col_name: (type_str, comment)} to match the schema cache format.

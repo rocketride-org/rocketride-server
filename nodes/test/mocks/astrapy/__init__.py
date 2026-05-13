@@ -59,8 +59,7 @@ Or manually:
     python -m pytest nodes/test/test_dynamic.py -k astra_db -s -v
 """
 
-from typing import List, Any, Optional, Dict, Iterator
-from dataclasses import dataclass, field
+from typing import List, Any, Dict, Iterator
 import re
 
 
@@ -216,7 +215,17 @@ class Collection:
         """Get the data list for this collection."""
         return Database._data.get(self.name, [])
 
-    def find(self, filter: Dict[str, Any] = None, sort: Dict[str, Any] = None, limit: int = None, skip: int = 0, projection: Dict[str, int] = None, include_similarity: bool = False, include_sort_vector: bool = False, **kwargs) -> 'Cursor':
+    def find(
+        self,
+        filter: Dict[str, Any] = None,
+        sort: Dict[str, Any] = None,
+        limit: int = None,
+        skip: int = 0,
+        projection: Dict[str, int] = None,
+        include_similarity: bool = False,
+        include_sort_vector: bool = False,
+        **kwargs,
+    ) -> 'Cursor':
         """
         Find documents matching the filter.
 

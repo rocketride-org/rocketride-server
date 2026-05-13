@@ -37,7 +37,7 @@ Storage:
     - Call MockConnection.reset() between tests to clear state
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import re
 import numpy as np
 
@@ -287,7 +287,21 @@ class MockCursor:
         """Extract column names from SELECT query."""
         # Handle SELECT *
         if re.search(r'select\s+\*', query.lower()):
-            return ['id', 'content', 'objectid', 'nodeid', 'parent', 'permissionid', 'isdeleted', 'chunkid', 'istable', 'tableid', 'vectorsize', 'modelname', 'embedding']
+            return [
+                'id',
+                'content',
+                'objectid',
+                'nodeid',
+                'parent',
+                'permissionid',
+                'isdeleted',
+                'chunkid',
+                'istable',
+                'tableid',
+                'vectorsize',
+                'modelname',
+                'embedding',
+            ]
 
         # Extract specific columns
         match = re.search(r'select\s+(.+?)\s+from', query.lower())
@@ -395,6 +409,8 @@ class MockConnection:
 # =============================================================================
 
 
-def connect(dbname: str = None, user: str = None, password: str = None, host: str = None, port: int = None, **kwargs) -> MockConnection:
+def connect(
+    dbname: str = None, user: str = None, password: str = None, host: str = None, port: int = None, **kwargs
+) -> MockConnection:
     """Create a database connection."""
     return MockConnection(dbname=dbname, user=user, password=password, host=host, port=port, **kwargs)

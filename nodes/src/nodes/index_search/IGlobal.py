@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ai.common.config import Config
 from ai.common.transform import IGlobalTransform
@@ -211,7 +211,9 @@ class IGlobal(IGlobalTransform):
             mode = config.get('mode', 'self-managed')
 
             if not INDEX_NAME_RE.fullmatch(index):
-                warning("Index name is invalid. Use 1-255 lowercase chars: letters, digits, '_', '-', '.'; no '/' or spaces")
+                warning(
+                    "Index name is invalid. Use 1-255 lowercase chars: letters, digits, '_', '-', '.'; no '/' or spaces"
+                )
                 return
             if port == 0:
                 warning('Port cannot be 0')
@@ -341,17 +343,16 @@ class IGlobal(IGlobalTransform):
 
         self.search_highlight_enabled = bool(connConfig.get('highlight', False))
         if self.search_highlight_enabled:
-            self.search_highlight_fragment_size = int(connConfig.get('fragment_size') or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE)
-        debug(f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} slop={self.search_exact_slop} highlight={self.search_highlight_enabled} fragment_size={self.search_highlight_fragment_size}')
+            self.search_highlight_fragment_size = int(
+                connConfig.get('fragment_size') or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
+            )
+        debug(
+            f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} slop={self.search_exact_slop} highlight={self.search_highlight_enabled} fragment_size={self.search_highlight_fragment_size}'
+        )
 
 
 def _format_error(e: Exception) -> str:
     """Concise, provider-first error string with early returns."""
-    try:
-        import json  # type: ignore
-    except Exception:
-        return str(e).strip()
-
     # Handle Elasticsearch exceptions
     error_str = str(e).strip()
 

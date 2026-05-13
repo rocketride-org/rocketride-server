@@ -38,7 +38,6 @@ Storage:
 """
 
 from typing import Any, Dict, List, Optional
-import uuid as uuid_module
 
 
 # =============================================================================
@@ -77,7 +76,14 @@ class MockCollection:
     def _storage(self) -> Dict[str, Dict]:
         return MockCollection._all_storage.get(self.name, {})
 
-    def query(self, query_embeddings: List[List[float]] = None, n_results: int = 10, where: Optional[Dict] = None, where_document: Optional[Dict] = None, include: List[str] = None) -> Dict[str, Any]:
+    def query(
+        self,
+        query_embeddings: List[List[float]] = None,
+        n_results: int = 10,
+        where: Optional[Dict] = None,
+        where_document: Optional[Dict] = None,
+        include: List[str] = None,
+    ) -> Dict[str, Any]:
         """Query the collection for similar vectors."""
         if include is None:
             include = ['metadatas', 'documents', 'distances']
@@ -110,7 +116,9 @@ class MockCollection:
             else:
                 distance = 1.0
 
-            matches.append({'id': id, 'metadata': self._serialize_metadata(metadata), 'document': document, 'distance': distance})
+            matches.append(
+                {'id': id, 'metadata': self._serialize_metadata(metadata), 'document': document, 'distance': distance}
+            )
 
         # Sort by distance (lower is better)
         matches.sort(key=lambda x: x['distance'])
@@ -124,7 +132,15 @@ class MockCollection:
 
         return results
 
-    def get(self, ids: List[str] = None, where: Optional[Dict] = None, where_document: Optional[Dict] = None, include: List[str] = None, limit: int = None, offset: int = 0) -> Dict[str, Any]:
+    def get(
+        self,
+        ids: List[str] = None,
+        where: Optional[Dict] = None,
+        where_document: Optional[Dict] = None,
+        include: List[str] = None,
+        limit: int = None,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
         """Get items from the collection."""
         if include is None:
             include = ['metadatas', 'documents']
@@ -171,12 +187,28 @@ class MockCollection:
 
         return results
 
-    def upsert(self, ids: List[str], embeddings: List[List[float]] = None, metadatas: List[Dict] = None, documents: List[str] = None):
+    def upsert(
+        self,
+        ids: List[str],
+        embeddings: List[List[float]] = None,
+        metadatas: List[Dict] = None,
+        documents: List[str] = None,
+    ):
         """Upsert items into the collection."""
         for i, id in enumerate(ids):
-            self._storage[id] = {'embedding': embeddings[i] if embeddings else [], 'metadata': metadatas[i] if metadatas else {}, 'document': documents[i] if documents else ''}
+            self._storage[id] = {
+                'embedding': embeddings[i] if embeddings else [],
+                'metadata': metadatas[i] if metadatas else {},
+                'document': documents[i] if documents else '',
+            }
 
-    def add(self, ids: List[str], embeddings: List[List[float]] = None, metadatas: List[Dict] = None, documents: List[str] = None):
+    def add(
+        self,
+        ids: List[str],
+        embeddings: List[List[float]] = None,
+        metadatas: List[Dict] = None,
+        documents: List[str] = None,
+    ):
         """Add items to the collection."""
         self.upsert(ids, embeddings, metadatas, documents)
 
