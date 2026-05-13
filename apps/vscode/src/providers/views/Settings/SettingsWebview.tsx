@@ -211,7 +211,7 @@ export const settingsStyles = {
 export const SettingsCardHeader: React.FC<{ title: string; onSave: () => void }> = ({ title, onSave }) => (
 	<div style={settingsStyles.cardHeader}>
 		{title}
-		<button style={commonStyles.buttonPrimary} onClick={onSave}>
+		<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton }} onClick={onSave}>
 			Save All Settings
 		</button>
 	</div>

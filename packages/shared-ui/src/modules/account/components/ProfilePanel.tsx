@@ -164,7 +164,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 						</div>
 					</div>
 
-					<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={openEdit}>
+					<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={openEdit}>
 						Edit Profile
 					</button>
 				</div>
@@ -205,7 +205,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 											{isDefault ? (
 												<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
 											) : (
-												<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
+												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
 													Set default
 												</button>
 											)}

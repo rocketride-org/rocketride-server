@@ -180,7 +180,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 						{subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
 					</span>
 					{isOrgAdmin && (
-						<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={onOpenPortal}>
+						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onOpenPortal}>
 							Manage Payment Methods →
 						</button>
 					)}
@@ -275,7 +275,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 									<div style={SharedS.rowActions}>
 										<Badge variant={sv.variant}>{sv.label}</Badge>
 										{isCancelable && isOrgAdmin && (
-											<button style={commonStyles.buttonDangerSmall as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
+											<button style={{ ...commonStyles.buttonDanger, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
 												Cancel
 											</button>
 										)}

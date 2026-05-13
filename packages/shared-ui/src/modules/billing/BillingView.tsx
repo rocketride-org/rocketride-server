@@ -408,7 +408,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 								{/* Action buttons */}
 								<div style={S.actions}>
 									{isCancelable && (
-										<button style={commonStyles.buttonDangerOutline as CSSProperties} onClick={() => requestCancel(sub.appId)}>
+										<button style={{ ...commonStyles.buttonDangerOutline, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => requestCancel(sub.appId)}>
 											Cancel Subscription
 										</button>
 									)}
@@ -420,7 +420,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 
 					{/* Stripe customer portal link */}
 					<div style={S.portalRow}>
-						<button style={commonStyles.buttonSecondary as CSSProperties} onClick={handlePortal}>
+						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={handlePortal}>
 							Manage Payment Methods →
 						</button>
 					</div>

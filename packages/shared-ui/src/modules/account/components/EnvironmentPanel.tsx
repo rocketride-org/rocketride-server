@@ -196,7 +196,7 @@ export const EnvScopeCard: React.FC<{
 									setError(null);
 								}}
 								disabled={saving}
-								style={commonStyles.buttonSecondarySmall as CSSProperties}
+								style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties}
 							>
 								Cancel
 							</button>
@@ -205,7 +205,8 @@ export const EnvScopeCard: React.FC<{
 								disabled={saving}
 								style={
 									{
-										...commonStyles.buttonPrimarySmall,
+										...commonStyles.buttonPrimary,
+										...commonStyles.cardHeaderButton,
 										...(saving ? commonStyles.buttonDisabled : {}),
 									} as CSSProperties
 								}
@@ -227,10 +228,10 @@ export const EnvScopeCard: React.FC<{
 							<div key={idx} style={styles.row}>
 								<input value={key} onChange={(e) => updateEntry(idx, 'key', e.target.value)} placeholder="ROCKETRIDE_KEY_NAME" style={styles.keyInput as CSSProperties} />
 								<input type={revealedKeys.has(key) ? 'text' : 'password'} value={value} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
-								<button onClick={() => toggleReveal(key)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
+								<button onClick={() => toggleReveal(key)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
 									{revealedKeys.has(key) ? 'Hide' : 'Show'}
 								</button>
-								<button onClick={() => removeEntry(idx)} style={commonStyles.buttonSecondarySmall as CSSProperties}>
+								<button onClick={() => removeEntry(idx)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
 									Delete
 								</button>
 							</div>
@@ -238,7 +239,7 @@ export const EnvScopeCard: React.FC<{
 
 						{/* Add button */}
 						<div style={styles.addRow}>
-							<button onClick={addEntry} style={{ ...commonStyles.buttonSecondarySmall, fontSize: 11 } as CSSProperties}>
+							<button onClick={addEntry} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
 								+ Add Variable
 							</button>
 						</div>
