@@ -73,16 +73,21 @@ export interface ServerAppEntry {
  * @returns Array of AppManifestEntry objects ready for the shell.
  */
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
+	// Drop entries missing a remoteEntry URL — the server may include
+	// apps that have no built UI yet (e.g. server-only nodes).
+	// Without this guard, MF's normalizeRemote crashes on undefined.
+	const validApps = serverApps.filter((a) => a.entry);
+
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set.
 	registerRemotes(
-		serverApps.map((a) => ({ name: a.moduleId, entry: a.entry })),
+		validApps.map((a) => ({ name: a.moduleId, entry: a.entry })),
 		{ force: true },
 	);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
-	return serverApps.map((a) => ({
+	return validApps.map((a) => ({
 		id:            a.id,
 		moduleId:      a.moduleId,
 		name:          a.name,

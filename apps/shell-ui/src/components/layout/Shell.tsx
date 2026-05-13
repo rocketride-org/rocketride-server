@@ -164,6 +164,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Desktop apps — derived from identity, falls back to static config ──
 	const apps = useMemo(() => {
 		if (identity?.apps?.length) {
+			console.log('identity.apps', identity.apps);
 			return registerAndMapApps(identity.apps as Parameters<typeof registerAndMapApps>[0]);
 		}
 		return config.apps;
