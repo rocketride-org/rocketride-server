@@ -27,26 +27,17 @@ from typing import Any
 import pytest
 
 # ---------------------------------------------------------------------------
-# Minimal stubs so we can import DocumentStoreBase without the full rocketlib
-# installed in the test runner environment.
+# rocketlib stub — registered once by conftest.py (repo root) before any
+# test module is imported.  Do NOT add inline sys.modules patches here;
+# that pattern is order-dependent across test files collected in the same
+# pytest session.
 # ---------------------------------------------------------------------------
 
-# Stub rocketlib.IInstanceBase
 import sys
-import types
-
-_rocketlib = types.ModuleType('rocketlib')
-
-
-class _IInstanceBase:
-    pass
-
-
-_rocketlib.IInstanceBase = _IInstanceBase  # type: ignore[attr-defined]
-sys.modules.setdefault('rocketlib', _rocketlib)
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType  # noqa: E402
 from ai.common.store import DocumentStoreBase  # noqa: E402
+
 
 
 # ---------------------------------------------------------------------------

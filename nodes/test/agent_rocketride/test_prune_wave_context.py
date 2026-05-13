@@ -25,43 +25,14 @@ from typing import Any
 import pytest
 
 # ---------------------------------------------------------------------------
-# Minimal rocketlib stub — must be in sys.modules before the RocketRideDriver
-# import chain triggers IInstance.py -> agent.py -> host.py which calls
-#   from rocketlib import IInstanceBase, tool_function
-#   from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
-# We satisfy these with no-op objects so __new__ can instantiate the class
-# without a live server process.  Nothing in _prune_wave_context touches them.
+# rocketlib stub — registered once by conftest.py (repo root) before any
+# test module is imported.  Do NOT add inline sys.modules patches here;
+# that pattern is order-dependent across test files collected in the same
+# pytest session.
 # ---------------------------------------------------------------------------
 
-import sys
-import types
-
-_rocketlib = types.ModuleType('rocketlib')
-
-
-class _IInstanceBase:
-    pass
-
-
-def _tool_function(fn=None, **_kwargs):
-    """No-op decorator stub for @tool_function."""
-    if fn is not None:
-        return fn
-    return lambda f: f
-
-
-_rocketlib.IInstanceBase = _IInstanceBase  # type: ignore[attr-defined]
-_rocketlib.tool_function = _tool_function  # type: ignore[attr-defined]
-sys.modules.setdefault('rocketlib', _rocketlib)
-
-# rocketlib.types sub-module — must be registered separately
-_rocketlib_types = types.ModuleType('rocketlib.types')
-for _name in ('IInvokeOp', 'IInvokeTool', 'IInvokeMemory'):
-    setattr(_rocketlib_types, _name, object)
-sys.modules.setdefault('rocketlib.types', _rocketlib_types)
-_rocketlib.types = _rocketlib_types  # type: ignore[attr-defined]
-
 from nodes.agent_rocketride.rocketride_agent import RocketRideDriver  # noqa: E402
+
 
 
 
