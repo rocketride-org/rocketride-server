@@ -10,8 +10,10 @@ This module provides:
 
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.transformers')
@@ -542,9 +544,11 @@ class PipelineProxy:
         self._metadata = self._client.metadata
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Execute pipeline on inputs."""
+        """Execute pipeline on inputs via model server RPC."""
+        # Count inference call (ModelClient.send_command handles perf timing)
+        metrics.counter('gpu_inference_count', 1)
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'pipeline_call',
                 'inputs': inputs,
@@ -589,13 +593,34 @@ class PipelineLocal:
             logger.info('GPU processing disabled. Recommend using GPU for better performance.')
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Execute pipeline on inputs."""
+        """Execute pipeline on inputs locally with perf timing."""
         if isinstance(inputs, str):
             inputs = [inputs]
 
+        # Time each phase individually for billing/monitoring
+        t0 = time.perf_counter()
         preprocessed = TransformersLoader.preprocess(self._pipeline, inputs, self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         raw_output = TransformersLoader.inference(self._pipeline, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         results = TransformersLoader.postprocess(self._pipeline, raw_output, len(inputs), self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
+        metrics.counter('gpu_inference_count', 1)
 
         return results
 
@@ -667,9 +692,11 @@ class ModelProxy:
         )
 
     def generate(self, **kwargs) -> Any:
-        """Generate text (for language models)."""
+        """Generate text via model server RPC (for language models)."""
+        # Count inference call (ModelClient.send_command handles perf timing)
+        metrics.counter('gpu_inference_count', 1)
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'generate',
                 'inputs': kwargs,
@@ -700,13 +727,34 @@ class ModelLocal:
         )
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Run model inference."""
+        """Run model inference locally with perf timing."""
         if isinstance(inputs, str):
             inputs = [inputs]
 
+        # Time each phase individually for billing/monitoring
+        t0 = time.perf_counter()
         preprocessed = TransformersLoader.preprocess(self._model, inputs, self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         raw_output = TransformersLoader.inference(self._model, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         results = TransformersLoader.postprocess(self._model, raw_output, len(inputs), self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
+        metrics.counter('gpu_inference_count', 1)
 
         return results
 

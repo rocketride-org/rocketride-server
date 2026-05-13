@@ -23,8 +23,10 @@ Note:
 import logging
 import os
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.whisper')
@@ -544,16 +546,43 @@ class Whisper:
         if not isinstance(audio, bytes):
             raise TypeError(f'audio must be bytes (PCM int16), got {type(audio)}')
 
+        # Count inference call — perf timing handled per-mode below
+        metrics.counter('gpu_inference_count', 1)
+
         if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
             return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, **kwargs)
         else:
+            # Local mode — time each phase
             return self._transcribe_local(audio, **kwargs)
 
     def _transcribe_local(self, audio: bytes, **kwargs) -> Dict[str, Any]:
-        """Execute local transcription using loader methods."""
+        """Execute local transcription with perf timing."""
+        # Preprocess phase — convert raw PCM bytes to model input format
+        t0 = time.perf_counter()
         preprocessed = WhisperLoader.preprocess(self._model, [audio], self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        # GPU inference phase — run transcription model
+        t0 = time.perf_counter()
         raw_output = WhisperLoader.inference(self._model, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        # Postprocess phase — extract requested output fields
+        t0 = time.perf_counter()
         results = WhisperLoader.postprocess(self._model, raw_output, 1, self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
 
         return results[0] if results else {}
 
@@ -567,7 +596,7 @@ class Whisper:
     ) -> Dict[str, Any]:
         """Execute remote transcription via model server."""
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'data': audio,
                 'beam_size': beam_size,

@@ -120,12 +120,6 @@ export class ConnectionManager extends EventEmitter {
 	// =========================================================================
 
 	protected setupConfigurationListener(): void {
-		this.disposables.push(
-			this.configManager.onEnvVarsChanged((env) => {
-				this.client?.setEnv(env);
-			})
-		);
-
 		const disposable = this.configManager.onConfigurationChanged((_config) => {
 			if (this.isDisposing) {
 				return;
@@ -234,7 +228,6 @@ export class ConnectionManager extends EventEmitter {
 	protected createClient(): RocketRideClient {
 		const client = new RocketRideClient({
 			persist: true,
-			env: this.configManager.getEnv(),
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
@@ -260,7 +253,16 @@ export class ConnectionManager extends EventEmitter {
 				} else if (message.event?.startsWith('apaevt_')) {
 					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
 				}
-				this.emit('event', message);
+
+				// Transform apaext_account into a dedicated shell:accountUpdate
+				// event — don't also emit it as a generic shell:event to avoid
+				// duplicate handling downstream
+				if (message.event === 'apaext_account' && message.body) {
+					this.emit('shell:accountUpdate', message.body);
+					return;
+				}
+
+				this.emit('shell:event', message);
 			},
 			onConnected: async () => {
 				this.updateConnectionStatus({
@@ -271,7 +273,7 @@ export class ConnectionManager extends EventEmitter {
 					progressMessage: undefined,
 				});
 				this.logger.output(`${icons.success} Connected to RocketRide server`);
-				this.emit('connected');
+				this.emit('shell:connected');
 
 				// Fetch and cache services list
 				this.refreshServices().catch((err) => {
@@ -286,7 +288,7 @@ export class ConnectionManager extends EventEmitter {
 				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
 					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
 				}
-				this.emit('disconnected');
+				this.emit('shell:disconnected');
 			},
 			onConnectError: async (error: Error) => {
 				// Auth rejection: stop retrying, clear stale credentials, and
@@ -401,7 +403,7 @@ export class ConnectionManager extends EventEmitter {
 				state: ConnectionState.DISCONNECTED,
 				lastError: errorMessage,
 			});
-			this.emit('error', error);
+			this.emit('shell:error', error);
 		}
 	}
 
@@ -464,20 +466,43 @@ export class ConnectionManager extends EventEmitter {
 		return { ...this.connectionStatus };
 	}
 
+	/**
+	 * Returns the HTTP/HTTPS URL for this connection's server.
+	 * Local mode uses the actual engine port; remote modes derive
+	 * the URL from the group's configured hostUrl.
+	 */
 	public getHttpUrl(): string {
+		// Local mode: engine runs on a dynamic port
 		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
 			const port = this.manager.getActualPort();
 			if (port) return `http://localhost:${port}`;
 		}
-		return this.configManager.getHttpUrl();
+		// Remote modes: normalize the group's hostUrl into a clean origin
+		const hostUrl = this.getGroupConfig().hostUrl;
+		if (!hostUrl) return 'http://localhost:5565';
+		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
+		const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+		return `${url.protocol}//${url.hostname}:${port}`;
 	}
 
+	/**
+	 * Returns the WebSocket URL for this connection's DAP service.
+	 * Local mode uses the actual engine port; remote modes derive
+	 * the URL from the group's configured hostUrl.
+	 */
 	public getWebSocketUrl(): string {
+		// Local mode: engine runs on a dynamic port
 		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
 			const port = this.manager.getActualPort();
 			if (port) return `ws://localhost:${port}/task/service`;
 		}
-		return this.configManager.getWebSocketUrl();
+		// Remote modes: normalize the group's hostUrl and upgrade to ws/wss
+		const hostUrl = this.getGroupConfig().hostUrl;
+		if (!hostUrl) return 'ws://localhost:5565/task/service';
+		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
+		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+		const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+		return `${wsProtocol}//${url.hostname}:${port}/task/service`;
 	}
 
 	public getEngineInfo(): { version: string | null; publishedAt: string | null } {
@@ -505,7 +530,7 @@ export class ConnectionManager extends EventEmitter {
 	public async refreshServices(): Promise<void> {
 		if (!this.isConnected() || !this.client) {
 			this.clearServicesCache();
-			this.emit('servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
 			return;
 		}
 
@@ -519,12 +544,12 @@ export class ConnectionManager extends EventEmitter {
 				const services: Record<string, unknown> = body.services ?? {};
 				this.cachedServices = services;
 				this.cachedServicesError = null;
-				this.emit('servicesUpdated', { services, servicesError: undefined });
+				this.emit('shell:servicesUpdated', { services, servicesError: undefined });
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				this.cachedServices = null;
 				this.cachedServicesError = msg;
-				this.emit('servicesUpdated', { services: {}, servicesError: msg });
+				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
 			} finally {
 				this.servicesRefreshPromise = null;
 			}
@@ -548,7 +573,12 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 		Object.assign(this.connectionStatus, updates);
-		this.emit('connectionStateChanged', this.connectionStatus);
+		this.emit('shell:statusChange', this.connectionStatus);
+
+		// Also emit the simple status message for UI consumers that don't
+		// need the full ConnectionStatus object
+		const message = this.connectionStatus.progressMessage ?? null;
+		this.emit('shell:statusMessage', { message });
 	}
 
 	protected async updateCredentialsStatus(): Promise<void> {

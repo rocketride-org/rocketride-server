@@ -827,7 +827,7 @@ class TestPathTraversalGuards(unittest.TestCase):
         """Remove the tmp directory."""
         try:
             self._outside.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
         self._tmp.cleanup()
 

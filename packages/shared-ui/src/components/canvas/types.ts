@@ -127,9 +127,6 @@ export interface INodeData {
 
 	/** Incoming invoke (control-flow) connections. */
 	control?: import('../../types/project').IControlConnection[];
-
-	/** Whether the node is locked from editing. */
-	isLocked?: boolean;
 }
 
 /**
@@ -182,46 +179,3 @@ export interface ICanvasPreferences {
 		offsetY: number;
 	};
 }
-
-// ============================================================================
-// Feature Flags
-// ============================================================================
-
-/**
- * Controls which toolbar buttons and capabilities are visible.
- */
-export interface IFlowFeatures {
-	addNode?: boolean;
-	addAnnotation?: boolean;
-	fitView?: boolean;
-	zoomIn?: boolean;
-	zoomOut?: boolean;
-	lock?: boolean;
-	undo?: boolean;
-	redo?: boolean;
-	autoLayout?: boolean;
-	keyboardShortcuts?: boolean;
-	logs?: boolean;
-	save?: boolean;
-	saveAs?: boolean;
-	importExport?: boolean;
-	moreOptions?: boolean;
-}
-
-export const DEFAULT_FLOW_FEATURES: IFlowFeatures = {
-	addNode: true,
-	addAnnotation: true,
-	fitView: true,
-	zoomIn: true,
-	zoomOut: true,
-	lock: true,
-	undo: true,
-	redo: true,
-	autoLayout: true,
-	keyboardShortcuts: true,
-	logs: true,
-	save: true,
-	saveAs: true,
-	importExport: true,
-	moreOptions: true,
-};

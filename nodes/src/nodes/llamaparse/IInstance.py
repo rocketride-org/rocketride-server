@@ -74,7 +74,6 @@ class IInstance(IInstanceBase):
                     debug('LlamaParse Instance: Acquired parser lock')
                     if self.IGlobal._parser:
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=self._document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -283,14 +282,12 @@ class IInstance(IInstanceBase):
                         debug('LlamaParse Instance: Processing image file')
                         # Parse image - result_type is configured in the parser
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
                     else:
                         # For documents, use the configured result_type
                         result = self.IGlobal._parser.parse(
-                            pipe_id=self.instance.pipeId,
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -326,19 +323,9 @@ class IInstance(IInstanceBase):
             if not text or len(text.strip()) == 0:
                 debug('LlamaParse Instance: No text content extracted, creating fallback message')
                 if mime_type.startswith('image/'):
-                    text = (
-                        f'# Image Processing Result\n\n'
-                        f'This image was processed by LlamaParse but no text content was extracted.\n\n'
-                        f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                        f'*Note: This may indicate that the image contains no readable text or the OCR processing was unsuccessful.*'
-                    )
+                    text = f'# Image Processing Result\n\nThis image was processed by LlamaParse but no text content was extracted.\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*Note: This may indicate that the image contains no readable text or the OCR processing was unsuccessful.*'
                 else:
-                    text = (
-                        f'# Document Processing Result\n\n'
-                        f'This document was processed by LlamaParse but no text content was extracted.\n\n'
-                        f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                        f'*Note: This may indicate that the document is empty or the parsing was unsuccessful.*'
-                    )
+                    text = f'# Document Processing Result\n\nThis document was processed by LlamaParse but no text content was extracted.\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*Note: This may indicate that the document is empty or the parsing was unsuccessful.*'
 
             # Extract tables from the parsed text and structured data
             self.extract_tables_from_text(text)
@@ -377,12 +364,7 @@ class IInstance(IInstanceBase):
             debug(f'LlamaParse Instance: Full traceback: {traceback.format_exc()}')
 
             # Create error message as markdown
-            error_text = (
-                f'# LlamaParse Processing Error\n\n'
-                f'**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\n'
-                f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                f'*The document could not be processed due to an error in the LlamaParse service.*'
-            )
+            error_text = f'# LlamaParse Processing Error\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*The document could not be processed due to an error in the LlamaParse service.*'
 
             # Write error message to text lane
             if self.instance.hasListener('text'):
@@ -551,7 +533,7 @@ class IInstance(IInstanceBase):
                 if self.IGlobal._parser:
                     debug(f'LlamaParse Instance: Calling parser for document object: {self._current_object.fileName}')
                     result = self.IGlobal._parser.parse(
-                        pipe_id=self.instance.pipeId, file_data=document_data, file_name=self._current_object.fileName
+                        file_data=document_data, file_name=self._current_object.fileName
                     )
                     # Handle both old string format and new dict format
                     if isinstance(result, dict):

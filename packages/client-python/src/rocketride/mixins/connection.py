@@ -52,7 +52,6 @@ Usage:
 
 import asyncio
 import os
-import time
 import urllib.parse
 from typing import Any, Dict, Optional
 from ..core import DAPClient, TransportWebSocket, CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_PROTOCOL
@@ -81,126 +80,255 @@ class ConnectionMixin(DAPClient):
         Initialize connection management.
 
         Args:
-            persist: Enable automatic reconnection on disconnect
-            max_retry_time: Max total time in ms to keep retrying (None = forever)
-            **kwargs: Additional arguments passed to parent class
+            persist: Enable automatic reconnection on disconnect.
+            max_retry_time: Deprecated — accepted but ignored. Reconnection
+                uses linear backoff (0.25s increments, 15s cap) and never gives up.
+            **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._persist = persist
-        self._max_retry_time = max_retry_time  # ms; None = retry forever
-        self._retry_start_time: Optional[float] = None  # when first failure occurred; used to enforce max_retry_time
-        self._current_reconnect_delay: float = (
-            0.5  # seconds until next retry; increments by 0.5s each failure, capped at 5s
-        )
-        self._manual_disconnect = (
-            False  # True only after user calls disconnect(); stops on_disconnected from scheduling reconnect
-        )
-        self._reconnect_task: Optional[asyncio.Task] = None  # task that sleeps then calls _attempt_connection
-        self._did_notify_connected = (
-            False  # True after we called on_connected; gates whether we invoke user on_disconnected
-        )
+        # Desired state model — replaces old flag soup
+        self._desired_state: str = 'detached'  # 'detached' | 'attached' | 'authenticated'
+        self._authenticated: bool = False
+        self._reconnect_timer: Optional[asyncio.Task] = None
+        self._current_reconnect_delay: float = 0.25  # seconds; +0.25 per failure, cap 15s
 
     async def on_connected(self, connection_info: Optional[str] = None) -> None:
-        """Handle connection established event."""
-        self._manual_disconnect = False
-        self._did_notify_connected = True
-        self._current_reconnect_delay = 0.5
-        self._retry_start_time = None
+        """Handle transport-level connection event (before auth)."""
         await super().on_connected(connection_info)
 
     async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
         """
-        Handle disconnection event.
+        Handle transport disconnection.
 
-        Clears stored ConnectResult, notifies user if we had connected,
-        and schedules reconnection in persist mode.
+        Clears transport and auth state, chains to parent, then consults
+        ``_desired_state`` to decide whether to reconnect.
         """
         self._transport = None
         self._connect_result = None
+        self._authenticated = False
 
-        if self._did_notify_connected:
-            self._did_notify_connected = False
-            await super().on_disconnected(reason, has_error)
+        await super().on_disconnected(reason, has_error)
 
-        if self._persist and not self._manual_disconnect:
-            await self._schedule_reconnect()
+        # Reconnect engine: honour _desired_state
+        if self._desired_state == 'detached':
+            return
+        if not self._persist:
+            self._desired_state = 'detached'
+            return
+        if self._reconnect_timer and not self._reconnect_timer.done():
+            return  # engine already active
+
+        self._current_reconnect_delay = 0.25
+        self._schedule_reconnect()
 
     # =========================================================================
-    # INTERNAL CONNECTION PRIMITIVES
+    # INTERNAL HELPERS
     # =========================================================================
 
-    async def _internal_connect(self, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """
-        Create transport if needed, connect, send auth, and notify on_connected.
-        Returns the auth response body (ConnectResult fields). Raises on failure.
-        """
+    async def _internal_attach(self, timeout: Optional[float] = None) -> None:
+        """Create transport if needed and open the WebSocket. No auth."""
         if self._transport is None:
-            self._transport = TransportWebSocket(uri=self._uri, auth=self._apikey)
+            self._transport = TransportWebSocket(uri=self._uri)
             self._bind_transport(self._transport)
+        await DAPClient.connect(self, timeout)
 
-        return await DAPClient.connect(self, timeout)
+    async def _internal_login(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Send the ``auth`` DAP command over the open transport."""
+        auth_args: Dict[str, Any] = {'auth': self._apikey or ''}
+        if getattr(self, '_client_display_name', None):
+            auth_args['clientName'] = self._client_display_name
+        if getattr(self, '_client_display_version', None):
+            auth_args['clientVersion'] = self._client_display_version
+
+        request = {
+            'type': 'request',
+            'command': 'auth',
+            'seq': self._next_seq(),
+            'arguments': auth_args,
+        }
+        try:
+            response = await self.request(request, timeout=timeout)
+        except Exception:
+            raise
+        if not response.get('success', False):
+            message = response.get('message', 'Authentication failed')
+            raise AuthenticationException({'message': message})
+
+        auth_body = response.get('body') or {}
+        self._connect_result = auth_body  # type: ignore[assignment]
+        self._authenticated = True
+
+        # Store userToken for future reconnects
+        if auth_body.get('userToken'):
+            self._apikey = auth_body['userToken']
+
+        connection_info = self._transport.get_connection_info() if self._transport else None
+        await super().on_connected(connection_info)
+        return auth_body
+
+    async def _internal_logout(self) -> None:
+        """Send ``deauth`` DAP command to revert to unauthenticated."""
+        if not self._authenticated or not self._transport or not self._transport.is_connected():
+            return
+        try:
+            request = {'type': 'request', 'command': 'deauth', 'seq': self._next_seq(), 'arguments': {}}
+            await self.request(request)
+        except Exception:
+            pass  # Best-effort
+        self._connect_result = None
+        self._authenticated = False
 
     async def _internal_disconnect(self) -> None:
-        """Close and clean up the transport. Transport invokes on_disconnected when it closes."""
+        """Close and clean up the transport."""
         if self._transport is None:
             return
         await self._transport.disconnect()
 
-    async def _attempt_connection(self, timeout: Optional[float] = None) -> Optional[ConnectResult]:
-        """
-        Try _internal_connect once; on auth error stop; on other error reschedule with backoff.
-        Used by persist-mode connect() and by the reconnect task.
-        Returns ConnectResult on success, None on failure.
-        """
+    def _clear_reconnect_timer(self) -> None:
+        """Cancel the reconnect task if active."""
+        if self._reconnect_timer and not self._reconnect_timer.done():
+            self._reconnect_timer.cancel()
+            self._reconnect_timer = None
+
+    def _schedule_reconnect(self) -> None:
+        """Schedule a reconnect attempt driven by ``_desired_state``."""
+        self._debug_message(f'Scheduling reconnect in {self._current_reconnect_delay}s')
+        self._reconnect_timer = asyncio.create_task(self._do_reconnect())
+
+    async def _do_reconnect(self) -> None:
+        """Reconnect engine: sleep, re-attach, optionally re-login."""
+        await asyncio.sleep(self._current_reconnect_delay)
         try:
-            await self._internal_connect(timeout)
-            # Persist mode: store userToken so reconnects use the durable rr_ key
-            if self._connect_result and self._connect_result.get('userToken'):
-                self._apikey = self._connect_result['userToken']
-            self._reconnect_task = None
-            self._debug_message('Connection successful')
-            return self._connect_result
-        except AuthenticationException as e:
-            self._debug_message(f'Connection failed (auth): {e}')
-            await self.on_connect_error(e)
-            return None
-        except Exception as e:
-            self._debug_message(f'Connection failed: {e}')
-            await self.on_connect_error(e)
-
-            if self._retry_start_time is None:
-                self._retry_start_time = time.monotonic()
-
-            if self._max_retry_time is not None:
-                if time.monotonic() - self._retry_start_time >= self._max_retry_time / 1000.0:
-                    return None
-
-            self._current_reconnect_delay = min(self._current_reconnect_delay + 0.5, 5.0)
-            await self._schedule_reconnect()
-            return None
-
-    async def _schedule_reconnect(self) -> None:
-        """Schedule a reconnection attempt with exponential backoff."""
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-
-        if self._max_retry_time is not None and self._retry_start_time is not None:
-            if time.monotonic() - self._retry_start_time >= self._max_retry_time / 1000.0:
-                await self.on_connect_error(Exception('Max retry time exceeded'))
+            await self._internal_attach()
+            if self._desired_state == 'detached':
+                self._reconnect_timer = None
                 return
 
-        self._debug_message(f'Scheduling reconnection in {self._current_reconnect_delay}s')
-        self._reconnect_task = asyncio.create_task(self._attempt_reconnect())
+            if self._desired_state == 'authenticated':
+                await self._internal_login()
+                if self._desired_state == 'detached':
+                    self._reconnect_timer = None
+                    return
 
-    async def _attempt_reconnect(self) -> None:
-        """Sleep then call _attempt_connection (used by scheduled reconnect)."""
-        await asyncio.sleep(self._current_reconnect_delay)
-        if self._persist and not self._manual_disconnect:
-            self._debug_message('Attempting to reconnect...')
-            await self._attempt_connection()
+            # Success — reset backoff
+            self._reconnect_timer = None
+            self._current_reconnect_delay = 0.25
+            self._debug_message('Reconnect successful')
+        except AuthenticationException as e:
+            # Auth rejected — downgrade to attached, stop retrying auth
+            if self._desired_state == 'detached':
+                self._reconnect_timer = None
+                return
+            self._desired_state = 'attached'
+            self._reconnect_timer = None
+            await self.on_connect_error(e)
+        except Exception as e:
+            if self._desired_state == 'detached':
+                self._reconnect_timer = None
+                return
+            # Transient failure — linear backoff, cap at 15s
+            self._current_reconnect_delay = min(self._current_reconnect_delay + 0.25, 15.0)
+            await self.on_connect_error(e)
+            self._schedule_reconnect()  # replaces timer
 
     # =========================================================================
-    # PUBLIC API
+    # PUBLIC API — TRANSPORT
+    # =========================================================================
+
+    async def attach(self, uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None:
+        """
+        Attach to a RocketRide server (open WebSocket, no auth).
+
+        If ``uri`` is provided and differs from the current URI, detaches
+        first. If already attached to the same URI, this is a no-op.
+        """
+        if uri:
+            normalised = self._get_websocket_uri(uri) if hasattr(self, '_get_websocket_uri') else uri
+            if normalised != self._uri:
+                if self.is_attached():
+                    await self.detach()
+                self._set_uri(normalised)
+        if self.is_attached():
+            if self._desired_state == 'detached':
+                self._desired_state = 'attached'
+            return
+        self._desired_state = 'attached'
+        await self._internal_attach(timeout)
+
+    async def detach(self) -> None:
+        """Detach from the server (close WebSocket, cancel reconnection)."""
+        self._desired_state = 'detached'
+        self._clear_reconnect_timer()
+        self._authenticated = False
+        self._connect_result = None
+        if self._transport and self._transport.is_connected():
+            await self._internal_disconnect()
+
+    def is_attached(self) -> bool:
+        """True when the WebSocket transport is connected (regardless of auth)."""
+        return self._transport is not None and self._transport.is_connected()
+
+    # =========================================================================
+    # PUBLIC API — AUTH
+    # =========================================================================
+
+    async def login(
+        self,
+        credential: Optional[str] = None,
+        *,
+        uri: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> ConnectResult:
+        """
+        Authenticate over an attached transport.
+
+        If ``uri`` is provided and differs, detaches and re-attaches first.
+        If ``credential`` is provided and differs from the current credential,
+        logs out (best-effort) before logging in with the new credential.
+        If already authenticated with the same credential, this is a no-op.
+        """
+        resolved = credential or self._apikey or os.environ.get('ROCKETRIDE_APIKEY', '')
+
+        # URI change → detach + re-attach
+        if uri:
+            normalised = self._get_websocket_uri(uri) if hasattr(self, '_get_websocket_uri') else uri
+            if normalised != self._uri:
+                await self.detach()
+                self._set_uri(normalised)
+                await self._internal_attach(timeout)
+
+        # Ensure attached
+        if not self.is_attached():
+            await self._internal_attach(timeout)
+
+        # Auth change → logout first (best-effort)
+        if resolved != self._apikey and self._authenticated:
+            try:
+                await self._internal_logout()
+            except Exception:
+                pass
+        self._set_auth(resolved)
+
+        # Already authenticated with same credential → no-op
+        if self._authenticated:
+            self._desired_state = 'authenticated'
+            return self._connect_result or {}  # type: ignore[return-value]
+
+        self._desired_state = 'authenticated'
+        return await self._internal_login(timeout)
+
+    async def logout(self) -> None:
+        """Deauthenticate: sends ``deauth`` to server, clears client auth state."""
+        await self._internal_logout()
+        self._desired_state = 'attached'
+
+    def is_authenticated(self) -> bool:
+        """True when the auth handshake has succeeded on the current connection."""
+        return self._authenticated
+
+    # =========================================================================
+    # COMPAT API — connect() / disconnect()
     # =========================================================================
 
     async def connect(
@@ -210,70 +338,23 @@ class ConnectionMixin(DAPClient):
         timeout: Optional[float] = None,
     ) -> ConnectResult:
         """
-        Connect to the RocketRide server and authenticate in a single call.
+        Connect and authenticate in a single call (backward compatible).
 
-        Sends the credential as the first DAP message and returns the full
-        ConnectResult (user identity + organizations + teams) on success.
-
-        If `credential` is omitted, falls back to: the `auth` passed at construction
-        time, then the `ROCKETRIDE_APIKEY` environment variable.
-
-        In persist mode, enables automatic reconnection. After the first successful
-        connect the stored `userToken` is replayed automatically on reconnect.
-
-        Args:
-            credential: API key / Zitadel access_token / rr_ user token.
-                        Falls back to construction-time auth, then ROCKETRIDE_APIKEY env var.
-            timeout: Optional overall timeout in ms covering the WebSocket handshake
-                     and auth request.
-
-        Returns:
-            ConnectResult with user identity, organizations, and teams.
+        Wraps ``attach()`` + ``login()``. Sends the credential as the first
+        DAP message and returns the full ConnectResult on success.
         """
-        resolved = credential or self._apikey or os.environ.get('ROCKETRIDE_APIKEY', '')
-        self._set_auth(resolved)
-
-        self._manual_disconnect = False
-        self._current_reconnect_delay = 0.5
-        self._retry_start_time = None
-
-        if self.is_connected():
-            await self._internal_disconnect()
-
-        if self._persist:
-            if self._reconnect_task and not self._reconnect_task.done():
-                self._reconnect_task.cancel()
-                self._reconnect_task = None
-            await self._attempt_connection(timeout)
-        else:
-            await self._internal_connect(timeout)
-            # Store userToken for reconnect
-            if self._connect_result and self._connect_result.get('userToken'):
-                self._apikey = self._connect_result['userToken']
-
-        return self._connect_result or {}  # type: ignore[return-value]
+        self._current_reconnect_delay = 0.25
+        await self.attach(timeout=timeout)
+        return await self.login(credential, timeout=timeout)
 
     def get_account_info(self) -> Optional[ConnectResult]:
-        """
-        Return the ConnectResult from the last successful connect().
-        Returns None if not connected or not yet authenticated.
-        """
+        """Return the ConnectResult from the last successful login()."""
         return self._connect_result
 
     async def disconnect(self) -> None:
-        """
-        Disconnect from the RocketRide server and stop automatic reconnection.
-
-        Should be called when finished with the client to clean up resources.
-        """
-        self._manual_disconnect = True
-
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-            self._reconnect_task = None
-
-        if self._transport is not None and self.is_connected():
-            await self._internal_disconnect()
+        """Disconnect (backward compatible). Wraps ``logout()`` + ``detach()``."""
+        await self.logout()
+        await self.detach()
 
     # =========================================================================
     # HELPERS

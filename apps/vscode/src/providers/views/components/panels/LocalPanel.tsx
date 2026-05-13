@@ -12,7 +12,7 @@
 
 import React from 'react';
 import localIcon from '../../../../assets/local.svg';
-import { settingsStyles as S, EngineVersionItem } from '../../PageSettings/SettingsWebview';
+import { settingsStyles as S, EngineVersionItem } from '../../Settings/SettingsWebview';
 
 // =============================================================================
 // TYPES

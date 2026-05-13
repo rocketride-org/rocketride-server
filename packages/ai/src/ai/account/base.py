@@ -30,6 +30,7 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import os
 from abc import ABC, abstractmethod
 
 
@@ -97,6 +98,26 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
+    async def get_merged_env(self, user_id: str, org_id: str, team_id: str | None) -> dict[str, str]:
+        """
+        Build the merged ROCKETRIDE_* environment for a user.
+
+        Merge order: os.environ → org → team → user.  Each layer overrides
+        the previous.
+
+        OSS default: returns ROCKETRIDE_* entries from os.environ only.
+        SaaS override: also decrypts org/team/user secrets from the database.
+
+        Args:
+            user_id: The user's internal ID.
+            org_id:  The user's organization ID.
+            team_id: The user's active team ID, or None.
+
+        Returns:
+            Merged key-value dict ready for pipeline variable resolution.
+        """
+        return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+
     async def init_account(self, server) -> None:
         """
         Register HTTP routes onto the WebServer instance and run async startup work.
@@ -107,6 +128,60 @@ class AccountBase(ABC):
 
         Args:
             server: ``WebServer`` instance (from ``ai.web``).
+        """
+        pass
+
+    async def get_public_apps(self) -> list:
+        """
+        Return apps visible to unauthenticated users.
+
+        OSS reads ``dist/server/static/apps.json`` and filters by
+        ``public !== false``.  SaaS queries the DB for ``owner_type='public'``.
+
+        Returns:
+            List of app manifest dicts (same shape as apps.json entries).
+        """
+        return []
+
+    async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
+        """
+        Return all apps the authenticated user is entitled to see.
+
+        OSS returns all apps (APIKEY grants full access).
+        SaaS queries the DB filtered by ``can_access_app()`` using the
+        user's org/team memberships.
+
+        Args:
+            user_id:       Internal user ID from the ConnectResult.
+            organizations: List of org dicts with nested teams (from ConnectResult).
+
+        Returns:
+            List of app manifest dicts.
+        """
+        return []
+
+    async def audit(
+        self,
+        user_id: str | None,
+        source: str,
+        reason: str,
+        request_data: dict | None = None,
+        response_data: dict | None = None,
+        org_id: str | None = None,
+    ) -> None:
+        """
+        Write an audit log entry.
+
+        OSS default is a no-op.  The SaaS implementation persists the
+        entry to the ``audit_logs`` table.
+
+        Args:
+            user_id:       UUID of the acting user, or None for system/webhook events.
+            source:        Origin system (e.g. "stripe", "account", "billing").
+            reason:        Machine-readable action code (e.g. "create_team", "webhook_invoice_paid").
+            request_data:  Optional JSON-serialisable dict of the triggering input.
+            response_data: Optional JSON-serialisable dict of the resulting state.
+            org_id:        UUID of the organisation this event pertains to, or None.
         """
         pass
 
@@ -136,3 +211,40 @@ class AccountBase(ABC):
             request: Raw DAP request dict.
         """
         raise NotImplementedError('App marketplace requires SaaS mode')
+
+    async def handle_public(self, conn, request):
+        """
+        Dispatch an ``rrext_public_*`` DAP command.
+
+        Available on both authenticated and unauthenticated connections.
+        The ``rrext_public_probe`` command is handled directly by
+        ``PublicCommands``; this method handles ``rrext_public_catalog``
+        and any future public commands that need account-layer logic.
+
+        OSS returns the static apps.json catalog.
+        SaaS queries the marketplace DB with pagination and optional
+        subscription overlay for authenticated callers.
+
+        Args:
+            conn:    ``TaskConn`` instance.
+            request: Raw DAP request dict.
+        """
+        # Default OSS implementation: return public apps from static manifest
+        args = request.get('arguments') or {}
+        offset = args.get('offset', 0)
+        limit = min(args.get('limit', 20), 100)
+        apps = await self.get_public_apps()
+
+        # Basic client-side pagination for OSS
+        total = len(apps)
+        page = apps[offset : offset + limit]
+
+        return conn.build_response(
+            request,
+            body={
+                'apps': page,
+                'total': total,
+                'offset': offset,
+                'limit': limit,
+            },
+        )

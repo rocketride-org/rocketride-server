@@ -33,6 +33,7 @@ import { useCallback, useMemo } from 'react';
 import { Node, Edge } from '@xyflow/react';
 
 import { useFlow } from './useFlowContext';
+import { useFlowPreferences } from '../context/FlowPreferencesContext';
 import { generateNodeId } from '../util/graph';
 import { uuid } from '../util/uuid';
 import { INodeData } from '../types';
@@ -106,8 +107,10 @@ export function useCopy() {
  */
 export function usePaste() {
 	const { nodes, setNodes, setEdges, onContentUpdated } = useFlow();
+	const { isLocked } = useFlowPreferences();
 
 	const paste = useCallback(() => {
+		if (isLocked) return;
 		if (!clipboardRef.current) return;
 
 		const { nodes: copiedNodes, edges: copiedEdges } = clipboardRef.current;
@@ -155,7 +158,7 @@ export function usePaste() {
 		setNodes((current) => [...current.map((n) => ({ ...n, selected: false })), ...newNodes]);
 		setEdges((current: Edge[]) => [...current, ...newEdges]);
 		onContentUpdated();
-	}, [nodes, setNodes, setEdges, onContentUpdated]);
+	}, [isLocked, nodes, setNodes, setEdges, onContentUpdated]);
 
 	return paste;
 }

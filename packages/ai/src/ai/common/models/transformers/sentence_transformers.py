@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     import numpy as np
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.sentence_transformers')
@@ -348,30 +350,66 @@ class SentenceTransformer:
         if isinstance(sentences, str):
             sentences = [sentences]
 
+        # Count inference call — perf timing handled per-mode below
+        metrics.counter('gpu_inference_count', 1)
+
         if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
             return self._encode_remote(sentences, batch_size, **kwargs)
         else:
+            # Local mode — time each phase across all batch iterations
             return self._encode_local(sentences, batch_size, **kwargs)
 
     def _encode_local(self, sentences: List[str], batch_size: int, **kwargs) -> np.ndarray:
-        """Execute local encoding using loader methods."""
+        """
+        Execute local encoding using loader methods.
+
+        Times each phase (preprocess/inference/postprocess) per batch
+        iteration and accumulates totals for billing.
+        """
         import numpy as np
 
         all_embeddings = []
+
+        # Accumulate timing across all batch iterations
+        t_pre = 0.0
+        t_gpu = 0.0
+        t_post = 0.0
 
         # Process in batches
         for i in range(0, len(sentences), batch_size):
             batch = sentences[i : i + batch_size]
 
-            # Use loader pipeline
+            # Preprocess phase
+            t0 = time.perf_counter()
             preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
+            t_pre += (time.perf_counter() - t0) * 1000
+
+            # GPU inference phase
+            t0 = time.perf_counter()
             raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu += (time.perf_counter() - t0) * 1000
+
+            # Postprocess phase
+            t0 = time.perf_counter()
             results = SentenceTransformerLoader.postprocess(self._model, raw_output, len(batch), self.output_fields)
+            t_post += (time.perf_counter() - t0) * 1000
 
             # Extract embeddings from results (handles both 'embeddings' and '$embeddings')
             for result in results:
                 emb = result.get('$embeddings') or result.get('embeddings') or result
                 all_embeddings.append(emb)
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
 
         return np.array(all_embeddings)
 
@@ -380,7 +418,7 @@ class SentenceTransformer:
         import numpy as np
 
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'encode',
                 'inputs': sentences,

@@ -347,9 +347,7 @@ class IGlobal(IGlobalTransform):
                 connConfig.get('fragment_size') or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
             )
         debug(
-            f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} '
-            f'slop={self.search_exact_slop} highlight={self.search_highlight_enabled} '
-            f'fragment_size={self.search_highlight_fragment_size}'
+            f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} slop={self.search_exact_slop} highlight={self.search_highlight_enabled} fragment_size={self.search_highlight_fragment_size}'
         )
 
 

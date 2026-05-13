@@ -13,9 +13,10 @@
  */
 
 import React from 'react';
+import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Btn, Badge, PermPill, Avatar, Modal, initials, avatarColor } from './shared';
+import { S, Badge, PermPill, Avatar, Modal, initials, avatarColor } from './shared';
 
 // =============================================================================
 // PROPS
@@ -137,10 +138,6 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 
 	return (
 		<section>
-			<div style={commonStyles.sectionHeader}>
-				<span style={commonStyles.sectionHeaderLabel}>Profile</span>
-			</div>
-
 			<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 				<div style={{ padding: '24px 24px 20px', display: 'flex', alignItems: 'center', gap: 18 }}>
 					{/* Avatar */}
@@ -167,55 +164,58 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 						</div>
 					</div>
 
-					<Btn variant="secondary" small onClick={openEdit}>
+					<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={openEdit}>
 						Edit Profile
-					</Btn>
+					</button>
 				</div>
 			</div>
 
 			{orgs.length > 0 && (
-				<>
-					<div style={commonStyles.sectionHeader}>
-						<span style={commonStyles.sectionHeaderLabel}>Organizations</span>
+				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
+					<div style={commonStyles.cardHeader}>
+						<span style={commonStyles.labelUppercase}>Organizations / Workspaces</span>
 					</div>
-					{orgs.map((o) => (
-						<div key={o.id} style={{ ...commonStyles.card, marginBottom: 14 }}>
-							<div style={commonStyles.cardHeader}>
-								<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-									<Avatar name={o.name} size={20} square />
-									<span>{o.name}</span>
+					<div style={S.rowList}>
+						{orgs.map((o, oi) => (
+							<React.Fragment key={o.id}>
+								{/* Org row */}
+								<div style={{ ...S.rowItem, borderBottom: 'none' }}>
+									<Avatar name={o.name} size={24} square />
+									<div style={S.rowInfo}>
+										<div style={S.rowName}>{o.name}</div>
+									</div>
+									{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
 								</div>
-								{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
-							</div>
-							<div style={S.rowList}>
+								{/* Teams sub-header */}
+								{o.teams.length > 0 && (
+									<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
+										<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
+									</div>
+								)}
+								{/* Team rows — indented under the org */}
 								{o.teams.map((t, i) => {
-									// Highlight the team that the user has chosen as their default context.
 									const isDefault = authUser?.defaultTeam === t.id;
+									const isLast = i === o.teams.length - 1;
 									return (
-										<div key={t.id} style={{ ...S.rowItem, borderBottom: i < o.teams.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-											<div style={{ width: 22, height: 22, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
+										<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < orgs.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
+											<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
 											<div style={S.rowInfo}>
 												<div style={S.rowName}>{t.name}</div>
-												<div style={S.perms}>
-													{t.permissions.map((p) => (
-														<PermPill key={p} perm={p} />
-													))}
-												</div>
 											</div>
 											{isDefault ? (
 												<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
 											) : (
-												<Btn variant="secondary" small onClick={() => onSetDefaultTeam(t.id)}>
+												<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
 													Set default
-												</Btn>
+												</button>
 											)}
 										</div>
 									);
 								})}
-							</div>
-						</div>
-					))}
-				</>
+							</React.Fragment>
+						))}
+					</div>
+				</div>
 			)}
 
 			{/* -- Edit Profile Dialog -- */}
@@ -225,41 +225,41 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 					onClose={closeEdit}
 					footer={
 						<>
-							<Btn variant="secondary" onClick={closeEdit} disabled={saving}>
+							<button style={{ ...commonStyles.buttonSecondary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={closeEdit} disabled={saving}>
 								Cancel
-							</Btn>
-							<Btn variant="primary" onClick={handleSave} disabled={saving}>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleSave} disabled={saving}>
 								{saving ? 'Saving\u2026' : 'Save Changes'}
-							</Btn>
+							</button>
 						</>
 					}
 				>
 					<div style={S.fieldRow}>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Nickname</div>
-							<input value={fields.displayName} onChange={set('displayName')} style={S.fieldInput} autoFocus />
-							<div style={S.fieldHint}>What we call you in the app</div>
+							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} autoFocus />
+							<div style={commonStyles.textMuted}>What we call you in the app</div>
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Login Name</div>
-							<input value={fields.preferredUsername} readOnly style={{ ...S.fieldInput, opacity: 0.6, cursor: 'default' }} />
-							<div style={S.fieldHint}>Used to sign in -- contact support to change</div>
+							<input value={fields.preferredUsername} readOnly style={{ ...commonStyles.inputField, opacity: 0.6, cursor: 'default' }} />
+							<div style={commonStyles.textMuted}>Used to sign in -- contact support to change</div>
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>First Name</div>
-							<input value={fields.givenName} onChange={set('givenName')} style={S.fieldInput} />
+							<input value={fields.givenName} onChange={set('givenName')} style={commonStyles.inputField} />
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Last Name</div>
-							<input value={fields.familyName} onChange={set('familyName')} style={S.fieldInput} />
+							<input value={fields.familyName} onChange={set('familyName')} style={commonStyles.inputField} />
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Email</div>
-							<input value={fields.email} onChange={set('email')} style={S.fieldInput} />
+							<input value={fields.email} onChange={set('email')} style={commonStyles.inputField} />
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Phone</div>
-							<input value={fields.phoneNumber} onChange={set('phoneNumber')} placeholder="+15550000000" style={S.fieldInput} />
+							<input value={fields.phoneNumber} onChange={set('phoneNumber')} placeholder="+15550000000" style={commonStyles.inputField} />
 						</div>
 					</div>
 					{error && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 4 }}>{error}</div>}

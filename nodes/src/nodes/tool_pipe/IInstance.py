@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 
-from rocketlib import IInstanceBase, getObject, normalize_tool_input, tool_function, debug
+from rocketlib import IInstanceBase, getObject, tool_function, debug
 from rocketlib import IJson
 
 from .IGlobal import IGlobal
@@ -83,7 +83,7 @@ class IInstance(IInstanceBase):
     )
     def run_pipe(self, input_obj) -> dict:
         """Run the connected pipeline with the given input and return its result."""
-        args = normalize_tool_input(input_obj, tool_name='tool_pipe')
+        args = _normalize_tool_input(input_obj)
         data = args.get('data')
         if not data:
             raise ValueError('tool_pipe: tool requires a non-empty `data` parameter')
@@ -178,3 +178,28 @@ def _extract_return_value(result: dict, return_type: str) -> str:
         return json.dumps(value, ensure_ascii=False)
 
     return str(value) if value is not None else ''
+
+
+def _normalize_tool_input(input_obj):
+    """Normalise tool input into a plain dict."""
+    if input_obj is None:
+        return {}
+    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
+        input_obj = input_obj.model_dump()
+    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
+        input_obj = input_obj.dict()
+    if isinstance(input_obj, str):
+        try:
+            parsed = json.loads(input_obj)
+            if isinstance(parsed, dict):
+                input_obj = parsed
+        except Exception:
+            pass
+    if not isinstance(input_obj, dict):
+        return {}
+    if 'input' in input_obj and isinstance(input_obj['input'], dict):
+        inner = input_obj['input']
+        extras = {k: v for k, v in input_obj.items() if k != 'input'}
+        input_obj = {**inner, **extras}
+    input_obj.pop('security_context', None)
+    return input_obj

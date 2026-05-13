@@ -1,0 +1,38 @@
+{
+  "name": "shell-ui",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "description": "RocketRide Shell — Module Federation host with dynamic app loading",
+  "license": "MIT",
+  "scripts": {
+    "start": "pnpm rsbuild dev --env-mode development",
+    "build": "pnpm rsbuild build --env-mode development",
+    "build:prod": "pnpm rsbuild build --env-mode production"
+  },
+  "dependencies": {
+    "@fontsource-variable/figtree": "^5.2.10",
+    "@module-federation/rsbuild-plugin": "^0.9.0",
+    "@module-federation/runtime": "^0.9.0",
+    "@stripe/react-stripe-js": "^3.1.0",
+    "@stripe/stripe-js": "^5.5.0",
+    "allotment": "^1.20.5",
+    "lucide-react": "~0.460.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rocketride": "workspace:*",
+    "shaders": "2.5.109",
+    "shared": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "1.1.0",
+    "@rsbuild/plugin-basic-ssl": "^1.2.2",
+    "@rsbuild/plugin-react": "1.0.7",
+    "@types/react": "~18.2.21",
+    "@types/react-dom": "~18.2.7"
+  }
+}

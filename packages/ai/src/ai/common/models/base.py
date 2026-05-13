@@ -324,7 +324,7 @@ class ModelClient:
                         if self._loader_options:
                             arguments['loader_options'] = self._loader_options
 
-                        request = self.client.build_request('load_model', arguments=arguments)
+                        request = self.client.build_request('rrext_ms_load_model', arguments=arguments)
                         result = await self.client.request(request)
 
                         # Check for errors in response
@@ -380,7 +380,9 @@ class ModelClient:
                 # Unload model from server first
                 if self.model_id:
                     try:
-                        request = self.client.build_request('unload_model', arguments={'model_id': self.model_id})
+                        request = self.client.build_request(
+                            'rrext_ms_unload_model', arguments={'model_id': self.model_id}
+                        )
                         await self.client.request(request)
                     except Exception:
                         pass  # Ignore errors during cleanup
@@ -399,6 +401,9 @@ class ModelClient:
         Send a DAP command to the model server with automatic reconnection.
 
         Used for inference and other commands (not model loading).
+        If the response contains a ``perf`` dict (server-reported timing
+        breakdown), it is automatically recorded into the metrics singleton
+        via ``metrics.add_time()``.
 
         Args:
             command: Command name
@@ -415,49 +420,59 @@ class ModelClient:
         future = asyncio.run_coroutine_threadsafe(
             self._send_command_async(command, arguments, retry_on_error), ai_node.server_loop
         )
-        return future.result()  # Block until complete
+        body = future.result()  # Block until complete
+
+        # Record server-reported perf counters (preprocess, gpu, postprocess,
+        # queue_wait, latency) into the metrics singleton — one call covers
+        # all 9 model wrappers that go through ModelClient
+        perf = body.get('perf') if isinstance(body, dict) else None
+        if perf:
+            from ai.web.metrics import metrics
+
+            metrics.add_time(perf)
+
+        return body
 
     async def _send_command_async(self, command: str, arguments: Dict[str, Any], retry_on_error: bool) -> Any:
-        """Send command asynchronously with retry logic (internal use only)."""
+        """
+        Send command asynchronously with retry logic (internal use only).
+
+        Distinguishes between transport errors (connection dropped, WebSocket
+        failure) and server-reported errors (valid response with success=false).
+        Only transport errors trigger reconnection and retry — server errors
+        propagate immediately since retrying the same request won't help.
+        """
         try:
-            # Always inject the current model_id into arguments
-            # The ModelClient owns the model_id, callers shouldn't need to specify it
-            # Use spread operator to create new dict without modifying caller's dict
+            # Send the DAP request over WebSocket.  Transport-level failures
+            # (connection dropped, WebSocket error) raise here and are caught
+            # by the except below for retry.
             request = self.client.build_request(command, arguments={**arguments, 'model_id': self.model_id})
             response = await self.client.request(request)
-
-            # Check if command was successful
-            if not response.get('success', True):  # Default to True if 'success' field missing
-                error_msg = response.get('message', 'Unknown error')
-                raise RuntimeError(f'Command failed: {error_msg}')
-
-            return response.get('body', {})
         except BaseException as e:
-            # Catch all exceptions including CancelledError (which inherits from BaseException, not Exception)
-            print(f'[MODEL_CLIENT] Command "{command}" failed: {e}')
+            # Transport-level failure — reconnect and retry once if allowed
+            print(f'[MODEL_CLIENT] Transport error for "{command}": {e}')
 
-            # Check if we should attempt reconnection
             if not retry_on_error:
                 raise
 
-            # Trigger reconnection
+            # Reconnect to the model server and reload the model
             await self._connect_and_load()
 
             # Retry the command once after successful reconnection
             print(f'[MODEL_CLIENT] Retrying command "{command}" with model_id={self.model_id}')
-
-            # Inject the current model_id (will be the new one after reconnection)
-            # Use spread operator to create new dict without modifying caller's dict
             try:
                 request = self.client.build_request(command, arguments={**arguments, 'model_id': self.model_id})
                 response = await self.client.request(request)
-
-                # Check if command was successful
-                if not response.get('success', True):
-                    error_msg = response.get('message', 'Unknown error')
-                    raise RuntimeError(f'Command failed: {error_msg}')
-
-                return response.get('body', {})
             except BaseException as retry_error:
-                print(f'[MODEL_CLIENT] Command retry after reconnection failed: {retry_error}')
+                print(f'[MODEL_CLIENT] Retry failed for "{command}": {retry_error}')
                 raise
+
+        # Check if the server returned an error in the response.
+        # The round-trip succeeded (we got a valid DAP message back) but
+        # the server reported a failure (e.g. batch processing crashed).
+        # Do not retry — propagate immediately to the caller.
+        if not response.get('success', True):
+            error_msg = response.get('message', 'Unknown error')
+            raise RuntimeError(f'Command failed: {error_msg}')
+
+        return response.get('body', {})

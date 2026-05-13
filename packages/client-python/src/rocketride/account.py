@@ -149,31 +149,38 @@ class AccountApi:
         self,
         *,
         name: str,
-        team_id: str,
-        permissions: list[str],
+        permissions: list[str] | None = None,
         expires_at: str | None = None,
+        team_id: str | None = None,
     ) -> CreateKeyResult:
         """
-        Create a new API key and return the raw key string.
+        Create a new API key (PAT) and return the raw key string.
+
+        When team_id is None (default) the key inherits all teams and
+        permissions from the user. When team_id is set, the key is scoped
+        to that team and permissions must be provided. Effective permissions
+        are always intersected with the user's actual permissions at auth time.
 
         Args:
             name: Human-readable label for the key.
-            team_id: The team this key is scoped to.
-            permissions: Array of permission strings to grant to this key.
+            permissions: Permission strings. Required when team_id is set;
+                None means inherit all from the user.
             expires_at: Optional ISO timestamp for key expiration. None means no expiry.
+            team_id: Optional team UUID to scope this key to.
 
         Returns:
             Dict containing the raw key string under the ``key`` field.
         """
-        # Build arguments with camelCase keys for the server
         kwargs: dict = {
             'subcommand': 'create',
             'name': name,
-            'teamId': team_id,
-            'permissions': permissions,
         }
+        if permissions is not None:
+            kwargs['permissions'] = permissions
         if expires_at is not None:
             kwargs['expiresAt'] = expires_at
+        if team_id is not None:
+            kwargs['teamId'] = team_id
 
         body = await self._client.call('rrext_account_keys', **kwargs)
         return {'key': body['key']}
@@ -260,7 +267,7 @@ class AccountApi:
         """
         await self._client.call(
             'rrext_account_members',
-            subcommand='remove',
+            subcommand='delete',
             orgId=org_id,
             userId=user_id,
         )
@@ -394,8 +401,92 @@ class AccountApi:
         """
         await self._client.call(
             'rrext_account_teams',
-            subcommand='remove_member',
+            subcommand='delete_member',
             orgId=org_id,
             teamId=team_id,
             userId=user_id,
         )
+
+    # =========================================================================
+    # ENVIRONMENT
+    # =========================================================================
+
+    async def get_environment_keys(self) -> list[str]:
+        """
+        Return the merged list of ROCKETRIDE_* key names (no values).
+
+        The list includes keys from all scopes (org → team → user) merged
+        in the same precedence order the server uses for pipeline resolution.
+
+        Returns:
+            Sorted list of ROCKETRIDE_* key names.
+        """
+        body = await self._client.call(
+            'rrext_account_me',
+            subcommand='env_keys',
+        )
+        return body.get('keys', [])
+
+    async def get_env(
+        self,
+        scope: str,
+        scope_id: str | None = None,
+    ) -> dict[str, str]:
+        """
+        Read the environment dict for a scope (org, team, or user).
+
+        Args:
+            scope: One of 'org', 'team', 'user'.
+            scope_id: For org: orgId. For team: teamId. For user: omit.
+
+        Returns:
+            Decrypted key-value dict of ROCKETRIDE_* variables.
+        """
+        if scope == 'org':
+            command = 'rrext_account_org'
+            kwargs = {'subcommand': 'get_env'}
+            if scope_id:
+                kwargs['orgId'] = scope_id
+        elif scope == 'team':
+            command = 'rrext_account_teams'
+            kwargs = {'subcommand': 'get_env'}
+            if scope_id:
+                kwargs['teamId'] = scope_id
+        else:
+            command = 'rrext_account_me'
+            kwargs = {'subcommand': 'get_env'}
+
+        body = await self._client.call(command, **kwargs)
+        return body.get('env', {})
+
+    async def set_env(
+        self,
+        scope: str,
+        env: dict[str, str],
+        scope_id: str | None = None,
+    ) -> None:
+        """
+        Write the full environment dict for a scope (org, team, or user).
+
+        Replaces the entire set of keys at that scope level.
+
+        Args:
+            scope: One of 'org', 'team', 'user'.
+            env: Full key-value dict to store.
+            scope_id: For org: orgId. For team: teamId. For user: omit.
+        """
+        if scope == 'org':
+            command = 'rrext_account_org'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+            if scope_id:
+                kwargs['orgId'] = scope_id
+        elif scope == 'team':
+            command = 'rrext_account_teams'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+            if scope_id:
+                kwargs['teamId'] = scope_id
+        else:
+            command = 'rrext_account_me'
+            kwargs = {'subcommand': 'set_env', 'env': env}
+
+        await self._client.call(command, **kwargs)

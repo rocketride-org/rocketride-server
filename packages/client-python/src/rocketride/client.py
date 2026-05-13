@@ -54,6 +54,7 @@ from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
+from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
 from typing import Callable, TYPE_CHECKING
 
@@ -79,6 +80,7 @@ class RocketRideClient(
     PingMixin,
     ServicesMixin,
     DashboardMixin,
+    CProfileMixin,
     StoreMixin,
     DAPClient,
 ):
@@ -231,6 +233,9 @@ class RocketRideClient(
         # Trace callback for observing all call() traffic
         self._on_trace: 'Callable[[int, DAPMessage], None] | None' = kwargs.get('on_trace', None)
 
+        # Public mode — permanently unauthenticated, only rrext_public_* commands
+        self._public = kwargs.get('public', False)
+
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
 
@@ -301,6 +306,45 @@ class RocketRideClient(
         return BillingApi(self)
 
     # =========================================================================
+    # TASK METHODS
+    # =========================================================================
+
+    async def get_task_token(self, project_id: str, source: str) -> 'str | None':
+        """
+        Resolve a running task's token from its project ID and source component.
+
+        The token is required for operations like terminate, restart, and
+        get_task_pipeline. Returns None if no task is currently running for
+        the given project/source pair.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+
+        Returns:
+            Task token string, or None if no matching task is running.
+        """
+        body = await self.call('rrext_get_token', projectId=project_id, source=source)
+        return body.get('token')
+
+    async def get_task_pipeline(self, token: str) -> 'dict | None':
+        """
+        Retrieve the unresolved pipeline for a running task.
+
+        The pipeline is returned exactly as stored on the task —
+        ``${ROCKETRIDE_*}`` placeholders are NOT substituted, so no secrets
+        are included in the response.
+
+        Args:
+            token: Task token returned by :meth:`get_task_token`.
+
+        Returns:
+            The unresolved pipeline dict, or None if the task is not found.
+        """
+        body = await self.call('rrext_get_pipeline', token=token)
+        return body.get('pipeline')
+
+    # =========================================================================
     # SERVER INFO — PRE-AUTH PROBE
     # =========================================================================
 
@@ -309,13 +353,9 @@ class RocketRideClient(
         """
         Probe a server for its capabilities without authenticating.
 
-        Opens a WebSocket, sends an ``auth`` request with ``infoOnly: True``,
-        and returns the server's version, capabilities, and platform. The
-        connection is closed immediately after.
-
-        Uses transport-only connect (no auth handshake) because the normal
-        ``connect()`` bundles transport open + auth with credentials — here we
-        need to send our own ``auth`` message with ``infoOnly`` instead.
+        Creates a temporary public connection and sends an
+        ``rrext_public_probe`` command. The server responds with version,
+        capabilities, platform, and public apps without requiring credentials.
 
         Args:
             uri: Server URI (e.g. ``"localhost:5565"`` or ``"https://cloud.example.com"``).
@@ -323,10 +363,10 @@ class RocketRideClient(
 
         Returns:
             A :class:`~rocketride.types.ServerInfoResult` dict with ``version``,
-            ``capabilities``, and ``platform`` keys.
+            ``capabilities``, ``platform``, and ``apps`` keys.
 
         Raises:
-            RuntimeError: If the server is unreachable or does not support info probes.
+            RuntimeError: If the server is unreachable or does not support probes.
 
         Example::
 
@@ -335,20 +375,14 @@ class RocketRideClient(
                 # Show cloud sign-in options
                 pass
         """
-        from .core.transport_websocket import TransportWebSocket
-
-        # Build a throwaway client — no auth credential needed for info probes
-        client = RocketRideClient(uri=uri, auth='', persist=False)
+        # Build a throwaway public client — permanently unauthenticated
+        client = RocketRideClient(uri=uri, auth='', persist=False, public=True)
         try:
-            # Open the transport without the normal auth handshake —
-            # connect() would send auth with credentials, but we need to
-            # send our own auth message with infoOnly instead.
-            client._transport = TransportWebSocket(uri=client._uri, auth='')
-            client._bind_transport(client._transport)
-            await client._transport.connect(timeout)
+            # Open a public connection (no auth handshake)
+            await client.connect(timeout=timeout)
 
-            # Send auth with infoOnly flag — server returns metadata without authenticating
-            message = client.build_request('auth', arguments={'infoOnly': True})
+            # Send rrext_public_probe — allowed on unauthenticated connections
+            message = client.build_request('rrext_public_probe', arguments={})
             response = await client.request(message, timeout=timeout)
 
             if client.did_fail(response):

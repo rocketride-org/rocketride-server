@@ -19,8 +19,8 @@ import { CloudPanel } from './panels/CloudPanel';
 import { OnPremPanel } from './panels/OnPremPanel';
 import { DockerPanel } from './panels/DockerPanel';
 import { ServicePanel } from './panels/ServicePanel';
-import { settingsStyles as S } from '../PageSettings/SettingsWebview';
-import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../PageSettings/SettingsWebview';
+import { settingsStyles as S } from '../Settings/SettingsWebview';
+import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../Settings/SettingsWebview';
 import type { ServiceStatus, DockerStatus, VersionOption } from './panels/shared';
 
 // =============================================================================
@@ -34,7 +34,7 @@ export interface ConnectionConfigProps {
 	/** Which connection group this config manages */
 	group: 'development' | 'deployment';
 
-	/** When true, only auth-relevant fields are shown (sign-in, API key). Used by PageAuth for re-authentication. */
+	/** When true, only auth-relevant fields are shown (sign-in, API key). Used by Auth page for re-authentication. */
 	authOnly?: boolean;
 
 	// Server capabilities (from probe) — controls which modes are shown

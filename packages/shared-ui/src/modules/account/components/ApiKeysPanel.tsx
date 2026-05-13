@@ -13,9 +13,10 @@
  */
 
 import React from 'react';
+import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ApiKeyRecord } from '../types';
-import { S, Btn, Badge, PermPill, RowIcon, avatarColor, relativeTime } from './shared';
+import { S, Badge, relativeTime } from './shared';
 
 // =============================================================================
 // PROPS
@@ -44,51 +45,37 @@ export interface ApiKeysPanelProps {
  */
 export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, onRevokeKey }) => (
 	<section>
-		<div style={commonStyles.sectionHeader}>
-			<span style={commonStyles.sectionHeaderLabel}>API Keys</span>
-		</div>
-
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 			<div style={commonStyles.cardHeader}>
-				<span>
-					{keys.length} key{keys.length !== 1 ? 's' : ''}
+				<span style={commonStyles.labelUppercase}>
+					API Keys — {keys.length} key{keys.length !== 1 ? 's' : ''}
 				</span>
-				<Btn variant="primary" onClick={onCreateKey} small>
+				<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onCreateKey}>
 					+ New Key
-				</Btn>
+				</button>
 			</div>
 			<div style={S.rowList}>
 				{keys.map((k, i) => (
 					// Dim revoked / expired keys with reduced opacity.
 					<div key={k.id} style={{ ...S.rowItem, opacity: k.active ? 1 : 0.5, borderBottom: i < keys.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-						<RowIcon>{'\uD83D\uDD11'}</RowIcon>
 						<div style={S.rowInfo}>
 							<div style={S.rowName}>{k.name}</div>
 							<div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
-								{k.teamName && (
-									<span style={S.teamTag}>
-										<span style={{ width: 5, height: 5, borderRadius: '50%', background: avatarColor(k.teamName) }} />
-										{k.teamName}
-									</span>
-								)}
-								<Badge variant={k.active ? 'active' : 'expired'}>{k.active ? 'Active' : 'Expired'}</Badge>
-							</div>
-							<div style={S.perms}>
-								{k.permissions.map((p) => (
-									<PermPill key={p} perm={p} />
-								))}
+								<Badge variant={k.isSession ? 'member' : k.active ? 'active' : 'expired'}>{k.isSession ? 'Interactive login' : k.active ? 'Active' : 'Expired'}</Badge>
+								{k.teamName && <Badge variant="pending">{k.teamName}</Badge>}
+								{!k.teamId && !k.isSession && <Badge variant="member">All Teams</Badge>}
 							</div>
 						</div>
-						<div style={S.rowTs}>
+						<div style={{ fontSize: 10, color: 'var(--rr-text-disabled)', textAlign: 'right' as const, flexShrink: 0, lineHeight: 1.6 }}>
 							{k.lastUsedAt ? `Used ${relativeTime(k.lastUsedAt)}` : 'Never used'}
 							<br />
 							{k.expiresAt ? `Exp. ${new Date(k.expiresAt).toLocaleDateString()}` : 'No expiry'}
 						</div>
-						{k.active && (
+						{k.active && !k.isSession && (
 							<div style={S.rowActions}>
-								<Btn variant="danger" small onClick={() => onRevokeKey(k)}>
+								<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRevokeKey(k)}>
 									Revoke
-								</Btn>
+								</button>
 							</div>
 						)}
 					</div>

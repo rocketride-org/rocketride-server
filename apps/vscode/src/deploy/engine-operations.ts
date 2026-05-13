@@ -24,7 +24,7 @@
 /**
  * EngineOperations — shared Docker and Service engine lifecycle manager.
  *
- * Extracted from PageDeployProvider so the same operations can be used by
+ * Extracted from DeployProvider so the same operations can be used by
  * both the Settings page (development and deployment panels) and any other
  * consumer that needs to install, start, stop, remove, or update Docker
  * containers and OS services.

@@ -23,6 +23,7 @@ import { Search } from 'lucide-react';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
+import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
 import { IService, IServiceCapabilities } from '../../../types';
 import { commonStyles } from '../../../../../themes/styles';
 
@@ -53,25 +54,35 @@ const DEFAULT_WIDTH = 260;
 // =============================================================================
 
 const styles = {
+	backdrop: {
+		position: 'absolute' as const,
+		inset: 0,
+		zIndex: 29,
+	},
 	container: {
 		position: 'absolute' as const,
 		right: 0,
 		top: 0,
 		bottom: 0,
 		display: 'flex',
-		zIndex: 20,
+		zIndex: 30,
 	},
-	resizeHandle: {
+	resizeHitArea: {
 		position: 'absolute' as const,
 		left: 0,
-		top: '50%',
-		transform: 'translate(-50%, -50%)',
-		width: '8px',
-		height: '56px',
-		borderRadius: '9999px',
-		backgroundColor: 'var(--rr-border)',
+		top: 0,
+		width: 6,
+		height: '100%',
 		cursor: 'col-resize',
 		zIndex: 1,
+	},
+	resizeLine: {
+		position: 'absolute' as const,
+		left: 0,
+		top: 0,
+		width: 2,
+		height: '100%',
+		background: 'var(--rr-brand)',
 	},
 	panel: {
 		position: 'relative' as const,
@@ -231,10 +242,13 @@ interface ICreateNodePanelProps {
 export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): ReactElement {
 	const { inventory } = useFlowProject();
 	const { addNode, setTempNode } = useFlowGraph();
+	const { getPreference, setPreference } = useFlowPreferences();
 
 	const [search, setSearch] = useState('');
-	const [width, setWidth] = useState(DEFAULT_WIDTH);
+	const storedWidth = (getPreference?.('createPanelWidth') as number) ?? DEFAULT_WIDTH;
+	const [width, setWidth] = useState(storedWidth);
 	const [isResizing, setIsResizing] = useState(false);
+	const [handleHover, setHandleHover] = useState(false);
 	// Track which groups are expanded. Only "source" is open by default.
 	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(['source']));
 	const resizeStart = useRef({ mouseX: 0, width: 0 });
@@ -246,6 +260,11 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 			e.preventDefault();
 			resizeStart.current = { mouseX: e.clientX, width };
 			setIsResizing(true);
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			document.querySelectorAll('iframe').forEach((f) => {
+				(f as HTMLIFrameElement).style.pointerEvents = 'none';
+			});
 		},
 		[width]
 	);
@@ -256,14 +275,22 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 			const delta = resizeStart.current.mouseX - e.clientX;
 			setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, resizeStart.current.width + delta)));
 		};
-		const onMouseUp = () => setIsResizing(false);
+		const onMouseUp = () => {
+			setIsResizing(false);
+			setPreference?.('createPanelWidth', width);
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			document.querySelectorAll('iframe').forEach((f) => {
+				(f as HTMLIFrameElement).style.pointerEvents = '';
+			});
+		};
 		window.addEventListener('mousemove', onMouseMove);
 		window.addEventListener('mouseup', onMouseUp);
 		return () => {
 			window.removeEventListener('mousemove', onMouseMove);
 			window.removeEventListener('mouseup', onMouseUp);
 		};
-	}, [isResizing]);
+	}, [isResizing, width, setPreference]);
 
 	// --- Group toggle ---
 
@@ -350,101 +377,90 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 	};
 
 	return (
-		<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px`, userSelect: isResizing ? 'none' : 'auto' }}>
-			{/* Resize handle — pill-shaped grabber */}
-			<div
-				onMouseDown={onResizeMouseDown}
-				style={{
-					...styles.resizeHandle,
-					opacity: isResizing ? 1 : 0.7,
-				}}
-				onMouseEnter={(e) => {
-					(e.target as HTMLElement).style.opacity = '1';
-					(e.target as HTMLElement).style.backgroundColor = 'var(--rr-accent)';
-				}}
-				onMouseLeave={(e) => {
-					if (!isResizing) {
-						(e.target as HTMLElement).style.opacity = '0.7';
-						(e.target as HTMLElement).style.backgroundColor = 'var(--rr-border)';
-					}
-				}}
-			/>
-
-			{/* Panel body */}
-			<div style={styles.panel}>
-				{/* Header */}
-				<div style={styles.header}>
-					<span style={styles.headerTitle}>Add Node</span>
-					<button style={styles.closeButton} onClick={onClose} title="Close">
-						<CloseIcon />
-					</button>
+		<>
+			<div style={styles.backdrop} onClick={onClose} />
+			<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px`, userSelect: isResizing ? 'none' : 'auto' }}>
+				{/* Resize handle */}
+				<div style={styles.resizeHitArea} onMouseDown={onResizeMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>
+					{(handleHover || isResizing) && <div style={styles.resizeLine} />}
 				</div>
 
-				{/* Search */}
-				<div style={styles.searchBox}>
-					<TextField
-						size="small"
-						fullWidth
-						placeholder="Search nodes..."
-						value={search}
-						onChange={(e) => setSearch(e.target.value)}
-						InputProps={{
-							startAdornment: (
-								<InputAdornment position="start">
-									<Search size={14} style={{ color: 'var(--rr-text-disabled)' }} />
-								</InputAdornment>
-							),
-							sx: {
-								fontSize: 'inherit',
-								fontFamily: 'inherit',
-								color: 'inherit',
-								height: '24px',
-							},
-						}}
-					/>
-				</div>
+				{/* Panel body */}
+				<div style={styles.panel}>
+					{/* Header */}
+					<div style={styles.header}>
+						<span style={styles.headerTitle}>Add Node</span>
+						<button style={styles.closeButton} onClick={onClose} title="Close">
+							<CloseIcon />
+						</button>
+					</div>
 
-				{/* Scrollable node list */}
-				<div style={styles.scrollArea}>
-					{Object.entries(groupedInventory).map(([groupKey, items]) => {
-						const expanded = expandedGroups.has(groupKey);
-						return (
-							<div key={groupKey}>
-								{/* Section header */}
-								<div style={styles.sectionHeader} onClick={() => toggleGroup(groupKey)}>
-									<ChevronIcon expanded={expanded} />
-									<span>{CATEGORY_TITLES[groupKey] ?? groupKey}</span>
+					{/* Search */}
+					<div style={styles.searchBox}>
+						<TextField
+							size="small"
+							fullWidth
+							placeholder="Search nodes..."
+							value={search}
+							onChange={(e) => setSearch(e.target.value)}
+							InputProps={{
+								startAdornment: (
+									<InputAdornment position="start">
+										<Search size={14} style={{ color: 'var(--rr-text-disabled)' }} />
+									</InputAdornment>
+								),
+								sx: {
+									fontSize: 'inherit',
+									fontFamily: 'inherit',
+									color: 'inherit',
+									height: '24px',
+								},
+							}}
+						/>
+					</div>
+
+					{/* Scrollable node list */}
+					<div style={styles.scrollArea}>
+						{Object.entries(groupedInventory).map(([groupKey, items]) => {
+							const expanded = expandedGroups.has(groupKey);
+							return (
+								<div key={groupKey}>
+									{/* Section header */}
+									<div style={styles.sectionHeader} onClick={() => toggleGroup(groupKey)}>
+										<ChevronIcon expanded={expanded} />
+										<span>{CATEGORY_TITLES[groupKey] ?? groupKey}</span>
+									</div>
+
+									{/* Items */}
+									{expanded &&
+										items.map(({ key, service }) => (
+											<div
+												key={key}
+												draggable
+												onDragStart={(e) => onDragStart(e, key)}
+												onClick={() => onClickItem(key)}
+												style={styles.item}
+												onMouseEnter={(e) => {
+													(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-widget-hover)';
+												}}
+												onMouseLeave={(e) => {
+													(e.currentTarget as HTMLElement).style.backgroundColor = '';
+												}}
+											>
+												{service.icon && <img src={service.icon} alt="" style={{ ...styles.itemIcon, filter: service.icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} />}
+												<span style={styles.itemTitle}>{service.title ?? key}</span>
+												{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
+												{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
+											</div>
+										))}
 								</div>
+							);
+						})}
 
-								{/* Items */}
-								{expanded &&
-									items.map(({ key, service }) => (
-										<div
-											key={key}
-											draggable
-											onDragStart={(e) => onDragStart(e, key)}
-											onClick={() => onClickItem(key)}
-											style={styles.item}
-											onMouseEnter={(e) => {
-												(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-widget-hover)';
-											}}
-											onMouseLeave={(e) => {
-												(e.currentTarget as HTMLElement).style.backgroundColor = '';
-											}}
-										>
-											{service.icon && <img src={service.icon} alt="" style={{ ...styles.itemIcon, filter: service.icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} />}
-											<span style={styles.itemTitle}>{service.title ?? key}</span>
-											{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
-											{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
-										</div>
-									))}
-							</div>
-						);
-					})}
-
-					{Object.keys(groupedInventory).length === 0 && <div style={styles.empty}>{search ? 'No matching nodes' : 'No nodes available'}</div>}
+						{Object.keys(groupedInventory).length === 0 && <div style={styles.empty}>{search ? 'No matching nodes' : 'No nodes available'}</div>}
+					</div>
 				</div>
 			</div>
-		</div>
+		</>
 	);
 }

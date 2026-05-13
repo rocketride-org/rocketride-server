@@ -59,11 +59,9 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
-import sys
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
-from rocketlib import getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
@@ -71,9 +69,11 @@ from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
+from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
-from ai.account.models import AccountInfo, resolve_team_permissions
+from .commands.cmd_public import PublicCommands
+from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -97,8 +97,10 @@ class TaskConn(
     MonitorCommands,
     DebugCommands,
     MiscCommands,
+    CProfileCommands,
     AccountCommands,
     AppCommands,
+    PublicCommands,
     DAPConn,
 ):
     """
@@ -130,6 +132,7 @@ class TaskConn(
     - MonitorCommands: Event subscription and monitoring
     - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
+    - CProfileCommands: cProfile process profiling (start, stop, status, report)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
     - AppCommands: App marketplace (developer, submission, catalog, admin, pricing)
     - DAPConn: Base DAP protocol implementation and transport handling
@@ -183,6 +186,7 @@ class TaskConn(
         TaskCommands.__init__(self, connection_id, server, transport, **kwargs)
         DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
+        CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
 
@@ -236,8 +240,11 @@ class TaskConn(
 
     async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
-        Intercept DAP dispatch: whitelist auth and login pre-authentication;
-        reject and disconnect all other commands until authenticated.
+        Intercept DAP dispatch: allow auth and rrext_public_* commands
+        before authentication; reject everything else until authenticated.
+
+        The rrext_public_* prefix convention lets public commands (catalog
+        browsing, server probe) bypass auth without maintaining a whitelist.
         """
         if message is None:
             message = {}
@@ -245,18 +252,15 @@ class TaskConn(
         self._last_activity = time.time()
         cmd = message.get('command', '')
 
-        # auth is always allowed before authentication:
-        #   auth  — authenticates the connection with a credential (access_token or user key)
-        if message.get('type') == 'request' and cmd in ('auth',):
+        # auth and rrext_public_* commands are allowed before authentication
+        if message.get('type') == 'request' and (cmd == 'auth' or cmd.startswith('rrext_public_')):
             await super().on_receive(message)
             return
 
         if not self._authenticated:
-            # Send an error message
+            # Send an error and schedule disconnect
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
-
-            # Schedules the disconnect after we return
             self._transport.disconnect()
             return
 
@@ -274,17 +278,6 @@ class TaskConn(
         """
         args = request.get('arguments') or {}
 
-        # Info-only probe: return server metadata without authenticating.
-        # Does not count toward auth attempts or change connection state.
-        if args.get('infoOnly'):
-            account = self._server._server.account
-            info = {
-                'version': getVersion(),
-                'capabilities': account.capabilities,
-                'platform': sys.platform,
-            }
-            return self.build_response(request, body=info)
-
         # Count every call (including empty/deauth and re-auth) toward the cap.
         self._auth_attempts += 1
         if self._auth_attempts > CONST_AUTH_MAX_ATTEMPTS_PER_CONN:
@@ -294,11 +287,6 @@ class TaskConn(
             return
 
         credential = args.get('auth') or ''
-
-        if not credential:
-            self._authenticated = False
-            self._account_info = None
-            raise ValueError('Not authenticated')
 
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
@@ -349,10 +337,34 @@ class TaskConn(
                     'clientId': self._account_info.userId if self._account_info else None,
                 },
             },
-            apikey=self._account_info.userToken,
+            user_id=self._account_info.userId,
         )
 
+        # Apps are already populated in AccountInfo by the account service
+        # (desktop apps with full manifest + subscription status).
         return self.build_response(request, body=result.to_connect_result())
+
+    async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP deauth command: clear authentication state.
+
+        Reverts the connection to unauthenticated mode so only
+        ``rrext_public_*`` commands are accepted. The WebSocket stays
+        open — callers can re-authenticate later via ``auth``.
+        """
+        # Nothing to do if not authenticated
+        if not self._authenticated:
+            return self.build_response(request, body={})
+
+        # Re-acquire an unauthenticated slot for this IP
+        if self._client_ip:
+            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+
+        # Clear authentication state
+        self._authenticated = False
+        self._account_info = None
+
+        return self.build_response(request, body={})
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the authenticated user has the given permission for their default team."""
@@ -423,11 +435,8 @@ class TaskConn(
         args = request.get('arguments') or {}
         token = args.get('token', None)
 
-        # Now, we are good... but we need to verify permissions
-        if permissions:
-            self.verify_permission(permissions)
-
-        # Get the task
+        # Permission checks are deferred to get_task() / callers where the
+        # task's team is known, so we can resolve against the correct team.
         return token
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
@@ -453,14 +462,17 @@ class TaskConn(
         # Get the token
         token = self.get_task_token(request, permissions)
 
-        # Get the task control and verify ownership for API key auth
+        # Get the task control and verify access for API key auth
         control = self._server.get_task_control(token)
 
-        # For API key auth, verify the task belongs to this user (cross-team safe).
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
+        # For all other auth types, resolve permissions against the task's team.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if control.userId != self._account_info.userId:
-                raise PermissionError('Access denied: task belongs to a different account')
+            perms = resolve_task_permissions(self._account_info, control.teamId)
+            if not perms:
+                raise PermissionError('Access denied: no permissions for this task')
+            if permissions and permissions not in perms:
+                raise PermissionError(f'Permission {permissions!r} denied for this task')
 
         return control.task
 

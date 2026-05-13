@@ -130,7 +130,7 @@ def test_transcribe_requires_bytes():
             MockClient.return_value = mock_client
             w = Whisper('tiny', output_fields=['$text'])
             assert w._proxy_mode is True
-    # Type check is first in transcribe()
+    # Type check is first in transcribe() — no billing context needed
     with pytest.raises(TypeError, match='audio must be bytes'):
         w.transcribe([1, 2, 3])  # type: ignore
     with pytest.raises(TypeError, match='audio must be bytes'):
