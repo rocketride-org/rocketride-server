@@ -114,6 +114,16 @@ class Chat(ChatBase):
 
     def _chat(self, prompt: str) -> ChatResponse:
         results = self._llm.invoke(prompt)
+        
+        # Extract base usage
         meta = getattr(results, 'usage_metadata', None) or getattr(results, 'response_metadata', {})
-        usage_dict = meta.get('usage', {}) if 'usage' in meta else meta
+        usage_dict = dict(meta.get('usage', {}) if 'usage' in meta else meta)
+        
+        # Flatten LangChain's nested cache metrics if present
+        input_details = usage_dict.get('input_token_details', {})
+        if 'cache_read' in input_details:
+            usage_dict['cache_read_input_tokens'] = input_details['cache_read']
+        if 'cache_creation' in input_details:
+            usage_dict['cache_creation_input_tokens'] = input_details['cache_creation']
+
         return ChatResponse(content=results.content, metadata={'usage': usage_dict})
