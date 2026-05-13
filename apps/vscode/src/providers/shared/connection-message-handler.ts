@@ -172,16 +172,6 @@ export class ConnectionMessageHandler {
 			console.log(`[ConnectionMessageHandler] probeServerInfo result: capabilities=${JSON.stringify(info.capabilities)}, version=${info.version}`);
 			this.cachedServerInfo = info;
 			webview.postMessage({ type: 'serverInfo', ...info });
-
-			// If server is SaaS and user is signed in, fetch teams immediately
-			const caps: string[] = info.capabilities ?? [];
-			if (caps.includes('saas')) {
-				const cloudAuth = CloudAuthProvider.getInstance();
-				if (await cloudAuth.isSignedIn()) {
-					console.log('[ConnectionMessageHandler] SaaS + signed in — fetching teams');
-					await this.fetchCloudTeams(webview, hostUrl);
-				}
-			}
 		} catch (error) {
 			console.log(`[ConnectionMessageHandler] probeServerInfo FAILED: ${error}`);
 			// Fall back to showing all modes if probe fails
@@ -198,7 +188,6 @@ export class ConnectionMessageHandler {
 		const signedIn = await cloudAuth.isSignedIn();
 		const userName = await cloudAuth.getUserName();
 		webview.postMessage({ type: 'cloud:status', signedIn, userName });
-		// Teams are fetched by CloudPanel after it confirms the server is SaaS
 	}
 
 	/**
