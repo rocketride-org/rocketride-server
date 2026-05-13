@@ -343,8 +343,12 @@ class DocumentStoreBase(ABC):
                 if not query.embedding_model:
                     raise Exception('You must run your question through an embedding filter')
 
-            # Single-query path: skip executor overhead entirely.
-            if len(queries) == 1:
+            if not queries:
+                # No sub-queries to execute; pre-loaded documents (if any) are
+                # already in the dict from the loop above.
+                pass
+            elif len(queries) == 1:
+                # Single-query path: skip executor overhead entirely.
                 _merge_docs(self.searchSemantic(queries[0], question.filter))
             else:
                 def _fetch_semantic(query: QuestionText) -> List[Doc]:
@@ -355,15 +359,25 @@ class DocumentStoreBase(ABC):
                     future_to_query = {pool.submit(_fetch_semantic, q): q for q in queries}
                     for future in as_completed(future_to_query):
                         # Propagate exceptions from sub-queries to the caller.
+                        # The 'with' block guarantees pool.shutdown(wait=True)
+                        # so in-flight threads complete before the exception
+                        # unwinds the stack — no thread orphaning.
                         _merge_docs(future.result())
 
         # ----------------------------------------------------------------
         # KEYWORD — parallel fan-out
+        # NOTE: this is an independent 'if', not an 'elif'. KEYWORD and GET
+        # are peer branches, not subordinate to the SEMANTIC block above.
+        # Using 'elif' here would make GET silently unreachable whenever
+        # KEYWORD matches with zero queries (the elif chain would fall through
+        # to the else: pass arm instead of the GET arm).
         # ----------------------------------------------------------------
         if type == QuestionType.KEYWORD:
             queries = question.questions
 
-            if len(queries) == 1:
+            if not queries:
+                pass  # nothing to search; return pre-loaded documents as-is
+            elif len(queries) == 1:
                 _merge_docs(self.searchKeyword(queries[0], question.filter))
             else:
                 def _fetch_keyword(query: QuestionText) -> List[Doc]:

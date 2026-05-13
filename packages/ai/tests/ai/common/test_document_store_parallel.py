@@ -499,3 +499,150 @@ class TestWaveSlidingWindow:
         wave_nums = [w['wave_num'] for w in waves]
         assert wave_nums == sorted(wave_nums)
         assert wave_nums[-1] == 9  # newest wave always present
+
+
+# ===========================================================================
+# Pre-Flight Audit Regression Tests (defects found and fixed)
+# ===========================================================================
+
+
+def _make_get_question() -> Question:
+    """Build a GET Question (no sub-queries, just a filter)."""
+    q = Question()
+    q.type = QuestionType.GET
+    q.filter = DocFilter()
+    q.documents = []
+    return q
+
+
+class TestPreFlightAuditRegressions:
+    """
+    Regression tests for the three production defects identified in the
+    hostile pre-flight audit.  These must NEVER be deleted.
+
+    Defect 1 (FIXED): Empty SEMANTIC query list → ThreadPoolExecutor(max_workers=0)
+                       raised ValueError.
+    Defect 2 (FIXED): Empty KEYWORD query list → same ValueError crash.
+    Defect 3 (FIXED): GET type silently unreachable because GET was chained as
+                       'elif' off the KEYWORD 'if', making it unreachable when
+                       KEYWORD matched with zero queries and fell to else:pass.
+    """
+
+    # ------------------------------------------------------------------
+    # Defect 1: Empty SEMANTIC question list must not crash
+    # ------------------------------------------------------------------
+
+    def test_semantic_empty_questions_no_crash(self) -> None:
+        """SEMANTIC question with zero sub-queries returns empty dict, no crash.
+
+        Before the fix, len(queries)==0 hit the 'else' branch which called
+        ThreadPoolExecutor(max_workers=min(8,0)) = ThreadPoolExecutor(max_workers=0)
+        raising ValueError: max_workers must be greater than 0.
+        """
+        store = _TestStore()
+        q = Question()
+        q.type = QuestionType.SEMANTIC
+        q.filter = DocFilter()
+        q.documents = []
+        q.questions = []  # deliberately empty
+
+        # Must not raise
+        result = store._queryDocuments(q)
+        assert result == {}, f'Expected empty dict, got {result}'
+
+    def test_prompt_empty_questions_no_crash(self) -> None:
+        """PROMPT type with zero sub-questions must not crash."""
+        store = _TestStore()
+        q = Question()
+        q.type = QuestionType.PROMPT
+        q.filter = DocFilter()
+        q.documents = []
+        q.questions = []
+
+        result = store._queryDocuments(q)
+        assert result == {}
+
+    # ------------------------------------------------------------------
+    # Defect 2: Empty KEYWORD question list must not crash
+    # ------------------------------------------------------------------
+
+    def test_keyword_empty_questions_no_crash(self) -> None:
+        """KEYWORD question with zero terms returns empty dict, no ValueError crash.
+
+        Before the fix, len(queries)==0 hit the 'else' branch which called
+        ThreadPoolExecutor(max_workers=0) raising ValueError.
+        """
+        store = _TestStore()
+        q = _make_keyword_question([])  # zero terms
+
+        result = store._queryDocuments(q)
+        assert result == {}
+
+    def test_keyword_empty_does_not_call_search(self) -> None:
+        """searchKeyword must not be called at all when query list is empty."""
+        call_count = {'n': 0}
+
+        def _spy(query, f):
+            call_count['n'] += 1
+            return []
+
+        store = _TestStore(keyword_fn=_spy)
+        q = _make_keyword_question([])
+
+        store._queryDocuments(q)
+        assert call_count['n'] == 0
+
+    # ------------------------------------------------------------------
+    # Defect 3: GET type must be reachable regardless of KEYWORD branch
+    # ------------------------------------------------------------------
+
+    def test_get_type_is_reachable(self) -> None:
+        """QuestionType.GET must call self.get() and return its results.
+
+        Before the fix, GET was chained as 'elif' off the KEYWORD 'if'.
+        When type==GET the KEYWORD 'if' was False, falling to the 'elif GET'
+        branch — this worked by coincidence for the simple case.  But if
+        type==KEYWORD with len(queries)==0, the code hit the else:pass arm
+        instead of the GET arm, silently returning no results.
+
+        This test verifies GET is always reachable as an independent branch.
+        """
+        get_doc = _make_doc('get-obj-1', score=0.88)
+
+        class _GetStore(_TestStore):
+            def get(self, docFilter: DocFilter, **_kw) -> List[Doc]:
+                return [get_doc]
+
+        store = _GetStore()
+        q = _make_get_question()
+
+        result = store._queryDocuments(q)
+
+        assert ('get-obj-1', 0) in result, (
+            f'GET document not found in result — GET branch may be unreachable. Got: {result}'
+        )
+
+    def test_get_type_not_affected_by_keyword_zero_queries(self) -> None:
+        """The broken elif chain: KEYWORD(queries=[]) must NOT fall to GET.
+
+        This tests the structural fix: KEYWORD with empty queries must return {},
+        not accidentally invoke the GET branch.
+        """
+        get_called = {'n': 0}
+
+        class _SpyGetStore(_TestStore):
+            def get(self, docFilter: DocFilter, **_kw) -> List[Doc]:
+                get_called['n'] += 1
+                return [_make_doc('should-not-appear')]
+
+        store = _SpyGetStore()
+        # KEYWORD type with zero queries — must NOT call get()
+        q = _make_keyword_question([])
+
+        result = store._queryDocuments(q)
+
+        assert get_called['n'] == 0, (
+            f'get() was called {get_called["n"]} time(s) for a KEYWORD question — '
+            f'the if/elif chain is still broken'
+        )
+        assert result == {}
