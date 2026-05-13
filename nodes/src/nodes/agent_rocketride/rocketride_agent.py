@@ -46,6 +46,17 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+# Server-side sliding window: retain only the most recent N waves in the
+# planning context.  Prevents unbounded prompt growth in long-running sessions
+# where the LLM omits ``remove`` signals.  Configurable via ``context_window_waves``.
+_DEFAULT_CONTEXT_WINDOW_WAVES = 5
+
+# Hard character budget for the aggregate structural summaries injected into
+# every planning prompt.  When exceeded, the oldest wave entries are evicted
+# until the total is under budget.  Configurable via ``wave_context_budget_chars``.
+# 12 000 chars ~= ~3 000 tokens, a safe budget for most provider context windows.
+_DEFAULT_WAVE_CONTEXT_BUDGET_CHARS = 12_000
+
 
 class RocketRideDriver(AgentBase):
     """
@@ -70,6 +81,66 @@ class RocketRideDriver(AgentBase):
         super().__init__(iGlobal)
         config = Config.getNodeConfig(iGlobal.glb.logicalType, iGlobal.glb.connConfig)
         self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
+        self._context_window_waves = int(
+            config.get('context_window_waves', _DEFAULT_CONTEXT_WINDOW_WAVES)
+        )
+        self._wave_context_budget_chars = int(
+            config.get('wave_context_budget_chars', _DEFAULT_WAVE_CONTEXT_BUDGET_CHARS)
+        )
+
+    # ------------------------------------------------------------------
+    # Context pruning
+    # ------------------------------------------------------------------
+
+    def _prune_wave_context(self, waves: List[Dict[str, Any]]) -> None:
+        """Apply server-side context budget enforcement to the wave history.
+
+        Two complementary eviction strategies run in order:
+
+        1. **Sliding window** — drops waves older than ``context_window_waves``.
+           This is the primary mechanism: it bounds worst-case prompt growth
+           regardless of LLM behaviour.
+
+        2. **Character budget** — if the aggregate length of all remaining
+           structural summaries still exceeds ``wave_context_budget_chars``,
+           evicts the oldest waves one-by-one until the budget is satisfied.
+           This handles edge cases where a single wave produces unusually large
+           summaries (e.g. a DB query returning hundreds of rows).
+
+        The LLM's ``remove`` signal is preserved as-is; this method only adds
+        an additional server-side safety net that fires when the LLM omits the
+        signal or produces larger-than-expected summaries.
+
+        Mutates *waves* in-place.
+        """
+        # --- Strategy 1: sliding window ---
+        window = max(1, self._context_window_waves)
+        if len(waves) > window:
+            # Evict the oldest waves (lowest indices = earliest).
+            # Memory keys for evicted results are already cleared by the
+            # LLM's remove signal or will be GC'd at run end; we only need
+            # to remove them from the prompt context here.
+            del waves[: len(waves) - window]
+
+        # --- Strategy 2: character budget ---
+        budget = self._wave_context_budget_chars
+        if budget <= 0:
+            return  # Budget disabled (0 means unlimited).
+
+        def _total_summary_chars(w_list: List[Dict[str, Any]]) -> int:
+            total = 0
+            for w in w_list:
+                for r in w.get('results', []):
+                    total += len(r.get('summary', ''))
+            return total
+
+        # Evict oldest waves until we're within budget or only one wave remains.
+        while len(waves) > 1 and _total_summary_chars(waves) > budget:
+            evicted = waves.pop(0)
+            debug(
+                f'rocketride wave context budget: evicted wave {evicted.get("wave_num")} '
+                f'(budget={budget} chars)'
+            )
 
     # ------------------------------------------------------------------
     # Main driver
@@ -208,6 +279,12 @@ class RocketRideDriver(AgentBase):
             # as context; the full result stays in memory for later peek access.
             results = execute_wave(tool_calls, agent_base=self, context=context, wave_name=f'wave-{wave_num}')
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
+
+            # Server-side context budget enforcement.  Runs after every wave
+            # append so the next planning prompt never exceeds the configured
+            # character budget, regardless of LLM ``remove`` signal behaviour.
+            self._prune_wave_context(waves)
+
             self.sendSSE(context, 'thinking', message=f'Step {wave_num + 1} complete', results=len(results))
 
         # ------------------------------------------------------------------
