@@ -194,7 +194,7 @@ class TestParallelSemanticFanOut:
         This proof is deterministic and CI-safe: it does not rely on
         wall-clock timing or OS scheduler behaviour.
         """
-        n_queries = 3
+        n_queries = min(3, DocumentStoreBase._MAX_PARALLEL_QUERIES)
         # Barrier requires all 3 threads to rendezvous simultaneously.
         # timeout=5s is generous — any reasonable parallel executor will
         # reach it in milliseconds.
