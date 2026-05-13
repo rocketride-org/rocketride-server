@@ -158,18 +158,17 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, 'executable', str(tmp_path / 'bin' / 'engine.exe'))
     monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
 
-    t = _task(
-        pipeline={
-            'version': 2,
-            'source': 'src',
-            'project_id': 'proj-1',
-            'name': 'my-pipeline',
-            'description': 'desc',
-            'components': [{'id': 'src'}],
-        },
-    )
+    pipeline = {
+        'version': 2,
+        'source': 'src',
+        'project_id': 'proj-1',
+        'name': 'my-pipeline',
+        'description': 'desc',
+        'components': [{'id': 'src'}],
+    }
+    t = _task(pipeline=pipeline)
 
-    config = Task._build_task(t)
+    config = Task._build_task(t, pipeline)
 
     assert config['type'] == 'pipeline'
     assert config['taskId'] == 'tk_test'
@@ -191,8 +190,9 @@ def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
     monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
 
-    t = _task(pipeline={'source': 'src', 'components': []})
-    config = Task._build_task(t)
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    config = Task._build_task(t, pipeline)
     assert config['config']['pipeline']['version'] == 1
 
 

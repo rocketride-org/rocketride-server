@@ -295,10 +295,10 @@ async def test_broadcast_server_event_calls_each_connection():
     ts._connections = {1: a, 2: b, 3: c}
 
     payload = {'event': 'dashboard', 'body': {'action': 'x'}}
-    await TaskServer.broadcast_server_event(ts, type='etype', event=payload, apikey='k')
+    await TaskServer.broadcast_server_event(ts, type='etype', event=payload, user_id='user-1')
 
     for conn in (a, b, c):
-        conn.send_server_event.assert_awaited_once_with('etype', event=payload, apikey='k')
+        conn.send_server_event.assert_awaited_once_with('etype', event=payload, user_id='user-1')
 
 
 @pytest.mark.asyncio

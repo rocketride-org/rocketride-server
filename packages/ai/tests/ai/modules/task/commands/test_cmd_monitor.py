@@ -41,9 +41,32 @@ def _make_conn(*, account_info=None, server=None, monitors=None, connection_id=1
     return conn
 
 
-def _account_info(*, user_id='user-1'):
-    """Build an AccountInfo stub."""
-    return SimpleNamespace(userId=user_id, userToken='token-' + user_id)
+def _account_info(*, user_id='user-1', team_id='team-1'):
+    """
+    Build an AccountInfo stub with a single org/team membership.
+
+    Args:
+        user_id: stable user identifier.
+        team_id: the team that the caller has ``task.monitor``/``task.data``/``task.control``
+            permissions on. Any control whose ``teamId`` matches this value will be
+            visible; controls with a different ``teamId`` are filtered out.
+    """
+    return SimpleNamespace(
+        userId=user_id,
+        userToken='token-' + user_id,
+        organizations=[
+            {
+                'id': 'org-1',
+                'permissions': [],
+                'teams': [
+                    {
+                        'id': team_id,
+                        'permissions': ['task.monitor', 'task.data', 'task.control'],
+                    }
+                ],
+            }
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -79,15 +102,17 @@ async def test_send_server_event_dispatches_when_subscribed():
 
 
 @pytest.mark.asyncio
-async def test_send_server_event_filters_by_apikey_tenant_scoping():
-    """A tenant-scoped event (apikey set) is filtered against the caller's userToken."""
+async def test_send_server_event_filters_by_user_id_tenant_scoping():
+    """A tenant-scoped event (user_id set) is filtered against the caller's userId."""
     account = SimpleNamespace(userId='user-1', userToken='ak_mine')
     conn = _make_conn(monitors={'*': EVENT_TYPE.DASHBOARD}, account_info=account)
-    # Mismatched apikey: should be filtered out.
-    await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}}, apikey='ak_other')
+    # Mismatched user_id: should be filtered out.
+    await MonitorCommands.send_server_event(
+        conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}}, user_id='other-user'
+    )
     conn.send_event.assert_not_called()
-    # Matching apikey: delivered.
-    await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}}, apikey='ak_mine')
+    # Matching user_id: delivered.
+    await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}}, user_id='user-1')
     conn.send_event.assert_awaited_once()
 
 
@@ -96,16 +121,24 @@ async def test_send_server_event_filters_by_apikey_tenant_scoping():
 # ---------------------------------------------------------------------------
 
 
-def _control(*, user_id='user-1', project_id='proj-1', source='src-1', task_id='task-1'):
+def _control(*, user_id='user-1', project_id='proj-1', source='src-1', task_id='task-1', team_id='team-1'):
     """Build a TASK_CONTROL stub for send_task_event tests."""
-    return SimpleNamespace(userId=user_id, project_id=project_id, source=source, id=task_id, token='tk_1')
+    return SimpleNamespace(
+        userId=user_id,
+        teamId=team_id,
+        project_id=project_id,
+        source=source,
+        id=task_id,
+        token='tk_1',
+    )
 
 
 @pytest.mark.asyncio
-async def test_send_task_event_skipped_when_user_does_not_own_task():
-    """Cross-tenant task events are silently dropped."""
+async def test_send_task_event_skipped_when_caller_lacks_team_access():
+    """Task events for a team the caller is not a member of are silently dropped."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control(user_id='someone-else'))
+    # Task belongs to team-other; caller's account only grants access to team-1.
+    server.get_task_control = MagicMock(return_value=_control(team_id='team-other'))
     conn = _make_conn(account_info=_account_info(), server=server, monitors={'*': EVENT_TYPE.SUMMARY})
     await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'evt', 'body': {}})
     conn.send_event.assert_not_called()
@@ -298,11 +331,12 @@ async def test_set_monitor_with_pipe_id_narrows_key():
 
 @pytest.mark.asyncio
 async def test_set_monitor_cross_tenant_token_raises():
-    """A token owned by a different user raises PermissionError."""
+    """A token whose team the caller is not a member of raises PermissionError."""
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_control(user_id='other-user'))
+    # Task belongs to team-other; caller only has team-1.
+    server.get_task_control = MagicMock(return_value=_control(team_id='team-other'))
     conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
-    with pytest.raises(PermissionError, match='different account'):
+    with pytest.raises(PermissionError, match='Access denied'):
         await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY)
 
 

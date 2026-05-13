@@ -57,6 +57,8 @@ def make_status():
             cpu_utilization=0.0,
             cpu_memory=0.0,
             gpu_memory=0.0,
+            gpu_inference=0.0,
+            custom={},
             total=0.0,
         ),
     )
