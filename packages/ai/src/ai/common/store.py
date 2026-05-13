@@ -154,7 +154,7 @@ class DocumentStoreBase(ABC):
 
             # Update the score if this one is higher
             if doc.score > tableDocs[tableKey].score:
-                tableDocs[tableKey] = doc.score
+                tableDocs[tableKey] = doc
 
         # If there are no tables, done
         if not len(tableIds):
@@ -177,14 +177,11 @@ class DocumentStoreBase(ABC):
                 # Get this chunks table key
                 tableKey = self._getTableKey(chunk)
 
-                # Get the object id
-                objectId = chunk.metadata.objectId
-
                 # If this is the first part of the table
                 if tableKey not in tableDocs:
-                    # Add it to the list
-                    # TODO: Fix this
-                    tableDocs[tableKey] = Doc(objectId=objectId, chunk=doc.metadata.chunkId, score=chunk.score)
+                    merged = chunk.model_copy(deep=True)
+                    merged.page_content = ''
+                    tableDocs[tableKey] = merged
 
                 # Append the text
                 tableDocs[tableKey].page_content += chunk.page_content

@@ -24,6 +24,7 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
  * @param {string[]} options.ignore - Glob patterns to ignore (default: '\*\*\/\_\_pycache\_\_\/\*\*')
  * @param {boolean} options.mirror - Remove files in dest that don't exist in source (default)
  * @param {boolean} options.package - Package the files for the server artifact
+ * @param {boolean} options.dryRun - If true, compute stats only; do not copy, delete, or update package state
  * @param {Object} stats - Shared stats object with number of changed (added, updated, deleted) and unchanged files
  * @returns {Promise<{ added: number, updated: number, deleted: number, changed: number, unchanged: number }>}
  */
@@ -49,6 +50,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 
     const pattern = options.pattern || '**';
     const ignore = options.ignore || ['**/__pycache__/**'];
+    const dryRun = options.dryRun === true;
 
     let changed = false;
 
@@ -73,14 +75,18 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
             if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
                 stats.unchanged++;
             } else {
-                await copyFileEnsure(srcPath, destPath);
+                if (!dryRun) {
+                    await copyFileEnsure(srcPath, destPath);
+                }
                 ++stats.updated, ++stats.changed, (changed = true);
             }
 
             destFiles.delete(name);
 
         } else {
-            await copyFileEnsure(srcPath, destPath);
+            if (!dryRun) {
+                await copyFileEnsure(srcPath, destPath);
+            }
             ++stats.added, ++stats.changed, (changed = true);
         }
     }
@@ -89,13 +95,15 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
     if (options.mirror === undefined || options.mirror) {
         for (const name of destFiles) {
             const destPath = path.join(dest, name);
-            await unlink(destPath);
+            if (!dryRun) {
+                await unlink(destPath);
+            }
             ++stats.deleted, ++stats.changed, changed = true;
         }
     }
 
     // Update list of dest files from this source for packaging
-    if (options.package && changed) {
+    if (options.package && changed && !dryRun) {
         const relPaths = Array.from(srcFiles, (name) => {
             const destPath = path.join(dest, name);
             const relPath = path.relative(SERVER_DIR, destPath);
@@ -110,7 +118,17 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
     return stats;
 }
 
+/**
+ * Incrementally sync a single file (same mtime/size rules as syncDir).
+ *
+ * @param {string} src - Source file path
+ * @param {string} dest - Destination file path
+ * @param {Object} options - Options (package, dryRun — same semantics as syncDir)
+ * @param {Object} stats - Shared stats object
+ */
 async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, changed: 0, unchanged: 0 }) {
+    const dryRun = options.dryRun === true;
+
     // Check source file
     const srcStat = await stat(src);
     if (!srcStat.isFile()) {
@@ -137,16 +155,20 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
         if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
             stats.unchanged++;
         } else {
-            await copyFileEnsure(src, dest);
+            if (!dryRun) {
+                await copyFileEnsure(src, dest);
+            }
             ++stats.updated, ++stats.changed, (changed = true);
         }
     } else {
-        await copyFileEnsure(src, dest);
+        if (!dryRun) {
+            await copyFileEnsure(src, dest);
+        }
         ++stats.added, ++stats.changed, (changed = true);
     }
 
     // Update list of dest files from this source for packaging
-    if (options.package && changed) {
+    if (options.package && changed && !dryRun) {
         const relPath = path.relative(SERVER_DIR, dest);
         if (relPath.startsWith('..')) {
             throw new Error(`Destination path ${dest} is not a subdirectory of ${SERVER_DIR}`);
@@ -160,11 +182,13 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
 /**
  * Format sync/copy stats for display
  * @param {{ added: number, updated: number, deleted: number, changed: number, unchanged: number }} stats
+ * @param {{ dryRun?: boolean }} [options] - If dryRun is true, prefix the message for preview-style output
  * @returns {string}
  */
-function formatSyncStats(stats) {
+function formatSyncStats(stats, options = {}) {
+    const prefix = options.dryRun ? '(dry run) ' : '';
     if (stats.changed === 0) {
-        return `No changes (${stats.unchanged || 0} files up to date)`;
+        return `${prefix}No changes (${stats.unchanged || 0} files up to date)`;
     }
 
     const parts = [];
@@ -172,7 +196,7 @@ function formatSyncStats(stats) {
     if (stats.updated > 0) parts.push(`~${stats.updated} updated`);
     if (stats.deleted > 0) parts.push(`-${stats.deleted} deleted`);
     if (stats.unchanged > 0) parts.push(`${stats.unchanged} unchanged`);
-    return parts.join(', ');
+    return prefix + parts.join(', ');
 }
 
 module.exports = {
