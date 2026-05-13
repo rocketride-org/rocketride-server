@@ -10,6 +10,26 @@ const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 
 /**
+ * Whether sync would run in dry-run mode for the given options and current env.
+ * Explicit `options.dryRun: false` disables dry-run even if ROCKETRIDE_SYNC_DRY_RUN is set.
+ *
+ * Env: ROCKETRIDE_SYNC_DRY_RUN=1|true|yes|on (case-insensitive, trimmed)
+ */
+function syncDryRunEffective(options = {}) {
+    if (options.dryRun === true) {
+        return true;
+    }
+    if (options.dryRun === false) {
+        return false;
+    }
+    const v = process.env.ROCKETRIDE_SYNC_DRY_RUN;
+    if (v == null || String(v).trim() === '') {
+        return false;
+    }
+    return /^(1|true|yes|on)$/i.test(String(v).trim());
+}
+
+/**
  * Incrementally sync source to destination directory (MIRROR or OVERLAY mode)
  * - Only copies files that are new or modified (based on mtime + size)
  * - Removes files in dest that don't exist in source in MIRROR mode (default)
@@ -24,7 +44,8 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
  * @param {string[]} options.ignore - Glob patterns to ignore (default: '\*\*\/\_\_pycache\_\_\/\*\*')
  * @param {boolean} options.mirror - Remove files in dest that don't exist in source (default)
  * @param {boolean} options.package - Package the files for the server artifact
- * @param {boolean} options.dryRun - If true, compute stats only; do not copy, delete, or update package state
+ * @param {boolean} options.dryRun - If true, compute stats only; do not copy, delete, or update package state.
+ *   May also be set via env ROCKETRIDE_SYNC_DRY_RUN; pass dryRun: false to force a real sync when the env is set.
  * @param {Object} stats - Shared stats object with number of changed (added, updated, deleted) and unchanged files
  * @returns {Promise<{ added: number, updated: number, deleted: number, changed: number, unchanged: number }>}
  */
@@ -50,7 +71,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 
     const pattern = options.pattern || '**';
     const ignore = options.ignore || ['**/__pycache__/**'];
-    const dryRun = options.dryRun === true;
+    const dryRun = syncDryRunEffective(options);
 
     let changed = false;
 
@@ -127,7 +148,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
  * @param {Object} stats - Shared stats object
  */
 async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, changed: 0, unchanged: 0 }) {
-    const dryRun = options.dryRun === true;
+    const dryRun = syncDryRunEffective(options);
 
     // Check source file
     const srcStat = await stat(src);
@@ -182,11 +203,12 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
 /**
  * Format sync/copy stats for display
  * @param {{ added: number, updated: number, deleted: number, changed: number, unchanged: number }} stats
- * @param {{ dryRun?: boolean }} [options] - If dryRun is true, prefix the message for preview-style output
+ * @param {{ dryRun?: boolean }} [options] - If dryRun is true, prefix the message. If omitted, uses the same
+ *   ROCKETRIDE_SYNC_DRY_RUN / options.dryRun rules as syncDir (so labels match global dry-run builds).
  * @returns {string}
  */
 function formatSyncStats(stats, options = {}) {
-    const prefix = options.dryRun ? '(dry run) ' : '';
+    const prefix = syncDryRunEffective(options) ? '(dry run) ' : '';
     if (stats.changed === 0) {
         return `${prefix}No changes (${stats.unchanged || 0} files up to date)`;
     }
@@ -202,5 +224,6 @@ function formatSyncStats(stats, options = {}) {
 module.exports = {
     syncDir,
     syncFile,
-    formatSyncStats
+    formatSyncStats,
+    syncDryRunEffective,
 };

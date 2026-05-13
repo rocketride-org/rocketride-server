@@ -6,10 +6,34 @@
 const fs = require('fs/promises');
 const path = require('path');
 const os = require('os');
-const test = require('node:test');
+const { test, beforeEach } = require('node:test');
 const assert = require('node:assert');
 
-const { syncDir, syncFile, formatSyncStats } = require('./sync');
+const { syncDir, syncFile, formatSyncStats, syncDryRunEffective } = require('./sync');
+
+beforeEach(() => {
+    delete process.env.ROCKETRIDE_SYNC_DRY_RUN;
+});
+
+test('syncDryRunEffective respects env and explicit dryRun: false', () => {
+    const prev = process.env.ROCKETRIDE_SYNC_DRY_RUN;
+    try {
+        delete process.env.ROCKETRIDE_SYNC_DRY_RUN;
+        assert.strictEqual(syncDryRunEffective({}), false);
+        assert.strictEqual(syncDryRunEffective({ dryRun: true }), true);
+        assert.strictEqual(syncDryRunEffective({ dryRun: false }), false);
+
+        process.env.ROCKETRIDE_SYNC_DRY_RUN = 'yes';
+        assert.strictEqual(syncDryRunEffective({}), true);
+        assert.strictEqual(syncDryRunEffective({ dryRun: false }), false);
+    } finally {
+        if (prev === undefined) {
+            delete process.env.ROCKETRIDE_SYNC_DRY_RUN;
+        } else {
+            process.env.ROCKETRIDE_SYNC_DRY_RUN = prev;
+        }
+    }
+});
 
 test('syncDir copies all files when destination directory does not exist', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rr-sync-'));
@@ -109,4 +133,62 @@ test('formatSyncStats optional dryRun prefix', () => {
         formatSyncStats({ added: 2, updated: 1, deleted: 0, changed: 3, unchanged: 0 }, { dryRun: true }),
         '(dry run) +2 added, ~1 updated'
     );
+});
+
+test('ROCKETRIDE_SYNC_DRY_RUN enables dry run and formatSyncStats label', async () => {
+    const prev = process.env.ROCKETRIDE_SYNC_DRY_RUN;
+    try {
+        process.env.ROCKETRIDE_SYNC_DRY_RUN = '1';
+        assert.strictEqual(
+            formatSyncStats({ added: 1, updated: 0, deleted: 0, changed: 1, unchanged: 0 }),
+            '(dry run) +1 added'
+        );
+
+        const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rr-sync-'));
+        try {
+            const src = path.join(tmp, 'src');
+            const dest = path.join(tmp, 'dest');
+            await fs.mkdir(src, { recursive: true });
+            await fs.mkdir(dest, { recursive: true });
+            await fs.writeFile(path.join(src, 'a.txt'), 'a');
+
+            const stats = await syncDir(src, dest);
+            assert.strictEqual(stats.added, 1);
+            await assert.rejects(() => fs.access(path.join(dest, 'a.txt')), /ENOENT/u);
+        } finally {
+            await fs.rm(tmp, { recursive: true, force: true });
+        }
+    } finally {
+        if (prev === undefined) {
+            delete process.env.ROCKETRIDE_SYNC_DRY_RUN;
+        } else {
+            process.env.ROCKETRIDE_SYNC_DRY_RUN = prev;
+        }
+    }
+});
+
+test('syncDir dryRun: false overrides ROCKETRIDE_SYNC_DRY_RUN', async () => {
+    const prev = process.env.ROCKETRIDE_SYNC_DRY_RUN;
+    try {
+        process.env.ROCKETRIDE_SYNC_DRY_RUN = 'true';
+        const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rr-sync-'));
+        try {
+            const src = path.join(tmp, 'src');
+            const dest = path.join(tmp, 'dest');
+            await fs.mkdir(src, { recursive: true });
+            await fs.writeFile(path.join(src, 'a.txt'), 'a');
+
+            await syncDir(src, dest, { dryRun: false });
+            const content = await fs.readFile(path.join(dest, 'a.txt'), 'utf8');
+            assert.strictEqual(content, 'a');
+        } finally {
+            await fs.rm(tmp, { recursive: true, force: true });
+        }
+    } finally {
+        if (prev === undefined) {
+            delete process.env.ROCKETRIDE_SYNC_DRY_RUN;
+        } else {
+            process.env.ROCKETRIDE_SYNC_DRY_RUN = prev;
+        }
+    }
 });
