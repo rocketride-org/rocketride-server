@@ -33,6 +33,8 @@ Usage:
 
 from __future__ import annotations
 
+import json
+from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from .schema.question import Question, QuestionType
@@ -40,6 +42,20 @@ from .types.data import PIPELINE_RESULT
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
+
+
+class DatabaseDialect(str, Enum):
+    """
+    Underlying database engine a pipeline is connected to.
+
+    Returned by ``client.database.dialect(...)`` so applications can branch on
+    dialect-specific behavior (e.g. SQL syntax differences, type coercion) and
+    detect when they're talking to a graph DB instead of a relational one.
+    """
+
+    POSTGRES = 'postgres'
+    MYSQL = 'mysql'
+    NEO4J = 'neo4j'
 
 
 class DatabaseApi:
@@ -88,3 +104,39 @@ class DatabaseApi:
         question = Question(type=QuestionType.EXECUTE)
         question.addQuestion(sql)
         return await self._client.chat(token=token, question=question, on_sse=on_sse)
+
+    async def dialect(self, *, token: str) -> DatabaseDialect:
+        """
+        Discover the underlying database engine for a pipeline.
+
+        Sends a ``Question(type=DIALECT)``; the database node replies on the
+        ``answers`` lane with ``{"dialect": "<engine>"}``. Use this to branch
+        on dialect-specific SQL or to assert you're not pointed at the wrong
+        kind of database (e.g. Neo4j when you expected Postgres).
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+
+        Returns:
+            DatabaseDialect: The dialect reported by the node.
+
+        Raises:
+            ValueError: If ``token`` is empty/whitespace, the pipeline returns
+                no answer, or the response is not a recognized dialect.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+
+        question = Question(type=QuestionType.DIALECT)
+        question.addQuestion('dialect')
+        result = await self._client.chat(token=token, question=question)
+
+        answers = result.get('answers') if isinstance(result, dict) else None
+        if not answers:
+            raise ValueError('Pipeline returned no dialect answer; is the endpoint a database node?')
+
+        try:
+            payload = json.loads(answers[0])
+            return DatabaseDialect(payload['dialect'])
+        except (TypeError, KeyError, ValueError, json.JSONDecodeError) as e:
+            raise ValueError(f'Unexpected dialect response from pipeline: {answers[0]!r}') from e

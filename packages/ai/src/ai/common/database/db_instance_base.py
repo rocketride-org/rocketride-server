@@ -70,6 +70,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _db_display_name(self) -> str:
         """Return the human-readable database name (e.g. 'MySQL', 'PostgreSQL')."""
 
+    @abstractmethod
+    def _db_dialect(self) -> str:
+        """Return the machine-readable dialect identifier (e.g. 'mysql', 'postgres').
+
+        Surfaced to SDK callers via ``QuestionType.DIALECT`` so applications can
+        branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
+        """
+
     # ------------------------------------------------------------------
     # Tool methods — dispatched by IInstanceBase.invoke() via @tool_function
     # ------------------------------------------------------------------
@@ -496,6 +504,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
+
+        # DIALECT: dialect-discovery request — emit {'dialect': '...'} on the
+        # answers lane so the SDK can branch on the engine. No gate needed:
+        # the value is metadata, not data, and the node already exposed itself
+        # by being connected.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': self._db_dialect()}))
+                self.instance.writeAnswers(answer)
+            return
 
         # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
         if question.type == QuestionType.EXECUTE:

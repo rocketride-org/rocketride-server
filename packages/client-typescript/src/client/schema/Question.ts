@@ -34,7 +34,8 @@ export enum QuestionType {
 	KEYWORD = 'keyword',
 	GET = 'get',
 	PROMPT = 'prompt',
-	EXECUTE = 'execute'
+	EXECUTE = 'execute',
+	DIALECT = 'dialect'
 }
 
 /**

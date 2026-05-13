@@ -35,6 +35,23 @@ import type { PIPELINE_RESULT } from './types/index.js';
 import { Question, QuestionType } from './schema/Question.js';
 
 // =============================================================================
+// DIALECT ENUM
+// =============================================================================
+
+/**
+ * Underlying database engine a pipeline is connected to.
+ *
+ * Returned by `client.database.dialect(...)` so applications can branch on
+ * dialect-specific behavior (e.g. SQL syntax differences, type coercion) and
+ * detect when they're talking to a graph DB instead of a relational one.
+ */
+export enum DatabaseDialect {
+	POSTGRES = 'postgres',
+	MYSQL = 'mysql',
+	NEO4J = 'neo4j',
+}
+
+// =============================================================================
 // DATABASE API CLASS
 // =============================================================================
 
@@ -76,5 +93,46 @@ export class DatabaseApi {
 		const question = new Question({ type: QuestionType.EXECUTE });
 		question.addQuestion(options.sql);
 		return this.client.chat({ token: options.token, question, onSSE: options.onSSE });
+	}
+
+	/**
+	 * Discover the underlying database engine for a pipeline.
+	 *
+	 * Sends a `Question(type=DIALECT)`; the database node replies on the
+	 * `answers` lane with `{"dialect": "<engine>"}`. Use this to branch on
+	 * dialect-specific SQL or to assert you're not pointed at the wrong kind
+	 * of database (e.g. Neo4j when you expected Postgres).
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @returns The dialect reported by the node.
+	 * @throws If `token` is empty, the pipeline returns no answer, or the
+	 *   response is not a recognized dialect.
+	 */
+	async dialect(options: { token: string }): Promise<DatabaseDialect> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+
+		const question = new Question({ type: QuestionType.DIALECT });
+		question.addQuestion('dialect');
+		const result = await this.client.chat({ token: options.token, question });
+
+		const answers = (result as { answers?: string[] })?.answers;
+		if (!answers || answers.length === 0) {
+			throw new Error('Pipeline returned no dialect answer; is the endpoint a database node?');
+		}
+
+		let payload: { dialect?: string };
+		try {
+			payload = JSON.parse(answers[0]);
+		} catch {
+			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
+		}
+
+		const known = Object.values(DatabaseDialect) as string[];
+		if (!payload.dialect || !known.includes(payload.dialect)) {
+			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
+		}
+		return payload.dialect as DatabaseDialect;
 	}
 }

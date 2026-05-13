@@ -170,9 +170,15 @@
 			"maximum": 20,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
 		},
+		"mysql.allow_execute": {
+			"type": "boolean",
+			"title": "Allow direct query execution",
+			"default": false,
+			"description": "Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
+		},
 		"mysql.default": {
 			"object": "default",
-			"properties": ["mysql.db_description", "mysql.host", "mysql.user", "mysql.password", "mysql.database", "mysql.table", "mysql.max_attempts"]
+			"properties": ["mysql.db_description", "mysql.host", "mysql.user", "mysql.password", "mysql.database", "mysql.table", "mysql.max_attempts", "mysql.allow_execute"]
 		},
 		"mysql.profile": {
 			"hidden": true,

@@ -195,6 +195,12 @@
 			"maximum": 20,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
+		"neo4jdb.allow_execute": {
+			"type": "boolean",
+			"title": "Allow direct query execution",
+			"default": false,
+			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
+		},
 		"neo4jdb.default": {
 			"object": "default",
 			"properties": [
@@ -203,7 +209,8 @@
 				"neo4jdb.auth_method",
 				"neo4jdb.database",
 				// "neo4jdb.label",
-				"neo4jdb.max_attempts"
+				"neo4jdb.max_attempts",
+				"neo4jdb.allow_execute"
 			]
 		},
 		"neo4jdb.profile": {

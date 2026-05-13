@@ -206,6 +206,16 @@ class IInstance(IInstanceBase):
 
         lanes = self.instance.getListeners()
 
+        # DIALECT: dialect-discovery request — emit {'dialect': 'neo4j'} on the
+        # answers lane so SDK callers can tell they're talking to a graph DB
+        # rather than a relational one.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': 'neo4j'}))
+                self.instance.writeAnswers(answer)
+            return
+
         # EXECUTE: caller passes raw Cypher; bypass LLM translation + safety check.
         if question.type == QuestionType.EXECUTE:
             if not self.IGlobal.allow_execute:

@@ -169,9 +169,15 @@
 			"maximum": 20,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
 		},
+		"postgresdb.allow_execute": {
+			"type": "boolean",
+			"title": "Allow direct query execution",
+			"default": false,
+			"description": "Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
+		},
 		"postgresdb.default": {
 			"object": "default",
-			"properties": ["postgresdb.db_description", "postgresdb.host", "postgresdb.user", "postgresdb.password", "postgresdb.database", "postgresdb.table", "postgresdb.max_attempts"]
+			"properties": ["postgresdb.db_description", "postgresdb.host", "postgresdb.user", "postgresdb.password", "postgresdb.database", "postgresdb.table", "postgresdb.max_attempts", "postgresdb.allow_execute"]
 		},
 		"postgresdb.profile": {
 			"hidden": true,

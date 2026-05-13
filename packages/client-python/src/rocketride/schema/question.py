@@ -295,6 +295,7 @@ class QuestionType(str, Enum):
         GET: Retrieves specific information or data
         PROMPT: Raw prompt without additional processing
         EXECUTE: Direct query execution against database nodes (bypasses LLM + safety checks)
+        DIALECT: Database-dialect discovery (node responds with its engine name)
     """
 
     QUESTION = 'question'  # Basic question-answering
@@ -303,6 +304,7 @@ class QuestionType(str, Enum):
     GET = 'get'  # Information retrieval
     PROMPT = 'prompt'  # Raw prompt processing
     EXECUTE = 'execute'  # Direct DB query execution (no LLM, no safety check)
+    DIALECT = 'dialect'  # Ask a database node which engine it is connected to
 
 
 class Question(BaseModel):
