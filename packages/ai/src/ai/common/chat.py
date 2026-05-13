@@ -111,7 +111,7 @@ class ChatBase:
         """
         return self._modelOutputTokens
 
-    def _chat(self, prompt: str) -> str:
+    def _chat(self, prompt: str) -> Union[str, ChatResponse]:
         """
         Send prompt, recieve response.
 
@@ -128,7 +128,7 @@ class ChatBase:
             prompt (str): The complete prompt to send to the AI model
 
         Returns:
-            str: The raw response from the AI model
+            Union[str, ChatResponse]: The raw response or stateless wrapper from the AI model
 
         Raises:
             Should raise appropriate exceptions for API failures, authentication
@@ -280,7 +280,7 @@ class ChatBase:
         # Default to retryable for unknown errors (conservative approach)
         return True
 
-    def _chat_with_retries(self, prompt: str) -> str:
+    def _chat_with_retries(self, prompt: str) -> Union[str, ChatResponse]:
         """
         Handle chat requests with retries for transient errors.
 
@@ -292,7 +292,7 @@ class ChatBase:
             prompt (str): The complete prompt to send to the AI model
 
         Returns:
-            str: The raw response from the AI model
+            Union[str, ChatResponse]: The raw response or stateless wrapper from the AI model
 
         Raises:
             Exception: If network/API retries are exhausted or non-retryable
@@ -334,7 +334,7 @@ class ChatBase:
         # This should never be reached due to the raise in the loop
         raise Exception('Unexpected exit from retry loop')
 
-    def chat_string(self, prompt: str) -> str:
+    def chat_string(self, prompt: str) -> Union[str, ChatResponse]:
         """
         Invoke the chat interface with string input, token management, and network retry handling.
 
@@ -354,7 +354,7 @@ class ChatBase:
             prompt (str): The complete prompt to send to the model
 
         Returns:
-            str: The model's response
+            Union[str, ChatResponse]: The model's response or stateless wrapper
 
         Warnings:
             - Issues debug warning if prompt is too long
