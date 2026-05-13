@@ -248,6 +248,42 @@ def _ensure_wheel():
     debug('wheel installed successfully')
 
 
+def _setuptools_available() -> bool:
+    """Check if setuptools module is available."""
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec('setuptools') is not None
+    except Exception:
+        return False
+
+
+def _ensure_setuptools():
+    """Ensure setuptools is installed in the parent env.
+
+    Required because we compile/install with --no-build-isolation, which means uv
+    builds source-only wheels (e.g. docopt 0.6.2, transitively pulled by kokoro →
+    misaki → num2words) against the parent env. Several legacy sdists declare
+    setup.py-style builds without listing setuptools in build-system.requires,
+    so uv can't auto-bootstrap them. Mirroring _ensure_wheel so the parent env
+    has the standard PEP 517 backend available at compile/install time.
+    """
+    if _setuptools_available():
+        debug('setuptools is available')
+        return
+
+    monitorStatus('Installing setuptools...')
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
+    )
+
+    if result.returncode != 0:
+        error(f'Failed to install setuptools: {result.stderr}')
+        raise RuntimeError('Failed to install setuptools')
+
+    debug('setuptools installed successfully')
+
+
 def _ensure_uv():
     """Ensure uv is installed."""
     if _uv_available():
@@ -355,10 +391,11 @@ def _ensure_site_packages():
 
 
 def bootstrap():
-    """Bootstrap the environment: ensure pip, uv, wheel."""
+    """Bootstrap the environment: ensure pip, uv, wheel, setuptools."""
     _ensure_site_packages()  # Must be first!
     _ensure_pip()
     _ensure_wheel()  # Needed for building packages with --no-build-isolation
+    _ensure_setuptools()  # Same reason — required by sdists with legacy setup.py builds
     _ensure_uv()
 
 
