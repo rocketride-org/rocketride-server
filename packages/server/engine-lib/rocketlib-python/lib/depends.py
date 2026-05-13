@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 from glob import glob
-from typing import Optional
+from typing import Callable, Optional
 
 # Conditional imports for cross-platform file locking (both are built-in)
 if os.name == 'nt':
@@ -175,19 +175,45 @@ def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return result
 
 
-def _pip_available():
-    """Check if pip module is available."""
+def _module_available(name: str) -> bool:
+    """Check if a Python module is available."""
     try:
         import importlib.util
 
-        return importlib.util.find_spec('pip') is not None
+        return importlib.util.find_spec(name) is not None
     except Exception:
         return False
 
 
+def _ensure_module(
+    name: str,
+    *,
+    check: Callable[[], bool],
+    install_args: Optional[list[str]] = None,
+    verify: bool = True,
+):
+    """Ensure a pip-installable dependency is available."""
+    if check():
+        debug(f'{name} is available')
+        return
+
+    monitorStatus(f'Installing {name}...')
+    args = install_args or [sys.executable, '-m', 'pip', 'install', name, '--quiet', '--disable-pip-version-check']
+    result = _run(args, check=False)
+
+    if result.returncode != 0:
+        error(f'Failed to install {name}: {result.stderr}')
+        raise RuntimeError(f'Failed to install {name}')
+
+    if verify and not check():
+        raise RuntimeError(f'{name} installed but not found')
+
+    debug(f'{name} installed successfully')
+
+
 def _ensure_pip():
     """Ensure pip is available using ensurepip."""
-    if _pip_available():
+    if _module_available('pip'):
         debug('pip is available')
         return
 
@@ -199,12 +225,12 @@ def _ensure_pip():
 
         if result.returncode != 0:
             # Check if pip is available anyway (might have succeeded before error)
-            if _pip_available():
+            if _module_available('pip'):
                 return
             raise RuntimeError(f'Failed to bootstrap pip: {result.stderr}')
     except Exception:
         # Check if pip got installed despite exception
-        if _pip_available():
+        if _module_available('pip'):
             return
         raise
 
@@ -220,42 +246,15 @@ def _uv_available() -> bool:
     return os.path.isfile(_uv_abs_path())
 
 
-def _wheel_available() -> bool:
-    """Check if wheel module is available."""
-    try:
-        import importlib.util
-
-        return importlib.util.find_spec('wheel') is not None
-    except Exception:
-        return False
+def _ensure_uv_available():
+    """Raise if the uv executable is not available."""
+    if not _uv_available():
+        raise RuntimeError('uv executable not found')
 
 
 def _ensure_wheel():
     """Ensure wheel is installed (needed for building packages with --no-build-isolation)."""
-    if _wheel_available():
-        debug('wheel is available')
-        return
-
-    monitorStatus('Installing wheel...')
-    result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
-    )
-
-    if result.returncode != 0:
-        error(f'Failed to install wheel: {result.stderr}')
-        raise RuntimeError('Failed to install wheel')
-
-    debug('wheel installed successfully')
-
-
-def _setuptools_available() -> bool:
-    """Check if setuptools module is available."""
-    try:
-        import importlib.util
-
-        return importlib.util.find_spec('setuptools') is not None
-    except Exception:
-        return False
+    _ensure_module('wheel', check=lambda: _module_available('wheel'))
 
 
 def _ensure_setuptools():
@@ -268,42 +267,12 @@ def _ensure_setuptools():
     so uv can't auto-bootstrap them. Mirroring _ensure_wheel so the parent env
     has the standard PEP 517 backend available at compile/install time.
     """
-    if _setuptools_available():
-        debug('setuptools is available')
-        return
-
-    monitorStatus('Installing setuptools...')
-    result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
-    )
-
-    if result.returncode != 0:
-        error(f'Failed to install setuptools: {result.stderr}')
-        raise RuntimeError('Failed to install setuptools')
-
-    # Verify installation
-    if not _setuptools_available():
-        raise RuntimeError('setuptools installed but not found')
-
-    debug('setuptools installed successfully')
+    _ensure_module('setuptools', check=lambda: _module_available('setuptools'))
 
 
 def _ensure_uv():
     """Ensure uv is installed."""
-    if _uv_available():
-        debug('uv is available')
-        return
-
-    monitorStatus('Installing uv...')
-    result = _run([sys.executable, '-m', 'pip', 'install', 'uv', '--quiet', '--disable-pip-version-check'], check=False)
-
-    if result.returncode != 0:
-        error(f'Failed to install uv: {result.stderr}')
-        raise RuntimeError('Failed to install uv')
-
-    # Verify installation
-    if not _uv_available():
-        raise RuntimeError('uv installed but not found')
+    _ensure_module('uv', check=_uv_available)
 
 
 def pip(*args) -> bool:
@@ -459,12 +428,50 @@ def _combine_requirements(file_paths: list[str], output_path: str):
             out.write('\n')
 
 
+def _run_uv(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run uv from the executable directory."""
+    run_kwargs = {
+        'capture_output': True,
+        'text': True,
+        'check': False,
+        'stdin': subprocess.PIPE,
+        'cwd': _get_executable_dir(),
+    }
+    run_kwargs.update(kwargs)
+    return subprocess.run(args, **run_kwargs)
+
+
+def _constraints_flags(constraints_path: str) -> list[str]:
+    """Return uv constraints args if the constraints file exists and has content."""
+    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
+        return ['-c', constraints_path]
+    return []
+
+
+def _build_uv_install_argv(requirements_path: str, constraints_path: str, *, dry_run: bool = False) -> list[str]:
+    """Build common uv pip install args for dry-run and real installs."""
+    args = [
+        _uv_abs_path(),
+        'pip',
+        'install',
+        '--python',
+        sys.executable,
+        '-r',
+        requirements_path,
+        '--index-strategy',
+        'unsafe-best-match',
+        '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
+    ]
+    if dry_run:
+        args.extend(['--dry-run', '--no-color'])
+    args.extend(_constraints_flags(constraints_path))
+    return args
+
+
 def _compile_constraints(constraints_path: str):
     """Use uv pip compile to generate constraints file."""
-    if not _uv_available():
-        raise RuntimeError('uv executable not found')
+    _ensure_uv_available()
 
-    exe_dir = _get_executable_dir()
     monitorStatus('Compiling constraints...')
 
     args = [
@@ -482,15 +489,10 @@ def _compile_constraints(constraints_path: str):
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
     debug(f'Compile: {args}')
-    result = subprocess.run(
+    result = _run_uv(
         args,
-        capture_output=True,
-        text=True,
-        check=False,
-        stdin=subprocess.PIPE,
         encoding='utf-8',
         errors='replace',
-        cwd=exe_dir,
     )
 
     if result.returncode != 0:
@@ -682,31 +684,11 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     Returns empty list if all requirements are already satisfied.
     Raises RuntimeError if dependency resolution fails.
     """
-    if not _uv_available():
-        raise RuntimeError('uv executable not found')
+    _ensure_uv_available()
 
-    exe_dir = _get_executable_dir()
-    args = [
-        _uv_abs_path(),
-        'pip',
-        'install',
-        '--python',
-        sys.executable,
-        '-r',
-        requirements_path,
-        '--index-strategy',
-        'unsafe-best-match',
-        '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
-        '--dry-run',
-        '--no-color',
-    ]
-
-    # Only add constraints if the file exists and has content
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', './cache/constraints.txt'])
-
+    args = _build_uv_install_argv(requirements_path, constraints_path, dry_run=True)
     debug(f'Dry-run: {args}')
-    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
+    result = _run_uv(args)
 
     # Check if dry-run failed (e.g., dependency resolution error)
     if result.returncode != 0:
@@ -766,28 +748,13 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     debug(f'sys.executable: {sys.executable}')
     debug(f'cwd: {os.getcwd()}')
 
-    # Build uv command
-    exe_dir = _get_executable_dir()
-    uv_args = [
-        _uv_abs_path(),
-        'pip',
-        'install',
-        '-r',
-        requirements_path,
-        '--python',
-        sys.executable,
-        '--index-strategy',
-        'unsafe-best-match',
-        '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
-    ]
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        uv_args.extend(['-c', './cache/constraints.txt'])
+    uv_args = _build_uv_install_argv(requirements_path, constraints_path)
 
     # Run uv and stream output
     debug(f'Install: {uv_args}')
     proc = subprocess.Popen(
         uv_args,
-        cwd=exe_dir,
+        cwd=_get_executable_dir(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -913,8 +880,7 @@ def main():
             # For install/sync commands, add constraints file if available
             constraints_path = os.path.join(cache_dir, 'constraints.txt')
             if sys.argv[1] in ('install', 'sync'):
-                if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-                    uv_args.extend(['-c', './cache/constraints.txt'])
+                uv_args.extend(_constraints_flags(constraints_path))
 
             # Run uv
             result = subprocess.run(uv_args, cwd=exe_dir)
