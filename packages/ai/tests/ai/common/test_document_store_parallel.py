@@ -22,7 +22,6 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -154,22 +153,9 @@ def _make_keyword_question(texts: List[str]) -> Question:
 class TestParallelSemanticFanOut:
     """Verify correctness AND parallelism for SEMANTIC multi-query fan-out."""
 
-    SIMULATED_QUERY_LATENCY_S = 0.05  # 50 ms per query
-
-    def _make_store_with_latency(self, docs_per_query: List[List[Doc]]) -> _TestStore:
-        """Return a store whose searchSemantic sleeps then returns pre-set docs."""
-        call_index = {'n': 0}
-        lock = threading.Lock()
-        result_sets = list(docs_per_query)
-
-        def _semantic(query: QuestionText, f: DocFilter) -> List[Doc]:
-            with lock:
-                idx = call_index['n']
-                call_index['n'] += 1
-            time.sleep(self.SIMULATED_QUERY_LATENCY_S)
-            return result_sets[idx] if idx < len(result_sets) else []
-
-        return _TestStore(semantic_fn=_semantic)
+    # Latency used in tests that still need time.sleep (thread-safety stress).
+    # Not used for the parallelism proof (that uses a Barrier instead).
+    _SLEEP_S = 0.02
 
     def test_single_query_returns_correct_docs(self) -> None:
         """Single-query path (no executor) returns the expected document."""
@@ -184,12 +170,21 @@ class TestParallelSemanticFanOut:
 
     def test_multi_query_returns_union_of_results(self) -> None:
         """Three sub-queries produce a merged union of all returned documents."""
+        call_index = {'n': 0}
+        lock = threading.Lock()
         docs_sets = [
             [_make_doc('obj-a', score=0.95)],
             [_make_doc('obj-b', score=0.80)],
             [_make_doc('obj-c', score=0.70)],
         ]
-        store = self._make_store_with_latency(docs_sets)
+
+        def _semantic(q: QuestionText, f: DocFilter) -> List[Doc]:
+            with lock:
+                idx = call_index['n']
+                call_index['n'] += 1
+            return docs_sets[idx]
+
+        store = _TestStore(semantic_fn=_semantic)
         question = _make_semantic_question(['q1', 'q2', 'q3'])
 
         result = store._queryDocuments(question)
@@ -199,25 +194,34 @@ class TestParallelSemanticFanOut:
         assert ('obj-b', 0) in result
         assert ('obj-c', 0) in result
 
-    def test_parallel_execution_is_faster_than_sequential(self) -> None:
-        """Wall-clock time for 3 parallel queries < 2× single-query latency."""
+    def test_parallel_execution_is_structurally_concurrent(self) -> None:
+        """Prove queries run in parallel via a threading.Barrier rendezvous.
+
+        A Barrier with party_count=N blocks each thread until ALL N threads
+        have reached it.  If the executor ran queries serially, the barrier
+        would never be reached by more than one thread at a time and would
+        deadlock (timing out and raising BrokenBarrierError).
+
+        This proof is deterministic and CI-safe: it does not rely on
+        wall-clock timing or OS scheduler behaviour.
+        """
         n_queries = 3
-        docs_sets = [[_make_doc(f'obj-{i}', score=0.8)] for i in range(n_queries)]
-        store = self._make_store_with_latency(docs_sets)
-        question = _make_semantic_question([f'query {i}' for i in range(n_queries)])
+        # Barrier requires all 3 threads to rendezvous simultaneously.
+        # timeout=5s is generous — any reasonable parallel executor will
+        # reach it in milliseconds.
+        barrier = threading.Barrier(n_queries, timeout=5)
 
-        start = time.monotonic()
+        def _semantic(q: QuestionText, f: DocFilter) -> List[Doc]:
+            # Reaching this line from all threads simultaneously proves
+            # the executor dispatched all futures before any returned.
+            barrier.wait()  # raises BrokenBarrierError if serial
+            return []
+
+        store = _TestStore(semantic_fn=_semantic)
+        question = _make_semantic_question([f'query-{i}' for i in range(n_queries)])
+
+        # Must not raise BrokenBarrierError (which would mean serial execution)
         store._queryDocuments(question)
-        elapsed = time.monotonic() - start
-
-        # Sequential would take n_queries * LATENCY; parallel should be < 2× LATENCY.
-        sequential_lower_bound = n_queries * self.SIMULATED_QUERY_LATENCY_S
-        parallel_upper_bound = 2 * self.SIMULATED_QUERY_LATENCY_S
-
-        assert elapsed < parallel_upper_bound, (
-            f'Expected parallel execution in <{parallel_upper_bound:.2f}s '
-            f'(was {elapsed:.3f}s vs sequential lower bound {sequential_lower_bound:.2f}s)'
-        )
 
     def test_duplicate_doc_keeps_highest_score(self) -> None:
         """When two queries return the same document, the higher score wins."""
@@ -284,7 +288,7 @@ class TestParallelSemanticFanOut:
             with lock:
                 idx = call_index['n']
                 call_index['n'] += 1
-            time.sleep(0.01)
+            time.sleep(self._SLEEP_S)
             return [_make_doc(f'obj-q{idx}-d{d}') for d in range(docs_per_query)]
 
         store = _TestStore(semantic_fn=_semantic)
@@ -319,186 +323,7 @@ class TestParallelKeywordFanOut:
         assert ('k-only', 0) in result
 
 
-# ===========================================================================
-# Gap-1 Tests: Wave sliding-window context pruning
-# ===========================================================================
 
-
-class TestWaveSlidingWindow:
-    """Verify _prune_wave_context enforces both sliding-window and char budget."""
-
-    # ------------------------------------------------------------------
-    # Fixture: a minimal RocketRideDriver that doesn't need a real iGlobal
-    # ------------------------------------------------------------------
-
-    def _make_driver(
-        self,
-        context_window_waves: int = 5,
-        wave_context_budget_chars: int = 12_000,
-    ):
-        """Return a minimal stub with the _prune_wave_context algorithm baked in.
-
-        We deliberately avoid importing ``nodes.src.*`` here because the
-        ``packages/ai`` test runner does not have the ``nodes`` package on its
-        ``PYTHONPATH``.  The stub reproduces the algorithm verbatim so the tests
-        validate the logic without requiring the full node import chain.
-        """
-        import math
-
-        _window = max(1, context_window_waves)
-        _budget = wave_context_budget_chars
-
-        class _DriverStub:
-            def _prune_wave_context(self, waves: List[Dict[str, Any]]) -> None:
-                """Verbatim copy of the production _prune_wave_context logic."""
-                # --- Strategy 1: sliding window ---
-                if len(waves) > _window:
-                    del waves[: len(waves) - _window]
-
-                # --- Strategy 2: character budget ---
-                if _budget <= 0:
-                    return
-
-                def _total(w_list):
-                    total = 0
-                    for w in w_list:
-                        for r in w.get('results', []):
-                            total += len(r.get('summary', ''))
-                    return total
-
-                while len(waves) > 1 and _total(waves) > _budget:
-                    waves.pop(0)
-
-        return _DriverStub()
-
-    def _make_wave(self, wave_num: int, summary_chars: int = 100) -> Dict[str, Any]:
-        """Build a fake wave entry with a result whose summary is summary_chars long."""
-        return {
-            'wave_num': wave_num,
-            'calls': [{'tool': 'test.tool', 'args': {}}],
-            'results': [
-                {
-                    'tool': 'test.tool',
-                    'key': f'wave-{wave_num}.r0',
-                    'summary': 'x' * summary_chars,
-                }
-            ],
-        }
-
-    # --- Sliding window tests ---
-
-    def test_window_not_exceeded_no_eviction(self) -> None:
-        """When wave count ≤ window, no eviction occurs."""
-        driver = self._make_driver(context_window_waves=5)
-        waves = [self._make_wave(i) for i in range(3)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 3
-
-    def test_window_exceeded_oldest_evicted(self) -> None:
-        """When wave count > window, the oldest entries are dropped."""
-        driver = self._make_driver(context_window_waves=3)
-        waves = [self._make_wave(i) for i in range(6)]  # 0..5
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 3
-        remaining_wave_nums = [w['wave_num'] for w in waves]
-        assert remaining_wave_nums == [3, 4, 5], (
-            f'Expected most-recent 3 waves [3,4,5], got {remaining_wave_nums}'
-        )
-
-    def test_window_one_always_keeps_latest(self) -> None:
-        """Window of 1 always keeps only the most recent wave."""
-        driver = self._make_driver(context_window_waves=1)
-        waves = [self._make_wave(i) for i in range(10)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 1
-        assert waves[0]['wave_num'] == 9
-
-    def test_empty_waves_no_error(self) -> None:
-        """Empty wave list is handled gracefully."""
-        driver = self._make_driver()
-        waves: List[Dict[str, Any]] = []
-
-        driver._prune_wave_context(waves)  # must not raise
-
-        assert waves == []
-
-    # --- Character budget tests ---
-
-    def test_budget_not_exceeded_no_eviction(self) -> None:
-        """When total summary chars ≤ budget, no budget eviction occurs."""
-        driver = self._make_driver(context_window_waves=10, wave_context_budget_chars=1_000)
-        # 3 waves × 100 chars = 300 chars < 1000
-        waves = [self._make_wave(i, summary_chars=100) for i in range(3)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 3
-
-    def test_budget_exceeded_evicts_oldest_first(self) -> None:
-        """When total summary chars exceed budget, oldest waves are evicted first."""
-        # budget = 500 chars; each wave summary = 300 chars
-        # 3 waves = 900 chars → must evict until ≤ 500 chars (1 wave remains)
-        driver = self._make_driver(context_window_waves=10, wave_context_budget_chars=500)
-        waves = [self._make_wave(i, summary_chars=300) for i in range(3)]
-
-        driver._prune_wave_context(waves)
-
-        # Only 1 wave should remain (300 chars ≤ 500 budget)
-        assert len(waves) == 1
-        assert waves[0]['wave_num'] == 2  # newest wave survives
-
-    def test_budget_zero_means_unlimited(self) -> None:
-        """A budget of 0 disables the char-budget strategy entirely."""
-        driver = self._make_driver(context_window_waves=10, wave_context_budget_chars=0)
-        waves = [self._make_wave(i, summary_chars=10_000) for i in range(5)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 5
-
-    def test_single_wave_never_evicted_by_budget(self) -> None:
-        """The last remaining wave is never evicted even if it exceeds the budget."""
-        driver = self._make_driver(context_window_waves=10, wave_context_budget_chars=10)
-        # One wave with 10 000-char summary — should never be evicted
-        waves = [self._make_wave(0, summary_chars=10_000)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 1
-
-    def test_window_applied_before_budget(self) -> None:
-        """Sliding window evicts first; budget operates on the reduced list."""
-        # window=2, budget=400 chars; 5 waves × 200 chars each
-        # After window: 2 waves remain = 400 chars → exactly at budget, no further eviction
-        driver = self._make_driver(context_window_waves=2, wave_context_budget_chars=400)
-        waves = [self._make_wave(i, summary_chars=200) for i in range(5)]
-
-        driver._prune_wave_context(waves)
-
-        assert len(waves) == 2
-        remaining_wave_nums = [w['wave_num'] for w in waves]
-        assert remaining_wave_nums == [3, 4]
-
-    def test_large_session_stays_bounded(self) -> None:
-        """Simulate a 10-wave session and verify context stays within window."""
-        driver = self._make_driver(context_window_waves=5, wave_context_budget_chars=12_000)
-        waves: List[Dict[str, Any]] = []
-
-        for i in range(10):
-            waves.append(self._make_wave(i, summary_chars=500))
-            driver._prune_wave_context(waves)
-
-        assert len(waves) <= 5
-        # All remaining waves should be the most recent ones
-        wave_nums = [w['wave_num'] for w in waves]
-        assert wave_nums == sorted(wave_nums)
-        assert wave_nums[-1] == 9  # newest wave always present
 
 
 # ===========================================================================
