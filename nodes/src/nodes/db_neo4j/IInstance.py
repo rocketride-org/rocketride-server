@@ -21,7 +21,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .IGlobal import IGlobal
+from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
 from .utils import _is_cypher_safe, _parse_is_valid
 
 
@@ -45,7 +45,7 @@ class IInstance(IInstanceBase):
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of rows to return (default 250, max 25000).',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}).',
                 },
             },
         },
@@ -414,8 +414,8 @@ class IInstance(IInstanceBase):
 
 
 def _clamp_limit(raw_limit) -> int:
-    """Clamp a user-supplied limit to [1, 25000]."""
+    """Clamp a user-supplied limit to [1, DEFAULT_MAX_EXECUTE_ROWS]."""
     try:
-        return max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        return max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
     except (ValueError, TypeError):
         return 250

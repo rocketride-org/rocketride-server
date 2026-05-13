@@ -49,7 +49,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DatabaseGlobalBase
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
 from .sql_safety import is_sql_safe
 
 
@@ -85,7 +85,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}). Increase when you need the full result set.',
                 },
             },
         },
@@ -127,7 +127,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         question = question.strip()
         raw_limit = args.get('limit')
         try:
-            limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+            limit = max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
         except (TypeError, ValueError):
             limit = 250
 
