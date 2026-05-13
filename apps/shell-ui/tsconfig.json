@@ -21,8 +21,6 @@
 		"skipLibCheck": true,
 		"allowJs": true,
 		"checkJs": false,
-		"incremental": true,
-		"tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo",
 		"paths": {
 			"shared": ["../../packages/shared-ui/src/index.ts"],
 			"shared/*": ["../../packages/shared-ui/src/*"],

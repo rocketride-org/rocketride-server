@@ -90,7 +90,7 @@ export default defineConfig(({ command }) => {
 		plugins: [
 			// Enable HTTPS in dev so the MF host and remotes share the same origin
 			// scheme — mixed HTTP/HTTPS would block cross-origin requests in browsers.
-			...(isDev ? [pluginBasicSsl()] : []),
+			// ...(isDev ? [pluginBasicSsl()] : []),
 
 			// Standard React JSX transform + Fast Refresh support.
 			pluginReact(),

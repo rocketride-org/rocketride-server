@@ -160,6 +160,31 @@ class AccountBase(ABC):
         """
         return []
 
+    async def audit(
+        self,
+        user_id: str | None,
+        source: str,
+        reason: str,
+        request_data: dict | None = None,
+        response_data: dict | None = None,
+        org_id: str | None = None,
+    ) -> None:
+        """
+        Write an audit log entry.
+
+        OSS default is a no-op.  The SaaS implementation persists the
+        entry to the ``audit_logs`` table.
+
+        Args:
+            user_id:       UUID of the acting user, or None for system/webhook events.
+            source:        Origin system (e.g. "stripe", "account", "billing").
+            reason:        Machine-readable action code (e.g. "create_team", "webhook_invoice_paid").
+            request_data:  Optional JSON-serialisable dict of the triggering input.
+            response_data: Optional JSON-serialisable dict of the resulting state.
+            org_id:        UUID of the organisation this event pertains to, or None.
+        """
+        pass
+
     async def handle_account(self, conn, request):
         """
         Dispatch an ``rrext_account_*`` DAP command to the account handler.

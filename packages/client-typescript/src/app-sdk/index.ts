@@ -150,7 +150,7 @@ export declare function useLogout(): (() => void) | null;
  * @returns Object with desktopApps array, isOnDesktop lookup, and getStatus lookup.
  */
 export declare function useSubscriptions(): {
-	desktopApps: { appId: string; subscriptionStatus: string; seats?: number; seatsUsed?: number; features?: string[] }[];
+	desktopApps: { appId: string; appStatus: string; onDesktop: boolean; seats?: number; seatsUsed?: number; features?: string[] }[];
 	isOnDesktop: (appId: string) => boolean;
 	getStatus: (appId: string) => string | undefined;
 };

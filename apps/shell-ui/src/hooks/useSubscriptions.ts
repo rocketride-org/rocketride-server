@@ -32,8 +32,11 @@ import { useAuthUser } from './useAuthUser';
 // TYPES
 // =============================================================================
 
-/** Subscription status values from the server. */
-export type SubscriptionStatus = 'free' | 'unsubscribed' | 'active' | 'trialing' | 'past_due' | 'incomplete' | 'canceled';
+/** App lifecycle status values computed server-side. */
+export type AppStatus = 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled';
+
+/** @deprecated Use AppStatus instead. */
+export type SubscriptionStatus = AppStatus;
 
 // =============================================================================
 // HOOK
@@ -50,25 +53,27 @@ export function useSubscriptions(): {
 	desktopApps: AppManifestEntry[];
 	/** Quick lookup: is this appId on the desktop? */
 	isOnDesktop: (appId: string) => boolean;
-	/** Quick lookup: what's this app's subscription status? */
-	getStatus: (appId: string) => SubscriptionStatus | undefined;
+	/** Quick lookup: what's this app's appStatus? */
+	getStatus: (appId: string) => AppStatus | undefined;
 } {
 	const identity = useAuthUser();
 
 	return useMemo(() => {
 		const raw: AppManifestEntry[] = identity?.apps ?? [];
 
-		// Build a lookup map for fast access
-		const statusMap = new Map<string, SubscriptionStatus>();
+		// Build lookup maps for fast access
+		const statusMap = new Map<string, AppStatus>();
+		const desktopSet = new Set<string>();
 		for (const entry of raw) {
 			if (entry?.id) {
-				statusMap.set(entry.id, (entry.subscriptionStatus ?? 'free') as SubscriptionStatus);
+				statusMap.set(entry.id, (entry.appStatus ?? 'free') as AppStatus);
+				if (entry.onDesktop) desktopSet.add(entry.id);
 			}
 		}
 
 		return {
 			desktopApps: raw,
-			isOnDesktop: (appId: string) => statusMap.has(appId),
+			isOnDesktop: (appId: string) => desktopSet.has(appId),
 			getStatus: (appId: string) => statusMap.get(appId),
 		};
 	}, [identity?.apps]);

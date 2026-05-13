@@ -65,9 +65,9 @@ export class RemoteManager extends BaseManager {
 			throw new Error('No credential provided for connection.');
 		}
 
-		// Connect with timeout to avoid indefinite hangs
+		// Login with timeout to avoid indefinite hangs (transport already attached)
 		const result = await Promise.race([
-			client.connect(config.credential as string | { code: string; verifier: string; redirectUri: string }),
+			client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
 			new Promise<never>((_, reject) =>
 				setTimeout(() => reject(new Error(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS),
 			),

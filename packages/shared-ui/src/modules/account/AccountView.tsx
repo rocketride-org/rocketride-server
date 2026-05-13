@@ -140,6 +140,8 @@ export interface IAccountViewProps {
 	creditBalance: CreditBalance | null;
 	/** Available credit packs for purchase. */
 	creditPacks: CreditPack[];
+	/** Map of appId → display name for subscription rows. */
+	appNames?: Record<string, string>;
 
 	// -- Billing callbacks -----------------------------------------------------
 	/** Cancel a subscription. Host re-fetches and updates subscriptions prop. */
@@ -230,7 +232,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, onLoadEnv, onSaveEnv, refreshSignal } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, appNames, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, onLoadEnv, onSaveEnv, refreshSignal } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -731,7 +733,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			billing: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} appNames={appNames} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},

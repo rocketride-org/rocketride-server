@@ -92,9 +92,9 @@ class AccountInfo(BaseModel):
     # Full org/team/permissions structure — all permission checks resolve through this
     organizations: list[OrgInfo] = []
 
-    # Apps on the user's desktop — full manifest entries with subscription status.
-    # OSS: all apps with subscriptionStatus="free".
-    # SaaS: populated from app_users table, enriched with full manifest + subscription info.
+    # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
+    # OSS: all apps with appStatus="free", onDesktop=True.
+    # SaaS: populated from app_users table, enriched with full manifest + billing info.
     apps: list[AppManifestEntry] = []
 
     # Server capability tags — 'oss' or 'saas' depending on the account provider

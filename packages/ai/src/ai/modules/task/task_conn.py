@@ -344,6 +344,28 @@ class TaskConn(
         # (desktop apps with full manifest + subscription status).
         return self.build_response(request, body=result.to_connect_result())
 
+    async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP deauth command: clear authentication state.
+
+        Reverts the connection to unauthenticated mode so only
+        ``rrext_public_*`` commands are accepted. The WebSocket stays
+        open — callers can re-authenticate later via ``auth``.
+        """
+        # Nothing to do if not authenticated
+        if not self._authenticated:
+            return self.build_response(request, body={})
+
+        # Re-acquire an unauthenticated slot for this IP
+        if self._client_ip:
+            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+
+        # Clear authentication state
+        self._authenticated = False
+        self._account_info = None
+
+        return self.build_response(request, body={})
+
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the authenticated user has the given permission for their default team."""
         if not self._account_info:

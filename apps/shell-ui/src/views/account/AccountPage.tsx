@@ -45,6 +45,7 @@ import type {
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { useWorkspace } from '../../workspace/WorkspaceContext';
 
 // =============================================================================
 // STYLES
@@ -73,6 +74,14 @@ const AccountPage: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
 	const authUser = useAuthUser();
 	const logout = useLogout();
+	const { appManifest } = useWorkspace();
+
+	// Build appId → displayName map from the manifest
+	const appNames = React.useMemo(() => {
+		const map: Record<string, string> = {};
+		for (const app of appManifest) map[app.id] = app.name;
+		return map;
+	}, [appManifest]);
 
 	// ── Navigation state ────────────────────────────────────────────────────
 	const [section, setSection] = useState<AccountSection>('profile');
@@ -415,6 +424,7 @@ const AccountPage: React.FC = () => {
 			billingError={billingError}
 			creditBalance={creditBalance}
 			creditPacks={creditPacks}
+			appNames={appNames}
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
 			onBuyCredits={handleBuyCredits}

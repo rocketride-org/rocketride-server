@@ -249,7 +249,8 @@ class AppManifestEntry(TypedDict, total=False):
         public (bool): Whether the app is visible to unauthenticated users.
         stripeProductId (str): Stripe product ID (SaaS paid apps only).
         stripePrices (list): Available pricing tiers (SaaS paid apps only).
-        subscriptionStatus (str): Subscription status (present on desktop apps).
+        appStatus (str): App lifecycle status (auth|free|unsubscribed|subscribed|trialing|past_due|canceled).
+        onDesktop (bool): Whether this app is on the user's desktop.
         seats (int): Total seats on the subscription.
         seatsUsed (int): Seats currently occupied in this org.
         features (list[str]): Feature flags enabled by the subscribed plan.
@@ -269,7 +270,8 @@ class AppManifestEntry(TypedDict, total=False):
     public: bool
     stripeProductId: str
     stripePrices: list[dict]
-    subscriptionStatus: str
+    appStatus: str
+    onDesktop: bool
     seats: int
     seatsUsed: int
     features: list[str]

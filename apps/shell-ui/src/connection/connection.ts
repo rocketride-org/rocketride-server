@@ -143,6 +143,7 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** The shared RocketRideClient instance. */
 	private client: RocketRideClient | null = null;
+	private _attachPromise: Promise<void> | undefined;
 
 	/** Active backend manager (RemoteManager). */
 	private manager: BaseManager | null = null;
@@ -261,6 +262,12 @@ export class ConnectionManager implements IConnectionManager {
 		// Store OAuth config for startOAuth()
 		this.zitadelUrl = options?.zitadelUrl ?? '';
 		this.zitadelClientId = options?.zitadelClientId ?? '';
+
+		// Attach immediately so public APIs (rrext_public_*) work before login.
+		// The promise is stored so bootstrap() can await it before login().
+		this._attachPromise = this.client.attach().catch((err) => {
+			console.error('[ConnectionManager] Failed to attach:', err);
+		});
 	}
 
 	/**
@@ -321,6 +328,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 
+		// Ensure the transport is attached before any login attempt
+		await this._attachPromise;
+
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
 		const sessionAppId = this.getSessionAppId();
@@ -338,7 +348,7 @@ export class ConnectionManager implements IConnectionManager {
 				return null;
 			}
 
-			const result = await this.client.connect({ code, verifier, redirectUri: window.location.origin });
+			const result = await this.client.login({ code, verifier, redirectUri: window.location.origin });
 			return await this.finishConnect(result, sessionAppId, config);
 		}
 
@@ -347,7 +357,7 @@ export class ConnectionManager implements IConnectionManager {
 			const token = this.loadToken();
 			if (token) {
 				try {
-					const result = await this.client.connect(token);
+					const result = await this.client.login(token);
 					return await this.finishConnect(result, sessionAppId, config);
 				} catch {
 					// Token expired or invalid — clear and restart OAuth
@@ -366,7 +376,7 @@ export class ConnectionManager implements IConnectionManager {
 		if (token) {
 			try {
 				const result = await Promise.race([
-					this.client.connect(token),
+					this.client.login(token),
 					new Promise<never>((_, reject) =>
 						setTimeout(() => reject(new Error('timeout')), 8000),
 					),
@@ -379,7 +389,7 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
-		// No token — show shell unauthenticated
+		// No token — show shell unauthenticated (transport is attached, public APIs work)
 		return null;
 	}
 

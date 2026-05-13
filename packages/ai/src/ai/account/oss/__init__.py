@@ -139,9 +139,9 @@ class Account(AccountBase):
                     ],
                 }
             ],
-            # OSS: all apps are on the desktop with subscriptionStatus="free"
+            # OSS: all apps are on the desktop and free
             apps=[
-                {'appId': a.get('id', ''), 'subscriptionStatus': 'free'}
+                {'appId': a.get('id', ''), 'appStatus': 'free', 'onDesktop': True}
                 for a in self._read_apps_json(public_only=False)
                 if a.get('id')
             ],
@@ -231,6 +231,8 @@ class Account(AccountBase):
 
     async def remove_team_member(self, **kw):
         self._saas_only()
+
+    # audit() is inherited from AccountBase as a no-op — OSS has no database.
 
     # =========================================================================
     # APP MANIFEST — read from static apps.json

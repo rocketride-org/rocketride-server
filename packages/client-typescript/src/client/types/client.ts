@@ -365,9 +365,9 @@ export interface ConnectResult {
 	organizations: OrgInfo[];
 
 	/**
-	 * Apps on the user's desktop with subscription status.
-	 * OSS: all apps with ``subscriptionStatus: "free"``.
-	 * SaaS: populated from the ``app_users`` table, enriched with subscription info.
+	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
+	 * OSS: all apps with ``appStatus: "free"``, ``onDesktop: true``.
+	 * SaaS: populated from the ``app_users`` table, enriched with billing info.
 	 */
 	apps: AppManifestEntry[];
 
@@ -433,8 +433,11 @@ export interface AppManifestEntry {
 	/** Available pricing tiers (SaaS paid apps only). */
 	stripePrices?: StripePriceEntry[];
 
-	/** Subscription status (present on desktop apps from ConnectResult.apps). */
-	subscriptionStatus?: string;
+	/** App lifecycle status: 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled'. */
+	appStatus?: string;
+
+	/** Whether this app is on the user's desktop. */
+	onDesktop?: boolean;
 
 	/** Total seats on the subscription (only for subscribed paid apps). */
 	seats?: number;

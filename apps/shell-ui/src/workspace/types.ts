@@ -211,6 +211,10 @@ export interface AppManifestEntry {
 	 * Defaults to true — most apps show the status bar.
 	 */
 	showStatusBar?: boolean;
+	/** App lifecycle status: auth | free | unsubscribed | subscribed | trialing | past_due | canceled. */
+	appStatus?: string;
+	/** Whether this app is on the user's desktop. */
+	onDesktop?: boolean;
 	/** Async loader — dynamically imports and returns the full AppDescriptor. */
 	load: () => Promise<AppDescriptor>;
 }

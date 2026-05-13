@@ -88,6 +88,16 @@ function formatInterval(interval: string): string {
 }
 
 /**
+ * Formats a credit grant line using the label template from Stripe metadata.
+ * Replaces ``{amount}`` with the localized number. Falls back to raw key.
+ */
+function formatGrant(resource: string, amount: number, labels: Record<string, string> | null | undefined): string {
+	const template = labels?.[resource];
+	if (template) return template.replace('{amount}', amount.toLocaleString());
+	return `${amount.toLocaleString()} ${resource}`;
+}
+
+/**
  * Returns a badge variant and label for a Stripe subscription status.
  *
  * @param status - Stripe status string (active, trialing, past_due, canceled).
@@ -134,6 +144,8 @@ export interface BillingPanelProps {
 	onBuyCredits: (pack: CreditPack) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
+	/** Map of appId → display name for subscription rows. */
+	appNames?: Record<string, string>;
 }
 
 // =============================================================================
@@ -146,7 +158,7 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, appNames, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
 	return (
 		<section>
 			{/* Error banner */}
@@ -181,7 +193,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 								<div key={sub.appId} style={{ ...SharedS.rowItem, borderBottom: i < subscriptions.length - 1 ? '1px solid var(--rr-border)' : 'none', alignItems: 'flex-start' }}>
 									<div style={SharedS.rowInfo}>
 										{/* App name + renewal info */}
-										<div style={SharedS.rowName}>{sub.appId}</div>
+										<div style={SharedS.rowName}>{appNames?.[sub.appId] ?? sub.appId}</div>
 										{sub.currentPeriodEnd && <div style={S.meta}>{sub.cancelAtPeriodEnd ? `Cancels on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}` : `Renews on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`}</div>}
 
 										{/* Subscription detail grid */}
@@ -219,6 +231,38 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 												</>
 											)}
 										</div>
+
+										{/* Credit grant summary */}
+										{sub.credits && (() => {
+											const recurring = sub.credits!.recurring;
+											const initial = sub.credits!.initial;
+											// Welcome gift = initial - recurring (bonus above baseline); hide if <= 0
+											const bonuses = initial && recurring
+												? Object.entries(initial)
+													.map(([res, amt]) => ({ res, diff: amt - (recurring[res] ?? 0) }))
+													.filter(({ diff }) => diff > 0)
+												: [];
+											return (
+												<div style={{ marginTop: 8, fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.6 }}>
+													{bonuses.length > 0 && (
+														<>
+															<div style={{ fontWeight: 600, marginTop: 4 }}>As a Welcome gift</div>
+															{bonuses.map(({ res, diff }) => (
+																<div key={`bonus-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, diff, sub.creditLabels)} bonus</div>
+															))}
+														</>
+													)}
+													{recurring && (
+														<>
+															<div style={{ fontWeight: 600, marginTop: 4 }}>Monthly</div>
+															{Object.entries(recurring).map(([res, amt]) => (
+																<div key={`rec-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, amt, sub.creditLabels)}</div>
+															))}
+														</>
+													)}
+												</div>
+											);
+										})()}
 									</div>
 
 									{/* Status badge + actions */}

@@ -39,12 +39,12 @@ export function isSubscribed(client: RocketRideClient | undefined, appId: string
 	if (!capabilities.includes('saas')) return true;
 
 	// Check ConnectResult.apps for the desktop app entry
-	const apps: { appId: string; subscriptionStatus: string }[] =
-		(info as Record<string, unknown>).apps as { appId: string; subscriptionStatus: string }[] ?? [];
+	const apps: { appId: string; appStatus: string }[] =
+		(info as Record<string, unknown>).apps as { appId: string; appStatus: string }[] ?? [];
 	const entry = apps.find((a) => a.appId === appId);
 	if (!entry) return false;
 
-	// Allow launch for free, active, trialing, and unsubscribed (paywall base features)
-	const allowed = ['free', 'active', 'trialing', 'unsubscribed'];
-	return allowed.includes(entry.subscriptionStatus);
+	// Allow launch for free, subscribed, trialing, and unsubscribed (paywall base features)
+	const allowed = ['free', 'subscribed', 'trialing', 'unsubscribed'];
+	return allowed.includes(entry.appStatus);
 }

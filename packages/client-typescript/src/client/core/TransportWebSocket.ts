@@ -86,32 +86,20 @@ type UniversalWebSocket = WebSocket | NodeWsInstance;
 export class TransportWebSocket extends TransportBase {
 	private _websocket?: UniversalWebSocket | null;
 	private _uri: string;
-	private _auth?: string;
 	private _messageTasks = new Set<Promise<void>>();
 	private _draining = false;
 	private _connectionTimeout?: ReturnType<typeof setTimeout>;
 	private _pingInterval?: ReturnType<typeof setInterval>;
 	private _lastPong: number = Date.now();
 
-	constructor(uri = CONST_DEFAULT_SERVICE, auth?: string) {
+	constructor(uri = CONST_DEFAULT_SERVICE) {
 		super();
 		this._uri = uri;
-		this._auth = auth;
-	}
-
-	/** Auth credential for use by connect flow (e.g. first DAP auth command). */
-	getAuth(): string | undefined {
-		return this._auth;
 	}
 
 	/** Connection info for the "connected" callback (URI). */
 	getConnectionInfo(): string | undefined {
 		return this._uri;
-	}
-
-	/** Update auth credential. Takes effect on the next connect(). */
-	setAuth(auth: string): void {
-		this._auth = auth;
 	}
 
 	/** Update connection URI. Takes effect on the next connect(). */

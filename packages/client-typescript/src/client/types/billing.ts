@@ -68,6 +68,12 @@ export interface BillingDetail {
 
 	/** True when the user has requested cancellation at period end. */
 	cancelAtPeriodEnd: boolean;
+
+	/** Credit grants config from Stripe price metadata, or null. */
+	credits: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+
+	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
+	creditLabels: Record<string, string> | null;
 }
 
 /**
@@ -107,6 +113,13 @@ export interface CreditBalance {
 
 	/** Total consumed per resource type — useful for ledger display. */
 	lifetimeConsumed: Record<string, number>;
+
+	/**
+	 * Human-readable display templates per resource type, from Stripe price metadata.
+	 * Supports ``{amount}`` substitution (e.g. ``"{amount} minutes of Audio"``).
+	 * Falls back to the raw resource key when a label is not configured.
+	 */
+	labels: Record<string, string>;
 }
 
 /**

@@ -296,10 +296,10 @@ export class ConnectionMessageHandler {
 				return;
 			}
 
-			testClient = new RocketRideClient({ auth: apiKey, uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
+			testClient = new RocketRideClient({ uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
 
 			try {
-				await testClient.connect(undefined, { timeout: 8000 });
+				await testClient.connect(apiKey as string, { timeout: 8000 });
 			} catch (connectError) {
 				if (testClient) await testClient.disconnect();
 				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);

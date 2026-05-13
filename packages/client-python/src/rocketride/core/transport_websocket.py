@@ -133,21 +133,12 @@ class TransportWebSocket(TransportBase):
         self._websocket: Union[object, None] = None
         self._receive_task = None
         self._uri = uri
-        self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
         self._draining: bool = False
-
-    def get_auth(self) -> Optional[str]:
-        """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
-        return self._auth
 
     def get_connection_info(self) -> Optional[str]:
         """Return connection info for the "connected" callback (URI)."""
         return self._uri
-
-    def set_auth(self, auth: str) -> None:
-        """Update auth credential. Takes effect on the next connect()."""
-        self._auth = auth
 
     def set_uri(self, uri: str) -> None:
         """Update connection URI. Takes effect on the next connect()."""

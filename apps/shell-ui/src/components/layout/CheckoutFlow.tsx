@@ -61,6 +61,18 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		});
 	}, []);
 
+	// --- Listen for unsubscribe events ---------------------------------------
+	useEffect(() => {
+		return ConnectionManager.getInstance().on('shell:unsubscribe', ({ appId }: { appId: string }) => {
+			const client = ConnectionManager.getInstance().getClient();
+			if (client && orgId) {
+				client.billing.cancelSubscription(orgId, appId)
+					.then(() => console.log('[unsubscribe] canceled', appId))
+					.catch((err) => console.error('[unsubscribe] error', err));
+			}
+		});
+	}, [orgId]);
+
 	// --- Don't render if no checkout or missing config -----------------------
 	if (!checkoutApp || !stripeKey || !orgId) return null;
 

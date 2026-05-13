@@ -387,7 +387,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div style={{ display: 'flex', alignItems: 'center', height: 52, padding: collapsed ? '0 8px' : '0 12px', flexShrink: 0 }}>
+			<div style={{ display: 'flex', alignItems: 'center', height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}>
 				<button
 					title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
 					onClick={toggleCollapse}

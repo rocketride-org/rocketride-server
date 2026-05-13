@@ -25,6 +25,20 @@ import { commonStyles } from '../../themes/styles';
 import type { CheckoutModalProps, CheckoutPlan } from './types';
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Formats a credit grant line using the label template from Stripe metadata.
+ * Replaces ``{amount}`` with the localized number. Falls back to raw key.
+ */
+function formatGrant(resource: string, amount: number, labels: Record<string, string> | null | undefined): string {
+	const template = labels?.[resource];
+	if (template) return template.replace('{amount}', amount.toLocaleString());
+	return `${amount.toLocaleString()} ${resource}`;
+}
+
+// =============================================================================
 // STYLES
 // =============================================================================
 
@@ -447,6 +461,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ appName, appDescri
 									</div>
 								))}
 							</div>
+
+							{/* Credit grant details for the selected plan */}
+							{selectedPlan?.credits && (() => {
+								const { initial, recurring } = selectedPlan.credits!;
+								const labels = selectedPlan.creditLabels;
+								// Welcome bonus = initial - recurring (only show if > 0)
+								const bonuses = initial && recurring
+									? Object.entries(initial)
+										.map(([res, amt]) => ({ res, diff: amt - (recurring[res] ?? 0) }))
+										.filter(({ diff }) => diff > 0)
+									: [];
+								return (
+									<div style={{ marginBottom: 16, fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.7 }}>
+										{bonuses.length > 0 && (
+											<>
+												<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)' }}>As a Welcome gift</div>
+												{bonuses.map(({ res, diff }) => (
+													<div key={`b-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, diff, labels)} bonus</div>
+												))}
+											</>
+										)}
+										{recurring && (
+											<>
+												<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)', marginTop: bonuses.length > 0 ? 6 : 0 }}>Monthly</div>
+												{Object.entries(recurring).map(([res, amt]) => (
+													<div key={`r-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, amt, labels)}</div>
+												))}
+											</>
+										)}
+									</div>
+								);
+							})()}
 
 							<button style={S.continueBtn(!selectedPlan)} disabled={!selectedPlan} onClick={handleContinue}>
 								Continue
