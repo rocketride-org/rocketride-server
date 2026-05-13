@@ -71,11 +71,13 @@ class ChatBase:
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
+        self._provider = provider
         self._config = config
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits
         self._model = validate_model_name(config.get('model'))
+        self._cb_key = f"{self._provider}::{self._model}::{self._config.get('circuit_breaker_threshold', 3)}::{self._config.get('circuit_breaker_timeout_seconds', 60.0)}"
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
 
@@ -334,10 +336,10 @@ class ChatBase:
         
         # Pre-check circuit breaker state
         with self._cb_lock:
-            state = self._cb_state.setdefault(self._model, {"failures": 0, "open_until": 0.0})
+            state = self._cb_state.setdefault(self._cb_key, {"failures": 0, "open_until": 0.0})
             if time.time() < state["open_until"]:
-                debug(f'Circuit breaker is open for {self._model}, failing fast.')
-                raise CircuitBreakerTrippedError(f'Circuit Breaker open for {self._model}')
+                debug(f'Circuit breaker is open for {self._cb_key}, failing fast.')
+                raise CircuitBreakerTrippedError(f'Circuit Breaker open for {self._cb_key}')
 
         for attempt in range(max_network_retries):
             try:
@@ -346,7 +348,7 @@ class ChatBase:
                 
                 # Reset circuit breaker on success
                 with self._cb_lock:
-                    self._cb_state[self._model]["failures"] = 0
+                    self._cb_state[self._cb_key]["failures"] = 0
                     
                 return result
 
@@ -358,13 +360,14 @@ class ChatBase:
                     # Non-retryable error or max retries reached
                     debug(f'Chat failed after {attempt + 1} attempts: {str(e)}')
                     
-                    # Update circuit breaker on hard failure
-                    with self._cb_lock:
-                        self._cb_state[self._model]["failures"] += 1
-                        # Trip circuit breaker after consecutive hard failures
-                        if self._cb_state[self._model]["failures"] >= cb_threshold:
-                            self._cb_state[self._model]["open_until"] = time.time() + cb_timeout
-                            debug(f'Circuit breaker tripped for {self._model}')
+                    if is_retryable:
+                        # Update circuit breaker on hard failure
+                        with self._cb_lock:
+                            self._cb_state[self._cb_key]["failures"] += 1
+                            # Trip circuit breaker after consecutive hard failures
+                            if self._cb_state[self._cb_key]["failures"] >= cb_threshold:
+                                self._cb_state[self._cb_key]["open_until"] = time.time() + cb_timeout
+                                debug(f'Circuit breaker tripped for {self._cb_key}')
 
                     # Map to a friendlier exception if possible
                     raise self.map_exception(e)
