@@ -610,7 +610,9 @@ class TestNodeContracts:
         """Verify service*.json can be parsed and has required fields."""
         assert service.title, f'{service.test_id}: Missing title'
         assert service.protocol, f'{service.test_id}: Missing protocol'
-        assert service.node_type in ('filter', 'endpoint', ''), f'{service.test_id}: Invalid node_type: {service.node_type}'
+        assert service.node_type in ('filter', 'endpoint', ''), (
+            f'{service.test_id}: Invalid node_type: {service.node_type}'
+        )
 
     @pytest.mark.parametrize('service', get_python_services(), ids=lambda s: s.test_id)
     def test_node_module_exists(self, service: ServiceConfig):
@@ -664,7 +666,19 @@ class TestNodeLanes:
     @pytest.mark.parametrize('service,lane', get_python_lanes(), ids=get_python_lane_ids())
     def test_lane_outputs_valid(self, service: ServiceConfig, lane: LaneDefinition):
         """Verify output lane names are valid."""
-        valid_lanes = {'text', 'documents', 'questions', 'answers', 'table', 'image', 'audio', 'video', 'classifications', 'classificationContext', 'tags'}
+        valid_lanes = {
+            'text',
+            'documents',
+            'questions',
+            'answers',
+            'table',
+            'image',
+            'audio',
+            'video',
+            'classifications',
+            'classificationContext',
+            'tags',
+        }
         for output in lane.outputs:
             assert output in valid_lanes, f"{service.test_id}:{lane.lane}: Unknown output lane '{output}'"
 

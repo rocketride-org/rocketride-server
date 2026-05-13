@@ -312,7 +312,11 @@ class TaskMetrics:
                             # Fallback: total GPU memory - baseline
                             mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                             current_total_mb = float(mem_info.used // (1024 * 1024))
-                            baseline_mb = self._gpu_baseline_memory_mb[gpu_index] if gpu_index < len(self._gpu_baseline_memory_mb) else 0.0
+                            baseline_mb = (
+                                self._gpu_baseline_memory_mb[gpu_index]
+                                if gpu_index < len(self._gpu_baseline_memory_mb)
+                                else 0.0
+                            )
                             gpu_memory_this_gpu = max(0.0, current_total_mb - baseline_mb)
                         # else: driver supports it, our process truly has 0 memory
 
@@ -349,9 +353,15 @@ class TaskMetrics:
             self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
 
         # Track peaks (user-facing)
-        self._status.metrics.peak_cpu_percent = max(self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent)
-        self._status.metrics.peak_cpu_memory_mb = max(self._status.metrics.peak_cpu_memory_mb, self._status.metrics.cpu_memory_mb)
-        self._status.metrics.peak_gpu_memory_mb = max(self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb)
+        self._status.metrics.peak_cpu_percent = max(
+            self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent
+        )
+        self._status.metrics.peak_cpu_memory_mb = max(
+            self._status.metrics.peak_cpu_memory_mb, self._status.metrics.cpu_memory_mb
+        )
+        self._status.metrics.peak_gpu_memory_mb = max(
+            self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb
+        )
 
         # Calculate averages (user-facing)
         if self._duration_seconds > 0:
@@ -401,7 +411,11 @@ class TaskMetrics:
         self._status.tokens.gpu_inference = round(gpu_inference_tokens, 1)
         self._status.tokens.custom = custom_tokens
         self._status.tokens.total = round(
-            self._status.tokens.cpu_utilization + self._status.tokens.cpu_memory + self._status.tokens.gpu_memory + self._status.tokens.gpu_inference + sum(custom_tokens.values()),
+            self._status.tokens.cpu_utilization
+            + self._status.tokens.cpu_memory
+            + self._status.tokens.gpu_memory
+            + self._status.tokens.gpu_inference
+            + sum(custom_tokens.values()),
             1,
         )
 
@@ -455,8 +469,16 @@ class TaskMetrics:
         delta_tokens_memory = self._status.tokens.cpu_memory - self._last_report_tokens_memory
         delta_tokens_gpu = self._status.tokens.gpu_memory - self._last_report_tokens_gpu
         delta_tokens_gpu_inference = self._status.tokens.gpu_inference - self._last_report_tokens_gpu_inference
-        delta_tokens_custom = {k: round(v - self._last_report_tokens_custom.get(k, 0.0), 1) for k, v in self._status.tokens.custom.items()}
-        delta_tokens_total = delta_tokens_cpu + delta_tokens_memory + delta_tokens_gpu + delta_tokens_gpu_inference + sum(delta_tokens_custom.values())
+        delta_tokens_custom = {
+            k: round(v - self._last_report_tokens_custom.get(k, 0.0), 1) for k, v in self._status.tokens.custom.items()
+        }
+        delta_tokens_total = (
+            delta_tokens_cpu
+            + delta_tokens_memory
+            + delta_tokens_gpu
+            + delta_tokens_gpu_inference
+            + sum(delta_tokens_custom.values())
+        )
 
         # GPU inference stats for monitoring
         gpu_inference_count = self._subprocess_counters.get('gpu_inference_count', 0)
@@ -536,9 +558,13 @@ class TaskMetrics:
         # STUB: Log the report (will be replaced with actual API call)
         try:
             debug('[TaskMetrics] Billing report:')
-            debug(f'  Incremental Tokens (this period): CPU={delta_tokens_cpu:.2f}, Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, GPU Inference={delta_tokens_gpu_inference:.2f}, Custom={delta_tokens_custom}, Total={delta_tokens_total:.2f}')
+            debug(
+                f'  Incremental Tokens (this period): CPU={delta_tokens_cpu:.2f}, Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, GPU Inference={delta_tokens_gpu_inference:.2f}, Custom={delta_tokens_custom}, Total={delta_tokens_total:.2f}'
+            )
             debug(f'  Cumulative Tokens (lifetime): Total={self._status.tokens.total}')
-            debug(f'  GPU Inference Stats: {gpu_inference_count} calls, {gpu_inference_seconds:.3f}s total, {gpu_inference_avg:.4f}s avg')
+            debug(
+                f'  GPU Inference Stats: {gpu_inference_count} calls, {gpu_inference_seconds:.3f}s total, {gpu_inference_avg:.4f}s avg'
+            )
         except Exception:
             # Don't let print failures break billing tracking
             pass

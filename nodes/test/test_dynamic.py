@@ -97,7 +97,11 @@ class TestDynamicNodes:
                     # Report any validation errors
                     if errors:
                         error_msgs = [f'  - {e.path}: {e.args[0]}' for e in errors]
-                        pytest.fail(f'Test case {case_id} failed validation:\n' + '\n'.join(error_msgs) + f'\n\nResults: {results}')
+                        pytest.fail(
+                            f'Test case {case_id} failed validation:\n'
+                            + '\n'.join(error_msgs)
+                            + f'\n\nResults: {results}'
+                        )
 
                 except Exception as e:
                     pytest.fail(f'Test case {case_id} raised exception: {e}')
@@ -224,7 +228,9 @@ class TestPipelineBuilder:
         """Test building a simple pipeline."""
         from .framework import NodeTestConfig, PipelineBuilder
 
-        config = NodeTestConfig(node_name='question', provider='question', service_file='test.json', chain=['*'], outputs=['questions'])
+        config = NodeTestConfig(
+            node_name='question', provider='question', service_file='test.json', chain=['*'], outputs=['questions']
+        )
 
         builder = PipelineBuilder(config)
         pipeline = builder.build()
@@ -244,7 +250,13 @@ class TestPipelineBuilder:
         """Test building a pipeline with chain nodes."""
         from .framework import NodeTestConfig, PipelineBuilder
 
-        config = NodeTestConfig(node_name='milvus', provider='milvus', service_file='test.json', chain=['preprocessor_langchain', 'embedding_transformer', '*'], outputs=['documents', 'answers'])
+        config = NodeTestConfig(
+            node_name='milvus',
+            provider='milvus',
+            service_file='test.json',
+            chain=['preprocessor_langchain', 'embedding_transformer', '*'],
+            outputs=['documents', 'answers'],
+        )
 
         builder = PipelineBuilder(config)
         pipeline = builder.build()

@@ -98,7 +98,9 @@ class Chat(ChatBase):
         spatial_format = config.get('accessibility.spatialFormat', 'clock')
 
         # Build system prompt with config modifiers
-        self._system_prompt = config.get('accessibility.systemPrompt') or config.get('systemPrompt') or DEFAULT_SYSTEM_PROMPT
+        self._system_prompt = (
+            config.get('accessibility.systemPrompt') or config.get('systemPrompt') or DEFAULT_SYSTEM_PROMPT
+        )
         self._system_prompt += HAZARD_PROMPTS.get(hazard_priority, '')
         self._system_prompt += SPATIAL_PROMPTS.get(spatial_format, '')
 
@@ -109,7 +111,9 @@ class Chat(ChatBase):
 
         # Validate the API key format
         if api_key.startswith('sk-'):
-            raise ValueError('Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.')
+            raise ValueError(
+                'Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.'
+            )
 
         try:
             self._client = genai.Client(api_key=api_key)

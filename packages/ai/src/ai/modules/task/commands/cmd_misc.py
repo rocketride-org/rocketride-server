@@ -223,8 +223,7 @@ class MiscCommands(DAPConn):
 
             # Snapshot tasks the caller has access to (own, teammate, org admin)
             task_controls = [
-                c for c in server._task_control.values()
-                if resolve_task_permissions(self._account_info, c.teamId)
+                c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
             ]
             # Connections are user-scoped (not task-scoped), so filter by userId
             conn_items = [

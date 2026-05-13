@@ -53,7 +53,10 @@ class ToolsBase(ABC):
 
     def _owns_tool(self, tool_name: str) -> bool:
         """Return True if this provider owns the given tool name."""
-        return any((td.get('name') if isinstance(td, dict) else getattr(td, 'name', None)) == tool_name for td in self._tool_query())
+        return any(
+            (td.get('name') if isinstance(td, dict) else getattr(td, 'name', None)) == tool_name
+            for td in self._tool_query()
+        )
 
     def handle_invoke(self, param: Any) -> Any:  # noqa: ANN401
         """

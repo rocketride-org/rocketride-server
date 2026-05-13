@@ -232,7 +232,16 @@ class QdrantClient:
     # Constructor
     # -------------------------------------------------------------------------
 
-    def __init__(self, host: str = None, port: int = None, url: str = None, api_key: str = None, prefer_grpc: bool = False, timeout: int = 60, **kwargs):
+    def __init__(
+        self,
+        host: str = None,
+        port: int = None,
+        url: str = None,
+        api_key: str = None,
+        prefer_grpc: bool = False,
+        timeout: int = 60,
+        **kwargs,
+    ):
         """
         Initialize a mock Qdrant client connection.
 
@@ -295,9 +304,14 @@ class QdrantClient:
         if collection_name not in QdrantClient._collections:
             raise Exception(f'Collection {collection_name} not found')
 
-        return CollectionInfo(vectors_count=len(QdrantClient._points.get(collection_name, [])), payload_schema=QdrantClient._collections[collection_name].get('payload_schema', {}))
+        return CollectionInfo(
+            vectors_count=len(QdrantClient._points.get(collection_name, [])),
+            payload_schema=QdrantClient._collections[collection_name].get('payload_schema', {}),
+        )
 
-    def create_payload_index(self, collection_name: str, field_name: str, field_type: str = None, field_schema: Any = None) -> None:
+    def create_payload_index(
+        self, collection_name: str, field_name: str, field_type: str = None, field_schema: Any = None
+    ) -> None:
         """
         Create an index on a payload field for faster filtering.
 
@@ -316,7 +330,15 @@ class QdrantClient:
     # Data Retrieval: scroll()
     # -------------------------------------------------------------------------
 
-    def scroll(self, collection_name: str, scroll_filter: Filter = None, offset: int = 0, limit: int = 100, with_vectors: bool = False, with_payload: bool = True) -> Tuple[List[Record], Optional[str]]:
+    def scroll(
+        self,
+        collection_name: str,
+        scroll_filter: Filter = None,
+        offset: int = 0,
+        limit: int = 100,
+        with_vectors: bool = False,
+        with_payload: bool = True,
+    ) -> Tuple[List[Record], Optional[str]]:
         """
         Scroll through collection points with optional filtering.
 
@@ -389,7 +411,17 @@ class QdrantClient:
     # Data Retrieval: query_points() - Semantic Search
     # -------------------------------------------------------------------------
 
-    def query_points(self, collection_name: str, query: List[float], query_filter: Filter = None, with_vectors: bool = False, with_payload: bool = True, limit: int = 10, score_threshold: float = 0.0, search_params: Any = None) -> QueryResult:
+    def query_points(
+        self,
+        collection_name: str,
+        query: List[float],
+        query_filter: Filter = None,
+        with_vectors: bool = False,
+        with_payload: bool = True,
+        limit: int = 10,
+        score_threshold: float = 0.0,
+        search_params: Any = None,
+    ) -> QueryResult:
         """
         Perform semantic similarity search.
 

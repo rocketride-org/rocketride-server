@@ -233,7 +233,9 @@ class IInstance(IInstanceTransform):
             return
         expected_dim = self._os_get_vector_dim()
         if expected_dim and len(q_embedding) != expected_dim:
-            debug(f'writeQuestions vector mode: embedding dim mismatch len={len(q_embedding)} expected={expected_dim}; skipping')
+            debug(
+                f'writeQuestions vector mode: embedding dim mismatch len={len(q_embedding)} expected={expected_dim}; skipping'
+            )
             return
         debug(f'writeQuestions vector search index={index} dim={len(q_embedding)}')
         resp = client.search_vector(index=index, vector=q_embedding, k=10)
