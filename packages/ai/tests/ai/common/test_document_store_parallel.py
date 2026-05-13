@@ -33,11 +33,8 @@ import pytest
 # pytest session.
 # ---------------------------------------------------------------------------
 
-import sys
-
 from ai.common.schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType  # noqa: E402
 from ai.common.store import DocumentStoreBase  # noqa: E402
-
 
 
 # ---------------------------------------------------------------------------
