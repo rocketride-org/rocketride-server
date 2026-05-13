@@ -8,5 +8,3 @@ httpx
 psutil
 tenacity
 nvidia-ml-py
-
-SQLAlchemy==2.0.43
