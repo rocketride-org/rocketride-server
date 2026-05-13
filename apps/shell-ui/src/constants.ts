@@ -28,7 +28,7 @@
 // STORAGE KEYS
 // =============================================================================
 
-/** localStorage: persisted auth token — survives tab close / browser restart. */
+/** sessionStorage: auth token — survives refresh, cleared on tab close. */
 export const LS_TOKEN = 'rr:user_token';
 
 /**

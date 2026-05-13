@@ -636,21 +636,21 @@ export class ConnectionManager implements IConnectionManager {
 	// TOKEN STORAGE
 	// =========================================================================
 
-	/** Persist a user token to localStorage. */
+	/** Persist a user token to sessionStorage. */
 	public saveToken(token: string): void {
-		try { localStorage.setItem(LS_TOKEN, token); } catch (e) {
+		try { sessionStorage.setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
 	}
 
-	/** Load token from localStorage. Returns empty string if unavailable. */
+	/** Load token from sessionStorage. Returns empty string if unavailable. */
 	public loadToken(): string {
-		try { return localStorage.getItem(LS_TOKEN) ?? ''; } catch { return ''; }
+		try { return sessionStorage.getItem(LS_TOKEN) ?? ''; } catch { return ''; }
 	}
 
 	/** Clear the persisted token. */
 	public clearToken(): void {
-		try { localStorage.removeItem(LS_TOKEN); } catch (e) {
+		try { sessionStorage.removeItem(LS_TOKEN); } catch (e) {
 			console.error('[ConnectionManager] Failed to clear token:', e);
 		}
 	}

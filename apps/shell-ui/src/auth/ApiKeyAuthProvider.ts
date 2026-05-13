@@ -26,7 +26,7 @@
 //
 // Simple auth provider for open-source / local server mode.
 // User enters an API key (or leaves blank for open access), which is stored
-// in localStorage and passed to ConnectionManager.connect().
+// in sessionStorage and passed to ConnectionManager.connect().
 //
 // Implements the same IAuthProvider interface as CloudAuthProvider so the
 // ConnectionManager can use either interchangeably.
@@ -63,7 +63,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	/**
 	 * Sign in with an API key.
 	 *
-	 * Stores the key in localStorage for future sessions. An empty string
+	 * Stores the key in sessionStorage for the current session. An empty string
 	 * is valid (some OSS servers allow unauthenticated access).
 	 *
 	 * @param apiKey - The API key to store.
@@ -84,7 +84,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	private async storeToken(token: string): Promise<void> {
 		try {
-			localStorage.setItem(LS_TOKEN, token);
+			sessionStorage.setItem(LS_TOKEN, token);
 		} catch (e) {
 			console.error('[ApiKeyAuthProvider] Failed to store token:', e);
 		}
@@ -97,7 +97,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async getToken(): Promise<string | null> {
 		try {
-			const token = localStorage.getItem(LS_TOKEN);
+			const token = sessionStorage.getItem(LS_TOKEN);
 			// For API key mode, empty string is valid (open access)
 			return token;
 		} catch {
@@ -111,7 +111,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async isSignedIn(): Promise<boolean> {
 		try {
-			return localStorage.getItem(LS_TOKEN) !== null;
+			return sessionStorage.getItem(LS_TOKEN) !== null;
 		} catch {
 			return false;
 		}
@@ -126,7 +126,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async signOut(): Promise<void> {
 		try {
-			localStorage.removeItem(LS_TOKEN);
+			sessionStorage.removeItem(LS_TOKEN);
 		} catch (e) {
 			console.error('[ApiKeyAuthProvider] Failed to clear token:', e);
 		}
