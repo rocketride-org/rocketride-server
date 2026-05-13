@@ -281,6 +281,10 @@ def _ensure_setuptools():
         error(f'Failed to install setuptools: {result.stderr}')
         raise RuntimeError('Failed to install setuptools')
 
+    # Verify installation
+    if not _setuptools_available():
+        raise RuntimeError('setuptools installed but not found')
+
     debug('setuptools installed successfully')
 
 
