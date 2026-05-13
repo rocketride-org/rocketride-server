@@ -14,16 +14,19 @@ import time
 import json
 import importlib
 import threading
+import datetime
+from email.utils import parsedate_to_datetime
 from typing import Dict, Any, Optional
 
-class CircuitBreakerTrippedError(Exception):
-    """Exception raised when the LLM provider circuit breaker trips."""
-    pass
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
+
+class CircuitBreakerTrippedError(Exception):
+    """Exception raised when the LLM provider circuit breaker trips."""
+    pass
 
 
 class ChatBase:
@@ -68,6 +71,7 @@ class ChatBase:
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
+        self._config = config
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits
@@ -291,15 +295,10 @@ class ChatBase:
                         return float(val)
                     except ValueError:
                         try:
-                            from email.utils import parsedate_to_datetime
-                            import datetime
                             dt = parsedate_to_datetime(val)
                             # Calculate seconds from now (in UTC)
                             delay = (dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
                             return max(0.0, delay)
-                        except ImportError:
-                            # Gracefully handle missing standard library modules
-                            pass
                         except Exception:
                             pass
         except Exception:
@@ -330,6 +329,9 @@ class ChatBase:
         base_delay = CONST_CHAT_BASE_DELAY
         max_delay = CONST_CHAT_MAX_DELAY
         
+        cb_threshold = self._config.get('circuit_breaker_threshold', 3)
+        cb_timeout = self._config.get('circuit_breaker_timeout_seconds', 60.0)
+        
         # Pre-check circuit breaker state
         with self._cb_lock:
             state = self._cb_state.setdefault(self._model, {"failures": 0, "open_until": 0.0})
@@ -359,9 +361,9 @@ class ChatBase:
                     # Update circuit breaker on hard failure
                     with self._cb_lock:
                         self._cb_state[self._model]["failures"] += 1
-                        # Trip circuit breaker after 3 consecutive hard failures
-                        if self._cb_state[self._model]["failures"] >= 3:
-                            self._cb_state[self._model]["open_until"] = time.time() + 60.0
+                        # Trip circuit breaker after consecutive hard failures
+                        if self._cb_state[self._model]["failures"] >= cb_threshold:
+                            self._cb_state[self._model]["open_until"] = time.time() + cb_timeout
                             debug(f'Circuit breaker tripped for {self._model}')
 
                     # Map to a friendlier exception if possible
@@ -370,7 +372,7 @@ class ChatBase:
                 # Calculate delay with intelligent backoff
                 retry_after = self._extract_retry_after(e)
                 exp_backoff = min(base_delay * (2**attempt), max_delay)
-                delay = max(retry_after, exp_backoff) if retry_after is not None else exp_backoff
+                delay = retry_after if retry_after is not None else exp_backoff
 
                 debug(
                     f'Network/API error on attempt {attempt + 1}/{max_network_retries}: {str(e)}. Retrying in {delay:.1f} seconds...'
