@@ -106,6 +106,14 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # rsbuild/rslib/rspack are pre-1.x or early-1.x and ship breaking
+      # changes in minor releases (e.g. @rslib/core 0.13 → 0.21 broke the
+      # rollup-dts pipeline in PR #860). semver-minor ignore wouldn't fit
+      # — we still want minors for other deps. These are upgraded manually
+      # in coordinated bumps across shared-ui + apps/{chat,dropper}-ui.
+      - dependency-name: "@rsbuild/*"
+      - dependency-name: "@rslib/*"
+      - dependency-name: "@rspack/*"
 
   # ---------------------------------------------------------------------------
   # npm — apps/dropper-ui
@@ -131,6 +139,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # See shared-ui ecosystem above. Apps are pinned to @rsbuild 0.4.x
+      # while shared-ui is on 1.x; 0.x → 0.x bumps (e.g. #855: 0.4 → 0.7)
+      # strand the apps at an intermediate version. Upgrade together.
+      - dependency-name: "@rsbuild/*"
 
   # ---------------------------------------------------------------------------
   # npm — apps/chat-ui
@@ -156,6 +168,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # See shared-ui ecosystem above. Same pattern as dropper-ui:
+      # apps pinned to 0.x while shared-ui is on 1.x — block intermediate
+      # 0.x → 0.x bumps (e.g. #854: 0.4 → 0.7) to avoid stranding.
+      - dependency-name: "@rsbuild/*"
 
   # ---------------------------------------------------------------------------
   # Python — root pyproject.toml (covers most ai/nodes deps via workspace)
@@ -246,6 +262,14 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The semver-major rule above only catches `version-update:*`
+      # update-types. Pip `requirement-update` PRs (where Dependabot
+      # rewrites a `>=X,<Y` constraint to a higher Y) take a different
+      # classification path and slipped through — see #839
+      # (elasticsearch 8→9) and #857 (google-genai 1→2). Pin these by
+      # name so the requirement-update path is also blocked.
+      - dependency-name: "elasticsearch"
+      - dependency-name: "google-genai"
 
   # ---------------------------------------------------------------------------
   # GitHub Actions — workflow file SHA pin updates
