@@ -49,7 +49,7 @@
 		"glob": "^10.5.0"
 	},
 	"optionalDependencies": {
-		"ws": "^8.20.0"
+		"ws": "^8.20.1"
 	},
 	"devDependencies": {
 		"@jest/globals": "^30.1.2",
@@ -61,7 +61,7 @@
 		"rimraf": "^5.0.5",
 		"ts-jest": "^29.4.4",
 		"typescript": "^5.0.0",
-		"ws": "^8.20.0"
+		"ws": "^8.20.1"
 	},
 	"pnpm": {
 		"overrides": {
