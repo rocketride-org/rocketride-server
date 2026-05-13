@@ -141,7 +141,7 @@ class Account(AccountBase):
             ],
             # OSS: all apps are on the desktop and free
             apps=[
-                {'appId': a.get('id', ''), 'appStatus': 'free', 'onDesktop': True}
+                {'id': a.get('id', ''), 'appStatus': 'free', 'onDesktop': True}
                 for a in self._read_apps_json(public_only=False)
                 if a.get('id')
             ],
