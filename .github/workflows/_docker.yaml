@@ -81,7 +81,7 @@ jobs:
       #     --certificate-identity-regexp 'https://github\.com/<owner>/rocketride-server/.+' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - name: Install cosign
-        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
       - name: Sign image with cosign
         env:
