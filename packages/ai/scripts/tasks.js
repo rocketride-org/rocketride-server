@@ -80,12 +80,13 @@ function makeRunPytestAction(options = {}) {
             // The two paths don't match, so coverage reports 0%. Pinning
             // --cov to the absolute source directory bypasses the import-time
             // package resolution and tracks the directory we actually run.
+            const HTMLCOV_DIR = path.join(SERVER_DIR, 'htmlcov', 'ai');
             const pytestArgs = [
                 '-m', 'pytest', TESTS_DIR, '-v', '--rootdir', PACKAGE_DIR,
                 // Coverage flags
                 '--cov', SRC_DIR,
                 '--cov-report=term-missing',
-                '--cov-report=html',
+                `--cov-report=html:${HTMLCOV_DIR}`,
             ];
             if (options.pytest) {
                 pytestArgs.push(...options.pytest);

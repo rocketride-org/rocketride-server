@@ -816,20 +816,21 @@ class TestPathTraversalGuards(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create a tmp directory to stand in for the repo working directory."""
-        self._tmp = tempfile.TemporaryDirectory()
-        # Resolve to match how GitRepo resolves workdir internally.
-        self._workdir = str(Path(self._tmp.name).resolve())
-        # Create a sibling file outside the workdir to confirm traversal would actually escape.
-        self._outside = Path(self._workdir).parent / 'outside.txt'
+        # Outer tmp dir gives each test (and each pytest-xdist worker) its own
+        # private "outside" area. Anchoring outside.txt to the system temp root
+        # caused cross-test races where one tearDown unlinked the file while
+        # another test's assertion was mid-read.
+        self._outer = tempfile.TemporaryDirectory()
+        outer = Path(self._outer.name).resolve()
+        workdir_path = outer / 'repo'
+        workdir_path.mkdir()
+        self._workdir = str(workdir_path)
+        self._outside = outer / 'outside.txt'
         self._outside.write_text('do-not-overwrite', encoding='utf-8')
 
     def tearDown(self) -> None:
         """Remove the tmp directory."""
-        try:
-            self._outside.unlink()
-        except OSError:
-            pass
-        self._tmp.cleanup()
+        self._outer.cleanup()
 
     # ----- write_file -----
 
