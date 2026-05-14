@@ -1,0 +1,319 @@
+"""
+Unit tests for the lazy-target contract in ai.modules.data.
+
+After the shared-subprocess-web-server refactor (see plan), the `data`
+module is eager-loaded by `node.py` before any source node has run.
+That means `server.app.state.target` may be absent or `None` at module
+init time and only become non-None later, when a source node (webhook
+or telegram) executes its `_run()`.
+
+This file pins down that contract:
+
+- ``initModule`` must not crash when ``state.target`` is missing or
+  ``None``.
+- ``DataServer`` must expose ``_target`` lazily — reading the current
+  ``state.target`` at access time, not capturing a snapshot at __init__.
+- ``DataConn.__init__`` must tolerate ``target=None`` without
+  dereferencing it (the bare ``AttributeError`` on ``None.taskConfig``
+  is replaced with a safe default).
+- ``DataConn._require_target()`` returns the target when set, and
+  raises a controlled ``RuntimeError`` when not — *not* a bare
+  ``AttributeError`` from ``None.putPipe()``.
+
+These tests are characterization tests: they describe the NEW
+contract introduced by the shared-webserver PR. Before the production
+patch lands they fail; after it lands they pass.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_server_mock(target=None, *, omit_target_attr=False):
+    """Build a WebServer-shaped mock with a controllable ``app.state.target``.
+
+    Args:
+        target: The value to assign to ``app.state.target``. Ignored when
+            ``omit_target_attr`` is True.
+        omit_target_attr: When True, ``app.state`` has no ``target``
+            attribute at all (simulates the very-early-init case where
+            no source has touched state).
+
+    Returns:
+        A SimpleNamespace standing in for WebServer with the attributes
+        the data module touches at init / listen time.
+    """
+    state = SimpleNamespace()
+    if not omit_target_attr:
+        state.target = target
+
+    app = SimpleNamespace(state=state)
+    server = SimpleNamespace(
+        app=app,
+        add_socket=MagicMock(),
+    )
+    return server
+
+
+def _make_data_conn_uninitialized():
+    """Build a DataConn with __init__ bypassed, ready for attribute injection.
+
+    Mirrors the helper pattern in test_data_conn.py.
+    """
+    from ai.modules.data.data_conn import DataConn
+
+    conn = DataConn.__new__(DataConn)
+    conn.debug_message = MagicMock()
+    return conn
+
+
+# ---------------------------------------------------------------------------
+# initModule — must not eagerly read state.target
+# ---------------------------------------------------------------------------
+
+
+def test_initModule_succeeds_when_state_target_attribute_absent():
+    """Ensure ``initModule`` does not raise when ``app.state`` has no ``target`` attribute."""
+    from ai.modules.data import initModule
+
+    server = _make_server_mock(omit_target_attr=True)
+
+    # Should not raise AttributeError, RuntimeError, or anything else.
+    initModule(server, {})
+
+    # And it should still register the /task/data socket.
+    server.add_socket.assert_called_once()
+    called_path = server.add_socket.call_args.args[0]
+    assert called_path == '/task/data'
+
+
+def test_initModule_succeeds_when_state_target_is_None():
+    """Ensure ``initModule`` does not raise when ``app.state.target`` is explicitly None."""
+    from ai.modules.data import initModule
+
+    server = _make_server_mock(target=None)
+
+    initModule(server, {})
+
+    server.add_socket.assert_called_once()
+    assert server.add_socket.call_args.args[0] == '/task/data'
+
+
+def test_initModule_succeeds_when_state_target_is_set():
+    """Verify ``initModule`` still works when a target happens to already be present."""
+    from ai.modules.data import initModule
+
+    target = MagicMock()
+    target.taskConfig = {'threadCount': 8}
+    server = _make_server_mock(target=target)
+
+    initModule(server, {})
+
+    server.add_socket.assert_called_once()
+    assert server.add_socket.call_args.args[0] == '/task/data'
+
+
+# ---------------------------------------------------------------------------
+# DataServer._target — must read state.target lazily, not capture at init
+# ---------------------------------------------------------------------------
+
+
+def test_dataserver_target_is_None_when_state_target_absent():
+    """DataServer._target returns None when state has no target attribute."""
+    from ai.modules.data.data_server import DataServer
+
+    server = _make_server_mock(omit_target_attr=True)
+    ds = DataServer(server=server)
+
+    assert ds._target is None
+
+
+def test_dataserver_target_is_None_when_state_target_is_None():
+    """DataServer._target returns None when state.target is explicitly None."""
+    from ai.modules.data.data_server import DataServer
+
+    server = _make_server_mock(target=None)
+    ds = DataServer(server=server)
+
+    assert ds._target is None
+
+
+def test_dataserver_target_reflects_state_when_set_at_init_time():
+    """DataServer._target returns whatever state.target was at construction."""
+    from ai.modules.data.data_server import DataServer
+
+    target = MagicMock(name='initial-target')
+    server = _make_server_mock(target=target)
+    ds = DataServer(server=server)
+
+    assert ds._target is target
+
+
+def test_dataserver_target_picks_up_later_state_writes():
+    """DataServer._target reads lazily — picks up state.target set AFTER init.
+
+    This is the key new behavior: node.py constructs the DataServer with
+    state.target=None, then a source node (webhook/telegram) writes
+    state.target later, and DataServer must see the new value without
+    needing an explicit setter call.
+    """
+    from ai.modules.data.data_server import DataServer
+
+    server = _make_server_mock(target=None)
+    ds = DataServer(server=server)
+    assert ds._target is None  # baseline
+
+    # Simulate a source node assigning state.target later.
+    late_target = MagicMock(name='late-target')
+    server.app.state.target = late_target
+
+    # DataServer's view of the target must update.
+    assert ds._target is late_target
+
+
+def test_dataserver_target_reflects_subsequent_overwrites():
+    """If state.target is rewritten, DataServer sees the new value.
+
+    Not a use case the codebase exercises today (one source per
+    subprocess), but the lazy-read property should behave predictably.
+    """
+    from ai.modules.data.data_server import DataServer
+
+    first = MagicMock(name='first')
+    server = _make_server_mock(target=first)
+    ds = DataServer(server=server)
+    assert ds._target is first
+
+    second = MagicMock(name='second')
+    server.app.state.target = second
+    assert ds._target is second
+
+
+# ---------------------------------------------------------------------------
+# DataConn.__init__ — tolerate target=None
+# ---------------------------------------------------------------------------
+
+
+async def test_dataconn_init_with_target_None_does_not_AttributeError():
+    """DataConn(target=None, ...) must not raise AttributeError on init.
+
+    Before the fix, line ``self._thread_count = target.taskConfig.get(...)``
+    raised ``AttributeError: 'NoneType' object has no attribute 'taskConfig'``.
+    After the fix, ``target=None`` falls back to a sensible default.
+
+    Async because DataConn.__init__ schedules an asyncio task internally.
+    """
+    from ai.modules.data.data_conn import DataConn
+
+    server_mock = MagicMock()
+    transport_mock = MagicMock()
+
+    # Should not raise.
+    conn = DataConn(server=server_mock, target=None, transport=transport_mock)
+
+    # Sanity check: object constructed, _target attribute is None.
+    assert conn._target is None
+
+
+async def test_dataconn_init_with_target_None_uses_default_thread_count():
+    """When target is None, _thread_count falls back to 4 (the existing default)."""
+    from ai.modules.data.data_conn import DataConn
+
+    server_mock = MagicMock()
+    transport_mock = MagicMock()
+    conn = DataConn(server=server_mock, target=None, transport=transport_mock)
+
+    assert conn._thread_count == 4
+
+
+async def test_dataconn_init_with_target_set_reads_taskConfig_threadCount():
+    """When target is present, _thread_count comes from target.taskConfig (unchanged)."""
+    from ai.modules.data.data_conn import DataConn
+
+    target = MagicMock()
+    target.taskConfig = {'threadCount': 16}
+    server_mock = MagicMock()
+    transport_mock = MagicMock()
+
+    conn = DataConn(server=server_mock, target=target, transport=transport_mock)
+
+    assert conn._thread_count == 16
+
+
+async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
+    """When target exists but lacks a 'threadCount' entry, default to 4."""
+    from ai.modules.data.data_conn import DataConn
+
+    target = MagicMock()
+    target.taskConfig = {}  # no 'threadCount' key
+    server_mock = MagicMock()
+    transport_mock = MagicMock()
+
+    conn = DataConn(server=server_mock, target=target, transport=transport_mock)
+
+    assert conn._thread_count == 4
+
+
+# ---------------------------------------------------------------------------
+# DataConn._require_target — controlled error when no target is set
+# ---------------------------------------------------------------------------
+
+
+def test_require_target_returns_target_when_set():
+    """_require_target returns the stored target when it's not None."""
+    conn = _make_data_conn_uninitialized()
+    target = MagicMock(name='source-target')
+    conn._target = target
+
+    assert conn._require_target() is target
+
+
+def test_require_target_raises_RuntimeError_when_target_is_None():
+    """_require_target raises a controlled RuntimeError, not AttributeError, on None."""
+    conn = _make_data_conn_uninitialized()
+    conn._target = None
+
+    with pytest.raises(RuntimeError) as exc_info:
+        conn._require_target()
+
+    # Message should be informative, mentioning that no source is registered.
+    msg = str(exc_info.value)
+    assert 'target' in msg.lower()
+    assert 'source' in msg.lower()
+
+
+def test_require_target_called_by_cleanup_pipe(monkeypatch):
+    """_cleanup_pipe routes through _require_target so a None target raises cleanly."""
+    from ai.modules.data import data_conn as data_conn_mod
+
+    monkeypatch.setattr(data_conn_mod, 'monitorCompleted', lambda s: None)
+    monkeypatch.setattr(data_conn_mod, 'monitorFailed', lambda s: None)
+
+    conn = _make_data_conn_uninitialized()
+    conn._target = None
+    pipe_conn = SimpleNamespace(
+        pipe=MagicMock(),
+        pipe_id='p-x',
+        size=None,
+        written=0,
+        has_failed=False,
+        entry=None,
+    )
+
+    # _cleanup_pipe catches and logs exceptions (see existing
+    # test_cleanup_pipe_swallows_target_errors), so we look for the
+    # logged debug_message rather than expecting a raised exception.
+    conn._cleanup_pipe(pipe_conn)
+    conn.debug_message.assert_called()
+    # The logged message should reference the underlying error (no source target).
+    logged_args = [call.args for call in conn.debug_message.call_args_list]
+    assert any('target' in str(args).lower() or 'source' in str(args).lower() for args in logged_args)
