@@ -157,8 +157,8 @@ describe('RocketRideClient Integration Tests', () => {
 			});
 
 			// Retry a few times in case server is busy (tests may run in parallel)
-			const maxAttempts = 5;
-			const delayMs = 2000;
+			const maxAttempts = 10;
+			const delayMs = 1000;
 			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				try {
@@ -174,7 +174,7 @@ describe('RocketRideClient Integration Tests', () => {
 			expect(Object.values(TASK_STATE)).toContain(status!.state);
 
 			await client.terminate(result.token);
-		}, 90000);
+		}, TEST_CONFIG.timeout);
 
 		it(
 			'should terminate a pipeline',
