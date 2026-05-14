@@ -105,5 +105,29 @@
 			"title": "Deep Agent",
 			"properties": ["agent_deepagent.default"]
 		}
-	]
+	],
+	"test": {
+		"requires": ["ROCKETRIDE_DEEPAGENT_TEST"],
+		"profiles": ["default"],
+		"controls": ["llm_openai"],
+		"outputs": ["answers"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Answer a simple delegated question",
+				"questions": {
+					"questions": [
+						{
+							"text": "Reply with the word ok."
+						}
+					]
+				},
+				"expect": {
+					"answers": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

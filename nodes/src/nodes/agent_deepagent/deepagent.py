@@ -25,8 +25,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import ToolDescriptor, error
@@ -354,7 +356,8 @@ class DeepAgentDriver(AgentBase):
                 subagents=subagents_list if subagents_list else None,
             )
             stage = 'invoke'
-            state = agent.invoke(
+            state = _invoke_deepagent_with_parallel_tools(
+                agent,
                 {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
                 config={'callbacks': [_SSECallbackHandler(_send_sse)]},
             )
@@ -466,6 +469,25 @@ class DeepAgentDriver(AgentBase):
 # ────────────────────────────────────────────────────────────────────────────────
 
 
+def _invoke_deepagent_with_parallel_tools(agent: Any, input_state: Dict[str, Any], *, config: Dict[str, Any]) -> Any:
+    """Invoke DeepAgents through its async graph path so tool calls fan out."""
+    ainvoke = getattr(agent, 'ainvoke', None)
+    if not callable(ainvoke):
+        return agent.invoke(input_state, config=config)
+    return _run_coroutine_sync(ainvoke(input_state, config=config))
+
+
+def _run_coroutine_sync(coro: Any) -> Any:
+    """Run a coroutine from sync driver code, even if a loop is already active."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(coro)).result()
+
+
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     """
     Build the system-prompt preamble that instructs the LLM to output a JSON envelope.
@@ -481,6 +503,8 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
             'system: Allowed schemas:',
             'system: Tool call:',
             'system: {"type":"tool_call","name":"server.tool","args":{...}}',
+            'system: Multiple independent tool calls in one turn:',
+            'system: {"type":"tool_calls","calls":[{"name":"server.tool","args":{...}},...]}',
             'system: Final answer:',
             'system: {"type":"final","content":"..."}',
             'system: Never wrap JSON in markdown. Never include extra keys unless required.',
@@ -607,17 +631,42 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         return AIMessage(content=_safe_str(obj.get('content', '')))
 
     if msg_type == 'tool_call':
-        name = _safe_str(obj.get('name', '')).strip()
-        if not name:
+        tool_call = _parse_one_tool_call(obj)
+        if tool_call is None:
             return None
-        args = obj.get('args') or {}
-        if not isinstance(args, dict):
-            args = {'input': args}
-
-        tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
         return AIMessage(content='', tool_calls=[tool_call])
 
+    if msg_type == 'tool_calls':
+        calls = obj.get('calls') or obj.get('tool_calls') or []
+        if not isinstance(calls, list):
+            return None
+        tool_calls = []
+        for call in calls:
+            if not isinstance(call, dict):
+                return None
+            tool_call = _parse_one_tool_call(call)
+            if tool_call is None:
+                return None
+            tool_calls.append(tool_call)
+        if not tool_calls or len(tool_calls) != len(calls):
+            return None
+        return AIMessage(content='', tool_calls=tool_calls)
+
     return None
+
+
+def _parse_one_tool_call(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Parse one tool-call object from the RocketRide LLM envelope."""
+    name = _safe_str(obj.get('name', '')).strip()
+    if not name:
+        return None
+
+    args = obj['args'] if 'args' in obj and obj['args'] is not None else {}
+    if not isinstance(args, dict):
+        args = {'input': args}
+
+    call_id = _safe_str(obj.get('id', '')).strip() or f'call_{uuid.uuid4().hex[:12]}'
+    return {'id': call_id, 'type': 'tool_call', 'name': name, 'args': args}
 
 
 def _safe_str(v: Any) -> str:
