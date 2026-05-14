@@ -476,7 +476,7 @@ class Entry:
     hasPermissionId: bool
     hasServiceId: bool
     hasSize: bool
-    hasStorSize: bool
+    hasStoreSize: bool
     hasUniqueName: bool
     hasUniquePath: bool
     hasUniqueUrl: bool
