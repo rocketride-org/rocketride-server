@@ -187,5 +187,6 @@ class DeployCommands(DAPConn):
             record.schedule = args['schedule']
 
         record.updated_at = time.time()
-        await self._server.deployments.save(client_id, record, mode='update')
+        await self._server.deployments.save(client_id, record)
+        self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
         return self.build_response(request, body={})
