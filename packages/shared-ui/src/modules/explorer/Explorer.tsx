@@ -742,9 +742,14 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 			</div>
 
 			{/* ── File tree ───────────────────────────────────────────── */}
+			{/* When the tree is empty we still need to render the inline create
+			    input if the user just clicked +File / +Folder at the root, since
+			    that input lives inside renderChildren(). */}
 			<div style={S.treeList}>
-				{entries.length === 0 && <div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>}
-				{entries.length > 0 && renderChildren()}
+				{entries.length === 0 && !(createState && createState.parentDir === '') && (
+					<div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>
+				)}
+				{(entries.length > 0 || (createState && createState.parentDir === '')) && renderChildren()}
 			</div>
 		</div>
 	);
