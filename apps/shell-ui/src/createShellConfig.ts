@@ -110,9 +110,18 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 			welcomeSubtitle: 'Select an app to get started.',
 		},
 
-		// Apply the default theme on first mount.
-		// Theme JSON files are served under /shell/themes/ by the shell module.
-		onInit: () => fetchAndApplyTheme('rocketride-light', '/shell/themes').catch(console.error),
+		// Apply the user's saved theme on first mount so the loading screen
+		// background matches their preference instead of always showing light.
+		// Falls back to rocketride-light if nothing is saved yet.
+		onInit: () => {
+			const homeTheme = (() => { try { return localStorage.getItem('rr:home:theme'); } catch { return null; } })();
+			const saved = (() => {
+				if (homeTheme === 'dark') return 'rocketride';
+				if (homeTheme === 'light') return 'rocketride-light';
+				try { return localStorage.getItem('rr:theme') || 'rocketride-light'; } catch { return 'rocketride-light'; }
+			})();
+			return fetchAndApplyTheme(saved, '/shell/themes').catch(console.error);
+		},
 
 		themeConfig: {
 			options: THEME_OPTIONS,
