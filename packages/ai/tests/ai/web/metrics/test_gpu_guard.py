@@ -119,7 +119,7 @@ class TestInstallGPUGuard:
     def test_installs_when_model_server_set(self):
         """install_gpu_guard should install hook when --modelserver is set."""
         # Patch get_model_server_address to simulate --modelserver=5590
-        with patch('ai.common.models.gpu_guard.get_model_server_address', return_value=('localhost', 5590)):
+        with patch('ai.common.models.gpu_guard.get_model_server_address', return_value='localhost:5590'):
             install_gpu_guard()
 
         # Verify a blocker was installed in sys.meta_path
@@ -138,7 +138,7 @@ class TestInstallGPUGuard:
 
     def test_idempotent(self):
         """Calling install_gpu_guard multiple times should only install once."""
-        with patch('ai.common.models.gpu_guard.get_model_server_address', return_value=('localhost', 5590)):
+        with patch('ai.common.models.gpu_guard.get_model_server_address', return_value='localhost:5590'):
             install_gpu_guard()
             install_gpu_guard()
             install_gpu_guard()

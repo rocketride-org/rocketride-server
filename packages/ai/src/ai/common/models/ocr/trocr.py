@@ -344,10 +344,9 @@ class TrOCR:
             **self._kwargs,
         )
 
-    def _init_proxy(self, server_addr: tuple) -> None:
+    def _init_proxy(self, server_addr: str) -> None:
         """Initialize proxy to model server."""
-        host, port = server_addr
-        self._client = ModelClient(port=port, host=host)
+        self._client = ModelClient(server_addr)
         self._client.load_model(
             model_name='trocr',
             model_type='trocr',

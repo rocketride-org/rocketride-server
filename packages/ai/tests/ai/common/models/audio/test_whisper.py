@@ -124,7 +124,7 @@ def test_transcribe_requires_bytes():
     # to avoid loading. We only test the type check at the start of transcribe().
     from unittest.mock import patch, MagicMock
 
-    with patch('ai.common.models.audio.whisper.get_model_server_address', return_value=('localhost', 5590)):
+    with patch('ai.common.models.audio.whisper.get_model_server_address', return_value='localhost:5590'):
         with patch('ai.common.models.audio.whisper.ModelClient') as MockClient:
             mock_client = MagicMock()
             MockClient.return_value = mock_client

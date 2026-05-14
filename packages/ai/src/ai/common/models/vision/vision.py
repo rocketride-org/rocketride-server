@@ -275,8 +275,7 @@ class CLIPModel:
         should_proxy = server_addr and (device is None or device == 'server')
 
         if should_proxy:
-            host, port = server_addr
-            client = ModelClient(port, host)
+            client = ModelClient(server_addr)
             loader_options = {'variant': 'clip', 'output_spec': output_spec, **kwargs}
             client.load_model(
                 model_name=model_name,
@@ -338,8 +337,7 @@ class ViTModel:
         should_proxy = server_addr and (device is None or device == 'server')
 
         if should_proxy:
-            host, port = server_addr
-            client = ModelClient(port, host)
+            client = ModelClient(server_addr)
             loader_options = {'variant': 'vit', 'output_spec': output_spec, **kwargs}
             client.load_model(
                 model_name=model_name,
