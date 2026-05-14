@@ -17,11 +17,15 @@ Primary Responsibilities:
 Designed for integration with a FastAPI application and built on top of the ai.web debug server stack.
 """
 
+from typing import TYPE_CHECKING, Optional
 from fastapi import WebSocket
 from dataclasses import dataclass
 from rocketlib import IEndpointBase
 from ai.common.dap import DAPBase, TransportWebSocket
 from .data_conn import DataConn
+
+if TYPE_CHECKING:
+    from ai.web import WebServer
 
 
 @dataclass
@@ -51,19 +55,39 @@ class DataServer(DAPBase):
         Client (Data Tools) → ALB → DataServer → Backend Data Engine
     """
 
-    def __init__(self, target: IEndpointBase, **kwargs) -> None:
-        """
-        Initialize the DataServer with configuration and optional parameters.
+    def __init__(self, server: 'WebServer', **kwargs) -> None:
+        """Initialize the DataServer with a back-reference for lazy target lookup.
+
+        The DataServer does not capture a snapshot of the target endpoint at
+        construction. Instead, it reads ``server.app.state.target`` on every
+        access via the :pyattr:`_target` property, so it picks up the value
+        that a source node (webhook, telegram) writes later via
+        ``shared_web_server.app.state.target = self.target``.
+
+        For sourceless pipelines (agentic, etc.) ``state.target`` is never
+        set; ``_target`` returns ``None`` and data-bearing operations on
+        ``DataConn`` raise a controlled error via ``_require_target()``.
 
         Args:
-            target (IEndpointBase): The target endpoint for data operations.
-            **kwargs: Additional arguments passed to parent DAPBase
+            server: The parent WebServer; used for lazy ``state.target`` reads.
+            **kwargs: Additional arguments passed to the parent ``DAPBase``.
         """
-        # Save the target endpoint
-        self._target = target
+        # Hold the server reference for lazy target lookup. We deliberately
+        # do NOT store a separate _target attribute — it would let stale
+        # snapshots leak past a state.target reassignment.
+        self._server = server
 
         # Initialize parent with server identification
         super().__init__(module='DATA-SERVER', **kwargs)
+
+    @property
+    def _target(self) -> Optional[IEndpointBase]:
+        """Read the current target endpoint lazily from ``server.app.state``.
+
+        Returns ``None`` if no source node has registered a target yet
+        (e.g., for sourceless / agentic pipelines).
+        """
+        return getattr(self._server.app.state, 'target', None)
 
     async def _dapbase_on_connected(self, conn: DataConn) -> None:
         """

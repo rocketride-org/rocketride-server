@@ -110,8 +110,14 @@ class DataConn(DAPConn):
         # This helps distinguish data connections in logs from other DAP connections
         module_name = 'DATA'
 
-        # Get the specified thread count
-        self._thread_count = target.taskConfig.get('threadCount', 4)
+        # Get the specified thread count. Target may be None for sourceless
+        # pipelines (e.g., agentic pipelines that only receive process-scope
+        # DAP commands such as rrext_cprofile_*). Fall back to the existing
+        # default rather than dereferencing None.taskConfig.
+        if target is not None:
+            self._thread_count = target.taskConfig.get('threadCount', 4)
+        else:
+            self._thread_count = 4
 
         # Initialize parent DAPConn with transport and module identification
         # Note: transport should be passed via kwargs or created here
@@ -147,6 +153,36 @@ class DataConn(DAPConn):
         self.debug_message(
             f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
         )
+
+    def _require_target(self) -> 'IServiceEndpoint':
+        """Return the registered source target, or raise a controlled error.
+
+        Data-bearing operations (open / write / close) need a source target —
+        the IEndpointBase instance whose ``getPipe`` / ``putPipe`` methods
+        route data into the pipeline. For sourceless pipelines (agentic,
+        etc.) no source registers a target and any data operation here is
+        a usage error, not a programming bug — we surface it as a clean
+        ``RuntimeError`` instead of the bare ``AttributeError`` that would
+        otherwise come from ``None.putPipe()``.
+
+        Process-scope DAP commands (``rrext_cprofile_*``, future
+        ``rrext_trace_*``) do NOT call this helper — they don't need a
+        target and work on agentic pipelines too.
+
+        Returns:
+            The registered ``IServiceEndpoint`` target.
+
+        Raises:
+            RuntimeError: If no source node has registered a target.
+        """
+        if self._target is None:
+            raise RuntimeError(
+                'Data operation requires a registered source target, but none is set. '
+                'This pipeline has no source node (e.g., agentic pipeline); '
+                'data-bearing operations are not supported. Process-scope DAP '
+                'commands such as rrext_cprofile_* are unaffected.'
+            )
+        return self._target
 
     async def disconnect(self):
         """
@@ -319,7 +355,7 @@ class DataConn(DAPConn):
 
             # Return pipe to the endpoint for reuse
             if conn_pipe.pipe:
-                self._target.putPipe(conn_pipe.pipe)
+                self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
 
             # Release the entry
@@ -482,7 +518,7 @@ class DataConn(DAPConn):
                     entry = getObject(obj=obj)
 
                     # Get a pipe from the target endpoint
-                    pipe_instance = self._target.getPipe()
+                    pipe_instance = self._require_target().getPipe()
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
                     # Get the id and determine the lane
@@ -522,10 +558,13 @@ class DataConn(DAPConn):
                     return pipe_id
 
                 except Exception:
-                    # Clean up pipe if allocated
+                    # Clean up pipe if allocated. Use _require_target() so a
+                    # missing source surfaces as a clean RuntimeError instead
+                    # of an AttributeError; the inner try/except still swallows
+                    # either kind to avoid masking the original exception.
                     if pipe_instance:
                         try:
-                            self._target.putPipe(pipe_instance)
+                            self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
