@@ -285,7 +285,7 @@ class Entry:
     hasPermissionId: bool
     hasServiceId: bool
     hasSize: bool
-    hasStorSize: bool
+    hasStoreSize: bool
     hasUniqueName: bool
     hasUniquePath: bool
     hasUniqueUrl: bool
@@ -637,8 +637,8 @@ class IServiceFilterPipe(Protocol):
     def writeClassifications(
         self,
         classifications: Dict[str, Any],
-        classificationPolicy: Dict[str, Any],
-        classificationRules: Dict[str, Any],
+        classificationsPolicies: Dict[str, Any],
+        classificationsRules: Dict[str, Any],
     ) -> None: ...
     def writeClassificationContext(self, classifications: Dict[str, Any]) -> None: ...
     def closing(self) -> None: ...
@@ -700,8 +700,8 @@ class IInstanceBase:
     def writeClassifications(
         self,
         classifications: Dict[str, Any],
-        classificationPolicy: Dict[str, Any],
-        classificationRules: Dict[str, Any],
+        classificationsPolicies: Dict[str, Any],
+        classificationsRules: Dict[str, Any],
     ) -> None: ...
     def writeClassificationContext(self, classifications: Dict[str, Any]) -> None: ...
     def closing(self) -> None: ...
