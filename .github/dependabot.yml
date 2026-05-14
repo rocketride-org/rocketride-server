@@ -56,6 +56,16 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The root-level groups (npm-production, npm-development) span the
+      # whole pnpm workspace, so rsbuild/rslib/rspack updates that the
+      # per-app ecosystems ignore still get re-emitted here. PR #866
+      # tried to *downgrade* @rsbuild/* from 1.x to 0.7.10 across seven
+      # workspaces because chat-ui/dropper-ui are pinned to 0.4.x and
+      # Dependabot harmonised to the floor. Match the per-app ignores at
+      # the root to keep the npm-development group from re-creating that.
+      - dependency-name: "@rsbuild/*"
+      - dependency-name: "@rslib/*"
+      - dependency-name: "@rspack/*"
 
   # ---------------------------------------------------------------------------
   # npm — packages/client-typescript (published SDK)
