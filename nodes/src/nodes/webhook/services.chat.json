@@ -91,7 +91,15 @@
 	"fields": {
 		"Pipe.source.parameters": {
 			"section": "parameters",
-			"properties": []
+			"properties": [
+				{
+					"name": "persistSessions",
+					"title": "Persist sessions",
+					"description": "When on, conversations are saved per-user and resumable across windows. Off by default. Persistence is client-driven — the chat-ui writes to the per-user filestore at .chats/<chat_id>/.",
+					"type": "boolean",
+					"default": false
+				}
+			]
 		}
 	},
 	//

@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -190,13 +190,17 @@ export class Question {
 	goals: string[] = [];
 	documents: Doc[] = [];
 	questions: QuestionText[] = [];
+	chat_id: string | null = null;
 
-	constructor(options: {
-		type?: QuestionType;
-		filter?: DocFilter;
-		expectJson?: boolean;
-		role?: string;
-	} = {}) {
+	constructor(
+		options: {
+			type?: QuestionType;
+			filter?: DocFilter;
+			expectJson?: boolean;
+			role?: string;
+			chat_id?: string | null;
+		} = {}
+	) {
 		this.type = options.type || QuestionType.QUESTION;
 		this.filter = options.filter || {
 			fullTables: false,
@@ -206,10 +210,11 @@ export class Question {
 			useQuickRank: false,
 			useGroupRank: false,
 			followUpQuestions: 5,
-			context: false
+			context: false,
 		};
 		this.expectJson = options.expectJson || false;
 		this.role = options.role || '';
+		this.chat_id = options.chat_id ?? null;
 	}
 
 	/**
@@ -218,7 +223,7 @@ export class Question {
 	addInstruction(title: string, instruction: string): void {
 		this.instructions.push({
 			subtitle: title,
-			instructions: instruction
+			instructions: instruction,
 		});
 	}
 
@@ -226,13 +231,11 @@ export class Question {
 	 * Add an example to show the AI the kind of response you want.
 	 */
 	addExample(given: string, result: string | object | unknown[]): void {
-		const resultString = typeof result === 'object'
-			? JSON.stringify(result)
-			: String(result);
+		const resultString = typeof result === 'object' ? JSON.stringify(result) : String(result);
 
 		this.examples.push({
 			given,
-			result: resultString
+			result: resultString,
 		});
 	}
 
@@ -285,7 +288,7 @@ export class Question {
 				this.documents.push({
 					type: 'Document',
 					page_content: item,
-					metadata: { objectId: '', chunkId: 0 }
+					metadata: { objectId: '', chunkId: 0 },
 				});
 			} else {
 				this.documents.push(item);
@@ -358,12 +361,12 @@ export class Question {
 		if (this.instructions.length === 0) {
 			addPromptInstruction({
 				subtitle: 'Answer the following questions',
-				instructions: 'Answer the following questions.'
+				instructions: 'Answer the following questions.',
 			});
 			if (this.documents.length > 0) {
 				addPromptInstruction({
 					subtitle: 'Documents',
-					instructions: 'Use the provided documents as context for your answer.'
+					instructions: 'Use the provided documents as context for your answer.',
 				});
 			}
 		}
@@ -384,7 +387,7 @@ export class Question {
                     - Ensure your answer is strictly valid JSON format.
                     - Double check the JSON response to ensure it is valid.
                     - Enclose the json with \`\`\`\`json\` and \` \`\`\` \` tags.
-                    `
+                    `,
 			});
 
 			if (hasPreviousJsonFailed) {
@@ -393,7 +396,7 @@ export class Question {
 					instructions: `
                         - Your previous response returned invalid JSON.
                         - Examine your JSON and ensure it is complete and follows the JSON standards.
-                        `
+                        `,
 				});
 			}
 		}
@@ -402,7 +405,7 @@ export class Question {
 		if (this.examples.length > 0) {
 			addPromptInstruction({
 				subtitle: 'Examples',
-				instructions: ''
+				instructions: '',
 			});
 			for (const example of this.examples) {
 				addPromptExample(example);
@@ -464,7 +467,8 @@ export class Question {
 			context: this.context,
 			goals: this.goals,
 			documents: this.documents,
-			questions: this.questions
+			questions: this.questions,
+			chat_id: this.chat_id,
 		};
 	}
 
@@ -472,11 +476,21 @@ export class Question {
 	 * Create Question from dictionary.
 	 */
 	static fromDict(data: Record<string, unknown>): Question {
+		const rawChatId = data.chat_id;
+		let chat_id: string | null = null;
+		if (rawChatId !== undefined && rawChatId !== null) {
+			if (typeof rawChatId !== 'string' || !UUID_RE.test(rawChatId)) {
+				throw new Error(`Question.chat_id must be null or a UUID string; got ${String(rawChatId)}`);
+			}
+			chat_id = rawChatId;
+		}
+
 		const question = new Question({
 			type: data.type as QuestionType,
 			filter: data.filter as DocFilter,
 			expectJson: data.expectJson as boolean,
-			role: data.role as string
+			role: data.role as string,
+			chat_id,
 		});
 
 		question.instructions = (data.instructions || []) as QuestionInstruction[];
@@ -490,3 +504,5 @@ export class Question {
 		return question;
 	}
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

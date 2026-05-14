@@ -31,6 +31,7 @@ import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
+import { makeChatsNamespace, type ChatCatalogEntry } from './Chat.js';
 import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
@@ -321,6 +322,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created database API namespace. */
 	private _database?: DatabaseApi;
+
+	/** Lazily-created chats catalog namespace (persistent chat sessions). */
+	private _chats?: { list: (opts?: { pipelineId?: string }) => Promise<ChatCatalogEntry[]> };
 
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
@@ -2502,6 +2506,25 @@ export class RocketRideClient extends DAPClient {
 			this._database = new DatabaseApi(this);
 		}
 		return this._database;
+	}
+
+	/**
+	 * Lazily-initialised persistent-chat catalog namespace.
+	 *
+	 * Surfaces `client.chats.list({pipelineId})` for the chat-list UI. The
+	 * stateful `Chat` class is the constructor-driven companion — use
+	 * `Chat.create(...)` / `Chat.open(...)` to open one chat session.
+	 *
+	 * @example
+	 * ```typescript
+	 * const entries = await client.chats.list({ pipelineId: 'pipe-abc' });
+	 * ```
+	 */
+	get chats(): { list: (opts?: { pipelineId?: string }) => Promise<ChatCatalogEntry[]> } {
+		if (!this._chats) {
+			this._chats = makeChatsNamespace(this);
+		}
+		return this._chats;
 	}
 
 	// ============================================================================

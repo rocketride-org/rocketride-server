@@ -85,6 +85,19 @@ from .schema import (
     Doc,
     DocGroup,
 )
+from .chat import (
+    Chat,
+    ChatCatalogEntry,
+    ChatHeader,
+    ChatTurn,
+    ChatNotFoundError,
+    CatalogContentionError,
+    list_chats,
+    parse_chat_file,
+    CHAT_SCHEMA_VERSION,
+    CATALOG_SCHEMA_VERSION,
+    EAGER_HISTORY_TURNS,
+)
 
 # Import type definitions, constants, and callback signatures used throughout the SDK
 from .types import (
@@ -234,4 +247,16 @@ __all__ = [
     'StripePlan',
     'CreditBalance',
     'CreditPack',
+    # Persistent chat sessions
+    'Chat',
+    'ChatCatalogEntry',
+    'ChatHeader',
+    'ChatTurn',
+    'ChatNotFoundError',
+    'CatalogContentionError',
+    'list_chats',
+    'parse_chat_file',
+    'CHAT_SCHEMA_VERSION',
+    'CATALOG_SCHEMA_VERSION',
+    'EAGER_HISTORY_TURNS',
 ]

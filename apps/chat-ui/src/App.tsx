@@ -32,6 +32,10 @@ import { startClient } from './hooks/clientSingleton';
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
+	// Persistent-chat boot params delivered alongside ?auth=... by the chat node
+	// (see nodes/src/nodes/webhook/IEndpoint.py).
+	const [pipelineId, setPipelineId] = useState<string | null>(null);
+	const [persistEnabled, setPersistEnabled] = useState<boolean>(false);
 
 	// Initialize VSCode state
 	const [vscodeState, setVscodeState] = useState<VSCodeContextType>(() => {
@@ -105,6 +109,16 @@ const App: React.FC = () => {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
+		// Pull persistent-chat params from the URL alongside auth (TDD §6.3 + open-question
+		// resolution: same channel as authToken).  Sessionstorage them so they survive the
+		// query-string scrub above and reloads inside the iframe.
+		let urlPipelineId = urlParams.get('pipelineId') || '';
+		let urlPersist = urlParams.get('persist') === '1';
+		if (!isVSCode) {
+			if (!urlPipelineId) urlPipelineId = sessionStorage.getItem('chatPipelineId') || '';
+			if (!urlPersist) urlPersist = sessionStorage.getItem('chatPersist') === '1';
+		}
+
 		// Check these
 		if (!uri) {
 			throw new Error('Failed to start RocketRide client: No uri found');
@@ -127,8 +141,12 @@ const App: React.FC = () => {
 		// Save the token in session storage (skip in VSCode) and our state
 		if (!isVSCode) {
 			sessionStorage.setItem('auth', token);
+			if (urlPipelineId) sessionStorage.setItem('chatPipelineId', urlPipelineId);
+			if (urlPersist) sessionStorage.setItem('chatPersist', '1');
 		}
 		setAuthToken(token);
+		setPipelineId(urlPipelineId || null);
+		setPersistEnabled(urlPersist && !!urlPipelineId);
 
 		// Handle VSCode integration
 		if (isVSCode) {
@@ -172,7 +190,7 @@ const App: React.FC = () => {
 	return (
 		<VSCodeProvider value={vscodeState}>
 			<ThemeProvider>
-				<ChatContainer authToken={authToken} />
+				<ChatContainer authToken={authToken} pipelineId={pipelineId} persistEnabled={persistEnabled} />
 			</ThemeProvider>
 		</VSCodeProvider>
 	);

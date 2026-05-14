@@ -23,7 +23,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Question, QuestionType, PIPELINE_RESULT } from 'rocketride';
+import { Question, QuestionType, PIPELINE_RESULT, Chat, type ChatTurn } from 'rocketride';
 import { Message } from '../types/chat.types';
 import { extractTextFromResult } from '../utils/pipelineUtils';
 
@@ -36,7 +36,7 @@ import { extractTextFromResult } from '../utils/pipelineUtils';
  * - Processing API responses
  * - Typing indicators
  * - System messages (connection status, errors)
- * 
+ *
  * @returns Message state and control functions
  */
 export const useChatMessages = () => {
@@ -45,136 +45,151 @@ export const useChatMessages = () => {
 
 	/**
 	 * Sends user message to RocketRide AI and processes response
-	 * 
+	 *
 	 * Process:
 	 * 1. Validates connection state
 	 * 2. Builds Question object with user message
 	 * 3. Adds conversation history for context (last 6 messages)
 	 * 4. Sends to RocketRide via SDK
 	 * 5. Extracts and returns text responses
-	 * 
+	 *
 	 * @param userMessage - User's message text
 	 * @param client - RocketRideClient instance
 	 * @param authToken - Auth token for pipeline operations
 	 * @returns Array of formatted response strings
 	 * @throws Error if not connected or API request fails
 	 */
-	const sendMessageToAPI = useCallback(async (
-		userMessage: string,
-		client: any,
-		authToken: string
-	): Promise<ReturnType<typeof extractTextFromResult>> => {
-		try {
-			if (!client || !authToken) {
-				throw new Error('Not connected to RocketRide. Please refresh the page.');
-			}
+	const sendMessageToAPI = useCallback(
+		async (userMessage: string, client: any, authToken: string, chat?: Chat | null): Promise<ReturnType<typeof extractTextFromResult>> => {
+			try {
+				if (!client || !authToken) {
+					throw new Error('Not connected to RocketRide. Please refresh the page.');
+				}
 
-			// Build question with conversation history for context
-			const question = new Question({
-				type: QuestionType.PROMPT,
-				expectJson: false
-			});
-
-			question.addQuestion(userMessage);
-
-			// Include last 6 messages for context - helps AI maintain conversation flow
-			// Filter out system/status messages (UI-only) to avoid priming the LLM
-			messages.filter(msg => msg.sender !== 'system' && msg.sender !== 'status').slice(-6).forEach(msg => {
-				question.addHistory({
-					role: msg.sender === 'user' ? 'user' : 'assistant',
-					content: msg.text
-				});
-			});
-
-			// Send to RocketRide; onSSE adds real-time status messages to the chat
-			const result: PIPELINE_RESULT = await client.chat({
-				token: authToken,
-				question: question,
-				onSSE: async (type: string, data: Record<string, unknown>) => {
+				// Streaming SSE handler — pushes intermediate status messages into the chat-ui state.
+				const onSSE = async (type: string, data: Record<string, unknown>) => {
 					const text = data.message as string | undefined;
 					if (text) {
-						setMessages(prev => [...prev, {
-							id: Date.now(),
-							text,
-							sender: 'status',
-							sseType: type,
-							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-						}]);
+						setMessages((prev) => [
+							...prev,
+							{
+								id: Date.now(),
+								text,
+								sender: 'status',
+								sseType: type,
+								timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+							},
+						]);
 					}
+				};
+
+				let result: PIPELINE_RESULT;
+				if (chat) {
+					// Persist-on path: the Chat instance is the source of truth for
+					// history (read from .chats/<id>/chat.jsonl) and writes the turn
+					// line + catalog entry on its own. No need to flatten `messages`
+					// into Question.history — Chat.send slices the last-3 turns from
+					// chat.history itself.
+					result = await chat.send(userMessage, { onSSE });
+				} else {
+					// Persist-off path: today's behavior.
+					const question = new Question({
+						type: QuestionType.PROMPT,
+						expectJson: false,
+					});
+
+					question.addQuestion(userMessage);
+
+					// Include last 6 messages for context - helps AI maintain conversation flow
+					// Filter out system/status messages (UI-only) to avoid priming the LLM
+					messages
+						.filter((msg) => msg.sender !== 'system' && msg.sender !== 'status')
+						.slice(-6)
+						.forEach((msg) => {
+							question.addHistory({
+								role: msg.sender === 'user' ? 'user' : 'assistant',
+								content: msg.text,
+							});
+						});
+
+					result = await client.chat({
+						token: authToken,
+						question: question,
+						onSSE,
+					});
 				}
-			});
 
-			// Extract text responses from result
-			const textResponses = extractTextFromResult(result);
+				// Extract text responses from result
+				const textResponses = extractTextFromResult(result);
 
-			return textResponses.length > 0 ? textResponses : [{ text: 'No valid response received', key: '' }];
-
-		} catch (error) {
-			console.error('Error sending message via SDK:', error);
-			throw error;
-		}
-	}, [messages]);
+				return textResponses.length > 0 ? textResponses : [{ text: 'No valid response received', key: '' }];
+			} catch (error) {
+				console.error('Error sending message via SDK:', error);
+				throw error;
+			}
+		},
+		[messages]
+	);
 
 	/**
 	 * Sends a message and updates the chat history
-	 * 
+	 *
 	 * @param text - Message text to send
 	 * @param client - RocketRideClient instance
 	 * @param authToken - Auth token for pipeline operations
 	 * @returns Promise that resolves when message is sent and response received
 	 */
-	const sendMessage = useCallback(async (
-		text: string,
-		client: any,
-		authToken: string
-	): Promise<void> => {
-		if (!text.trim()) return;
+	const sendMessage = useCallback(
+		async (text: string, client: any, authToken: string, chat?: Chat | null): Promise<void> => {
+			if (!text.trim()) return;
 
-		// Add user message to chat
-		const userMessage: Message = {
-			id: Date.now(),
-			text,
-			sender: 'user',
-			timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-		};
-
-		setMessages(prev => [...prev, userMessage]);
-		setIsTyping(true);
-
-		try {
-			// Send to API and get response using authToken
-			const answers = await sendMessageToAPI(text, client, authToken);
-
-			// Add bot response(s) to chat
-			const botResponses: Message[] = answers.map((answer, index) => ({
-				id: Date.now() + index + 1,
-				text: answer.text,
-				sender: 'bot' as const,
+			// Add user message to chat
+			const userMessage: Message = {
+				id: Date.now(),
+				text,
+				sender: 'user',
 				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-				...(answer.key ? { resultKey: answer.key } : {})
-			}));
-
-			setMessages(prev => [...prev, ...botResponses]);
-		} catch (error) {
-			// Show error message in chat
-			const errorMessage: Message = {
-				id: Date.now() + 1,
-				text: error instanceof Error ? error.message : 'Sorry, I encountered an unexpected error. Please try again.',
-				sender: 'bot',
-				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 			};
 
-			setMessages(prev => [...prev, errorMessage]);
-		} finally {
-			setIsTyping(false);
-		}
-	}, [sendMessageToAPI]);
+			setMessages((prev) => [...prev, userMessage]);
+			setIsTyping(true);
+
+			try {
+				// Send to API and get response using authToken
+				const answers = await sendMessageToAPI(text, client, authToken, chat);
+
+				// Add bot response(s) to chat
+				const botResponses: Message[] = answers.map((answer, index) => ({
+					id: Date.now() + index + 1,
+					text: answer.text,
+					sender: 'bot' as const,
+					timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+					...(answer.key ? { resultKey: answer.key } : {}),
+				}));
+
+				setMessages((prev) => [...prev, ...botResponses]);
+			} catch (error) {
+				// Show error message in chat
+				const errorMessage: Message = {
+					id: Date.now() + 1,
+					text: error instanceof Error ? error.message : 'Sorry, I encountered an unexpected error. Please try again.',
+					sender: 'bot',
+					timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				};
+
+				setMessages((prev) => [...prev, errorMessage]);
+			} finally {
+				setIsTyping(false);
+			}
+		},
+		[sendMessageToAPI]
+	);
 
 	/**
 	 * Adds a system message to the chat
-	 * 
+	 *
 	 * Used for connection status updates, errors, and other system notifications.
-	 * 
+	 *
 	 * @param text - System message text to display
 	 */
 	const addSystemMessage = useCallback((text: string) => {
@@ -182,9 +197,48 @@ export const useChatMessages = () => {
 			id: Date.now(),
 			text,
 			sender: 'system',
-			timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+			timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 		};
-		setMessages(prev => [...prev, systemMessage]);
+		setMessages((prev) => [...prev, systemMessage]);
+	}, []);
+
+	/**
+	 * Replace the rendered message list with the turns persisted in a Chat.
+	 *
+	 * Each on-disk turn is one round-trip (`{question, answer}`); we flatten
+	 * it into a user-then-bot pair for the existing renderer. Status / system
+	 * messages from prior runs are not stored — only the durable transcript.
+	 */
+	const hydrateFromChat = useCallback((chat: Chat) => {
+		const flattened: Message[] = [];
+		for (const turn of chat.history as ChatTurn[]) {
+			const questionDict = turn.question as Record<string, unknown>;
+			const qs = (questionDict?.questions as Array<{ text?: string }> | undefined) ?? [];
+			const userText = qs.length > 0 ? String(qs[qs.length - 1]?.text ?? '') : '';
+			const result = turn.answer as PIPELINE_RESULT;
+			const responses = extractTextFromResult(result);
+
+			if (userText) {
+				flattened.push({
+					id: turn.seq * 2,
+					text: userText,
+					sender: 'user',
+					timestamp: turn.created.slice(11, 16),
+				});
+			}
+			for (let i = 0; i < responses.length; i++) {
+				const r = responses[i];
+				if (!r) continue;
+				flattened.push({
+					id: turn.seq * 2 + 1 + i,
+					text: r.text,
+					sender: 'bot',
+					timestamp: turn.created.slice(11, 16),
+					...(r.key ? { resultKey: r.key } : {}),
+				});
+			}
+		}
+		setMessages(flattened);
 	}, []);
 
 	/**
@@ -196,8 +250,8 @@ export const useChatMessages = () => {
 				id: Date.now(),
 				text: "Chat cleared! I'm your RocketRide assistant. How can I help you today?",
 				sender: 'system',
-				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-			}
+				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+			},
 		]);
 	}, []);
 
@@ -206,6 +260,8 @@ export const useChatMessages = () => {
 		isTyping,
 		sendMessage,
 		clearMessages,
-		addSystemMessage
+		addSystemMessage,
+		hydrateFromChat,
+		setMessages,
 	};
 };

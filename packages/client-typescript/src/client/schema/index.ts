@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
 
 /**
  * Schema definitions for RocketRide data structures.
- * 
+ *
  * Re-exports all schema classes and interfaces for convenient imports.
  */
 
@@ -33,3 +33,5 @@ export * from './DocFilter.js';
 export * from './DocGroup.js';
 export * from './DocMetadata.js';
 export * from './Question.js';
+export { Chat, CatalogContentionError, ChatNotFoundError, CATALOG_SCHEMA_VERSION, CHAT_SCHEMA_VERSION, EAGER_HISTORY_TURNS, parseChatFile, extractAnswerText, mutateCatalog } from '../Chat.js';
+export type { ChatCatalogEntry, ChatHeader, ChatLine, ChatTurn, RocketRideChatClient } from '../Chat.js';

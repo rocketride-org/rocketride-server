@@ -61,10 +61,33 @@ class IEndpoint(IEndpointBase):
         """
         try:
             if self.endpoint.logicalType == 'chat':
+                # Read the per-node config so chat-ui can decide whether to
+                # persist (TDD §4 "Persist sessions" toggle, default OFF) and
+                # which pipeline to attribute new chats to.  Both are delivered
+                # via the embed URL — same channel as the existing ?auth=...
+                # token (see App.tsx URL-param boot path).
+                parameters = getattr(self.endpoint, 'parameters', None) or {}
+                persist_sessions = bool(parameters.get('persistSessions', False))
+
+                service_config = getattr(self.endpoint, 'serviceConfig', None) or {}
+                job_config = getattr(self.endpoint, 'jobConfig', None) or {}
+                # Prefer the named pipeline service over the per-run task id —
+                # taskId rolls on every run, so it cannot anchor a resume.
+                pipeline_id = (service_config.get('name') if isinstance(service_config, dict) else None) or (job_config.get('taskId') if isinstance(job_config, dict) else None) or ''
+
+                # Add the persist + pipelineId params if persistence is on.
+                # ``button-link`` is rendered with {host}/{public_auth} late by
+                # the dropper-ui; the chat-ui parses pipelineId/persist from
+                # its own URL alongside auth (see chat-ui App.tsx).
+                if persist_sessions and pipeline_id:
+                    button_link = f'{{host}}/chat?auth={{public_auth}}&pipelineId={pipeline_id}&persist=1'
+                else:
+                    button_link = '{host}/chat?auth={public_auth}'
+
                 # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Chat now',
-                    'button-link': '{host}/chat?auth={public_auth}',
+                    'button-link': button_link,
                     'url-text': 'Chat interface URL',
                     'url-link': '{host}/chat',
                     'auth-text': 'Public Authorization Key',

@@ -57,12 +57,19 @@ class AgentHostServices:
         # instance in the process and silently leak tool descriptors between
         # concurrent agent runs.
 
-        def __init__(self, invoker):
+        def __init__(self, invoker, builtin_tools: Optional[List[ToolDescriptor]] = None):
             """Create a Tools host service wrapper bound to an engine invoker.
 
             Discovers all tools on every connected tool node once at
             construction.  Drivers read the prepared catalog as
             ``self.list`` (a flat ``List[ToolDescriptor]``).
+
+            ``builtin_tools`` are engine-built-in tool descriptors (e.g.
+            ``recall_history``) prepended to ``self.list`` so framework
+            drivers surface them to the LLM alongside discovered tools.
+            Built-ins are NOT entered into ``self._tool_list`` — invocation
+            of built-ins is dispatched in ``AgentBase.call_tool`` before
+            ever reaching ``Tools.invoke``.
             """
             self._invoker = invoker
             self._tool_list: Dict[str, Any] = {}
@@ -100,8 +107,12 @@ class AgentHostServices:
                     }
 
             # Prepared flat descriptor list, ready for direct reference
-            # via `context.tools.list` from any driver.
-            self.list: List[ToolDescriptor] = [entry['tool'] for entry in self._tool_list.values()]
+            # via `context.tools.list` from any driver.  Engine built-ins
+            # are prepended so the LLM sees them first; their invocation
+            # is intercepted in AgentBase.call_tool before reaching
+            # Tools.invoke (which only knows discovered tool nodes).
+            builtins: List[ToolDescriptor] = list(builtin_tools or [])
+            self.list: List[ToolDescriptor] = builtins + [entry['tool'] for entry in self._tool_list.values()]
 
         def get(self, tool_name: str) -> Any:
             """
@@ -213,10 +224,14 @@ class AgentHostServices:
             self._invoker.instance.invoke(param, component_id=self._node_id)
             return getattr(param, 'output', None) or {}
 
-    def __init__(self, invoker):
-        """Create host service wrappers bound to an engine invoker."""
+    def __init__(self, invoker, builtin_tools: Optional[List[ToolDescriptor]] = None):
+        """Create host service wrappers bound to an engine invoker.
+
+        ``builtin_tools`` is forwarded to the Tools channel so engine-built-in
+        descriptors (e.g. ``recall_history``) appear in ``self.tools.list``.
+        """
         self.llm = AgentHostServices.LLM(invoker)
-        self.tools = AgentHostServices.Tools(invoker)
+        self.tools = AgentHostServices.Tools(invoker, builtin_tools=builtin_tools)
         nodes = invoker.instance.getControllerNodeIds('memory')
         self.memory: Optional[AgentHostServices.Memory] = AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
 
@@ -284,3 +299,9 @@ class AgentContext:
     pipe_id: int
     framework: str
     started_at: str
+
+    # Chat session id (UUID) carried from the inbound Question.  Threaded
+    # to AgentBase._recall_history so the built-in history-lookup tool
+    # can scope reads to .chats/<chat_id>/chat.jsonl.  None when the
+    # caller is not chat-aware (toggle off, non-chat pipeline, etc.).
+    chat_id: Optional[str] = None
