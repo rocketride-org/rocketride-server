@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
 
 /**
  * Task Management Types: Comprehensive Status Tracking and Event Management System.
- * 
+ *
  * This module defines the complete type system for sophisticated task lifecycle management,
  * real-time status monitoring, and event-driven communication in distributed computational
  * pipeline systems. It provides structured data models for tracking complex task execution
@@ -33,53 +33,53 @@
 
 /**
  * Task lifecycle state enumeration for comprehensive state management.
- * 
+ *
  * This enumeration defines all possible states in the task execution lifecycle,
  * providing clear state transitions and enabling proper resource management,
  * error handling, and client notification. Each state represents a distinct
  * phase with specific characteristics and available operations.
- * 
+ *
  * Lifecycle Phases:
  * ----------------
  * NONE: Initial state before any resources are allocated or configuration
  *       is processed. Tasks in this state can be safely discarded without
  *       cleanup operations.
- * 
+ *
  * STARTING: Resource allocation and initial setup phase. Ports are allocated,
  *           temporary files created, and subprocess preparation occurs.
- * 
+ *
  * INITIALIZING: Subprocess has been created and is performing pipeline
  *               initialization. Service interfaces are being established.
- * 
+ *
  * RUNNING: Task is operational and processing requests. All interfaces
  *          are available and the pipeline is actively executing.
- * 
+ *
  * STOPPING: Graceful shutdown initiated. Subprocess is being terminated
  *           and resources are being cleaned up.
- * 
+ *
  * COMPLETED: Task finished successfully. All resources cleaned up and
  *            final status available for client queries.
- * 
+ *
  * CANCELLED: Task was terminated before completion. Resources cleaned up
  *            and termination reason available in status.
- * 
+ *
  * State Transitions:
  * -----------------
  * Normal execution flow:
  * NONE → STARTING → INITIALIZING → RUNNING → STOPPING → COMPLETED
- * 
+ *
  * Cancellation flow:
  * Any state → STOPPING → CANCELLED
- * 
+ *
  * Error handling:
  * Any state → STOPPING → COMPLETED (with error exit code)
- * 
+ *
  * Resource Management:
  * -------------------
  * - NONE/COMPLETED/CANCELLED: No active resources requiring cleanup
  * - STARTING/INITIALIZING/RUNNING: Active resources requiring cleanup
  * - STOPPING: Cleanup in progress, resources being deallocated
- * 
+ *
  * Client Operations:
  * -----------------
  * - NONE: Configuration and launch operations available
@@ -87,7 +87,7 @@
  * - RUNNING: Full debugging and data processing operations available
  * - STOPPING: Limited status monitoring, operations being rejected
  * - COMPLETED/CANCELLED: Status queries only, task cleanup may be initiated
- * 
+ *
  * Wait Operations:
  * ---------------
  * Clients can wait for specific state transitions using wait_for_running()
@@ -114,17 +114,17 @@ export enum TASK_STATE {
 	COMPLETED = 5,
 
 	/** Terminated before completion - resources cleaned up */
-	CANCELLED = 6
+	CANCELLED = 6,
 }
 
 /**
  * Pipeline component execution flow tracking and visualization model.
- * 
+ *
  * This model provides detailed tracking of pipeline component execution flow,
  * enabling real-time visualization of which components are currently executing
  * in each pipeline instance. It supports complex pipeline architectures with
  * multiple concurrent execution paths and nested component hierarchies.
- * 
+ *
  * Flow Tracking Features:
  * ----------------------
  * - Multi-pipeline execution tracking with per-instance component stacks
@@ -132,12 +132,12 @@ export enum TASK_STATE {
  * - Visual pipeline flow representation for debugging and monitoring
  * - Component execution depth tracking for nested pipeline architectures
  * - Concurrent execution visibility across multiple pipeline instances
- * 
+ *
  * Data Structure:
  * --------------
  * totalPipes: Total number of concurrent pipeline execution instances
  * byPipe: Dictionary mapping pipeline instance IDs to component execution stacks
- * 
+ *
  * Component Stack Behavior:
  * ------------------------
  * Each pipeline instance maintains a stack of currently executing components:
@@ -145,20 +145,20 @@ export enum TASK_STATE {
  * - Component exit pops component name from the stack
  * - Stack depth indicates nesting level of component execution
  * - Empty stack indicates pipeline instance is idle or completed
- * 
+ *
  * Visualization Applications:
  * --------------------------
  * - Real-time pipeline execution diagrams showing active components
  * - Performance analysis identifying bottlenecks and execution patterns
  * - Debugging support for component-level execution tracing
  * - Monitoring dashboards displaying pipeline health and activity
- * 
+ *
  * Concurrent Execution Support:
  * ----------------------------
  * Multiple pipeline instances can execute simultaneously, each maintaining
  * independent component execution stacks. This enables complex parallel
  * processing scenarios with full visibility into each execution path.
- * 
+ *
  * Example Flow Tracking:
  * ---------------------
  * Pipeline 0: ['source', 'transform', 'filter'] - Currently in filter component
@@ -175,12 +175,12 @@ export interface TASK_STATUS_FLOW {
 
 /**
  * Comprehensive task status model with real-time processing statistics and metrics.
- * 
+ *
  * This model provides complete task execution status including processing statistics,
  * error tracking, performance metrics, resource usage, and operational state.
  * It serves as the central status repository for task monitoring, client updates,
  * and administrative dashboards.
- * 
+ *
  * Status Categories:
  * -----------------
  * - Job Information: Basic task identification and lifecycle status
@@ -189,26 +189,26 @@ export interface TASK_STATUS_FLOW {
  * - Resource Monitoring: Service health and operational state
  * - Performance Metrics: Processing rates and resource utilization
  * - Pipeline Tracking: Component execution flow and pipeline visualization
- * 
+ *
  * Real-Time Updates:
  * -----------------
  * Status is updated in real-time as the task processes data and progresses
  * through its lifecycle. Updates are broadcast to subscribed clients based
  * on their EVENT_TYPE subscriptions, enabling responsive monitoring and
  * debugging interfaces.
- * 
+ *
  * Buffer Management:
  * -----------------
  * Error and warning lists maintain recent message history with automatic
  * buffer limits to prevent memory growth in long-running tasks. Trace
  * buffers preserve debugging information while controlling resource usage.
- * 
+ *
  * Metrics Integration:
  * -------------------
  * Processing statistics and performance metrics are continuously updated
  * to provide real-time visibility into task performance, throughput,
  * and resource utilization patterns.
- * 
+ *
  * Client Integration:
  * ------------------
  * Status information is serialized and broadcast to monitoring clients,
@@ -333,7 +333,7 @@ export interface TASK_STATUS {
 
 /**
  * Task token usage tracking (user-facing billing).
- * 
+ *
  * Behavior:
  *   - Values are CUMULATIVE from when monitoring starts
  *   - Updated in real-time every 250ms as metrics are sampled
@@ -350,13 +350,19 @@ export interface TASK_TOKENS {
 	/** Cumulative GPU memory tokens charged since monitoring started */
 	gpu_memory: number;
 
-	/** Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started */
+	/** Cumulative GPU inference timing tokens charged since monitoring started */
+	gpu_inference: number;
+
+	/** Custom node billing counters converted to tokens (counter_name -> tokens) */
+	custom: Record<string, number>;
+
+	/** Total cumulative tokens charged (all dimensions) since monitoring started */
 	total: number;
 }
 
 /**
  * Task resource utilization metrics.
- * 
+ *
  * User-facing metrics for monitoring CPU, memory, and GPU usage.
  * CPU percentages are normalized to 0-100% range across all platforms.
  */

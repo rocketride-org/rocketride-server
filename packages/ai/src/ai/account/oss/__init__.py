@@ -94,7 +94,7 @@ class Account(AccountBase):
         # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
         # on the server env is what we expect. Up to 3rd part and key rotation
         if oss_key and oss_key != credential:
-            # No key configured — reject the connection immediately.
+            # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
         # Credential matched — synthesise a local AccountInfo that grants the
@@ -138,6 +138,12 @@ class Account(AccountBase):
                         }
                     ],
                 }
+            ],
+            # OSS: all apps are on the desktop and free
+            apps=[
+                {'id': a.get('id', ''), 'appStatus': 'free', 'onDesktop': True}
+                for a in self._read_apps_json(public_only=False)
+                if a.get('id')
             ],
             capabilities=self.capabilities,
         )
@@ -214,6 +220,9 @@ class Account(AccountBase):
     async def get_team(self, team_id: str) -> Dict:
         self._saas_only()
 
+    async def get_team_member(self, team_id: str, user_id: str):
+        self._saas_only()
+
     async def add_team_member(self, **kw):
         self._saas_only()
 
@@ -222,5 +231,144 @@ class Account(AccountBase):
 
     async def remove_team_member(self, **kw):
         self._saas_only()
+
+    # audit() is inherited from AccountBase as a no-op — OSS has no database.
+
+    # =========================================================================
+    # APP MANIFEST — read from static apps.json
+    # =========================================================================
+
+    async def get_public_apps(self) -> list:
+        """
+        Return apps visible to unauthenticated users.
+
+        Reads ``dist/server/static/apps.json`` from disk and returns only
+        entries where ``public`` is not explicitly ``False``.
+
+        Returns:
+            List of app manifest dicts.
+        """
+        return self._read_apps_json(public_only=True)
+
+    async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
+        """
+        Return all apps for an authenticated OSS user.
+
+        In OSS mode, APIKEY grants full access — all apps are returned
+        regardless of the ``public`` flag.
+
+        Args:
+            user_id:       Internal user ID (always 'local' in OSS).
+            organizations: List of org dicts (single 'local' org in OSS).
+
+        Returns:
+            List of all app manifest dicts.
+        """
+        return self._read_apps_json(public_only=False)
+
+    def _read_apps_json(self, public_only: bool = False) -> list:
+        """
+        Read and parse the static apps.json manifest from disk.
+
+        Args:
+            public_only: If True, filter out entries with ``public: False``.
+
+        Returns:
+            List of app manifest dicts, or empty list if the file is missing.
+        """
+        import sys
+        import json
+
+        # apps.json is written by registerApp.js during the build
+        apps_path = os.path.join(os.path.dirname(sys.executable), 'static', 'apps.json')
+        try:
+            with open(apps_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+        apps = data.get('apps', [])
+        if public_only:
+            # Default is public (True) — only exclude explicitly private apps
+            apps = [a for a in apps if a.get('public', True)]
+        return apps
+
+    # =========================================================================
+    # HANDLE ACCOUNT — env-only support for OSS
+    # =========================================================================
+
+    async def handle_account(self, conn, request):
+        """
+        Handle ``rrext_account_me`` for env subcommands only.
+
+        OSS supports ``get_env`` (reads ROCKETRIDE_* from os.environ) and
+        ``set_env`` (writes to os.environ + persists to .env file).
+        All other account commands raise NotImplementedError.
+
+        Args:
+            conn:    TaskConn instance.
+            request: DAP request dict.
+        """
+        command = request.get('command', '')
+        args = request.get('arguments', {})
+        sub = args.get('subcommand', '')
+
+        if command == 'rrext_account_me':
+            if sub == 'get_env':
+                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                return conn.build_response(request, body={'env': env})
+
+            if sub == 'set_env':
+                # Only accept ROCKETRIDE_* keys — reject anything else
+                raw = args.get('env', {})
+                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+                # Persist to .env file
+                import sys
+
+                exec_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                return conn.build_response(request, body={'updated': True})
+
+            if sub == 'env_keys':
+                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
+                return conn.build_response(request, body={'keys': keys})
+
+        raise NotImplementedError('Account management requires SaaS mode')
+
+    @staticmethod
+    def _write_env_file(path: str, env: Dict[str, str]) -> None:
+        """
+        Merge ROCKETRIDE_* entries into a .env file.
+
+        Preserves non-ROCKETRIDE lines and comments. Replaces existing
+        ROCKETRIDE_* lines and appends new ones.
+
+        Args:
+            path: Absolute path to the .env file.
+            env:  Key-value dict to write.
+        """
+        lines: List[str] = []
+        written_keys: set = set()
+        try:
+            with open(path, 'r') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#') and '=' in stripped:
+                        key = stripped.split('=', 1)[0].strip()
+                        if key.startswith('ROCKETRIDE_'):
+                            if key in env:
+                                lines.append(f'{key}={env[key]}\n')
+                                written_keys.add(key)
+                            continue
+                    lines.append(line)
+        except FileNotFoundError:
+            pass
+
+        for k, v in sorted(env.items()):
+            if k not in written_keys:
+                lines.append(f'{k}={v}\n')
+
+        with open(path, 'w') as f:
+            f.writelines(lines)
 
     # generate_token is inherited from AccountBase.

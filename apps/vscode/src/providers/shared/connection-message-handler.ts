@@ -8,16 +8,14 @@
  * webview messages (cloud auth, engine versions, test connection, docker/service
  * lifecycle).
  *
- * Used by both PageSettingsProvider and PageWelcomeProvider so connection
+ * Used by both SettingsProvider and WelcomeProvider so connection
  * management code is never duplicated.
  */
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
-import { getConnectionManager } from '../../extension';
 import { EngineInstaller } from '../../connection/engine-installer';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
-import { DeployManager } from '../../connection/deploy-manager';
 import { EngineOperations, EngineOperationsCallbacks } from '../../deploy/engine-operations';
 
 // =============================================================================
@@ -84,7 +82,7 @@ export class ConnectionMessageHandler {
 				return true;
 
 			case 'fetchTeams':
-				await this.fetchCloudTeams(webview);
+				await this.fetchCloudTeams(webview, message.hostUrl as string);
 				return true;
 
 			case 'fetchEngineVersions':
@@ -97,7 +95,7 @@ export class ConnectionMessageHandler {
 
 			case 'probeServerInfo':
 				this.cachedServerInfo = null; // force re-probe
-				await this.probeServerInfo(webview);
+				await this.probeServerInfo(webview, message.hostUrl as string);
 				return true;
 
 			case 'sudoPassword':
@@ -152,25 +150,40 @@ export class ConnectionMessageHandler {
 	// =========================================================================
 
 	/**
-	 * Probe the server at ROCKETRIDE_URI for capabilities.
+	 * Probe the server for capabilities.
+	 * Uses the dev connection manager's URL when connected (actual running
+	 * server, which may be on a dynamic port). Falls back to the build-time
+	 * ROCKETRIDE_URI for pre-connection probing.
 	 * Caches the result so subsequent calls are instant.
-	 * Sends the result to the webview as `{ type: 'serverInfo', ... }`.
 	 */
-	public async probeServerInfo(webview: vscode.Webview): Promise<void> {
+	public async probeServerInfo(webview: vscode.Webview, hostUrl: string): Promise<void> {
 		if (this.cachedServerInfo) {
 			webview.postMessage({ type: 'serverInfo', ...this.cachedServerInfo });
 			return;
 		}
 
-		const uri = process.env.ROCKETRIDE_URI || '';
+		const uri = hostUrl;
 		if (!uri) return;
+
+		console.log(`[ConnectionMessageHandler] probeServerInfo: uri=${uri}`);
 
 		try {
 			const info = await RocketRideClient.getServerInfo(uri, 5000);
+			console.log(`[ConnectionMessageHandler] probeServerInfo result: capabilities=${JSON.stringify(info.capabilities)}, version=${info.version}`);
 			this.cachedServerInfo = info;
 			webview.postMessage({ type: 'serverInfo', ...info });
+
+			// If server is SaaS and user is signed in, fetch teams immediately
+			const caps: string[] = info.capabilities ?? [];
+			if (caps.includes('saas')) {
+				const cloudAuth = CloudAuthProvider.getInstance();
+				if (await cloudAuth.isSignedIn()) {
+					console.log('[ConnectionMessageHandler] SaaS + signed in — fetching teams');
+					await this.fetchCloudTeams(webview, hostUrl);
+				}
+			}
 		} catch (error) {
-			console.error('[ConnectionMessageHandler] Server info probe failed:', error);
+			console.log(`[ConnectionMessageHandler] probeServerInfo FAILED: ${error}`);
 			// Fall back to showing all modes if probe fails
 			webview.postMessage({ type: 'serverInfo', capabilities: [], version: '' });
 		}
@@ -188,42 +201,29 @@ export class ConnectionMessageHandler {
 		// Teams are fetched by CloudPanel after it confirms the server is SaaS
 	}
 
-	public async fetchCloudTeams(webview: vscode.Webview): Promise<void> {
-		const devAccount = getConnectionManager()?.getClient()?.getAccountInfo();
-		const devTeams = this.extractTeams(devAccount);
-		if (devTeams.length) {
-			webview.postMessage({ type: 'teamsLoaded', teams: devTeams });
-			return;
-		}
-
-		const deployAccount = DeployManager.getDeployInstance().getClient()?.getAccountInfo();
-		const deployTeams = this.extractTeams(deployAccount);
-		if (deployTeams.length) {
-			webview.postMessage({ type: 'teamsLoaded', teams: deployTeams });
-			return;
-		}
-
-		await this.fetchTeamsViaTempConnection(webview);
-	}
-
-	private async fetchTeamsViaTempConnection(webview: vscode.Webview): Promise<void> {
+	/**
+	 * Fetch cloud teams by connecting to the given cloud URL with the
+	 * stored cloud auth token. The URL comes from the webview (build-time
+	 * ROCKETRIDE_URI injected into the CloudPanel).
+	 */
+	public async fetchCloudTeams(webview: vscode.Webview, hostUrl: string): Promise<void> {
 		const cloudAuth = CloudAuthProvider.getInstance();
-		const signedIn = await cloudAuth.isSignedIn();
-		if (!signedIn) return;
+		const token = await cloudAuth.getToken();
+		if (!token) return;
+
+		const uri = hostUrl;
+		if (!uri) return;
+
+		console.log(`[ConnectionMessageHandler] fetchCloudTeams: uri=${uri}`);
 
 		let client: RocketRideClient | undefined;
 		try {
-			const token = await cloudAuth.getToken();
-			if (!token) return;
-
-			const cloudUri = process.env.ROCKETRIDE_URI || '';
 			client = new RocketRideClient({ module: 'CONN-CFG', requestTimeout: 8000 });
-			await client.connect(token, { uri: cloudUri, timeout: 10000 });
+			await client.connect(token, { uri, timeout: 10000 });
 
 			const teams = this.extractTeams(client.getAccountInfo());
-			if (teams.length) {
-				webview.postMessage({ type: 'teamsLoaded', teams });
-			}
+			console.log(`[ConnectionMessageHandler] fetchCloudTeams: ${teams.length} teams found`);
+			webview.postMessage({ type: 'teamsLoaded', teams });
 		} catch (error) {
 			console.log('[ConnectionMessageHandler] Could not fetch cloud teams:', error);
 		} finally {
@@ -296,10 +296,10 @@ export class ConnectionMessageHandler {
 				return;
 			}
 
-			testClient = new RocketRideClient({ auth: apiKey, uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
+			testClient = new RocketRideClient({ uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
 
 			try {
-				await testClient.connect(undefined, { timeout: 8000 });
+				await testClient.connect(apiKey as string, { timeout: 8000 });
 			} catch (connectError) {
 				if (testClient) await testClient.disconnect();
 				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);

@@ -41,7 +41,8 @@ const {
     stopServer,
     execCommand,
     parallel,
-    bracket
+    bracket,
+    parseServerAddress
 } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -79,10 +80,12 @@ function makeSyncNodesAction(options = {}) {
 function makeStartTestServerAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            if (options.testport) {
-                ctx.port = options.testport;
-                task.output = `Using existing server on port ${ctx.port}`;
-                return { port: ctx.port, server: null };
+            const taskserver = options.taskserver || ctx.options?.taskserver;
+            if (taskserver) {
+                const parsed = parseServerAddress(taskserver);
+                ctx.port = parsed.port;
+                task.output = `Using existing server at ${parsed.uri}`;
+                return { port: parsed.port, server: null, serverUri: parsed.uri };
             }
 
             task.output = 'Starting server...';
@@ -136,11 +139,13 @@ function makeRunPytestAction(options = {}) {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-            const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            const bracket = ctx.brackets?.['node-test-server'];
+            const port = bracket?.port || ctx.port;
+            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_URI: serverUri,
                 ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 

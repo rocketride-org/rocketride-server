@@ -89,6 +89,13 @@ export { MessageList, MessageBubble, ChatInputField, MarkdownRenderer, ChartRend
 export { useChatMessages } from './modules/chat';
 export type { UseChatMessagesReturn } from './modules/chat';
 
+// --- Shell connection types ---------------------------------------------------
+export type { ShellConnectionEventMap, IConnectionManager, ShellAppEntry } from './types/shell';
+
+// --- Connection state types (shared across shell-ui and VSCode) ---------------
+export { ConnectionState } from './types/connection';
+export type { ConnectionMode, ConnectionStatus, ManagerInfo, IAuthProvider } from './types/connection';
+
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';
 export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';

@@ -26,39 +26,39 @@
 namespace ap {
 
 // Size literals
-constexpr Size operator"" _tb(long double count) noexcept {
+constexpr Size operator""_tb(long double count) noexcept {
     return Size::terabytes(count);
 }
-constexpr Size operator"" _gb(long double count) noexcept {
+constexpr Size operator""_gb(long double count) noexcept {
     return Size::gigabytes(count);
 }
-constexpr Size operator"" _mb(long double count) noexcept {
+constexpr Size operator""_mb(long double count) noexcept {
     return Size::megabytes(count);
 }
-constexpr Size operator"" _kb(long double count) noexcept {
+constexpr Size operator""_kb(long double count) noexcept {
     return Size::kilobytes(count);
 }
-constexpr Size operator"" _b(long double count) noexcept {
+constexpr Size operator""_b(long double count) noexcept {
     return Size::bytes(count);
 }
-constexpr Size operator"" _tb(unsigned long long count) noexcept {
+constexpr Size operator""_tb(unsigned long long count) noexcept {
     return Size::kTerabyte * count;
 }
-constexpr Size operator"" _gb(unsigned long long count) noexcept {
+constexpr Size operator""_gb(unsigned long long count) noexcept {
     return Size::kGigabyte * count;
 }
-constexpr Size operator"" _mb(unsigned long long count) noexcept {
+constexpr Size operator""_mb(unsigned long long count) noexcept {
     return Size::kMegabyte * count;
 }
-constexpr Size operator"" _kb(unsigned long long count) noexcept {
+constexpr Size operator""_kb(unsigned long long count) noexcept {
     return Size::kKilobyte * count;
 }
-constexpr Size operator"" _b(unsigned long long count) noexcept {
+constexpr Size operator""_b(unsigned long long count) noexcept {
     return count;
 }
 
 // Url literals
-inline Url operator"" _url(const char *str, std::size_t count) noexcept {
+inline Url operator""_url(const char *str, std::size_t count) noexcept {
     return {TextView{str, count}};
 }
 

@@ -40,7 +40,7 @@
 import { ReactElement, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { RJSFValidationError } from '@rjsf/utils';
 import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
+import validator from '../../../util/csp-safe-validator';
 
 import { TextField } from '@mui/material';
 import { IFormData } from '../../../types';
@@ -71,13 +71,18 @@ const DEFAULT_WIDTH = 400;
 // =============================================================================
 
 const styles = {
+	backdrop: {
+		position: 'absolute' as const,
+		inset: 0,
+		zIndex: 29,
+	},
 	container: {
 		position: 'absolute' as const,
 		top: 0,
 		right: 0,
 		bottom: 0,
 		display: 'flex',
-		zIndex: 10,
+		zIndex: 30,
 		pointerEvents: 'auto' as const,
 	},
 	panel: {
@@ -152,17 +157,22 @@ const styles = {
 		color: 'var(--vscode-inputValidation-errorForeground, #f44336)',
 		border: '1px solid var(--vscode-inputValidation-errorBorder, #f44336)',
 	},
-	resizeHandle: {
+	resizeHitArea: {
 		position: 'absolute' as const,
 		left: 0,
-		top: '50%',
-		transform: 'translate(-50%, -50%)',
-		width: '6px',
-		height: '48px',
-		borderRadius: '9999px',
+		top: 0,
+		width: 6,
+		height: '100%',
 		cursor: 'col-resize',
 		zIndex: 11,
-		backgroundColor: 'var(--rr-border)',
+	},
+	resizeLine: {
+		position: 'absolute' as const,
+		left: 0,
+		top: 0,
+		width: 2,
+		height: '100%',
+		background: 'var(--rr-brand)',
 	},
 };
 
@@ -190,7 +200,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
 	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
-	const { getPreference, setPreference } = useFlowPreferences();
+	const { getPreference, setPreference, isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------
 	const isAnnotation = node.data.provider === 'annotation';
@@ -387,6 +397,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const storedWidth = (getPreference?.('configPanelWidth') as number) ?? DEFAULT_WIDTH;
 	const [width, setWidth] = useState(storedWidth);
 	const [isResizing, setIsResizing] = useState(false);
+	const [handleHover, setHandleHover] = useState(false);
 	const resizeStartRef = useRef({ x: 0, width: 0 });
 
 	const onResizeMouseDown = useCallback(
@@ -394,6 +405,11 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 			e.preventDefault();
 			setIsResizing(true);
 			resizeStartRef.current = { x: e.clientX, width };
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			document.querySelectorAll('iframe').forEach((f) => {
+				(f as HTMLIFrameElement).style.pointerEvents = 'none';
+			});
 		},
 		[width]
 	);
@@ -407,6 +423,11 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		const onUp = () => {
 			setIsResizing(false);
 			setPreference?.('configPanelWidth', width);
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			document.querySelectorAll('iframe').forEach((f) => {
+				(f as HTMLIFrameElement).style.pointerEvents = '';
+			});
 		};
 		window.addEventListener('mousemove', onMove);
 		window.addEventListener('mouseup', onUp);
@@ -421,149 +442,145 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	// --- Render -------------------------------------------------------------
 
 	const title = isAnnotation ? 'Note' : (service?.title ?? node.data.provider);
-	const disableSave = !isDirty || isSubmitting;
+	const disableSave = !isDirty || isSubmitting || isLocked;
 
 	return (
-		<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px` }}>
-			{/* Resize handle */}
-			<div
-				onMouseDown={onResizeMouseDown}
-				style={{ ...styles.resizeHandle, opacity: isResizing ? 1 : 0.7 }}
-				onMouseEnter={(e) => {
-					(e.target as HTMLElement).style.opacity = '1';
-				}}
-				onMouseLeave={(e) => {
-					if (!isResizing) (e.target as HTMLElement).style.opacity = '0.7';
-				}}
-			/>
-
-			<div style={styles.panel}>
-				{/* Header */}
-				<div style={styles.header}>
-					<span style={styles.headerTitle}>{title}</span>
-					<button style={styles.closeButton} onClick={onClose} title="Close">
-						✕
-					</button>
+		<>
+			<div style={styles.backdrop} onClick={onClose} />
+			<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px` }}>
+				{/* Resize handle */}
+				<div style={styles.resizeHitArea} onMouseDown={onResizeMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>
+					{(handleHover || isResizing) && <div style={styles.resizeLine} />}
 				</div>
 
-				{/* Body */}
-				<div style={styles.body}>
-					<div style={styles.scrollArea}>
-						{/* Node name field */}
-						{!isAnnotation && (
-							<TextField
-								label="Node Name"
-								value={name}
-								onChange={(e) => {
-									setName(e.target.value);
-									setIsDirty(true);
-								}}
-								placeholder={service?.title}
-								size="small"
-								fullWidth
-								sx={{ mb: 2 }}
-							/>
-						)}
-
-						{/* Annotation-specific fields */}
-						{isAnnotation && (
-							<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-								<TextField
-									label="Content (Markdown)"
-									value={annotationContent}
-									onChange={(e) => {
-										setAnnotationContent(e.target.value);
-										setIsDirty(true);
-									}}
-									placeholder="Enter markdown content..."
-									size="small"
-									fullWidth
-									multiline
-									minRows={4}
-									maxRows={12}
-								/>
-								<div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-									<div style={{ flex: 1 }}>
-										<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Background</label>
-										<input
-											type="color"
-											value={bgColor}
-											onChange={(e) => {
-												setBgColor(e.target.value);
-												setIsDirty(true);
-											}}
-											style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
-										/>
-									</div>
-									<div style={{ flex: 1 }}>
-										<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Text Color</label>
-										<input
-											type="color"
-											value={fgColor}
-											onChange={(e) => {
-												setFgColor(e.target.value);
-												setIsDirty(true);
-											}}
-											style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
-										/>
-									</div>
-								</div>
-							</div>
-						)}
-
-						{/* Configuration form (RJSF) */}
-						{schema && (
-							<ThemedForm
-								key={node.id}
-								ref={formRef}
-								schema={_schema}
-								uiSchema={{
-									..._uiSchema,
-									'ui:options': {
-										...(typeof (_uiSchema ?? {})['ui:options'] === 'object' ? (_uiSchema ?? {})['ui:options'] : {}),
-										hideRootTitle: true,
-									},
-									'ui:submitButtonOptions': { norender: true },
-								}}
-								formData={formValues}
-								formContext={{
-									formValues,
-									hideFor: formValues.parameters?.authType,
-									googlePickerDeveloperKey,
-									googlePickerClientId,
-									nodeId: node.id,
-									formDataErrors: node.data.formDataErrors,
-								}}
-								disabled={false}
-								validator={validator}
-								transformErrors={transformErrors}
-								onError={onError}
-								onSubmit={onSubmit}
-								onChange={onChange}
-								translateString={translate}
-							/>
-						)}
+				<div style={styles.panel}>
+					{/* Header */}
+					<div style={styles.header}>
+						<span style={styles.headerTitle}>{title}</span>
+						<button style={styles.closeButton} onClick={onClose} title="Close">
+							✕
+						</button>
 					</div>
 
-					{/* Footer */}
-					<div style={styles.footer}>
-						{validationError && <div style={styles.errorBox}>{validationError}</div>}
-						<button
-							style={{ ...styles.saveButton, ...(disableSave ? styles.saveButtonDisabled : {}) }}
-							disabled={disableSave}
-							onClick={() => {
-								if (schema) {
-									formRef.current?.submit();
-								} else {
-									handleSaveDetailsOnly();
-								}
-							}}
-						>
-							{isSubmitting ? 'Validating...' : 'Save Changes'}
-						</button>
+					{/* Body */}
+					<div style={styles.body}>
+						<div style={styles.scrollArea}>
+							{/* Node name field */}
+							{!isAnnotation && (
+								<TextField
+									label="Node Name"
+									value={name}
+									onChange={(e) => {
+										setName(e.target.value);
+										setIsDirty(true);
+									}}
+									placeholder={service?.title}
+									size="small"
+									fullWidth
+									sx={{ mb: 2 }}
+								/>
+							)}
+
+							{/* Annotation-specific fields */}
+							{isAnnotation && (
+								<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+									<TextField
+										label="Content (Markdown)"
+										value={annotationContent}
+										onChange={(e) => {
+											setAnnotationContent(e.target.value);
+											setIsDirty(true);
+										}}
+										placeholder="Enter markdown content..."
+										size="small"
+										fullWidth
+										multiline
+										minRows={4}
+										maxRows={12}
+									/>
+									<div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+										<div style={{ flex: 1 }}>
+											<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Background</label>
+											<input
+												type="color"
+												value={bgColor}
+												onChange={(e) => {
+													setBgColor(e.target.value);
+													setIsDirty(true);
+												}}
+												style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
+											/>
+										</div>
+										<div style={{ flex: 1 }}>
+											<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Text Color</label>
+											<input
+												type="color"
+												value={fgColor}
+												onChange={(e) => {
+													setFgColor(e.target.value);
+													setIsDirty(true);
+												}}
+												style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
+											/>
+										</div>
+									</div>
+								</div>
+							)}
+
+							{/* Configuration form (RJSF) */}
+							{schema && (
+								<ThemedForm
+									key={node.id}
+									ref={formRef}
+									schema={_schema}
+									uiSchema={{
+										..._uiSchema,
+										'ui:options': {
+											...(typeof (_uiSchema ?? {})['ui:options'] === 'object' ? (_uiSchema ?? {})['ui:options'] : {}),
+											hideRootTitle: true,
+										},
+										'ui:submitButtonOptions': { norender: true },
+									}}
+									formData={formValues}
+									formContext={{
+										formValues,
+										hideFor: formValues.parameters?.authType,
+										googlePickerDeveloperKey,
+										googlePickerClientId,
+										nodeId: node.id,
+										formDataErrors: node.data.formDataErrors,
+									}}
+									disabled={false}
+									validator={validator}
+									transformErrors={transformErrors}
+									onError={onError}
+									onSubmit={onSubmit}
+									onChange={onChange}
+									translateString={translate}
+								/>
+							)}
+						</div>
+
+						{/* Footer */}
+						<div style={styles.footer}>
+							{validationError && <div style={styles.errorBox}>{validationError}</div>}
+							<button
+								style={{ ...styles.saveButton, ...(disableSave ? styles.saveButtonDisabled : {}) }}
+								disabled={disableSave}
+								onClick={() => {
+									if (schema) {
+										formRef.current?.submit();
+									} else {
+										handleSaveDetailsOnly();
+									}
+								}}
+							>
+								{isSubmitting ? 'Validating...' : 'Save Changes'}
+							</button>
+						</div>
 					</div>
 				</div>
 			</div>
-		</div>
+		</>
 	);
 }

@@ -153,7 +153,7 @@ async def run(config: Dict[str, Any] = None) -> None:
     server.use('clients')
     server.use('task')
     server.use('task_http')
-    server.use('profiler')
+    server.use('shell')
 
     # Uniform entry point — OSS is a no-op; SaaS registers all HTTP routes
     # (Zitadel callback, Stripe webhook, Stripe Connect, Marketplace) and

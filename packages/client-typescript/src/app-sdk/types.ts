@@ -24,10 +24,10 @@
 // APP SDK TYPES
 // =============================================================================
 //
-// Type definitions for the RocketRide cloud-ui app plugin system.
+// Type definitions for the RocketRide shell-ui app plugin system.
 //
-// These mirror cloud-ui/src/workspace/types.ts so that third-party apps can
-// import them from `rocketride/app-sdk` without depending on the cloud-ui
+// These mirror shell-ui/src/workspace/types.ts so that third-party apps can
+// import them from `rocketride/app-sdk` without depending on the shell-ui
 // monorepo package.  At runtime, Module Federation replaces stub implementations
 // with the real singletons from the shell host.
 // =============================================================================
@@ -77,8 +77,8 @@ export interface ConnectResult {
 	userId?: string;
 	/** Organizations the user belongs to. */
 	organizations?: { id: string; name: string }[];
-	/** Apps the user is subscribed to. */
-	subscribedApps?: (string | { appId: string; status: string })[];
+	/** Apps on the user's desktop — full manifest entries with appStatus + onDesktop. */
+	apps?: { id: string; moduleId: string; name: string; entry: string; appStatus?: string; onDesktop?: boolean; [key: string]: unknown }[];
 	/** Open-ended additional fields. */
 	[key: string]: unknown;
 }
@@ -161,6 +161,8 @@ export interface AppManifestEntry {
 	settings?: AppSettingDefinition[];
 	/** When false, the app runs without authentication. Default: true. */
 	authenticated?: boolean;
+	/** When false, the status bar is hidden for this app. Default: true. */
+	statusBar?: boolean;
 	/** Async loader — dynamically imports and returns the full AppDescriptor. */
 	load: () => Promise<AppDescriptor>;
 }
@@ -298,16 +300,16 @@ export interface IWorkspaceContext {
 	settings: Record<string, string>;
 	/** Persist a single setting value. */
 	updateSetting: (key: string, value: string) => void;
-	/** Dispatch a workspace action (prefs update or app switch). */
-	dispatch: (action: WorkspaceAction) => void;
+	/** Update the active app's workspace preferences. */
+	updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
+	/** @deprecated Use `updatePrefs` for prefs, `connectionManager.emit('shell:switchApp')` for app switches. */
+	dispatch: (action: { type: string; [key: string]: unknown }) => void;
 	/** Emit a named event to all subscribers. */
 	emit: (event: string, payload: any) => void;
 	/** Subscribe to a named event. Returns an unsubscribe function. */
 	on: (event: string, handler: (payload: any) => void) => () => void;
 }
 
-/** Workspace dispatch action types. */
-export type WorkspaceAction = { type: 'prefs'; patch: Partial<WorkspacePrefs> } | { type: 'switchApp'; appId: string };
 
 // =============================================================================
 // VIRTUAL FILE SYSTEM
@@ -435,5 +437,5 @@ export interface ShellEventMap {
 	'shell:sidebarCollapsing': Record<string, never>;
 	'shell:themeChange': { tokens: Record<string, string> };
 	'shell:statusChange': { message: string | null };
-	'server:event': { event: unknown };
+	'shell:event': { event: unknown };
 }

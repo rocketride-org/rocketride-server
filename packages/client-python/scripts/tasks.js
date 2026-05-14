@@ -31,7 +31,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState } = require('../../../scripts/lib');
+const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
@@ -122,12 +122,13 @@ function makeCopyToServerStaticAction() {
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			// Check for --testport from CLI options or direct options
-			const testport = options.testport || ctx.options?.testport;
-			if (testport) {
-				ctx.port = testport;
-				task.output = `Using existing server on port ${ctx.port}`;
-				return { port: ctx.port, server: null };
+			// Check for --taskserver from CLI options or direct options
+			const taskserver = options.taskserver || ctx.options?.taskserver;
+			if (taskserver) {
+				const parsed = parseServerAddress(taskserver);
+				ctx.port = parsed.port;
+				task.output = `Using existing server at ${parsed.uri}`;
+				return { port: parsed.port, server: null, serverUri: parsed.uri };
 			}
 			// Use existing server when ROCKETRIDE_URI is set (e.g. for debugging: start server yourself, then run tests)
 			const envUri = process.env.ROCKETRIDE_URI;
@@ -254,6 +255,7 @@ module.exports = {
 			action: () => ({
 				description: 'Test Python client',
 				steps: [
+					'server:build',
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
 					bracket({
 						name: 'py-test-server',

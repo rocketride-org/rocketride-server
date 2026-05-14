@@ -757,24 +757,36 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-            // Bootstrap pip, install build tools, and test requirements (once; tracked in state).
-            // State key version bumped to force re-run on upgrade: pre-existing environments
-            // with `pipInstalled === true` from the old bootstrap would otherwise skip
-            // `pip install -r nodes/test/requirements.txt` and silently miss `pytest-xdist`.
-            const pipInstalled = await getState('server.pipInstalledV3');
+            // Bootstrap pip, then install all build, test, and runtime dependencies.
+            // uv is left for depends.py at runtime; the builder just uses pip.
+            // State key version bumped to force re-run when deps change.
+            const pipInstalled = await getState('server.pipInstalledV8');
             if (!pipInstalled) {
+                // Bootstrap pip
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
-                task.output = 'Upgrading pip...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
-                task.output = 'Installing setuptools, wheel, build...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build'], { task, cwd: DIST_DIR });
-                task.output = 'Installing test requirements...';
-                const testReqs = path.join(PROJECT_ROOT, 'nodes', 'test', 'requirements.txt');
-                await execCommand(enginePath, ['-m', 'pip', 'install', '-r', testReqs], { task, cwd: DIST_DIR });
-                await setState('server.pipInstalledV3', true);
+
+                const pipInstall = (...deps) => execCommand(enginePath, [
+                    '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
+                ], { task, cwd: DIST_DIR });
+
+                task.output = 'Installing build tools...';
+                await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');
+
+                task.output = 'Installing test and runtime dependencies...';
+                await pipInstall(
+                    // Test framework
+                    'pytest', 'pytest-asyncio', 'pytest-timeout', 'pytest-xdist',
+                    // Runtime deps needed by client-python tests and AI modules
+                    'pydantic', 'python-dotenv',
+                    // MCP client tests
+                    'mcp>=1.2.0',
+                    // Model server
+                    'huggingface_hub[hf_xet]',
+                );
+                await setState('server.pipInstalledV8', true);
             } else {
-                task.output = 'Pip and build deps already installed (skipped)';
+                task.output = 'Build and test deps already installed (skipped)';
             }
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
@@ -962,10 +974,46 @@ function makeTestAction() {
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
+	};
+}
+
+// Pytest runner for the rocketlib Python package
+// (packages/server/engine-lib/rocketlib-python). Lives in the ``server``
+// namespace because ``server:setup-python`` is what makes ``rocketlib``
+// importable in dist — the test step is just the natural follow-up.
+//
+// Mirrors the structure of ``syncRocketlibPythonLib`` above: a single
+// top-level function, source path inlined, early-return on missing source.
+// ``rocketlib-python/lib`` has already been synced into ``dist/server`` by
+// the time we run, so ``from rocketlib import ...`` resolves at runtime —
+// the only thing pytest still needs from the source tree is the ``tests/``
+// directory itself (not copied to dist).
+function makeRocketlibPythonTestAction(options = {}) {
+	return {
+		run: async (_ctx, task) => {
+			const rocketrideTests = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python', 'tests');
+			const exeExt = isWindows() ? '.exe' : '';
+			const engine = path.join(DIST_DIR, 'engine' + exeExt);
+
+			if (!(await exists(rocketrideTests))) {
+				task.output = 'rocketlib tests not found, skipping';
+				return;
+			}
+
+			const pytestArgs = ['-m', 'pytest', rocketrideTests, '-v'];
+			if (options.pytest) {
+				const tokens = typeof options.pytest === 'string'
+					? options.pytest.split(/\s+/).filter(Boolean)
+					: options.pytest.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
+				pytestArgs.push(...tokens);
+			}
+
+			await execCommand(engine, pytestArgs, { task, cwd: DIST_DIR });
+		},
 	};
 }
 
@@ -1055,40 +1103,70 @@ module.exports = {
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
+		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean', action: makeCleanServerAction },
 
 		// Public actions (have descriptions, shown in help)
 		{
 			name: 'server:dev',
 			action: (options = {}) => ({
-				description: 'Start EaaS development server (dist/server/engine ai/eaas.py)',
+				description: 'Start EaaS development server + shell-ui rsbuild dev server',
 				steps: [
 					'server:build',
-					{
-						name: 'server:run-eaas',
-						action: () => ({
-							run: async (_ctx, task) => {
-								// Use the pre-built engine binary from the assembled dist directory.
-								const exeExt = isWindows() ? '.exe' : '';
-								const engine = path.join(DIST_DIR, 'engine' + exeExt);
-
-								// Forward --trace=... and --saas from the CLI to the eaas.py process.
-								const args = ['ai/eaas.py'];
-								if (options.trace?.length) {
-									args.push(`--trace=${options.trace.join(',')}`);
-								}
-								if (options.saas) {
-									args.push('--saas');
-								}
-
-								task.output = `Starting EaaS server: ${engine} ${args.join(' ')}`;
-
-								// Run with cwd=DIST_DIR so relative module paths in eaas.py resolve correctly.
-								await execCommand(engine, args, { task, cwd: DIST_DIR });
-							},
-						}),
-					},
+					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
 				],
+			}),
+		},
+		{
+			name: 'server:run',
+			action: (options = {}) => {
+				// --modelserver (bare/true) → start local model server alongside task server
+				// --modelserver=addr → use existing remote model server
+				const startLocalModelServer = options.modelserver === true;
+				const servers = ['server:run-eaas'];
+				if (startLocalModelServer) {
+					servers.push('model_server:run-process');
+				}
+				return {
+					description: 'Build and run EaaS server (no dev tools)',
+					steps: [
+						'server:build',
+						parallel(servers, 'Start servers'),
+					],
+				};
+			},
+		},
+		{
+			// Internal action — starts the EaaS Python server process.
+			// Separated so it can be run in parallel with shell-ui:dev or model_server.
+			name: 'server:run-eaas',
+			action: (options = {}) => ({
+				run: async (_ctx, task) => {
+					// Use the pre-built engine binary from the assembled dist directory.
+					const exeExt = isWindows() ? '.exe' : '';
+					const engine = path.join(DIST_DIR, 'engine' + exeExt);
+
+					// Forward --trace=... and --saas from the CLI to the eaas.py process.
+					const args = ['ai/eaas.py'];
+					if (options.trace?.length) {
+						args.push(`--trace=${options.trace.join(',')}`);
+					}
+					if (options.saas) {
+						args.push('--saas');
+					}
+
+					// --modelserver: true means local (default address), string means use given address
+					if (options.modelserver === true) {
+						args.push('--modelserver=localhost:5590');
+					} else if (options.modelserver) {
+						args.push(`--modelserver=${options.modelserver}`);
+					}
+
+					task.output = `Starting EaaS server: ${engine} ${args.join(' ')}`;
+
+					// Run with cwd=DIST_DIR so relative module paths in eaas.py resolve correctly.
+					await execCommand(engine, args, { task, cwd: DIST_DIR });
+				},
 			}),
 		},
 		{ name: 'server:build', action: makeBuildAction },

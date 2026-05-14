@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * SidebarFooter — unified footer for both cloud-ui and VS Code sidebars.
+ * SidebarFooter — unified footer for both shell-ui and VS Code sidebars.
  *
  * Renders (top to bottom):
  *   1. Documentation button (optional, driven by onOpenDocs)
@@ -75,7 +75,6 @@ export interface SidebarFooterProps {
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
 	onOpenDocs?: () => void;
-
 	// ── Popup menu items ────────────────────────────────────────────────────
 	/** Host-specific menu items shown in the avatar popup. */
 	menuItems?: SidebarFooterMenuItem[];
@@ -178,11 +177,7 @@ const S = {
 	}),
 
 	// ── Popup divider ───────────────────────────────────────────────────────
-	divider: {
-		height: 1,
-		background: 'var(--rr-border)',
-		margin: '4px 0',
-	} as CSSProperties,
+	divider: commonStyles.divider,
 };
 
 // =============================================================================
@@ -220,7 +215,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const flyoutRef = useRef<HTMLDivElement>(null);
 
 	// ── Portal container for popups (escapes overflow:hidden ancestors) ─────
-	// The host (VS Code webview entry, cloud-ui shell) must create a
+	// The host (VS Code webview entry, shell-ui shell) must create a
 	// <div id="rr-popup-portal"> on document.body before React mounts.
 	// Looked up on every render (not cached) because React 18 concurrent
 	// mode can re-invoke the component in contexts where a cached ref
@@ -455,6 +450,10 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 							left: flyoutPos.left,
 							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
 							minWidth: 140,
+							maxHeight: `calc(100vh - ${flyoutPos.top + 8}px)`,
+							overflowY: 'auto',
+							scrollbarWidth: 'thin',
+							scrollbarColor: 'var(--rr-bg-scrollbar-thumb) transparent',
 							zIndex: 10001,
 						}}
 					>

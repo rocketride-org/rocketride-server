@@ -210,32 +210,32 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
-            # Resolve org_id from the user's default team. Fail loudly if the
-            # default team does not appear in any organisation the user belongs
-            # to — silently starting the task with org_id='' breaks billing
-            # attribution and permission checks downstream.
+            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            args = request.get('arguments') or {}
+            team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Resolve org_id by walking the organizations/teams tree.
             org_id: Optional[str] = None
             for org in self._account_info.organizations or []:
                 for team in org.get('teams', []):
-                    if team.get('id') == self._account_info.defaultTeam:
+                    if team.get('id') == team_id:
                         org_id = org.get('id', '')
                         break
                 if org_id is not None:
                     break
             if org_id is None:
                 raise PermissionError(
-                    f'Default team {self._account_info.defaultTeam!r} does not belong to any organisation for user {self._account_info.userId!r}'
+                    f'Team {team_id!r} does not belong to any organisation for user {self._account_info.userId!r}'
                 )
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(
-                self._account_info.userToken,
                 request,
                 self,
                 attach_debugger=True,
                 client_id=self._account_info.userId,
                 user_id=self._account_info.userId,
-                team_id=self._account_info.defaultTeam,
+                team_id=team_id,
                 org_id=org_id,
             )
 

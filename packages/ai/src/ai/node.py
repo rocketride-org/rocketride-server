@@ -108,6 +108,12 @@ def run():
     # Start the global event loop for async operations
     _start_event_loop()
 
+    # Block direct GPU library imports (torch, tensorflow, etc.) when running
+    # in model server mode — all GPU inference goes through ModelClient RPC
+    from ai.common.models.gpu_guard import install_gpu_guard
+
+    install_gpu_guard()
+
     # This will actually do the dependency loading and start the main process
     from rocketlib import processArguments, monitorStatus
 
