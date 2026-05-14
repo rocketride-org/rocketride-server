@@ -55,24 +55,18 @@ const BUILD_HASH_KEY = 'chat-ui.buildHash';
 function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if any build inputs changed; skip when nothing moved.
-			if (!ctx.options.force) {
-				const { changed } = await hasBuildInputChanged(
-					BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
-				const outputExists = await exists(BUILD_DIR);
-				if (!changed && outputExists) {
-					task.output = 'No changes detected';
-					return;
-				}
+			// Fingerprint inputs before building so concurrent edits are detected on the next run.
+			const { changed, hash } = await hasBuildInputChanged(
+				BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
+			if (!ctx.options.force && !changed && (await exists(BUILD_DIR))) {
+				task.output = 'No changes detected';
+				return;
 			}
 
 			// Clean build output before rebuilding to prevent stale chunks
 			await removeDir(BUILD_DIR);
 			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
 
-			// Persist the hash so the next run can skip if nothing changed
-			const { hash } = await hasBuildInputChanged(
-				BUILD_HASH_KEY, [SRC_DIR, SHELL_UI_SRC, SHARED_UI_SRC], [PKG_JSON]);
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
 	};

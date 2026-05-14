@@ -161,7 +161,7 @@ export interface BillingPanelProps {
 export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
 	// Build appId → app lookup for display name resolution
 	const appMap = React.useMemo(() => {
-		const map: Record<string, { name: string }> = {};
+		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
 		for (const a of apps ?? []) map[a.id] = a;
 		return map;
 	}, [apps]);

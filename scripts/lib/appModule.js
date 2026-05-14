@@ -102,22 +102,18 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	function makeBundleAction() {
 		return {
 			run: async (ctx, task) => {
-				// Check if any build inputs changed; skip when nothing moved.
-				if (!ctx.options.force) {
-					const { changed } = await hasBuildInputChanged(buildHashKey, inputDirs, inputFiles);
-					const outputExists = await exists(buildDir);
-					if (!changed && outputExists) {
-						task.output = 'No changes detected';
-						return;
-					}
+				// Fingerprint inputs before building so concurrent edits are detected on the next run.
+				const { changed, hash } = await hasBuildInputChanged(buildHashKey, inputDirs, inputFiles);
+				if (!ctx.options.force && !changed && (await exists(buildDir))) {
+					task.output = 'No changes detected';
+					return;
 				}
 
 				// Clean build output before rebuilding to prevent stale chunks
 				await removeDir(buildDir);
 				await execCommand('npx', ['rsbuild', 'build'], { task, cwd: appRoot });
 
-				// Persist the hash so the next run can skip if nothing changed
-				const { hash } = await hasBuildInputChanged(buildHashKey, inputDirs, inputFiles);
+				// Persist the pre-build hash so any concurrent edits force a rebuild next time
 				await saveSourceHash(buildHashKey, hash);
 			},
 		};
@@ -129,7 +125,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	function makeCopyAction() {
 		return {
 			run: async (ctx, task) => {
-				const stats = await syncDir(buildDir, serverStaticDir);
+				const stats = await syncDir(buildDir, serverStaticDir, { package: true });
 				task.output = formatSyncStats(stats);
 			},
 		};

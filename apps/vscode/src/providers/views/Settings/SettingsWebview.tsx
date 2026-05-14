@@ -383,6 +383,7 @@ export const Settings: React.FC = () => {
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
 						// Show "Saved" in card header on successful save
 						if (message.level === 'success') {
+							savedSettingsRef.current = JSON.parse(JSON.stringify(settings));
 							setDirty(false);
 							setSaved(true);
 							setTimeout(() => setSaved(false), 5000);
