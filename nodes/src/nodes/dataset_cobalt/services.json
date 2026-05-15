@@ -90,23 +90,6 @@
 	},
 	//
 	// Optional:
-	//		Test configuration for automated node testing
-	//
-	"test": {
-		"profiles": ["inline"],
-		"cases": [
-			{
-				"text": "Load dataset",
-				"expect": {
-					"questions": {
-						"count": ">0"
-					}
-				}
-			}
-		]
-	},
-	//
-	// Optional:
 	//		Local fields defintions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
