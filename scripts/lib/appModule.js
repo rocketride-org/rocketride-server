@@ -159,7 +159,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		{
 			name: `${name}:clean`,
 			action: () => ({
-				description: `Cleaning ${name}`,
+				description: `Clean ${name}`,
 				run: async (ctx, task) => {
 					await removeDir(buildDir);
 					await removeDir(serverStaticDir);
@@ -176,7 +176,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		actions.push({
 			name: `${name}:dev`,
 			action: () => ({
-				description: `Starting ${name} (dev)`,
+				description: `Start ${name} (dev)`,
 				run: async (ctx, task) => {
 					task.output = 'Starting development server...';
 					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: appRoot });

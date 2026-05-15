@@ -630,9 +630,13 @@ async function buildInputHash(dirs, files = []) {
             const st = await fsp.stat(file);
             hash.update(file);
             hash.update(`${st.size}:${st.mtimeMs}`);
-        } catch {
-            hash.update(file);
-            hash.update('missing');
+        } catch (err) {
+            if (err?.code === 'ENOENT') {
+                hash.update(file);
+                hash.update('missing');
+                continue;
+            }
+            throw err;
         }
     }
 

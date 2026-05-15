@@ -401,8 +401,9 @@ class ConnectionMixin(DAPClient):
         parsed = urllib.parse.urlparse(normalized)
 
         ws_scheme = 'wss' if parsed.scheme in ('https', 'wss') else 'ws'
-        ws_uri = parsed._replace(scheme=ws_scheme)
-        return f'{ws_uri.geturl()}{ws_path}'
+        normalized_ws_path = f'/{ws_path.lstrip("/")}'
+        ws_uri = parsed._replace(scheme=ws_scheme, path=normalized_ws_path, params='', query='', fragment='')
+        return ws_uri.geturl()
 
     def _set_uri(self, uri: str) -> None:
         """Update the server URI (internal)."""

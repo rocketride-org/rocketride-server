@@ -325,6 +325,7 @@ export const Settings: React.FC = () => {
 	const [dirty, setDirty] = useState(false);
 	const [saved, setSaved] = useState(false);
 	const savedSettingsRef = useRef<SettingsData | null>(null);
+	const pendingSaveSnapshotRef = useRef<SettingsData | null>(null);
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -383,7 +384,8 @@ export const Settings: React.FC = () => {
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
 						// Show "Saved" in card header on successful save
 						if (message.level === 'success') {
-							savedSettingsRef.current = JSON.parse(JSON.stringify(settings));
+							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
+							pendingSaveSnapshotRef.current = null;
 							setDirty(false);
 							setSaved(true);
 							setTimeout(() => setSaved(false), 5000);
@@ -455,7 +457,9 @@ export const Settings: React.FC = () => {
 	 * Save all settings to extension storage
 	 */
 	const handleSaveSettings = (): void => {
-		sendMessage({ type: 'saveSettings', settings });
+		const snapshot = JSON.parse(JSON.stringify(settings)) as SettingsData;
+		pendingSaveSnapshotRef.current = snapshot;
+		sendMessage({ type: 'saveSettings', settings: snapshot });
 	};
 
 	/** Revert to last-saved settings and clear dirty state. */
