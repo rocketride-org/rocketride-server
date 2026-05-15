@@ -86,7 +86,9 @@ class TestLLMOutputQuality:
             scores.append(evaluation['score'])
 
             # Each individual response should have at least some relevance
-            assert evaluation['score'] > 0.2, f'Response to "{item["input"]}" has very low relevance: {evaluation["reasoning"]}'
+            assert evaluation['score'] > 0.2, (
+                f'Response to "{item["input"]}" has very low relevance: {evaluation["reasoning"]}'
+            )
 
         avg_score = sum(scores) / len(scores)
         # Threshold matches cobalt.toml [thresholds] p95 = 0.5
@@ -111,11 +113,15 @@ class TestLLMOutputQuality:
             output = result['output']
 
             # A complete response should not be trivially short
-            assert len(output.split()) >= 10, f'Response to "{item["input"]}" is too short ({len(output.split())} words)'
+            assert len(output.split()) >= 10, (
+                f'Response to "{item["input"]}" is too short ({len(output.split())} words)'
+            )
 
             # Check that the response addresses the subject of the question
             evaluation = evaluate_relevance(output, item['expected'])
-            assert evaluation['score'] >= 0.3, f'Response to "{item["input"]}" appears incomplete: {evaluation["reasoning"]}'
+            assert evaluation['score'] >= 0.3, (
+                f'Response to "{item["input"]}" appears incomplete: {evaluation["reasoning"]}'
+            )
 
     def test_response_format(self, mock_rocketride_client, sample_qa_dataset):
         """Test that responses follow expected prose formatting.
@@ -135,7 +141,9 @@ class TestLLMOutputQuality:
             output = result['output']
 
             evaluation = evaluate_format(output, expected_format='prose')
-            assert evaluation['passed'], f'Response to "{item["input"]}" has unexpected format: {evaluation["reasoning"]}'
+            assert evaluation['passed'], (
+                f'Response to "{item["input"]}" has unexpected format: {evaluation["reasoning"]}'
+            )
 
     def test_factual_accuracy(self, mock_rocketride_client, sample_qa_dataset):
         """Test factual accuracy using keyword overlap with reference answers.

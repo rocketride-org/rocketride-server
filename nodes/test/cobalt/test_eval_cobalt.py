@@ -348,12 +348,17 @@ class TestSemanticEvaluation:
             'reasoning': 'High semantic similarity',
         }
 
-        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance) as mock_cls:
+        with (
+            patch('eval_cobalt.cobalt_evaluator._cobalt_available', True),
+            patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance) as mock_cls,
+        ):
             evaluator = CobaltEvaluator({'threshold': 0.5}, {})
             result = evaluator.evaluate_semantic('Paris is capital of France', 'The capital of France is Paris')
 
         mock_cls.assert_called_once_with(name='semantic-similarity', type='similarity', threshold=0.5)
-        mock_evaluator_instance.evaluate.assert_called_once_with(output='Paris is capital of France', expected='The capital of France is Paris')
+        mock_evaluator_instance.evaluate.assert_called_once_with(
+            output='Paris is capital of France', expected='The capital of France is Paris'
+        )
         assert result['score'] == 0.92
         assert result['passed'] is True
         assert result['evaluator'] == 'semantic'
@@ -363,7 +368,10 @@ class TestSemanticEvaluation:
         mock_evaluator_instance = MagicMock()
         mock_evaluator_instance.evaluate.side_effect = RuntimeError('Connection failed')
 
-        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance):
+        with (
+            patch('eval_cobalt.cobalt_evaluator._cobalt_available', True),
+            patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance),
+        ):
             evaluator = CobaltEvaluator({'threshold': 0.3}, {})
             result = evaluator.evaluate_semantic('hello world test', 'hello world test')
 
@@ -396,7 +404,10 @@ class TestLLMJudgeEvaluation:
             'reasoning': 'Output is accurate and well-structured',
         }
 
-        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance):
+        with (
+            patch('eval_cobalt.cobalt_evaluator._cobalt_available', True),
+            patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance),
+        ):
             evaluator = CobaltEvaluator({'eval_type': 'llm_judge', 'apikey': 'test-key', 'threshold': 0.7}, {})
             result = evaluator.evaluate_llm_judge('The answer is 42', 'expected 42')
 
@@ -409,7 +420,10 @@ class TestLLMJudgeEvaluation:
         mock_evaluator_instance = MagicMock()
         mock_evaluator_instance.evaluate.side_effect = RuntimeError('API timeout')
 
-        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance):
+        with (
+            patch('eval_cobalt.cobalt_evaluator._cobalt_available', True),
+            patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance),
+        ):
             evaluator = CobaltEvaluator({'eval_type': 'llm_judge', 'apikey': 'test-key', 'threshold': 0.5}, {})
             result = evaluator.evaluate_llm_judge('some output', 'expected')
 
@@ -620,7 +634,9 @@ class TestIInstanceWriteAnswers:
         )
 
         answer = MockAnswer(expectJson=True)
-        answer.setAnswer({'output': 'Paris', 'expected': 'SECRET_REF', 'context': 'SECRET_CTX', 'reference': 'SECRET_REFERENCE'})
+        answer.setAnswer(
+            {'output': 'Paris', 'expected': 'SECRET_REF', 'context': 'SECRET_CTX', 'reference': 'SECRET_REFERENCE'}
+        )
 
         inst.writeAnswers(answer)
 

@@ -124,7 +124,9 @@ class IInstance(IInstanceBase):
 
         result = evaluator.evaluate(output_text, expected)
 
-        debug(f'Cobalt evaluation: score={result["score"]:.3f} passed={result["passed"]} evaluator={result["evaluator"]}')
+        debug(
+            f'Cobalt evaluation: score={result["score"]:.3f} passed={result["passed"]} evaluator={result["evaluator"]}'
+        )
 
         # Forward the original answer unchanged
         self.instance.writeAnswers(answer)

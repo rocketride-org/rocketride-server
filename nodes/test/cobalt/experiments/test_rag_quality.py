@@ -100,7 +100,9 @@ class TestRAGRetrievalQuality:
             expected_text = ' '.join(item['documents'])
 
             evaluation = evaluate_relevance(retrieved_text, expected_text)
-            assert evaluation['score'] >= 0.4, f'Retrieval for "{item["query"]}" has low relevance: {evaluation["reasoning"]}'
+            assert evaluation['score'] >= 0.4, (
+                f'Retrieval for "{item["query"]}" has low relevance: {evaluation["reasoning"]}'
+            )
 
     def test_retrieval_coverage(self, mock_rocketride_client, sample_rag_dataset):
         """Test that retrieval covers key information from the source documents.
@@ -126,7 +128,9 @@ class TestRAGRetrievalQuality:
             # Check that retrieved docs cover the core content
             retrieved_text = ' '.join(output['retrieved_docs'])
             evaluation = evaluate_relevance(retrieved_text, item['expected'])
-            assert evaluation['score'] >= 0.3, f'Retrieved docs for "{item["query"]}" miss key information: {evaluation["reasoning"]}'
+            assert evaluation['score'] >= 0.3, (
+                f'Retrieved docs for "{item["query"]}" miss key information: {evaluation["reasoning"]}'
+            )
 
 
 @pytest.mark.cobalt
@@ -158,7 +162,9 @@ class TestRAGAnswerQuality:
             evaluation = evaluate_grounding(answer, context)
             scores.append(evaluation['score'])
 
-            assert evaluation['score'] >= 0.4, f'Answer for "{item["query"]}" is not well grounded: {evaluation["reasoning"]}'
+            assert evaluation['score'] >= 0.4, (
+                f'Answer for "{item["query"]}" is not well grounded: {evaluation["reasoning"]}'
+            )
 
         avg_score = sum(scores) / len(scores)
         assert avg_score >= 0.5, f'Average grounding score {avg_score:.2f} is below threshold 0.5'
@@ -191,7 +197,9 @@ class TestRAGAnswerQuality:
                 low_grounding_sentences = [s for s in evaluation['details'] if s['score'] < 0.3]
                 hallucination_ratio = len(low_grounding_sentences) / len(evaluation['details'])
 
-                assert hallucination_ratio < 0.5, f'Answer for "{item["query"]}" has {len(low_grounding_sentences)}/{len(evaluation["details"])} potentially hallucinated sentences (ratio: {hallucination_ratio:.2f})'
+                assert hallucination_ratio < 0.5, (
+                    f'Answer for "{item["query"]}" has {len(low_grounding_sentences)}/{len(evaluation["details"])} potentially hallucinated sentences (ratio: {hallucination_ratio:.2f})'
+                )
 
     def test_answer_relevance_to_query(self, mock_rocketride_client, sample_rag_dataset):
         """Test that the answer is relevant to the original query.
@@ -214,7 +222,9 @@ class TestRAGAnswerQuality:
             answer = output['answer']
 
             evaluation = evaluate_relevance(answer, item['expected'])
-            assert evaluation['score'] >= 0.4, f'Answer for "{item["query"]}" is not relevant to the query: {evaluation["reasoning"]}'
+            assert evaluation['score'] >= 0.4, (
+                f'Answer for "{item["query"]}" is not relevant to the query: {evaluation["reasoning"]}'
+            )
 
 
 @pytest.mark.cobalt

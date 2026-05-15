@@ -148,7 +148,19 @@ class IEndpoint(IEndpointBase):
         return config
 
     def _hasDatasetConfig(self, config: Dict[str, Any]) -> bool:
-        return any(key in config for key in ('profile', 'source_type', 'items', 'file_path', 'dataset.source_type', 'dataset.items', 'inline', 'file'))
+        return any(
+            key in config
+            for key in (
+                'profile',
+                'source_type',
+                'items',
+                'file_path',
+                'dataset.source_type',
+                'dataset.items',
+                'inline',
+                'file',
+            )
+        )
 
     def _get_dict_value(self, value: Any, key: str, default: Any = None) -> Any:
         try:

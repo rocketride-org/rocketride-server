@@ -191,7 +191,9 @@ class DatasetLoader:
             debug('Cobalt DatasetLoader: basalt-ai-cobalt not installed, using Python fallback for transforms')
             return self._apply_transforms_fallback(items, config)
 
-    def _apply_transforms_cobalt(self, items: List[Dict[str, Any]], config: Dict[str, Any], Dataset: Any) -> List[Dict[str, Any]]:
+    def _apply_transforms_cobalt(
+        self, items: List[Dict[str, Any]], config: Dict[str, Any], Dataset: Any
+    ) -> List[Dict[str, Any]]:
         """Apply transforms using cobalt's Dataset class."""
         dataset = Dataset.from_items(items)
 
@@ -207,7 +209,9 @@ class DatasetLoader:
         if sample_size > 0:
             current_items = list(dataset)
             bounded_size = min(sample_size, len(current_items))
-            debug(f'Cobalt DatasetLoader: Sampling {bounded_size} items (requested {sample_size}, available {len(current_items)})')
+            debug(
+                f'Cobalt DatasetLoader: Sampling {bounded_size} items (requested {sample_size}, available {len(current_items)})'
+            )
             if bounded_size > 0:
                 dataset = dataset.sample(bounded_size)
 

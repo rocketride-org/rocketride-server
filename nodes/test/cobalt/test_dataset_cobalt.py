@@ -281,7 +281,13 @@ class MockDataset:
         if path.endswith('.json'):
             return cls([{'input': 'json-q1', 'expected': 'json-a1'}, {'input': 'json-q2', 'expected': 'json-a2'}])
         elif path.endswith('.csv'):
-            return cls([{'input': 'csv-q1', 'expected': 'csv-a1'}, {'input': 'csv-q2', 'expected': 'csv-a2'}, {'input': 'csv-q3', 'expected': 'csv-a3'}])
+            return cls(
+                [
+                    {'input': 'csv-q1', 'expected': 'csv-a1'},
+                    {'input': 'csv-q2', 'expected': 'csv-a2'},
+                    {'input': 'csv-q3', 'expected': 'csv-a3'},
+                ]
+            )
         return cls([])
 
     @classmethod
@@ -574,7 +580,9 @@ class TestPathValidation:
         with pytest.raises(ValueError, match='outside the working directory'):
             loader.load_from_file(_ETC_SECRETS)
 
-    @patch('os.path.realpath', side_effect=lambda p: os.path.join(_SAFE_WORKDIR_EVIL, 'test.json') if 'evil' in p else p)
+    @patch(
+        'os.path.realpath', side_effect=lambda p: os.path.join(_SAFE_WORKDIR_EVIL, 'test.json') if 'evil' in p else p
+    )
     @patch('os.getcwd', return_value=_SAFE_WORKDIR)
     def test_sibling_prefix_attack_raises(self, mock_cwd, mock_realpath):
         """Sibling prefix like /safe/workdir_evil/ must not pass startswith check."""
@@ -774,7 +782,11 @@ class TestIEndpointSource:
                         'config': {
                             'parameters': {
                                 'profile': 'inline',
-                                'inline': {'source_type': 'inline', 'items': '[{"input": "q", "expected": "a"}]', 'sample_size': 0},
+                                'inline': {
+                                    'source_type': 'inline',
+                                    'items': '[{"input": "q", "expected": "a"}]',
+                                    'sample_size': 0,
+                                },
                             },
                         },
                     },
@@ -866,7 +878,11 @@ class TestIGlobalLifecycle:
     @patch('os.getcwd', return_value=_abs_test_path('missing'))
     @patch('os.path.isfile', return_value=False)
     def test_begin_global_missing_file_graceful(self, mock_isfile, mock_cwd, mock_realpath):
-        config = {'source_type': 'file', 'file_path': os.path.join(_abs_test_path('missing'), 'data.json'), 'sample_size': 0}
+        config = {
+            'source_type': 'file',
+            'file_path': os.path.join(_abs_test_path('missing'), 'data.json'),
+            'sample_size': 0,
+        }
         g = self._make_global(config)
 
         # Should not raise; warns internally and sets empty dataset

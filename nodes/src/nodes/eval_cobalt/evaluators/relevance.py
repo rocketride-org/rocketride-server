@@ -103,7 +103,9 @@ def _compute_length_ratio(output: str, expected: str) -> float:
     return max(0.0, 0.5 - 0.1 * (ratio - 3.0))
 
 
-def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, length_weight: float = 0.3, threshold: float = 0.5) -> dict:
+def evaluate_relevance(
+    output: str, expected: str, keyword_weight: float = 0.7, length_weight: float = 0.3, threshold: float = 0.5
+) -> dict:
     """Evaluate response relevance using keyword overlap and length heuristics.
 
     This evaluator is deterministic and works entirely offline. It combines

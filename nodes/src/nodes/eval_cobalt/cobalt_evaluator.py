@@ -137,14 +137,18 @@ class CobaltEvaluator:
         try:
             evaluator = Evaluator(name='semantic-similarity', type='similarity', threshold=threshold)
             result = evaluator.evaluate(output=output, expected=expected)
-            score = float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
+            score = (
+                float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
+            )
             reasoning = result.get('reasoning', '') if isinstance(result, dict) else getattr(result, 'reasoning', '')
             return self._make_result(score, threshold, reasoning or 'Semantic similarity evaluated', 'semantic')
         except Exception as e:
             debug(f'Cobalt semantic evaluation failed: {e}')
             return self._fallback_semantic(output, expected, threshold)
 
-    def evaluate_llm_judge(self, output: str, expected: str, criteria: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
+    def evaluate_llm_judge(
+        self, output: str, expected: str, criteria: Optional[str] = None, model: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Evaluate output using an LLM as a judge (GPT-4, Claude, etc.).
 
         Args:
@@ -171,9 +175,13 @@ class CobaltEvaluator:
             return self._make_result(0.0, self._threshold, 'cobalt-ai not installed', 'llm_judge')
 
         try:
-            evaluator = Evaluator(name='llm-judge', type='llm_judge', model=model, criteria=criteria, api_key=self._apikey)
+            evaluator = Evaluator(
+                name='llm-judge', type='llm_judge', model=model, criteria=criteria, api_key=self._apikey
+            )
             result = evaluator.evaluate(output=output, expected=expected)
-            score = float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
+            score = (
+                float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
+            )
             reasoning = result.get('reasoning', '') if isinstance(result, dict) else getattr(result, 'reasoning', '')
             return self._make_result(score, self._threshold, reasoning or 'LLM judge evaluation complete', 'llm_judge')
         except Exception as e:
@@ -231,8 +239,16 @@ class CobaltEvaluator:
         try:
             from .evaluators.relevance import evaluate_relevance as _relevance_fn
 
-            result = _relevance_fn(output, expected, keyword_weight=self._keyword_weight, length_weight=self._length_weight, threshold=threshold)
-            return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'relevance')
+            result = _relevance_fn(
+                output,
+                expected,
+                keyword_weight=self._keyword_weight,
+                length_weight=self._length_weight,
+                threshold=threshold,
+            )
+            return self._make_result(
+                float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'relevance'
+            )
         except Exception as e:
             debug(f'Relevance evaluation failed: {e}')
             return self._make_result(0.0, threshold, f'Relevance evaluation failed: {type(e).__name__}', 'relevance')
@@ -253,12 +269,16 @@ class CobaltEvaluator:
             from .evaluators.grounding import evaluate_grounding as _grounding_fn
 
             result = _grounding_fn(output, context, threshold=threshold)
-            return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'grounding')
+            return self._make_result(
+                float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'grounding'
+            )
         except Exception as e:
             debug(f'Grounding evaluation failed: {e}')
             return self._make_result(0.0, threshold, f'Grounding evaluation failed: {type(e).__name__}', 'grounding')
 
-    def evaluate_format(self, output: str, expected_format: Optional[str] = None, threshold: Optional[float] = None) -> Dict[str, Any]:
+    def evaluate_format(
+        self, output: str, expected_format: Optional[str] = None, threshold: Optional[float] = None
+    ) -> Dict[str, Any]:
         """Evaluate output formatting against an expected structural format.
 
         Args:
@@ -371,6 +391,8 @@ class CobaltEvaluator:
                 union = output_tokens | expected_tokens
                 score = len(intersection) / len(union) if union else 0.0
 
-            return CobaltEvaluator._make_result(score, threshold, 'Fallback Jaccard similarity (cobalt-ai not installed)', 'semantic')
+            return CobaltEvaluator._make_result(
+                score, threshold, 'Fallback Jaccard similarity (cobalt-ai not installed)', 'semantic'
+            )
         except Exception:
             return CobaltEvaluator._make_result(0.0, threshold, 'Fallback similarity computation failed', 'semantic')
