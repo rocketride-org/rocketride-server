@@ -1,0 +1,117 @@
+{
+	"title": "Hybrid Search",
+	"protocol": "search_hybrid://",
+	"classType": ["search"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.search_hybrid",
+	"prefix": "Hybrid Search",
+	"description": ["A hybrid search component that combines vector similarity search with BM25 ", "keyword search for improved retrieval accuracy. Uses Reciprocal Rank Fusion (RRF) ", "to merge results from both search signals, producing a unified ranking that ", "captures both semantic meaning and exact keyword matches. Configurable alpha ", "parameter controls the balance between vector and keyword search. Ideal for ", "RAG pipelines where neither pure semantic nor pure keyword search alone is sufficient."],
+	"icon": "search-hybrid.svg",
+	"tile": ["Alpha: ${parameters.search_hybrid.${profile}.alpha}", "Top K: ${parameters.search_hybrid.${profile}.top_k}"],
+	"lanes": {
+		"questions": ["documents", "answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": ["Receives questions with attached documents (from an upstream vector ", "store search) and re-ranks them using hybrid vector + BM25 scoring."],
+			"output": [
+				{
+					"lane": "documents",
+					"description": ["Produces documents re-ranked by hybrid search score, combining ", "vector similarity and keyword relevance via Reciprocal Rank Fusion."],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": ["Produces an answer composed from the top-ranked documents."],
+					"output": []
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "balanced",
+		"profiles": {
+			"balanced": {
+				"title": "Balanced - Equal weight to vector and keyword search",
+				"alpha": 0.5,
+				"top_k": 10,
+				"rrf_k": 60
+			},
+			"semantic": {
+				"title": "Semantic-heavy - Emphasize vector similarity",
+				"alpha": 0.8,
+				"top_k": 10,
+				"rrf_k": 60
+			},
+			"keyword": {
+				"title": "Keyword-heavy - Emphasize BM25 keyword matching",
+				"alpha": 0.2,
+				"top_k": 10,
+				"rrf_k": 60
+			}
+		}
+	},
+	"fields": {
+		"search_hybrid.alpha": {
+			"type": "number",
+			"title": "Alpha (vector weight)",
+			"description": "Weight for vector scores (0.0 = BM25 only, 1.0 = vector only, 0.5 = balanced)",
+			"default": 0.5
+		},
+		"search_hybrid.top_k": {
+			"type": "number",
+			"title": "Top K results",
+			"description": "Maximum number of results to return after hybrid ranking",
+			"default": 10
+		},
+		"search_hybrid.rrf_k": {
+			"type": "number",
+			"title": "RRF constant (k)",
+			"description": "Reciprocal Rank Fusion constant. Higher values reduce impact of top rankings",
+			"default": 60
+		},
+		"search_hybrid.balanced": {
+			"object": "balanced",
+			"properties": ["search_hybrid.alpha", "search_hybrid.top_k", "search_hybrid.rrf_k"]
+		},
+		"search_hybrid.semantic": {
+			"object": "semantic",
+			"properties": ["search_hybrid.alpha", "search_hybrid.top_k", "search_hybrid.rrf_k"]
+		},
+		"search_hybrid.keyword": {
+			"object": "keyword",
+			"properties": ["search_hybrid.alpha", "search_hybrid.top_k", "search_hybrid.rrf_k"]
+		},
+		"search_hybrid.profile": {
+			"title": "Search mode",
+			"description": "Select the balance between vector and keyword search",
+			"type": "string",
+			"default": "balanced",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "balanced",
+					"properties": ["search_hybrid.balanced"]
+				},
+				{
+					"value": "semantic",
+					"properties": ["search_hybrid.semantic"]
+				},
+				{
+					"value": "keyword",
+					"properties": ["search_hybrid.keyword"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Hybrid Search",
+			"properties": ["search_hybrid.profile"]
+		}
+	]
+}
