@@ -182,7 +182,7 @@ class MockCollection:
             count += 1
 
             # Apply limit
-            if limit and len(results['ids']) >= limit:
+            if limit is not None and len(results['ids']) >= limit:
                 break
 
         return results
