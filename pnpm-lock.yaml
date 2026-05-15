@@ -471,7 +471,7 @@ importers:
         specifier: ^18.0.0
         version: 18.2.25
       '@types/vscode':
-        specifier: ^1.120.0
+        specifier: ^1.99.0
         version: 1.120.0
       '@types/vscode-webview':
         specifier: ^1.57.5
