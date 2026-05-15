@@ -533,8 +533,16 @@ def _render_init(node_name: str, has_requirements: bool) -> str:
     return _license_header() + "\n" + body
 
 
-def _render_readme(node_name: str, title: str, description: str) -> str:
+def _render_readme(node_name: str, title: str, description: str, has_requirements: bool) -> str:
     """Render a minimal but valid README.md."""
+    req_section = ""
+    if has_requirements:
+        req_section = textwrap.dedent("""\
+            ## Requirements
+
+            See `requirements.txt` for Python dependencies.
+
+        """)
     return textwrap.dedent(f"""\
         # {title}
 
@@ -553,11 +561,7 @@ def _render_readme(node_name: str, title: str, description: str) -> str:
         | questions | input | Incoming questions |
         | answers | output | Generated answers |
 
-        ## Requirements
-
-        See `requirements.txt` for Python dependencies.
-
-        ## Documentation
+        {req_section}## Documentation
 
         {DOCS_URL}
     """)
@@ -589,6 +593,12 @@ def scaffold(
     _validate_node_name(node_name)
 
     effective_prefix = prefix or _derive_prefix(node_name)
+    if not re.match(r"^[a-zA-Z0-9_]+$", effective_prefix):
+        _die(
+            f"Invalid prefix {effective_prefix!r}. "
+            "Prefix can only contain alphanumeric characters and underscores."
+        )
+
     title = _title_from_name(node_name)
     target_dir = NODES_ROOT / node_name
 
@@ -615,7 +625,7 @@ def scaffold(
             register=register,
             description=description,
         ),
-        "README.md": _render_readme(node_name, title, description),
+        "README.md": _render_readme(node_name, title, description, with_requirements),
     }
 
     if with_requirements:
