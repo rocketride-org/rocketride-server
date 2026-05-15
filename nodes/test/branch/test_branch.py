@@ -830,6 +830,34 @@ class TestIInstanceRouting:
         inst.instance.writeQuestions.assert_called_once()
         inst.instance.writeAnswers.assert_not_called()
 
+    def test_write_questions_rejects_invalid_rule_lane(self, branch_runtime):
+        inst = self._make_instance(
+            branch_runtime,
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'documents'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('What is Python?')
+
+        with pytest.raises(ValueError, match='unsupported output lane'):
+            inst.writeQuestions(question)
+
+        inst.instance.writeQuestions.assert_not_called()
+        inst.instance.writeAnswers.assert_not_called()
+
+    def test_write_answers_rejects_invalid_default_lane(self, branch_runtime):
+        inst = self._make_instance(
+            branch_runtime,
+            rules=[{'condition': {'type': 'always_false'}, 'lane': 'answers'}],
+            default_lane='documents',
+        )
+        answer = _MockAnswer(text='Python is a programming language.')
+
+        with pytest.raises(ValueError, match='unsupported output lane'):
+            inst.writeAnswers(answer)
+
+        inst.instance.writeQuestions.assert_not_called()
+        inst.instance.writeAnswers.assert_not_called()
+
     def test_original_object_passed_directly(self, branch_runtime):
         """Verify that the original question is passed directly (no deepcopy) since first-match-wins means only one downstream consumer."""
         inst = self._make_instance(

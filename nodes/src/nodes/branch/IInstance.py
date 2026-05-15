@@ -36,6 +36,9 @@ except ImportError:  # pragma: no cover - exercised only in legacy schema envs
     QuestionHistory = None
 
 
+_VALID_OUTPUT_LANES = frozenset({'questions', 'answers'})
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -46,6 +49,17 @@ class IInstance(IInstanceBase):
             'metadata': metadata if metadata is not None else {},
             'score': score,
         }
+
+    def _validate_lane(self, lane: str, source_lane: str) -> str:
+        """Return a supported output lane or raise for invalid branch configuration."""
+        if lane in _VALID_OUTPUT_LANES:
+            return lane
+
+        supported = ', '.join(sorted(_VALID_OUTPUT_LANES))
+        raise ValueError(
+            f'Branch node cannot route {source_lane} input to unsupported output lane {lane!r}. '
+            f'Supported lanes: {supported}.'
+        )
 
     def _route_question(self, question: Question) -> None:
         """Evaluate branch conditions against a question and route to the matched output lane.
@@ -65,7 +79,7 @@ class IInstance(IInstanceBase):
         metadata = question.model_dump() if hasattr(question, 'model_dump') else {}
 
         data = self._build_data(text, metadata)
-        lane = engine.route(data)
+        lane = self._validate_lane(engine.route(data), 'questions')
 
         if lane == 'answers':
             # Convert question to an answer and route to the answers lane.
@@ -97,7 +111,7 @@ class IInstance(IInstanceBase):
         metadata = answer.model_dump() if hasattr(answer, 'model_dump') else {}
 
         data = self._build_data(text, metadata)
-        lane = engine.route(data)
+        lane = self._validate_lane(engine.route(data), 'answers')
 
         if lane == 'questions':
             # Convert answer to a question and route to the questions lane.
