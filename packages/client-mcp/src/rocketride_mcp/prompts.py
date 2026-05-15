@@ -63,9 +63,15 @@ PROMPT_TEMPLATES: List[Dict[str, Any]] = [
 
 # Pre-built message templates keyed by prompt name.
 _MESSAGE_TEMPLATES: Dict[str, str] = {
-    'analyze-document': ('Please analyze the document using the RocketRide pipeline "{pipeline}". Focus on the following: {query}'),
-    'chat-with-data': ('I would like to discuss data processed by the RocketRide pipeline "{pipeline}". My question is: {question}'),
-    'evaluate-pipeline': ('Evaluate the output quality of the RocketRide pipeline "{pipeline}" using the following test input:\n\n{test_input}{expected_output_section}'),
+    'analyze-document': (
+        'Please analyze the document using the RocketRide pipeline "{pipeline}". Focus on the following: {query}'
+    ),
+    'chat-with-data': (
+        'I would like to discuss data processed by the RocketRide pipeline "{pipeline}". My question is: {question}'
+    ),
+    'evaluate-pipeline': (
+        'Evaluate the output quality of the RocketRide pipeline "{pipeline}" using the following test input:\n\n{test_input}{expected_output_section}'
+    ),
 }
 
 
@@ -151,4 +157,6 @@ def _render_message(name: str, arguments: Dict[str, str]) -> str:
         else:
             arguments = {**arguments, 'expected_output_section': ''}
 
-    return template_str.format(**{k: v for k, v in arguments.items() if '{' + k + '}' in template_str or k + '_section}' in template_str})
+    return template_str.format(
+        **{k: v for k, v in arguments.items() if '{' + k + '}' in template_str or k + '_section}' in template_str}
+    )

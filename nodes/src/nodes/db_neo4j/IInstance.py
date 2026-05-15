@@ -13,6 +13,7 @@ queries, and inserts data as graph nodes.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase, tool_function, error, warning
@@ -20,7 +21,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .IGlobal import IGlobal
+from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
 from .utils import _is_cypher_safe, _parse_is_valid
 
 
@@ -38,18 +39,31 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['question'],
             'properties': {
-                'question': {'type': 'string', 'description': 'Natural-language description of the graph data you want to retrieve'},
-                'limit': {'type': 'integer', 'description': 'Maximum number of rows to return (default 250, max 25000).'},
+                'question': {
+                    'type': 'string',
+                    'description': 'Natural-language description of the graph data you want to retrieve',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}).',
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'description': 'Result rows returned by the Cypher query.', 'items': {'type': 'object'}},
+                'rows': {
+                    'type': 'array',
+                    'description': 'Result rows returned by the Cypher query.',
+                    'items': {'type': 'object'},
+                },
                 'cypher': {'type': 'string', 'description': 'The generated Cypher query that was executed.'},
                 'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
                 'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
-                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a graph query.'},
+                'answer': {
+                    'type': 'string',
+                    'description': 'LLM text response when the question is not a graph query.',
+                },
             },
         },
         description=(
@@ -84,18 +98,26 @@ class IInstance(IInstanceBase):
         input_schema={
             'type': 'object',
             'properties': {
-                'label': {'type': 'string', 'description': 'Optional node label to filter schema to a single node type.'},
+                'label': {
+                    'type': 'string',
+                    'description': 'Optional node label to filter schema to a single node type.',
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
                 'nodes': {'type': 'object', 'description': 'Map of node label to list of {property, type} objects.'},
-                'relationships': {'type': 'array', 'description': 'List of {type, start, end} relationship descriptors.'},
+                'relationships': {
+                    'type': 'array',
+                    'description': 'List of {type, start, end} relationship descriptors.',
+                },
                 'database': {'type': 'string'},
             },
         },
-        description=('Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively — only use when get_data fails or returns unexpected results.'),
+        description=(
+            'Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively — only use when get_data fails or returns unexpected results.'
+        ),
     )
     def get_schema(self, args):
         """Return the cached graph schema."""
@@ -128,7 +150,10 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'required': ['question'],
             'properties': {
-                'question': {'type': 'string', 'description': 'Natural-language question to convert into a Cypher query'},
+                'question': {
+                    'type': 'string',
+                    'description': 'Natural-language question to convert into a Cypher query',
+                },
             },
         },
         output_schema={
@@ -137,10 +162,15 @@ class IInstance(IInstanceBase):
                 'cypher': {'type': 'string', 'description': 'The generated Cypher MATCH statement.'},
                 'valid': {'type': 'boolean', 'description': 'Whether a valid, safe Cypher query was generated.'},
                 'error': {'type': 'string', 'description': 'Error message if the generated Cypher was unsafe.'},
-                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a graph query.'},
+                'answer': {
+                    'type': 'string',
+                    'description': 'LLM text response when the question is not a graph query.',
+                },
             },
         },
-        description=('Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher — for actual data retrieval, use get_data instead.'),
+        description=(
+            'Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher — for actual data retrieval, use get_data instead.'
+        ),
     )
     def get_cypher(self, args):
         """Translate natural language to Cypher without executing."""
@@ -175,6 +205,41 @@ class IInstance(IInstanceBase):
             return
 
         lanes = self.instance.getListeners()
+
+        # DIALECT: dialect-discovery request — emit {'dialect': 'neo4j'} on the
+        # answers lane so SDK callers can tell they're talking to a graph DB
+        # rather than a relational one.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': 'neo4j'}))
+                self.instance.writeAnswers(answer)
+            return
+
+        # EXECUTE: caller passes raw Cypher; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
+                return
+            try:
+                execute_result = self.IGlobal._run_query_raw(question_text)
+                rows = execute_result['rows']
+                affected = execute_result['affected_rows']
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
+
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(execute_result, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
+            return
 
         try:
             query_json = self._buildCypherQuery(question_text)
@@ -233,11 +298,15 @@ class IInstance(IInstanceBase):
             if ok:
                 return result
 
-            warning(f'Cypher validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}')
+            warning(
+                f'Cypher validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
+            )
             previous_cypher = cypher
             last_error = explain_error
 
-        warning(f'Cypher validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.')
+        warning(
+            f'Cypher validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.'
+        )
         return result
 
     def _buildCypherQueryOnce(
@@ -283,23 +352,45 @@ class IInstance(IInstanceBase):
 
         question.expectJson = True
 
-        question.addInstruction('Cypher Query Generation Guidelines', 'Generate a Cypher query based only on the node labels and relationship types provided in context.')
-        question.addInstruction('LIMIT', f'Limit the results to {limit} rows using LIMIT {limit} at the end of the query.')
-        question.addInstruction('Formatting', 'Do not wrap the Cypher query in markdown (e.g., no triple backticks) and abide by formatting in the provided examples.')
-        question.addInstruction('Commands', 'You are only permitted to use MATCH, OPTIONAL MATCH, WITH, WHERE, RETURN, ORDER BY, SKIP, and LIMIT. Avoid any write operations (CREATE, MERGE, DELETE, DETACH DELETE, SET, REMOVE, DROP).')
-        question.addInstruction('Ambiguity', "If the user's question is ambiguous, make reasonable assumptions and attempt to craft a query. If you infer that the user's question is entirely unrelated to querying the graph, attempt to answer the question in a manner similar to the provided examples.")
+        question.addInstruction(
+            'Cypher Query Generation Guidelines',
+            'Generate a Cypher query based only on the node labels and relationship types provided in context.',
+        )
+        question.addInstruction(
+            'LIMIT', f'Limit the results to {limit} rows using LIMIT {limit} at the end of the query.'
+        )
+        question.addInstruction(
+            'Formatting',
+            'Do not wrap the Cypher query in markdown (e.g., no triple backticks) and abide by formatting in the provided examples.',
+        )
+        question.addInstruction(
+            'Commands',
+            'You are only permitted to use MATCH, OPTIONAL MATCH, WITH, WHERE, RETURN, ORDER BY, SKIP, and LIMIT. Avoid any write operations (CREATE, MERGE, DELETE, DETACH DELETE, SET, REMOVE, DROP).',
+        )
+        question.addInstruction(
+            'Ambiguity',
+            "If the user's question is ambiguous, make reasonable assumptions and attempt to craft a query. If you infer that the user's question is entirely unrelated to querying the graph, attempt to answer the question in a manner similar to the provided examples.",
+        )
 
         question.addExample(
             "Who are Alice's colleagues?",
-            {'isValid': 'true', 'query': f"MATCH (alice:Person {{name: 'Alice'}})-[:WORKS_WITH]->(colleague:Person)\nRETURN colleague.name AS name, colleague.role AS role\nLIMIT {limit}"},
+            {
+                'isValid': 'true',
+                'query': f"MATCH (alice:Person {{name: 'Alice'}})-[:WORKS_WITH]->(colleague:Person)\nRETURN colleague.name AS name, colleague.role AS role\nLIMIT {limit}",
+            },
         )
         question.addExample(
             'When did the Visigoths sack Rome?',
-            {'isValid': 'false', 'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.'},
+            {
+                'isValid': 'false',
+                'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.',
+            },
         )
 
         if previous_cypher and error_message:
-            question.addContext(f'Your previous attempt produced the following Cypher:\n\n{previous_cypher}\n\nNeo4J rejected it with this error:\n\n{error_message}\n\nPlease fix the query and try again.')
+            question.addContext(
+                f'Your previous attempt produced the following Cypher:\n\n{previous_cypher}\n\nNeo4J rejected it with this error:\n\n{error_message}\n\nPlease fix the query and try again.'
+            )
 
         result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
@@ -333,8 +424,8 @@ class IInstance(IInstanceBase):
 
 
 def _clamp_limit(raw_limit) -> int:
-    """Clamp a user-supplied limit to [1, 25000]."""
+    """Clamp a user-supplied limit to [1, DEFAULT_MAX_EXECUTE_ROWS]."""
     try:
-        return max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        return max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
     except (ValueError, TypeError):
         return 250

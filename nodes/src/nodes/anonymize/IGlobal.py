@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, debug, OPEN_MODE
+from rocketlib import IGlobalBase
 from ai.common.config import Config
 
 

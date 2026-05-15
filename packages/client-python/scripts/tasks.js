@@ -31,7 +31,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState } = require('../../../scripts/lib');
+const { execCommand, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
@@ -122,12 +122,13 @@ function makeCopyToServerStaticAction() {
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			// Check for --testport from CLI options or direct options
-			const testport = options.testport || ctx.options?.testport;
-			if (testport) {
-				ctx.port = testport;
-				task.output = `Using existing server on port ${ctx.port}`;
-				return { port: ctx.port, server: null };
+			// Check for --taskserver from CLI options or direct options
+			const taskserver = options.taskserver || ctx.options?.taskserver;
+			if (taskserver) {
+				const parsed = parseServerAddress(taskserver);
+				ctx.port = parsed.port;
+				task.output = `Using existing server at ${parsed.uri}`;
+				return { port: parsed.port, server: null, serverUri: parsed.uri };
 			}
 			// Use existing server when ROCKETRIDE_URI is set (e.g. for debugging: start server yourself, then run tests)
 			const envUri = process.env.ROCKETRIDE_URI;
@@ -147,6 +148,12 @@ function makeStartTestServerAction(options = {}) {
 				script: 'ai/eaas.py',
 				trace: options.trace,
 				basePort: 20000,
+				// CI for fork PRs doesn't have repo secrets; the integration tests
+				// expect a shared API key between server and client. Default to the
+				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
+				env: {
+					ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+				},
 				onOutput: (text) => {
 					if (taskComplete) return;
 					const lines = text.trim().split('\n');
@@ -193,6 +200,10 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_URI: serverUri,
+				// CI can provide ROCKETRIDE_APIKEY as an empty string; pytest's
+				// TEST_CONFIG uses os.getenv(..., 'MYAPIKEY') which does not treat
+				// empty as missing. Ensure a usable default for local test server auth.
+				ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 			};
 
 			// Use absolute paths since cwd is dist/server
@@ -235,15 +246,16 @@ module.exports = {
 		{
 			name: 'client-python:build',
 			action: () => ({
-				description: 'Build Python client',
+				description: 'Build client-python',
 				steps: ['server:build', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
 			}),
 		},
 		{
 			name: 'client-python:test',
 			action: () => ({
-				description: 'Test Python client',
+				description: 'Testing client-python',
 				steps: [
+					'server:build',
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
 					bracket({
 						name: 'py-test-server',
@@ -257,7 +269,7 @@ module.exports = {
 		{
 			name: 'client-python:clean',
 			action: () => ({
-				description: 'Clean Python client',
+				description: 'Cleaning client-python',
 				run: async (ctx, task) => {
 					await removeDirs([path.join(PACKAGE_DIR, 'build'), path.join(PACKAGE_DIR, 'dist')]);
 					await removeDirAndParents(PROJECT_ROOT, [BUILD_DIR, DIST_DIR, SERVER_CLIENTS_DIR, SERVER_STATIC_DIR]);

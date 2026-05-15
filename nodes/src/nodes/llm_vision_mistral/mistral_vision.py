@@ -70,9 +70,13 @@ class Chat(ChatBase):
         if not api_key:
             raise ValueError('Missing Mistral AI API key. Please check your configuration.')
         if api_key.startswith('sk-'):
-            raise ValueError('Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.'
+            )
         if api_key.startswith('AI'):
-            raise ValueError('Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.'
+            )
         # Initialize the client with a custom httpx client to handle large image payloads
         try:
             http_client = httpx.Client(follow_redirects=True, timeout=120.0)
@@ -130,7 +134,13 @@ class Chat(ChatBase):
             with open(image_data, 'rb') as image_file:
                 image_bytes = image_file.read()
                 ext = os.path.splitext(image_data)[1].lower()
-                mime_type = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp'}.get(ext, 'image/jpeg')
+                mime_type = {
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.png': 'image/png',
+                    '.gif': 'image/gif',
+                    '.webp': 'image/webp',
+                }.get(ext, 'image/jpeg')
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 return {'type': 'image_url', 'image_url': f'data:{mime_type};base64,{base64_image}'}
         raise ValueError('Invalid image input format. Please provide a valid URL, base64 encoded image, or file path.')
@@ -173,7 +183,20 @@ class Chat(ChatBase):
     def _shouldRetry(self, error: Exception) -> bool:
         """Determine if an error is retryable."""
         error_msg = str(error).lower()
-        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'service temporarily unavailable', 'bad gateway']
+        retryable_errors = [
+            'timeout',
+            'timed out',
+            'connection',
+            'network',
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'service unavailable',
+            'service temporarily unavailable',
+            'bad gateway',
+        ]
         return any(phrase in error_msg for phrase in retryable_errors)
 
     def _getRetryConfig(self, model: str) -> Tuple[int, float]:
@@ -203,13 +226,18 @@ class Chat(ChatBase):
 
         # Validate image input
         if not image_data or not self._validateImageInput(image_data):
-            raise ValueError('Invalid image input. Please provide a valid image URL, base64 encoded image, or file path.')
+            raise ValueError(
+                'Invalid image input. Please provide a valid image URL, base64 encoded image, or file path.'
+            )
         for attempt in range(max_retries + 1):
             try:
                 # Process the image input
                 image_content = self._processImageInput(image_data)
                 # Create the messages with system role, user prompt, and image content
-                messages = [{'role': 'system', 'content': [{'type': 'text', 'text': self._system_prompt}]}, {'role': 'user', 'content': [{'type': 'text', 'text': prompt_text}, image_content]}]
+                messages = [
+                    {'role': 'system', 'content': [{'type': 'text', 'text': self._system_prompt}]},
+                    {'role': 'user', 'content': [{'type': 'text', 'text': prompt_text}, image_content]},
+                ]
                 api_params = {
                     'model': self._model,
                     'messages': messages,

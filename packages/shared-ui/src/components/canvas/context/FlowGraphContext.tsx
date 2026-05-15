@@ -711,6 +711,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	const addNode = useCallback(
 		(data: INodeData, position?: { x: number; y: number }, type: INodeType = INodeType.Default): string => {
+			if (isLocked) return '';
 			const id = generateNodeId(nodes, data.provider);
 
 			// Default to center of viewport if no position given, then search
@@ -823,6 +824,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	const updateNode = useCallback(
 		(nodeId: string, data: Partial<INodeData>): FlowNode | undefined => {
+			if (isLocked) return undefined;
 			let updatedNode: FlowNode | undefined;
 
 			setNodes((nds: FlowNode[]) =>
@@ -840,6 +842,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	const deleteNode = useCallback(
 		(nodeIds: string[], deleteChildren: boolean = false) => {
+			if (isLocked) return;
 			const ids = new Set(nodeIds);
 			const nodesToRemove = nodes.filter((n: FlowNode) => ids.has(n.id));
 			const parentMap = Object.fromEntries(nodesToRemove.map((n) => [n.id, n]));

@@ -61,7 +61,7 @@ def run():
     Execute the script.
     """
     import os
-    
+
     # Inject mock modules path if set (for testing)
     mock_path = os.environ.get('ROCKETRIDE_MOCK')
     if mock_path:
@@ -102,10 +102,17 @@ def run():
 
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning("Failed to initialize debugpy: %s", e)
+
+            logging.getLogger(__name__).warning('Failed to initialize debugpy: %s', e)
 
     # Start the global event loop for async operations
     _start_event_loop()
+
+    # Block direct GPU library imports (torch, tensorflow, etc.) when running
+    # in model server mode — all GPU inference goes through ModelClient RPC
+    from ai.common.models.gpu_guard import install_gpu_guard
+
+    install_gpu_guard()
 
     # This will actually do the dependency loading and start the main process
     from rocketlib import processArguments, monitorStatus

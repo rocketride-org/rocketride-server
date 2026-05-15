@@ -13,7 +13,7 @@
 import React, { useEffect } from 'react';
 import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
 import cloudLogoLight from '../../../../../rocketride-light-icon.png';
-import { settingsStyles as S } from '../../PageSettings/SettingsWebview';
+import { settingsStyles as S } from '../../Settings/SettingsWebview';
 import { useTheme } from '../../hooks/useTheme';
 
 // =============================================================================
@@ -32,10 +32,10 @@ export interface CloudPanelProps {
 	simplified?: boolean;
 	/** Whether the server supports SaaS/OAuth. When false, shows an incompatible-server message. */
 	isSaas?: boolean;
-	/** Called on mount to trigger a server probe. Parent updates isSaas when result arrives. */
-	onProbeServer?: () => void;
-	/** Called when isSaas becomes true, to fetch the team list. */
-	onFetchTeams?: () => void;
+	/** Called on mount to probe the cloud server. Receives the cloud endpoint URL. */
+	onProbeServer?: (cloudUrl: string) => void;
+	/** Called when isSaas becomes true, to fetch the team list. Receives the cloud endpoint URL. */
+	onFetchTeams?: (cloudUrl: string) => void;
 }
 
 // =============================================================================
@@ -46,15 +46,18 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 	const id = (name: string) => `${idPrefix}-${name}`;
 	const theme = useTheme();
 
-	// Stage 1: Probe on mount to check if server supports cloud/OAuth
-	useEffect(() => {
-		if (onProbeServer) onProbeServer();
-	}, []);
+	const cloudUrl = process.env.ROCKETRIDE_URI || '';
 
-	// Stage 2: Once confirmed SaaS and signed in, fetch teams
+	// Step 1: Probe on mount to confirm server is SaaS.
 	useEffect(() => {
-		if (isSaas && cloudSignedIn && onFetchTeams) onFetchTeams();
-	}, [isSaas, cloudSignedIn, onFetchTeams]);
+		if (onProbeServer && cloudUrl) onProbeServer(cloudUrl);
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Step 3: Once SaaS is confirmed and user is signed in, fetch teams.
+	// (Step 2 — sign-in — is handled by the Sign In button / auth listener.)
+	useEffect(() => {
+		if (isSaas && cloudSignedIn && onFetchTeams && cloudUrl) onFetchTeams(cloudUrl);
+	}, [isSaas, cloudSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	return (
 		<>

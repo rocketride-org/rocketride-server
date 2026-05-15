@@ -211,7 +211,11 @@ def sync_provider(
     title_mappings = config.get('title_mappings', {})
     output_token_overrides = config.get('model_output_tokens', {}).get('overrides', {})
     output_defaults = config.get('model_output_tokens', {}).get('defaults', {})
-    default_output_tokens = output_defaults.get('embedding', 0) if provider_name.startswith('embedding_') else output_defaults.get('chat', 4096)
+    default_output_tokens = (
+        output_defaults.get('embedding', 0)
+        if provider_name.startswith('embedding_')
+        else output_defaults.get('chat', 4096)
+    )
     global_protected = list(_active_protected_profiles(config.get('default_protected_profiles', [])))
 
     return provider.sync(
@@ -273,25 +277,33 @@ def main() -> int:
         dest='model_sources',
         default=None,
         metavar='SOURCE',
-        help=("Source to consult for model lists and token data. Repeatable. Order matters — the first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: 'provider', 'openrouter', 'litellm' (in that order)."),
+        help=(
+            "Source to consult for model lists and token data. Repeatable. Order matters — the first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: 'provider', 'openrouter', 'litellm' (in that order)."
+        ),
     )
     parser.add_argument(
         '--enable-discovery',
         action='store_true',
         default=False,
-        help=("Allow new model profiles to be added to services.json. Default off — without this flag, the sync only enriches existing profiles' token data and deprecation status."),
+        help=(
+            "Allow new model profiles to be added to services.json. Default off — without this flag, the sync only enriches existing profiles' token data and deprecation status."
+        ),
     )
     parser.add_argument(
         '--allow-fallback-discovery',
         action='store_true',
         default=False,
-        help=('Permit OpenRouter/LiteLLM to act as discovery sources for providers whose API key is missing. Requires --enable-discovery. Default off — strict mode skips discovery for providers without keys (existing profiles still enriched).'),
+        help=(
+            'Permit OpenRouter/LiteLLM to act as discovery sources for providers whose API key is missing. Requires --enable-discovery. Default off — strict mode skips discovery for providers without keys (existing profiles still enriched).'
+        ),
     )
     parser.add_argument(
         '--no-config-overrides',
         action='store_true',
         default=False,
-        help=('Ignore token_limit_overrides and model_output_tokens.overrides from sync_models.config.json. Token limits come entirely from live data sources (provider API, OpenRouter, LiteLLM).'),
+        help=(
+            'Ignore token_limit_overrides and model_output_tokens.overrides from sync_models.config.json. Token limits come entirely from live data sources (provider API, OpenRouter, LiteLLM).'
+        ),
     )
     args = parser.parse_args()
 
@@ -333,7 +345,11 @@ def main() -> int:
         return 1
 
     providers_config = config.get('providers', {})
-    providers_to_sync = sorted(k for k in _PROVIDER_REGISTRY if providers_config.get(k, {}).get('enabled', True) is not False) if args.all else args.providers
+    providers_to_sync = (
+        sorted(k for k in _PROVIDER_REGISTRY if providers_config.get(k, {}).get('enabled', True) is not False)
+        if args.all
+        else args.providers
+    )
 
     # Pre-load OpenRouter cache once before the provider loop so the header
     # status is accurate and all per-model lookups hit the in-memory dict.

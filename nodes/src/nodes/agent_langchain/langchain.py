@@ -91,7 +91,10 @@ def _build_langchain_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                 if msg is not None:
                     return ChatResult(generations=[ChatGeneration(message=msg)])
                 if attempt < 2:
-                    prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+                    prompt = (
+                        prompt
+                        + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+                    )
 
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 

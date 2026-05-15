@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 
-from rocketlib import IInstanceBase, tool_function, warning
+from rocketlib import IInstanceBase, normalize_tool_input, tool_function, warning
 
 from .utils import firecrawl_wrapper
 from .IGlobal import IGlobal
@@ -48,7 +48,12 @@ class IInstance(IInstanceBase):
             'required': ['url'],
             'properties': {
                 'url': {'type': 'string', 'description': 'The URL of the web page to scrape.'},
-                'format': {'type': 'string', 'enum': ['markdown', 'html'], 'description': 'Output format (default: "markdown").', 'default': 'markdown'},
+                'format': {
+                    'type': 'string',
+                    'enum': ['markdown', 'html'],
+                    'description': 'Output format (default: "markdown").',
+                    'default': 'markdown',
+                },
             },
         },
         output_schema={
@@ -63,7 +68,7 @@ class IInstance(IInstanceBase):
     )
     def scrape_url(self, args):
         """Scrape a single web page."""
-        args = _normalize_tool_input(args)
+        args = normalize_tool_input(args, tool_name='firecrawl')
         url = args.get('url')
         if not url:
             raise ValueError('scrape_url requires a `url` parameter')
@@ -104,7 +109,7 @@ class IInstance(IInstanceBase):
     )
     def map_url(self, args):
         """Map a website's URL structure."""
-        args = _normalize_tool_input(args)
+        args = normalize_tool_input(args, tool_name='firecrawl')
         url = args.get('url')
         if not url:
             raise ValueError('map_url requires a `url` parameter')
@@ -120,34 +125,3 @@ class IInstance(IInstanceBase):
                     links.append(link)
 
         return {'success': True, 'links': links}
-
-
-def _normalize_tool_input(input_obj):
-    """Normalize tool input into a plain dict.
-
-    Handles: None, dict, Pydantic model, JSON string, and nested
-    ``input`` wrappers that some framework paths produce.
-    """
-    if input_obj is None:
-        return {}
-    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
-        input_obj = input_obj.model_dump()
-    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
-        input_obj = input_obj.dict()
-    if isinstance(input_obj, str):
-        try:
-            parsed = json.loads(input_obj)
-            if isinstance(parsed, dict):
-                input_obj = parsed
-        except (json.JSONDecodeError, TypeError) as e:
-            warning(f'firecrawl: failed to parse input as JSON: {e}')
-            pass
-    if not isinstance(input_obj, dict):
-        warning(f'firecrawl: unexpected input type {type(input_obj).__name__}')
-        return {}
-    if 'input' in input_obj and isinstance(input_obj['input'], dict):
-        inner = input_obj['input']
-        extras = {k: v for k, v in input_obj.items() if k != 'input'}
-        input_obj = {**inner, **extras}
-    input_obj.pop('security_context', None)
-    return input_obj

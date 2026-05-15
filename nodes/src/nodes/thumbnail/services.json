@@ -64,32 +64,6 @@
 		"image": ["documents", "image"],
 		"documents": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "image",
-			"description": "Image data to thumbnail",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Thumbnailed image as document with metadata"
-				},
-				{
-					"lane": "image",
-					"description": "Thumbnailed image data"
-				}
-			]
-		},
-		{
-			"lane": "documents",
-			"description": "Image documents to thumbnail",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Thumbnailed image documents with original metadata preserved"
-				}
-			]
-		}
-	],
 	//
 	// Optional:
 	//     Local fields definitions - these define fields only for the

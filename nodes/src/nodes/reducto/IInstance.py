@@ -86,7 +86,9 @@ class IInstance(IInstanceBase):
                         except UnicodeDecodeError:
                             metadata_str = metadata_str.decode('latin-1', errors='ignore')
                     self.current_metadata = json.loads(metadata_str)
-                    debug(f'Reducto Instance: Metadata loaded: {list(self.current_metadata.keys()) if self.current_metadata else []}')
+                    debug(
+                        f'Reducto Instance: Metadata loaded: {list(self.current_metadata.keys()) if self.current_metadata else []}'
+                    )
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 debug(f'Reducto Instance: Failed to parse metadata: {e}')
                 self.current_metadata = None
@@ -109,7 +111,9 @@ class IInstance(IInstanceBase):
                     data_bytes = raw_tag_bytes[header_size:]
                     self.document_data += data_bytes
                 else:
-                    debug(f'Reducto Instance: Invalid SDAT tag structure: total={len(raw_tag_bytes)}, data_size={tag_size}')
+                    debug(
+                        f'Reducto Instance: Invalid SDAT tag structure: total={len(raw_tag_bytes)}, data_size={tag_size}'
+                    )
             except Exception as e:
                 debug(f'Reducto Instance: Error processing SDAT tag: {e}')
                 if self.current_object:

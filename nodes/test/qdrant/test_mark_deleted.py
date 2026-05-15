@@ -117,7 +117,9 @@ class TestQdrantMarkDeleted:
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'meta': {'isDeleted': True}}, f'Expected {{"meta": {{"isDeleted": true}}}} but got {kwargs["payload"]}'
+        assert kwargs['payload'] == {'meta': {'isDeleted': True}}, (
+            f'Expected {{"meta": {{"isDeleted": true}}}} but got {kwargs["payload"]}'
+        )
 
     def test_markActive_writes_meta_isDeleted_false(self):
         """MarkActive must set meta.isDeleted = False, not top-level isDeleted."""
@@ -127,7 +129,9 @@ class TestQdrantMarkDeleted:
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'meta': {'isDeleted': False}}, f'Expected {{"meta": {{"isDeleted": false}}}} but got {kwargs["payload"]}'
+        assert kwargs['payload'] == {'meta': {'isDeleted': False}}, (
+            f'Expected {{"meta": {{"isDeleted": false}}}} but got {kwargs["payload"]}'
+        )
 
     def test_markDeleted_skips_when_collection_missing(self):
         """MarkDeleted is a no-op when the collection does not exist."""

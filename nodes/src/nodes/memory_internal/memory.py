@@ -100,8 +100,6 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
 ]
 
 
-
-
 class MemoryStore:
     """Run-scoped keyed memory for the RocketRide planning agent."""
 
@@ -156,7 +154,7 @@ class MemoryStore:
             args = {}
 
         # Strip the "memory." prefix to get the operation name
-        op = tool_name[len(_MEMORY_PREFIX):]
+        op = tool_name[len(_MEMORY_PREFIX) :]
         if op == 'put':
             return self.put(args.get('key', ''), args.get('value'))
         if op == 'get':

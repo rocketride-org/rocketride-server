@@ -8,7 +8,7 @@
  *
  * Pure service lifecycle management — register, start, stop, remove, status.
  * No downloading, no versioning, no engine installation. The caller
- * (PageDeployProvider) handles engine installation via EngineInstaller
+ * (DeployProvider) handles engine installation via EngineInstaller
  * and then passes the executable path here.
  *
  * Each platform has its own implementation:
@@ -97,9 +97,18 @@ export abstract class ServiceManager {
 		return new Promise((resolve) => {
 			const socket = new net.Socket();
 			socket.setTimeout(1000);
-			socket.on('connect', () => { socket.destroy(); resolve(true); });
-			socket.on('timeout', () => { socket.destroy(); resolve(false); });
-			socket.on('error', () => { socket.destroy(); resolve(false); });
+			socket.on('connect', () => {
+				socket.destroy();
+				resolve(true);
+			});
+			socket.on('timeout', () => {
+				socket.destroy();
+				resolve(false);
+			});
+			socket.on('error', () => {
+				socket.destroy();
+				resolve(false);
+			});
 			socket.connect(port, 'localhost');
 		});
 	}

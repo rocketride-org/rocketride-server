@@ -49,6 +49,7 @@ import { sanitizeAndParseHtmlToReact } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import MoreMenu from './more-menu';
 import { useFlow, useNodeActionLabels, useCopy, usePaste } from '../../../../hooks';
+import { useFlowPreferences } from '../../../../context/FlowPreferencesContext';
 
 // =============================================================================
 // Styles
@@ -121,6 +122,7 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 	// ========================================================================
 
 	const { toolchainState, deleteNode: deleteNodeFromGraph, onOpenLink } = useFlow();
+	const { isLocked } = useFlowPreferences();
 
 	// Open the node config panel via the graph context
 	const { setEditingNodeId, editingNodeId } = useFlow();
@@ -152,12 +154,12 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 				copy();
 				paste();
 			},
-			disabled: !!actionsPanelType,
+			disabled: !!actionsPanelType || isLocked,
 		},
 		{
 			...deleteNode,
 			handleClick: () => deleteNodeFromGraph([id]),
-			disabled: false,
+			disabled: isLocked,
 		},
 	];
 

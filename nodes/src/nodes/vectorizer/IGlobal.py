@@ -52,7 +52,9 @@ class IGlobal(IGlobalBase):
 
             # If we are using an embedding
             if 'preprocessor' in config:
-                providerPreprocessor, configPreprocessor = Config.getMultiProviderConfig('preprocessor', self.glb.connConfig)
+                providerPreprocessor, configPreprocessor = Config.getMultiProviderConfig(
+                    'preprocessor', self.glb.connConfig
+                )
                 self.preprocessor = getPreprocessor(providerPreprocessor, configPreprocessor, bag)
 
             # If we are using an embedding
