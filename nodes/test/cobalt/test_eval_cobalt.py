@@ -170,6 +170,7 @@ if _NODES_DIR not in sys.path:
     sys.path.insert(0, _NODES_DIR)
 
 from eval_cobalt.cobalt_evaluator import CobaltEvaluator
+
 importlib.import_module('eval_cobalt.IGlobal')
 importlib.import_module('eval_cobalt.IInstance')
 
