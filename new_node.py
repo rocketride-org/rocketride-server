@@ -80,6 +80,26 @@ _BASE_MAP: dict[str, tuple[str, str, list[str], list[str]]] = {
             "from ai.common.llm_base import LLMBase",
         ],
     ),
+    "agent": (
+        "IGlobalBase",
+        "AgentBase",
+        [
+            "from rocketlib import IGlobalBase",
+        ],
+        [
+            "from ai.common.agent.agent import AgentBase",
+        ],
+    ),
+    "embedding": (
+        "IGlobalBase",
+        "EmbeddingBase",
+        [
+            "from rocketlib import IGlobalBase",
+        ],
+        [
+            "from ai.common.embedding import EmbeddingBase",
+        ],
+    ),
     "database": (
         "DatabaseGlobalBase",
         "DatabaseInstanceBase",
@@ -201,7 +221,6 @@ def _render_services_json(
     capabilities: list[str],
     register: str | None,
     description: str,
-    has_requirements: bool,
 ) -> str:
     """
     Render a valid services.json for the new node.
@@ -595,7 +614,6 @@ def scaffold(
             capabilities=capabilities,
             register=register,
             description=description,
-            has_requirements=with_requirements,
         ),
         "README.md": _render_readme(node_name, title, description),
     }
