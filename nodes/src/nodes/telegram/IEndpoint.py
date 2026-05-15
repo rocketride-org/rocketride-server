@@ -27,6 +27,7 @@ import argparse
 import sys
 import asyncio
 import secrets
+import threading
 import uuid
 from typing import Any, Callable, Dict
 from urllib.parse import urlparse
@@ -588,27 +589,106 @@ class IEndpoint(IEndpointBase):
     # -------------------------------------------------------------------------
 
     def _run(self):
-        """Bootstrap the WebServer and configure the update-delivery mode.
+        """Block until shutdown, using the shared WebServer from ``node.py`` if available.
 
-        Parses ``--data_host`` and ``--data_port`` from sys.argv, reads and
-        caches the Telegram config (bot token, mode, webhook URL), creates the
-        WebServer instance, optionally registers the webhook POST route, and
-        starts the server (blocking until shutdown).
+        When EaaS spawns this subprocess with ``--data_port=N``, ``node.py``
+        bootstraps a shared :class:`WebServer` on the background event loop
+        and exposes it as ``ai.node.shared_web_server``. We register our
+        target endpoint and (in webhook mode) the inbound POST route on
+        that server, then block on a shutdown event so ``scanObjects()``
+        doesn't return.
 
-        Returns:
-            None
+        Legacy fallback (direct CLI invocation without ``--data_port``,
+        unit tests): the shared server is ``None``, and we build our own
+        ``WebServer`` and run it blocking — today's behavior preserved.
+
+        Note on cloud reachability: telegram webhook mode is inherently
+        self-hosted-only regardless of routing. Cloud users share a
+        multi-tenant engine and cannot expose their pipeline's
+        subprocess port to Telegram; only polling mode works in cloud.
+        See the project plan ("HTTP-over-DAP pattern" / "push-message
+        source nodes") for the architectural reasoning.
         """
-        parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument('--data_host', type=str, default='localhost')
-        parser.add_argument('--data_port', type=int, default=5567)
-        parsed_args, _ = parser.parse_known_args(sys.argv)
-
         # Read config HERE (sync context)
         config = self._get_telegram_config()
         self._bot_token = config.get('botToken', '')
         self._mode = config.get('mode', 'polling')
         self._webhook_url = config.get('webhookUrl', '')
         debug(f'Telegram _run: mode={self._mode!r} token_present={bool(self._bot_token)}')
+
+        # Discover the shared server. The lazy attribute lookup is
+        # required — node.py assigns to its module-level
+        # `shared_web_server` at runtime, after this file has been
+        # imported.
+        from ai import node as ai_node
+
+        shared = ai_node.shared_web_server
+
+        if shared is None:
+            # Legacy / direct invocation path — construct and run our
+            # own server, blocking exactly as before.
+            return self._run_legacy_self_hosted_server()
+
+        # Shared-server path: register on the existing server.
+        shared.app.state.target = self.target
+
+        if self._mode == 'webhook':
+            # Register the inbound POST route so Telegram's callback URL
+            # resolves to our handler. Cloud users can't actually reach
+            # this externally (see docstring) but the registration is
+            # harmless and the route works for self-hosted users.
+            webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
+            shared.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
+
+        # Drive our lifespan startup hook on the SHARED server_loop —
+        # not on a fresh asyncio.run() loop. _startup spawns a polling
+        # task via `asyncio.create_task(self._poll_loop())`. That task
+        # must outlive _startup itself (it runs for the whole pipeline
+        # lifetime). If we ran _startup inside `asyncio.run()`, the
+        # temporary loop would close when _startup returned and the
+        # polling task would die with it. Scheduling on `server_loop`
+        # (the existing daemon-thread loop that hosts the shared
+        # WebServer) gives the polling task a stable home for the
+        # duration of the subprocess.
+        from ai.node import server_loop
+
+        try:
+            startup_future = asyncio.run_coroutine_threadsafe(self._startup(), server_loop)
+            startup_future.result(timeout=30)
+        except Exception as e:
+            debug(f'telegram _startup raised: {e}')
+
+        # Block scanObjects() until something signals shutdown. Today
+        # nothing in the codebase sets this event in production — the
+        # subprocess is killed by EaaS / `--autoterm` and the wait is
+        # interrupted by process termination, mirroring how uvicorn's
+        # `server.run()` blocked until the same external signal.
+        self._shutdown_event = threading.Event()
+        self._shutdown_event.wait()
+
+        # Same pattern for shutdown — _shutdown cancels the polling
+        # task and closes the aiohttp session, both of which were
+        # created on server_loop, so the cancel/await must also run on
+        # server_loop.
+        try:
+            shutdown_future = asyncio.run_coroutine_threadsafe(self._shutdown(), server_loop)
+            shutdown_future.result(timeout=10)
+        except Exception as e:
+            debug(f'telegram _shutdown raised: {e}')
+
+    def _run_legacy_self_hosted_server(self):
+        """Legacy path: construct and run a dedicated ``WebServer``.
+
+        Used only when ``ai.node.shared_web_server`` is ``None`` — i.e.
+        when ``node.py`` was invoked without ``--data_port`` (direct CLI
+        invocations, unit tests). EaaS always passes ``--data_port`` in
+        production, so this branch never runs there.
+        """
+        debug('telegram shared web server is not setup, using LEGACY self-hosted WebServer path')
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument('--data_host', type=str, default='localhost')
+        parser.add_argument('--data_port', type=int, default=5567)
+        parsed_args, _ = parser.parse_known_args(sys.argv)
 
         self._server = WebServer(
             config={

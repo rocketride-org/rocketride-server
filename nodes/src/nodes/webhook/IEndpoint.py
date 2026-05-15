@@ -25,6 +25,7 @@ import json
 import os
 import argparse
 import sys
+import threading
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, debug
 from typing import Any, Dict, Callable
 from ai.web import WebServer
@@ -52,12 +53,78 @@ class IEndpoint(IEndpointBase):
 
     target: IEndpointBase | None = None
 
-    async def _startup(self):
-        """
-        Perform startup initialization for the endpoint.
+    def _emit_ready_status_sync(self):
+        """Emit the per-logical-type readiness status message.
 
-        This method is called when the endpoint is started and can be
-        overridden in subclasses to perform additional initialization tasks.
+        Pure-sync body, just three C-extension calls (``monitorOther`` and
+        ``monitorStatus``) and a ``json.dumps``. Extracted from
+        :pyfunc:`_startup` so the shared-server path in :pyfunc:`_run`
+        can call it directly without spinning up a fresh asyncio loop
+        via ``asyncio.run`` (which crashes the subprocess in production —
+        see Phase 3 notes).
+        """
+        try:
+            if self.endpoint.logicalType == 'chat':
+                # These should NOT be replacable strings!!!
+                info = {
+                    'button-text': 'Chat now',
+                    'button-link': '{host}/chat?auth={public_auth}',
+                    'url-text': 'Chat interface URL',
+                    'url-link': '{host}/chat',
+                    'auth-text': 'Public Authorization Key',
+                    'auth-key': '{public_auth}',
+                    'token-text': 'Private Token',
+                    'token-key': '{token}',
+                }
+                monitorOther('usr', json.dumps([info]))
+                monitorStatus('Chat ready - system is ready to accept questions')
+
+            elif self.endpoint.logicalType == 'dropper':
+                info = {
+                    'button-text': 'Drop now',
+                    'button-link': '{host}/dropper?auth={public_auth}',
+                    'url-text': 'Dropper interface URL',
+                    'url-link': '{host}/dropper',
+                    'auth-text': 'Public Authorization Key',
+                    'auth-key': '{public_auth}',
+                    'token-text': 'Private Token',
+                    'token-key': '{token}',
+                }
+                monitorOther('usr', json.dumps([info]))
+                monitorStatus('Dropper ready - system is ready to process files')
+
+            elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
+                url_text_map = {
+                    'webhook': 'Webhook interface URL',
+                    'adtoolchain': 'RocketRide DataToolchain interface URL',
+                }
+                info = {
+                    'url-text': url_text_map[self.endpoint.logicalType],
+                    'url-link': '{host}/webhook',
+                    'auth-text': 'Public Authorization Key',
+                    'auth-key': '{public_auth}',
+                    'token-text': 'Private Token',
+                    'token-key': '{token}',
+                }
+                monitorOther('usr', json.dumps([info]))
+                monitorStatus('Webhook ready - system is ready to accept requests')
+
+        except Exception as e:
+            debug(f'Error during startup: {e}')
+
+    def _emit_shutdown_status_sync(self):
+        """Sync version of the ``_shutdown`` body — single ``monitorOther('usr')``."""
+        try:
+            monitorOther('usr')
+        except Exception as e:
+            debug(f'Error during shutdown: {e}')
+
+    async def _startup(self):
+        """Async wrapper for FastAPI's lifespan hook (legacy fallback path).
+
+        The shared-server path calls :pyfunc:`_emit_ready_status_sync` directly
+        instead. This async wrapper exists so the legacy WebServer
+        ``on_startup=`` registration still works.
         """
         try:
             if self.endpoint.logicalType == 'chat':
@@ -143,12 +210,49 @@ class IEndpoint(IEndpointBase):
             debug(f'Error during shutdown: {e}')
 
     def _run(self):
-        """
-        Initialize and run the FastAPI server with the specified configuration.
+        """Block until shutdown, using the shared WebServer from ``node.py`` if available.
 
-        Args:
-            config (dict): The configuration dictionary containing parameters like endpoint, port, etc.
+        When EaaS spawns this subprocess with ``--data_port=N``, ``node.py``
+        bootstraps a shared :class:`WebServer` on the background event loop
+        and exposes it as ``ai.node.shared_web_server``. We just register
+        our target endpoint on that server's ``app.state.target`` (the
+        ``data`` module reads it lazily on each WebSocket connection) and
+        block on a shutdown event so ``scanObjects()`` doesn't return.
+
+        Legacy fallback (direct CLI invocation without ``--data_port``,
+        unit tests, etc.): the shared server is ``None``, and we build our
+        own ``WebServer`` and run it blocking — today's behavior preserved.
         """
+        # Discover the shared server lazily — `from ai.node import
+        # shared_web_server` MUST be inside this function (not at module
+        # top), because `node.py:run()` assigns to the module-level
+        # `shared_web_server` at runtime; a top-of-file `from` binding
+        # would capture the pre-assignment value (None) forever.
+        from ai import node as ai_node
+
+        shared = ai_node.shared_web_server
+
+        if shared is None:
+            return self._run_legacy_self_hosted_server()
+
+        shared.app.state.target = self.target
+
+        self._emit_ready_status_sync()
+
+        self._shutdown_event = threading.Event()
+        self._shutdown_event.wait()
+
+        self._emit_shutdown_status_sync()
+
+    def _run_legacy_self_hosted_server(self):
+        """Legacy path: construct and run a dedicated ``WebServer``.
+
+        Used only when ``ai.node.shared_web_server`` is ``None`` — i.e.
+        when ``node.py`` was invoked without ``--data_port`` (direct CLI
+        invocations, unit tests). EaaS always passes ``--data_port`` in
+        production, so this branch never runs there.
+        """
+        debug('webhook shared web server is not setup, using LEGACY self-hosted WebServer path')
         # Parse arguments
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument('--data_host', type=str, default='localhost')
