@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Protocol, TypedDict
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Protocol, TypedDict, overload
 
 # ---------------------------------------------------------------------------
 # Re-exports — everything listed in __all__
@@ -106,6 +106,8 @@ class Ec:
     Lz4Inflate: int
     Lz4Deflate: int
     LicenseLimit: int
+    Retry: int
+    InvalidFilename: int
 
 
 class APERR(Exception):
@@ -137,6 +139,8 @@ class PROTOCOL_CAPS:
     INVOKE: int
     REMOTING: int
     GPU: int
+    DEPRECATED: int
+    EXPERIMENTAL: int
 
     @staticmethod
     def getProtocolCaps(protocol: str) -> int: ...
@@ -231,7 +235,14 @@ class IJson:
     C++ json::Value wrapper exposed to Python via PyBind11.
     Supports dict-like and list-like access patterns.
     """
+    @overload
     def __init__(self) -> None: ...
+    @overload
+    def __init__(self, data: Dict[str, Any]) -> None: ...
+    @overload
+    def __init__(self, data: List[Any]) -> None: ...
+    @overload
+    def __init__(self, data: "IJson") -> None: ...
     def keys(self) -> List[str]: ...
     def values(self) -> List[Any]: ...
     def items(self) -> List[tuple[str, Any]]: ...
@@ -264,25 +275,32 @@ class Entry:
     """
     accessTime: int
     attrib: int
+    changeKey: str
     changeTime: int
     componentId: str
+    completionError: Dict[str, Any]
     createTime: int
     fileName: str
     flags: int
     hasAccessTime: bool
     hasAttrib: bool
+    hasChangeKey: bool
     hasChangeTime: bool
     hasComponentId: bool
     hasCreateTime: bool
     hasFileName: bool
     hasFlags: bool
     hasInstanceId: bool
+    hasInstanceTags: bool
     hasKeyId: bool
+    hasMetadata: bool
     hasModifyTime: bool
     hasName: bool
     hasObjectId: bool
+    hasObjectTags: bool
     hasPath: bool
     hasPermissionId: bool
+    hasResponse: bool
     hasServiceId: bool
     hasSize: bool
     hasStoreSize: bool
@@ -290,17 +308,22 @@ class Entry:
     hasUniquePath: bool
     hasUniqueUrl: bool
     hasUrl: bool
+    hasVectorBatchId: bool
     hasVersion: bool
     hasWordBatchId: bool
     instanceId: str
+    instanceTags: IJson
     keyId: str
+    metadata: IJson
     modifyTime: int
     name: str
     objectFailed: bool
     objectSkipped: bool
     objectId: str
+    objectTags: IJson
     path: str
     permissionId: int
+    response: IJson
     serviceId: int
     size: int
     storeSize: int
@@ -308,9 +331,13 @@ class Entry:
     uniquePath: str
     uniqueUrl: str
     url: str
+    vectorBatchId: int
     version: int
     wordBatchId: int
 
+    @overload
+    def __init__(self) -> None: ...
+    @overload
     def __init__(self, url: str) -> None: ...
     def completionCode(self, msg: str) -> None: ...
     def markChanged(self, msg: str) -> None: ...
@@ -560,6 +587,8 @@ class IServiceEndpoint(Protocol):
     serviceConfig: "IServiceEndpoint.IServiceEndpoint_ServiceConfig"
     parameters: Dict[str, Any]
     bag: Dict[str, Any]
+    target: Any
+    debugger: Any
 
     def insertFilter(self, filterName: str, filterConfig: Dict[str, Any]) -> None: ...
     def getToken(self, serviceConfig: "IServiceEndpoint.IServiceEndpoint_ServiceConfig", key: str) -> str: ...
@@ -612,7 +641,7 @@ class IServiceFilterPipe(Protocol):
     def addPermissions(self, perm: Dict[str, Any], throwOnError: bool) -> None: ...
     def addUserGroupInfo(self, isUser: bool, id: str, authority: str, name: str, local: bool) -> bool: ...
     def addUserInfo(self, id: str, authority: str, name: str, local: bool) -> bool: ...
-    def addGroupInfo(self, id: str, authority: str, name: str, local: bool) -> bool: ...
+    def addGroupInfo(self, id: str, authority: str, name: str, local: bool, groupMembers: Any = None) -> bool: ...
 
     # Target-mode helpers
     def hasListener(self, lane: str) -> bool: ...
@@ -836,7 +865,32 @@ def outputException() -> None:
     ...
 
 
-# ---- C++ engLib.Filters (imported directly in __init__.py) ----
+# ---- C++ engLib classes (imported directly in __init__.py) ----
+
+class IPipeType:
+    """Pipeline node metadata (C++ class exposed via PyBind11)."""
+    id: str
+    logicalType: str
+    physicalType: str
+    connConfig: IJson
+
+
+class IOBuffer:
+    """Target-mode I/O buffer (C++ class exposed via PyBind11)."""
+    name: str
+    segmentId: int
+    data: bytes
+
+
+class Paths:
+    """Static configuration paths (C++ class exposed via PyBind11)."""
+    DATA: str
+    CACHE: str
+    CONTROL: str
+    LOG: str
+
+
+
 
 class Filters:
     """
