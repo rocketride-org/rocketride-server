@@ -237,8 +237,12 @@ class DAPClient(DAPBase):
             return response
 
         except (ConnectionError, ConnectionResetError) as e:
-            # Connection errors trigger cleanup
-            await self.disconnect()
+            # Schedule transport teardown without awaiting it. Awaiting self.disconnect()
+            # here forms a cycle when request() runs inside a task that is itself a
+            # member of TransportWebSocket._message_tasks: the drain gather closes back
+            # on the calling task, and asyncio's cancel propagation recurses on
+            # _GatheringFuture.cancel until the recursion limit fires.
+            self._transport.disconnect()
             self.raise_exception(ConnectionError(f'{e}'))
 
         except asyncio.TimeoutError:
