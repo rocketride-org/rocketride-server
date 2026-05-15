@@ -11,6 +11,7 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records) forma
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [0001](0001-custom-build-system.md) | Custom declarative build system | Accepted | 2026-03-02 |
+| [0002](0002-llm-token-streaming.md) | LLM token streaming activation contract | Proposed | 2026-05-16 |
 
 ## Creating a New ADR
 
