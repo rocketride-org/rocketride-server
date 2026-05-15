@@ -64,28 +64,6 @@
 		"text": ["text"],
 		"documents": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": "Text to extract entities from",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Original text (passed through)"
-				}
-			]
-		},
-		{
-			"lane": "documents",
-			"description": "Documents to extract entities from",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents with entity metadata"
-				}
-			]
-		}
-	],
 	//
 	//	Test configuration for automated node testing
 	//

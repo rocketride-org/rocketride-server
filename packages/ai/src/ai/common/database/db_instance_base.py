@@ -49,7 +49,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DatabaseGlobalBase
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
 from .sql_safety import is_sql_safe
 
 
@@ -70,6 +70,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _db_display_name(self) -> str:
         """Return the human-readable database name (e.g. 'MySQL', 'PostgreSQL')."""
 
+    @abstractmethod
+    def _db_dialect(self) -> str:
+        """Return the machine-readable dialect identifier (e.g. 'mysql', 'postgres').
+
+        Surfaced to SDK callers via ``QuestionType.DIALECT`` so applications can
+        branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
+        """
+
     # ------------------------------------------------------------------
     # Tool methods — dispatched by IInstanceBase.invoke() via @tool_function
     # ------------------------------------------------------------------
@@ -85,7 +93,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}). Increase when you need the full result set.',
                 },
             },
         },
@@ -127,7 +135,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         question = question.strip()
         raw_limit = args.get('limit')
         try:
-            limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+            limit = max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
         except (TypeError, ValueError):
             limit = 250
 
@@ -428,6 +436,39 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
+    def _executeRawQuery(self, query: str) -> dict | None:
+        """Execute a raw SQL statement (read or write) without LLM or safety gating.
+
+        Uses ``engine.begin()`` so writes auto-commit. Returns
+        ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
+        (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+
+        SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
+        large query from exhausting worker memory. ``rowcount`` is normalized
+        to a non-negative int — some dialects return -1 when unknown.
+        """
+        try:
+            with self.IGlobal.engine.begin() as conn:
+                result = conn.execute(text(query))
+                if result.returns_rows:
+                    max_rows = self.IGlobal.max_execute_rows
+                    rows = result.fetchmany(max_rows + 1)
+                    if len(rows) > max_rows:
+                        error(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+                        return None
+                    column_names = result.keys()
+                    return {
+                        'rows': [dict(zip(column_names, row)) for row in rows],
+                        'affected_rows': 0,
+                    }
+                rowcount = result.rowcount
+                affected = rowcount if isinstance(rowcount, int) and rowcount >= 0 else 0
+                return {'rows': [], 'affected_rows': affected}
+
+        except SQLAlchemyError as e:
+            error(f'Error executing raw SQL query: {e}')
+            return None
+
     def _formatResultAsMarkdown(self, result: Any) -> str:
         """Convert a query result to a markdown table string."""
         headers = None
@@ -463,6 +504,46 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
+
+        # DIALECT: dialect-discovery request — emit {'dialect': '...'} on the
+        # answers lane so the SDK can branch on the engine. No gate needed:
+        # the value is metadata, not data, and the node already exposed itself
+        # by being connected.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': self._db_dialect()}))
+                self.instance.writeAnswers(answer)
+            return
+
+        # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
+                return
+            try:
+                execute_result = self._executeRawQuery(question_text)
+                if execute_result is None:
+                    return
+
+                rows = [self._sanitize_row(row) for row in execute_result['rows']]
+                affected = execute_result['affected_rows']
+                payload = {'rows': rows, 'affected_rows': affected}
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
+
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(payload, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
+            return
 
         try:
             # Ask the LLM to translate the natural-language question into SQL.

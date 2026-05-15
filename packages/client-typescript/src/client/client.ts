@@ -30,6 +30,7 @@ import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
+import { DatabaseApi } from './database.js';
 import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
@@ -317,6 +318,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created billing API namespace. */
 	private _billing?: BillingApi;
+
+	/** Lazily-created database API namespace. */
+	private _database?: DatabaseApi;
 
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
@@ -2480,6 +2484,24 @@ export class RocketRideClient extends DAPClient {
 			this._billing = new BillingApi(this);
 		}
 		return this._billing;
+	}
+
+	/**
+	 * Lazily-initialised database API namespace.
+	 *
+	 * Provides direct SQL/Cypher execution against database pipelines, bypassing
+	 * the LLM translation layer that {@link RocketRideClient.chat} uses.
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.database.query({ token, sql: 'SELECT 1' });
+	 * ```
+	 */
+	get database(): DatabaseApi {
+		if (!this._database) {
+			this._database = new DatabaseApi(this);
+		}
+		return this._database;
 	}
 
 	// ============================================================================

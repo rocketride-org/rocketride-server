@@ -60,6 +60,8 @@ from sqlalchemy.exc import DBAPIError
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
 
+DEFAULT_MAX_EXECUTE_ROWS = 25000
+
 
 class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
@@ -71,6 +73,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     schema: Dict[str, Tuple[str, str]] = {}
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
+    allow_execute: bool = False
+    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -442,6 +446,20 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # they're available to the instance as soon as beginGlobal returns.
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
         self.db_description = (self._db_description(raw) or '').strip()
+
+        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
+        # the LLM translation + is_sql_safe gate, so the node owner must
+        # explicitly enable the capability. Strings like 'false' / '0' must
+        # not be truthy here, so don't use bool() directly.
+        allow_execute = raw.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
+        try:
+            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
 
         self.database = params['database']
         self.table = params['table']

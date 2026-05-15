@@ -69,34 +69,6 @@
 		"documents": [],
 		"questions": ["documents", "answers", "questions"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"description": ["Stores the documents into the MongoDB Atlas vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
-			"output": []
-		},
-		{
-			"lane": "questions",
-			"description": "Searchs the database for documents most similar to the given questions.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": ["Produces documents that are most similar to the given question."],
-					"output": []
-				},
-				{
-					"lane": "answers",
-					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
-					"output": []
-				},
-				{
-					"lane": "questions",
-					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
-					"output": []
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

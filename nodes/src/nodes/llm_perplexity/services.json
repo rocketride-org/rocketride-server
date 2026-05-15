@@ -14,16 +14,6 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"input": [
-		{
-			"lane": "questions",
-			"output": [
-				{
-					"lane": "answers"
-				}
-			]
-		}
-	],
 	"preconfig": {
 		"default": "sonar",
 		"profiles": {
