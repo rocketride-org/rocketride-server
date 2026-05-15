@@ -229,6 +229,34 @@ def run():
     global shared_web_server
     shared_web_server, _shared_web_server_future = _setup_shared_web_server()
 
+    # CRITICAL — `__main__` vs `ai.node` module duality.
+    #
+    # engine.exe spawns this file as a script, so Python loads it as
+    # `sys.modules['__main__']`. The `global shared_web_server` above
+    # therefore writes to `__main__.shared_web_server`. When source nodes
+    # later do `from ai import node as ai_node`, Python imports the file
+    # AGAIN as `sys.modules['ai.node']` — a SEPARATE module with
+    # `shared_web_server = None`. They'd see None, fall back to legacy,
+    # and the data plane would be torn between two WebServers.
+    #
+    # Mirror the assignment into `ai.node` so the standard import path
+    # used by source nodes returns the live value.
+    #
+    # Thread-safety: this runs ONCE on the main thread before
+    # `processArguments` starts the C engine (which is what eventually
+    # spawns the source-node threads). Single-writer, sequenced-before
+    # any reader. No lock needed; Python's GIL guarantees atomicity of
+    # the attribute store.
+    try:
+        import sys as _sys
+
+        _ai_node_mod = _sys.modules.get('ai.node')
+        if _ai_node_mod is None:
+            import ai.node as _ai_node_mod  # type: ignore
+        _ai_node_mod.shared_web_server = shared_web_server
+    except Exception as e:
+        debug(f'failed to mirror shared_web_server into ai.node: {e}')
+
     # Block direct GPU library imports (torch, tensorflow, etc.) when running
     # in model server mode — all GPU inference goes through ModelClient RPC
     from ai.common.models.gpu_guard import install_gpu_guard
@@ -249,6 +277,15 @@ def run():
         # closes — its serve() coroutine is running on server_loop.
         _teardown_shared_web_server(shared_web_server, _shared_web_server_future)
         shared_web_server = None
+        # Mirror the reset to ai.node (see comment at the assignment above).
+        try:
+            import sys as _sys
+
+            _ai_node_mod = _sys.modules.get('ai.node')
+            if _ai_node_mod is not None:
+                _ai_node_mod.shared_web_server = None
+        except Exception:
+            pass
         # Stop the event loop on exit
         _stop_event_loop()
 
