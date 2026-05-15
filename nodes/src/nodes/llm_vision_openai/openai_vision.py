@@ -60,7 +60,9 @@ class Chat(ChatBase):
         if not api_key:
             raise ValueError('Missing OpenAI API key. Get one at https://platform.openai.com/api-keys')
         if not api_key.startswith('sk-'):
-            raise ValueError('Invalid OpenAI API key format. Keys should start with "sk-". Please check your key at https://platform.openai.com/api-keys')
+            raise ValueError(
+                'Invalid OpenAI API key format. Keys should start with "sk-". Please check your key at https://platform.openai.com/api-keys'
+            )
 
         self._api_key = api_key
         self._modelTotalTokens = config.get('modelTotalTokens', 128000)
@@ -173,7 +175,9 @@ class Chat(ChatBase):
                 t.start()
                 t.join(timeout=hard_timeout)
                 if t.is_alive():
-                    warning(f'OpenAI Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running')
+                    warning(
+                        f'OpenAI Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running'
+                    )
                     raise TimeoutError(f'Vision inference timed out after {hard_timeout}s (attempt {attempt + 1})')
                 if exc[0]:
                     raise exc[0]

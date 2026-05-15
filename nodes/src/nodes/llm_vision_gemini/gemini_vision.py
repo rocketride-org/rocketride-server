@@ -62,9 +62,13 @@ class Chat(ChatBase):
         if not api_key:
             raise ValueError('Missing Google AI API key. Get one at https://aistudio.google.com/apikey')
         if api_key.startswith('sk-'):
-            raise ValueError('Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.')
+            raise ValueError(
+                'Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.'
+            )
         if not api_key.startswith('AI'):
-            raise ValueError('Invalid Gemini API key format. Google AI API keys start with "AI". Please check your API key at https://aistudio.google.com/apikey')
+            raise ValueError(
+                'Invalid Gemini API key format. Google AI API keys start with "AI". Please check your API key at https://aistudio.google.com/apikey'
+            )
 
         try:
             self._api_key = api_key
@@ -109,7 +113,17 @@ class Chat(ChatBase):
     def _shouldRetry(self, error: Exception) -> bool:
         """Determine if an error is retryable."""
         error_msg = str(error).lower()
-        retryable = ['timeout', 'timed out', 'connection', '500', '502', '503', '504', 'internal server error', 'service unavailable']
+        retryable = [
+            'timeout',
+            'timed out',
+            'connection',
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'service unavailable',
+        ]
         return any(p in error_msg for p in retryable)
 
     def chat(self, question: Question) -> Answer:
@@ -179,7 +193,9 @@ class Chat(ChatBase):
                 t.start()
                 t.join(timeout=hard_timeout)
                 if t.is_alive():
-                    warning(f'Gemini Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running')
+                    warning(
+                        f'Gemini Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running'
+                    )
                     raise TimeoutError(f'Vision inference timed out after {hard_timeout}s (attempt {attempt + 1})')
                 if exc[0]:
                     raise exc[0]
