@@ -64,7 +64,9 @@ class IGlobal(IGlobalBase):
                 )
             except Exception:
                 GoogleAPICallError = Exception  # type: ignore
-                ClientError = BadRequest = Unauthorized = Forbidden = NotFound = TooManyRequests = ServiceUnavailable = InternalServerError = DeadlineExceeded = InvalidArgument = Exception  # type: ignore
+                ClientError = BadRequest = Unauthorized = Forbidden = NotFound = TooManyRequests = (
+                    ServiceUnavailable
+                ) = InternalServerError = DeadlineExceeded = InvalidArgument = Exception  # type: ignore
             try:
                 from google.auth.exceptions import GoogleAuthError, RefreshError
             except Exception:
@@ -81,7 +83,19 @@ class IGlobal(IGlobalBase):
             try:
                 client = genai.Client(api_key=apikey)
                 client.models.generate_content(model=model, contents=self.VALIDATION_PROMPT)
-            except (BadRequest, Unauthorized, Forbidden, NotFound, TooManyRequests, ServiceUnavailable, InternalServerError, DeadlineExceeded, InvalidArgument, ClientError, GoogleAPICallError) as e:
+            except (
+                BadRequest,
+                Unauthorized,
+                Forbidden,
+                NotFound,
+                TooManyRequests,
+                ServiceUnavailable,
+                InternalServerError,
+                DeadlineExceeded,
+                InvalidArgument,
+                ClientError,
+                GoogleAPICallError,
+            ) as e:
                 try:
                     prov_code = e.code  # type: ignore[attr-defined]
                 except Exception:
@@ -93,7 +107,12 @@ class IGlobal(IGlobalBase):
                 code = None
                 try:
                     status, emsg, code = self._extract_status_message_code(raw, prov_code)
-                    if isinstance(status, str) and status.upper() == 'INVALID_ARGUMENT' and isinstance(emsg, str) and 'response modalities' in emsg.lower():
+                    if (
+                        isinstance(status, str)
+                        and status.upper() == 'INVALID_ARGUMENT'
+                        and isinstance(emsg, str)
+                        and 'response modalities' in emsg.lower()
+                    ):
                         return
                 except Exception:
                     pass
