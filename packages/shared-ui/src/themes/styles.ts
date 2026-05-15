@@ -92,6 +92,31 @@ const cardFlat: CSSProperties = {
 	padding: 16,
 };
 
+/**
+ * Card header button size modifier — compact sizing for buttons rendered
+ * inside `cardHeader`. Compose with a colour variant:
+ *   style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton }}
+ * Same dimensions as `cardBodyButton` today; split so header vs body
+ * can diverge independently later.
+ */
+const cardHeaderButton: CSSProperties = {
+	padding: '3px 9px',
+	fontSize: 11,
+	lineHeight: 1.4,
+};
+
+/**
+ * Card body button size modifier — compact sizing for buttons rendered
+ * inside `cardBody` rows (actions like Revoke, Remove, Cancel, etc.).
+ * Compose with a colour variant:
+ *   style={{ ...commonStyles.buttonDanger, ...commonStyles.cardBodyButton }}
+ */
+const cardBodyButton: CSSProperties = {
+	padding: '3px 9px',
+	fontSize: 11,
+	lineHeight: 1.4,
+};
+
 // =============================================================================
 // SECTIONS
 // =============================================================================
@@ -202,6 +227,44 @@ const buttonSecondary: CSSProperties = {
 	backgroundColor: 'var(--rr-bg-paper)',
 	color: 'var(--rr-text-secondary)',
 	transition: 'opacity 0.15s',
+};
+
+/**
+ * Small button modifier — reduces padding and font size for compact row contexts.
+ * Spread over any button variant to shrink it for inline/card-header usage:
+ *   style={{ ...commonStyles.buttonPrimary, ...commonStyles.buttonSmall }}
+ */
+const buttonSmall: CSSProperties = {
+	padding: '3px 9px',
+	fontSize: 11,
+	lineHeight: 1.4,
+};
+
+/**
+ * Pre-composed small primary button — brand fill at compact size.
+ * Use directly: `style={commonStyles.buttonPrimarySmall}`.
+ */
+const buttonPrimarySmall: CSSProperties = {
+	...buttonPrimary,
+	...buttonSmall,
+};
+
+/**
+ * Pre-composed small secondary button — outline at compact size.
+ * Use directly: `style={commonStyles.buttonSecondarySmall}`.
+ */
+const buttonSecondarySmall: CSSProperties = {
+	...buttonSecondary,
+	...buttonSmall,
+};
+
+/**
+ * Pre-composed small danger button — error fill at compact size.
+ * Use directly: `style={commonStyles.buttonDangerSmall}`.
+ */
+const buttonDangerSmall: CSSProperties = {
+	...buttonDanger,
+	...buttonSmall,
 };
 
 /**
@@ -564,6 +627,49 @@ const dialog: CSSProperties = {
 };
 
 /**
+ * Modal dialog box — pre-composed `dialog` with standard width for
+ * confirmation dialogs, edit forms, and action modals.
+ * Override `width` inline for wider modals (e.g. checkout).
+ * Pair with `modalOverlay` as the backdrop.
+ */
+const modalDialog: CSSProperties = {
+	...dialog,
+	width: 440,
+	maxWidth: '95vw',
+	overflow: 'hidden',
+};
+
+/**
+ * Modal header row — title on the left, close button on the right.
+ * Sits flush at the top of a `modalDialog`.
+ */
+const modalHeader: CSSProperties = {
+	...cardHeader,
+	padding: '16px 20px 13px',
+	fontSize: 14,
+	fontWeight: 700,
+};
+
+/**
+ * Modal body — padded content area between header and footer.
+ */
+const modalBody: CSSProperties = {
+	padding: 20,
+};
+
+/**
+ * Modal footer — right-aligned action buttons separated from the body by
+ * a top border.  Place Cancel on the left and the primary action on the right.
+ */
+const modalFooter: CSSProperties = {
+	padding: '13px 20px',
+	borderTop: '1px solid var(--rr-border)',
+	display: 'flex',
+	justifyContent: 'flex-end',
+	gap: 8,
+};
+
+/**
  * Floating context / popup menu container — fixed-position card with shadow.
  * Use for right-click menus, "..." action menus, and dropdown panels.
  * Position top/left via state (e.g. mouse coordinates or element getBoundingClientRect).
@@ -751,12 +857,19 @@ export const commonStyles = {
 	sectionHeader,
 	sectionHeaderLabel,
 
-	// Buttons — primary/secondary/danger + buttonDisabled modifier
+	// Buttons — primary/secondary/danger; small pre-composed variants; disabled modifier
 	buttonPrimary,
 	buttonDanger,
 	buttonDangerOutline,
 	buttonSecondary,
+	buttonSmall,
+	buttonPrimarySmall,
+	buttonSecondarySmall,
+	buttonDangerSmall,
 	buttonDisabled,
+	// Card button size modifiers — compose with colour variants
+	cardHeaderButton,
+	cardBodyButton,
 	// Toggle buttons — toggleGroup wraps toggleButton(active) items
 	toggleButton,
 	toggleGroup,
@@ -776,10 +889,14 @@ export const commonStyles = {
 	fontMono,
 	labelUppercase,
 
-	// Overlays & modals — (overlay | modalOverlay) → dialog; popupMenu standalone
+	// Overlays & modals — (overlay | modalOverlay) → dialog; modal* for structured dialogs; popupMenu standalone
 	overlay,
 	modalOverlay,
 	dialog,
+	modalDialog,
+	modalHeader,
+	modalBody,
+	modalFooter,
 	popupMenu,
 
 	// Navigation & menus — popupMenu → menuRow items + divider separators

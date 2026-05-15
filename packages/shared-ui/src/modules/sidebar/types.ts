@@ -87,6 +87,9 @@ export interface ISidebarViewProps {
 	// ── Connection ──────────────────────────────────────────────────────────
 	connection: ConnectionInfo;
 
+	/** Whether the user has an active subscription. When false, run/stop icons are hidden. */
+	isSubscribed?: boolean;
+
 	// ── File tree ───────────────────────────────────────────────────────────
 	/** Flat array of all .pipe files (host-provided). */
 	entries: ProjectEntry[];

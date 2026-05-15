@@ -33,10 +33,10 @@ class Chat(ChatBase):
 
         # Build kwargs for ChatOpenAI
         kwargs = {
-            "model": self._model,
-            "api_key": apikey,
-            "temperature": 0,
-            "max_tokens": self._modelOutputTokens,
+            'model': self._model,
+            'api_key': apikey,
+            'temperature': 0,
+            'max_tokens': self._modelOutputTokens,
         }
         if base_url:
             kwargs['base_url'] = base_url

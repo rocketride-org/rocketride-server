@@ -193,10 +193,6 @@ class TransportBase(ABC):
         """Return connection info for the "connected" callback (e.g. URI). Default none."""
         return None
 
-    def set_auth(self, auth: str) -> None:
-        """Update auth credential. Takes effect on the next connect()."""
-        pass
-
     def set_uri(self, uri: str) -> None:
         """Update connection URI. Takes effect on the next connect()."""
         pass

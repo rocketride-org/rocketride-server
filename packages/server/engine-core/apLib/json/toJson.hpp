@@ -28,7 +28,7 @@
 
 namespace ap {
 // Allow specifying R"(json...)"_json string
-inline json::Value operator"" _json(const char *str,
+inline json::Value operator""_json(const char *str,
                                     std::size_t count) noexcept {
     return json::parse(str);
 }

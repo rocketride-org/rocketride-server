@@ -71,7 +71,7 @@ Or manually:
     python -m pytest nodes/test/test_dynamic.py -k milvus -s -v
 """
 
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
 import re
@@ -81,6 +81,7 @@ import re
 # DataType Enumeration
 # =============================================================================
 # Mirrors pymilvus.DataType for schema field type definitions
+
 
 class DataType(Enum):
     """
@@ -92,6 +93,7 @@ class DataType(Enum):
     - VARCHAR for text content
     - JSON for metadata
     """
+
     NONE = 0
     BOOL = 1
     INT8 = 2
@@ -115,6 +117,7 @@ class DataType(Enum):
 # Schema Helper Classes
 # =============================================================================
 
+
 @dataclass
 class FieldSchema:
     """
@@ -128,6 +131,7 @@ class FieldSchema:
         max_length: Maximum length for VARCHAR fields
         dim: Dimension for vector fields
     """
+
     field_name: str
     datatype: DataType
     is_primary: bool = False
@@ -148,6 +152,7 @@ class CollectionSchema:
         enable_dynamic_field: Whether to allow dynamic fields
         fields: List of FieldSchema definitions
     """
+
     auto_id: bool = False
     enable_dynamic_field: bool = False
     fields: List[FieldSchema] = field(default_factory=list)
@@ -160,17 +165,19 @@ class CollectionSchema:
         auto_id: bool = False,
         max_length: int = 0,
         dim: int = 0,
-        **kwargs
+        **kwargs,
     ) -> None:
         """Add a field to the schema."""
-        self.fields.append(FieldSchema(
-            field_name=field_name,
-            datatype=datatype,
-            is_primary=is_primary,
-            auto_id=auto_id,
-            max_length=max_length,
-            dim=dim
-        ))
+        self.fields.append(
+            FieldSchema(
+                field_name=field_name,
+                datatype=datatype,
+                is_primary=is_primary,
+                auto_id=auto_id,
+                max_length=max_length,
+                dim=dim,
+            )
+        )
 
 
 @dataclass
@@ -183,28 +190,22 @@ class IndexParams:
     Attributes:
         indexes: List of index configurations (field_name, index_type, params, etc.)
     """
+
     indexes: List[Dict[str, Any]] = field(default_factory=list)
 
     def add_index(
-        self,
-        field_name: str,
-        index_type: str = None,
-        metric_type: str = None,
-        params: Dict[str, Any] = None,
-        **kwargs
+        self, field_name: str, index_type: str = None, metric_type: str = None, params: Dict[str, Any] = None, **kwargs
     ) -> None:
         """Add an index definition."""
-        self.indexes.append({
-            'field_name': field_name,
-            'index_type': index_type,
-            'metric_type': metric_type,
-            'params': params or {}
-        })
+        self.indexes.append(
+            {'field_name': field_name, 'index_type': index_type, 'metric_type': metric_type, 'params': params or {}}
+        )
 
 
 # =============================================================================
 # Payload Serialization Helper
 # =============================================================================
+
 
 def _serialize_value(value: Any) -> Any:
     """
@@ -260,6 +261,7 @@ def _normalize_id(id_value: Any) -> int:
 # =============================================================================
 # Filter Expression Parser
 # =============================================================================
+
 
 def _parse_filter_expression(filter_expr: str, data: Dict[str, Any]) -> bool:
     """
@@ -419,6 +421,7 @@ def _parse_filter_expression(filter_expr: str, data: Dict[str, Any]) -> bool:
 # Mock MilvusClient
 # =============================================================================
 
+
 class MilvusClient:
     """
     Mock implementation of the Milvus vector database client.
@@ -462,11 +465,7 @@ class MilvusClient:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def create_schema(
-        auto_id: bool = False,
-        enable_dynamic_field: bool = False,
-        **kwargs
-    ) -> CollectionSchema:
+    def create_schema(auto_id: bool = False, enable_dynamic_field: bool = False, **kwargs) -> CollectionSchema:
         """
         Create a new collection schema.
 
@@ -479,23 +478,14 @@ class MilvusClient:
         Returns:
             A new CollectionSchema instance to be populated with add_field()
         """
-        return CollectionSchema(
-            auto_id=auto_id,
-            enable_dynamic_field=enable_dynamic_field
-        )
+        return CollectionSchema(auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
 
     # -------------------------------------------------------------------------
     # Constructor
     # -------------------------------------------------------------------------
 
     def __init__(
-        self,
-        uri: str = None,
-        host: str = None,
-        port: int = None,
-        token: str = None,
-        timeout: int = 60,
-        **kwargs
+        self, uri: str = None, host: str = None, port: int = None, token: str = None, timeout: int = 60, **kwargs
     ):
         """
         Initialize a mock Milvus client connection.
@@ -545,11 +535,7 @@ class MilvusClient:
         return collection_name in MilvusClient._collections
 
     def create_collection(
-        self,
-        collection_name: str,
-        schema: CollectionSchema = None,
-        index_params: IndexParams = None,
-        **kwargs
+        self, collection_name: str, schema: CollectionSchema = None, index_params: IndexParams = None, **kwargs
     ) -> None:
         """
         Create a new collection.
@@ -577,7 +563,7 @@ class MilvusClient:
         output_fields: List[str] = None,
         offset: int = 0,
         limit: int = 100,
-        **kwargs
+        **kwargs,
     ) -> List[Dict[str, Any]]:
         """
         Query collection with filter expression.
@@ -613,7 +599,7 @@ class MilvusClient:
             data = [record for record in data if _parse_filter_expression(filter, record)]
 
         # Apply pagination
-        data = data[offset:offset + limit]
+        data = data[offset : offset + limit]
 
         # Select output fields and serialize
         results = []
@@ -627,10 +613,12 @@ class MilvusClient:
                 result['id'] = _normalize_id(record.get('id'))
                 results.append(result)
             else:
-                results.append({
-                    'id': _normalize_id(record.get('id')),
-                    **{k: _serialize_value(v) for k, v in record.items() if k != 'id'}
-                })
+                results.append(
+                    {
+                        'id': _normalize_id(record.get('id')),
+                        **{k: _serialize_value(v) for k, v in record.items() if k != 'id'},
+                    }
+                )
 
         return results
 
@@ -645,7 +633,7 @@ class MilvusClient:
         filter: str = None,
         limit: int = 10,
         output_fields: List[str] = None,
-        **kwargs
+        **kwargs,
     ) -> List[List[Dict[str, Any]]]:
         """
         Perform semantic similarity search.
@@ -686,10 +674,7 @@ class MilvusClient:
 
         # Apply additional filter if specified
         if filter:
-            filtered_data = [
-                record for record in filtered_data
-                if _parse_filter_expression(filter, record)
-            ]
+            filtered_data = [record for record in filtered_data if _parse_filter_expression(filter, record)]
 
         # Build results for each query vector (usually just one)
         all_results = []
@@ -704,11 +689,13 @@ class MilvusClient:
                 else:
                     entity = {k: _serialize_value(v) for k, v in record.items() if k != 'vector'}
 
-                results.append({
-                    'id': _normalize_id(record.get('id')),
-                    'distance': 0.85,  # Fixed distance for mock (cosine similarity)
-                    'entity': entity
-                })
+                results.append(
+                    {
+                        'id': _normalize_id(record.get('id')),
+                        'distance': 0.85,  # Fixed distance for mock (cosine similarity)
+                        'entity': entity,
+                    }
+                )
             all_results.append(results)
 
         return all_results
@@ -717,11 +704,7 @@ class MilvusClient:
     # Data Operations: Insert/Update/Delete
     # -------------------------------------------------------------------------
 
-    def upsert(
-        self,
-        collection_name: str,
-        data: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def upsert(self, collection_name: str, data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Insert or update records in a collection.
 
@@ -759,12 +742,7 @@ class MilvusClient:
 
         return {'upsert_count': len(data)}
 
-    def delete(
-        self,
-        collection_name: str,
-        filter: str = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    def delete(self, collection_name: str, filter: str = None, **kwargs) -> Dict[str, Any]:
         """
         Delete records from a collection.
 
@@ -788,8 +766,7 @@ class MilvusClient:
 
         original_count = len(MilvusClient._data[collection_name])
         MilvusClient._data[collection_name] = [
-            record for record in MilvusClient._data[collection_name]
-            if not _parse_filter_expression(filter, record)
+            record for record in MilvusClient._data[collection_name] if not _parse_filter_expression(filter, record)
         ]
 
         delete_count = original_count - len(MilvusClient._data[collection_name])
@@ -828,13 +805,10 @@ class MilvusClient:
 __all__ = [
     # Main client class
     'MilvusClient',
-
     # Data types
     'DataType',
-
     # Schema types
     'CollectionSchema',
     'FieldSchema',
     'IndexParams',
 ]
-

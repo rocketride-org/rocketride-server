@@ -314,7 +314,7 @@
 	},
 	//
 	//	Full test configuration - tests all OCR profiles (engines/script families).
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

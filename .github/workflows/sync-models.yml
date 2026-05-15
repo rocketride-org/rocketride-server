@@ -1,5 +1,12 @@
 name: Sync LLM Models
 
+# Default least-privilege permissions for the workflow. The `sync`
+# job below raises to contents:write + pull-requests:write to commit
+# updated model manifests and open the PR. Closes Scorecard
+# TokenPermissionsID #605.
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: '0 5 * * 1' # Mondays 05:00 UTC

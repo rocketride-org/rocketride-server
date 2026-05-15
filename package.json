@@ -53,9 +53,16 @@
 		},
 		"overrides": {
 			"cross-spawn": ">=6.0.6",
+			"dompurify": ">=3.4.0 <3.5.0",
 			"glob": ">=11.1.0",
+			"handlebars": ">=4.7.9 <5",
 			"js-yaml": ">=4.1.1",
+			"minimatch@<3.1.4": ">=3.1.4 <4",
+			"minimatch@5": ">=5.1.8 <6",
+			"minimatch@9": ">=9.0.7 <10",
+			"minimatch@10": ">=10.2.3 <11",
 			"postcss": ">=8.4.31",
+			"protobufjs": ">=7.5.5 <8",
 			"qs": ">=6.14.1"
 		},
 		"supportedArchitectures": {
@@ -71,7 +78,7 @@
 		"@eslint/js": "^9.15.0",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
 		"@types/node": "^20.0.0",
-		"adm-zip": "^0.5.16",
+		"adm-zip": "^0.5.17",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
 		"eslint": "^9.15.0",
@@ -87,7 +94,7 @@
 		"npm-run-all": "^4.1.5",
 		"prettier": "^3.3.3",
 		"rimraf": "^5.0.5",
-		"tar": "^7.5.8",
+		"tar": "^7.5.15",
 		"lefthook": "^2.1.4",
 		"typescript": "^5.3.3",
 		"typescript-eslint": "^8.15.0"

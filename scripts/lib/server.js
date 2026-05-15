@@ -197,7 +197,38 @@ async function stopServer(serverObj, timeout = 5000) {
 	});
 }
 
+/**
+ * Parse a server address string into host, port, and full URI.
+ *
+ * Accepts two formats:
+ *   - Bare port: "5565" → { host: 'localhost', port: 5565, uri: 'http://localhost:5565' }
+ *   - Host:port: "myhost:5590" → { host: 'myhost', port: 5590, uri: 'http://myhost:5590' }
+ *
+ * @param {string|number} value - The address to parse
+ * @returns {{ host: string, port: number, uri: string }}
+ */
+function parseServerAddress(value) {
+	const s = String(value);
+	// Bare port number
+	if (/^\d+$/.test(s)) {
+		const port = parseInt(s, 10);
+		return { host: 'localhost', port, uri: `http://localhost:${port}` };
+	}
+	// host:port
+	const idx = s.lastIndexOf(':');
+	if (idx === -1) {
+		throw new Error(`Invalid server address: "${s}" (expected port or host:port)`);
+	}
+	const host = s.substring(0, idx);
+	const port = parseInt(s.substring(idx + 1), 10);
+	if (isNaN(port)) {
+		throw new Error(`Invalid port in server address: "${s}"`);
+	}
+	return { host, port, uri: `http://${host}:${port}` };
+}
+
 module.exports = {
 	startServer,
 	stopServer,
+	parseServerAddress,
 };

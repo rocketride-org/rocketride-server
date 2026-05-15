@@ -32,6 +32,7 @@ from typing import Optional
 @dataclass
 class Timeout:
     """Timeout configuration."""
+
     init: int = 30
     query: int = 60
     insert: int = 120
@@ -40,14 +41,14 @@ class Timeout:
 @dataclass
 class AdditionalConfig:
     """Additional client configuration."""
+
     timeout: Optional[Timeout] = None
 
 
 class Auth:
     """Authentication helpers."""
-    
+
     @staticmethod
     def api_key(key: str) -> dict:
         """Create API key authentication."""
-        return {"api_key": key}
-
+        return {'api_key': key}

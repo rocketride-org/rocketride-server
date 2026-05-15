@@ -48,10 +48,14 @@ class BillingDetail(TypedDict):
     ``list`` subcommand. One row per subscribed app.
 
     Attributes:
-        appId: App identifier matching AppManifestEntry.id (e.g. "brandi").
+        appId: App identifier matching AppManifestEntry.appId (e.g. "rocketride.brandy").
         stripeSubscriptionId: Stripe sub_* subscription identifier.
         stripePriceId: Stripe price_* for the subscribed plan.
         status: One of: active, trialing, past_due, canceled.
+        planNickname: Human-readable plan name from Stripe price (e.g. "Pro Monthly"), or None.
+        unitAmount: Price in USD cents for the subscribed plan, or None.
+        billingInterval: Billing interval ("month" or "year"), or None.
+        currentPeriodStart: ISO 8601 datetime when the current billing period started, or None.
         currentPeriodEnd: ISO 8601 datetime when the current billing period ends, or None.
         cancelAtPeriodEnd: True when the user has requested cancellation at period end.
     """
@@ -60,6 +64,10 @@ class BillingDetail(TypedDict):
     stripeSubscriptionId: str
     stripePriceId: str
     status: str
+    planNickname: str | None
+    unitAmount: int | None
+    billingInterval: str | None
+    currentPeriodStart: str | None
     currentPeriodEnd: str | None
     cancelAtPeriodEnd: bool
 
@@ -89,19 +97,20 @@ class StripePlan(TypedDict):
 
 class CreditBalance(TypedDict):
     """
-    Current credit balance for an organisation's compute wallet.
+    Multi-resource credit balance for an organisation's wallet.
 
-    Returned by the ``credits_balance`` subcommand.
+    Returned by the ``credits_balance`` subcommand. Each field is a dict
+    keyed by resource type (e.g. ``{"tokens": 4200, "video": 80}``).
 
     Attributes:
-        balance: Current unspent credit balance for the org.
-        lifetimePurchased: Total credits ever purchased.
-        lifetimeConsumed: Total credits ever consumed.
+        balances: Current unspent balances per resource type.
+        lifetimePurchased: Total purchased per resource type.
+        lifetimeConsumed: Total consumed per resource type.
     """
 
-    balance: int
-    lifetimePurchased: int
-    lifetimeConsumed: int
+    balances: dict[str, int]
+    lifetimePurchased: dict[str, int]
+    lifetimeConsumed: dict[str, int]
 
 
 class CreditPack(TypedDict):

@@ -85,7 +85,7 @@ def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
     """
     if not env_var.startswith('ROCKETRIDE_'):
         return None
-    suffix = env_var[len('ROCKETRIDE_'):]  # e.g. 'OPENAI_KEY'
+    suffix = env_var[len('ROCKETRIDE_') :]  # e.g. 'OPENAI_KEY'
 
     # Accept both full provider name ('LLM_OPENAI') and short form
     # ('OPENAI'). Full form is tried first so that an exact directory
@@ -93,14 +93,14 @@ def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
     candidates = [provider.upper()]
     for pfx in ('llm_', 'tool_'):
         if provider.startswith(pfx):
-            candidates.append(provider[len(pfx):].upper())
+            candidates.append(provider[len(pfx) :].upper())
             break
 
     suffix_upper = suffix.upper()
     for candidate in candidates:
         token = candidate + '_'
         if suffix_upper.startswith(token):
-            attr = suffix[len(token):]
+            attr = suffix[len(token) :]
             if not attr:
                 return None
             return _ENV_ATTR_MAP.get(attr.upper(), attr.lower())
@@ -202,7 +202,9 @@ class PipelineBuilder:
                 config[profile] = {**overrides, **creds}
         return config
 
-    def _build_chain_component(self, provider: str, component_id: str, input_from: str, input_lanes: List[str]) -> Dict[str, Any]:
+    def _build_chain_component(
+        self, provider: str, component_id: str, input_from: str, input_lanes: List[str]
+    ) -> Dict[str, Any]:
         """Build a component for a chain node.
 
         Wires all input_lanes that the chain node supports (e.g. embedding_transformer
@@ -222,7 +224,12 @@ class PipelineBuilder:
         if not lanes_to_wire:
             lanes_to_wire = [input_lanes[0]] if input_lanes else ['text']
 
-        return {'id': component_id, 'provider': provider, 'config': self._get_node_config(provider, profile), 'input': [{'lane': lane, 'from': input_from} for lane in lanes_to_wire]}
+        return {
+            'id': component_id,
+            'provider': provider,
+            'config': self._get_node_config(provider, profile),
+            'input': [{'lane': lane, 'from': input_from} for lane in lanes_to_wire],
+        }
 
     def _build_control_components(self, target_id: str) -> List[Dict[str, Any]]:
         """Build control node components attached to the target node."""
@@ -254,7 +261,14 @@ class PipelineBuilder:
 
         for output_lane in self.config.outputs:
             response_id = self._next_id(f'response_{output_lane}')
-            components.append({'id': response_id, 'provider': 'response', 'config': {}, 'input': [{'lane': output_lane, 'from': input_from}]})
+            components.append(
+                {
+                    'id': response_id,
+                    'provider': 'response',
+                    'config': {},
+                    'input': [{'lane': output_lane, 'from': input_from}],
+                }
+            )
 
         # Sink nodes (outputs=[]): no response components needed
         if not self.config.outputs:
@@ -262,7 +276,14 @@ class PipelineBuilder:
         # No outputs inferred: add default response on text lane
         if not components:
             response_id = self._next_id('response')
-            components.append({'id': response_id, 'provider': 'response', 'config': {}, 'input': [{'lane': 'text', 'from': input_from}]})
+            components.append(
+                {
+                    'id': response_id,
+                    'provider': 'response',
+                    'config': {},
+                    'input': [{'lane': 'text', 'from': input_from}],
+                }
+            )
 
         return components
 
@@ -305,7 +326,14 @@ class PipelineBuilder:
                 # Wire ALL input lanes from webhook to the node
                 node_inputs = [{'lane': lane, 'from': prev_id} for lane in input_lanes]
 
-                components.append({'id': node_id, 'provider': self.config.provider, 'config': self._get_node_config(self.config.provider, self.profile), 'input': node_inputs})
+                components.append(
+                    {
+                        'id': node_id,
+                        'provider': self.config.provider,
+                        'config': self._get_node_config(self.config.provider, self.profile),
+                        'input': node_inputs,
+                    }
+                )
 
                 # Add control nodes attached to this node
                 control_components = self._build_control_components(node_id)

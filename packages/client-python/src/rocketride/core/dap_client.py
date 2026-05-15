@@ -40,10 +40,11 @@ Key Features:
 """
 
 import asyncio
-import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from .dap_base import DAPBase
-from .exceptions import AuthenticationException
+
+if TYPE_CHECKING:
+    from ..types.client import ConnectResult
 
 
 class DAPClient(DAPBase):
@@ -83,8 +84,8 @@ class DAPClient(DAPBase):
         self._pending_requests: Dict[int, asyncio.Future] = {}
         # Default request timeout in ms (None = no timeout); converted to seconds for asyncio
         self._request_timeout: Optional[float] = kwargs.get('request_timeout', None)
-        # True only after auth has succeeded (set in connect(), cleared in on_disconnected)
-        self._authenticated: bool = False
+        # Auth response body from the last successful connect. Set before on_connected fires.
+        self._connect_result: Optional['ConnectResult'] = None
 
     async def _send(self, message: Dict[str, Any]) -> None:
         """
@@ -109,16 +110,12 @@ class DAPClient(DAPBase):
 
     def is_connected(self) -> bool:
         """
-        Check whether the transport is connected and authenticated.
-
-        The transport may be socket-connected before auth; we are not "connected"
-        until both the socket is up and the DAP auth handshake has completed.
+        Check whether the transport is connected.
+        Backward compatible — returns True when the WebSocket is open.
         """
         if self._transport is None:
             return False
-        if not self._transport.is_connected():
-            return False
-        return self._authenticated
+        return self._transport.is_connected()
 
     async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
         """
@@ -131,7 +128,6 @@ class DAPClient(DAPBase):
             reason: Optional reason for disconnection
             has_error: Whether disconnection was due to error
         """
-        self._authenticated = False
         # Fail all pending requests since connection is lost
         connection_error = ConnectionError(reason)
 
@@ -291,70 +287,19 @@ class DAPClient(DAPBase):
         )
         return await self.request(request, timeout=timeout)
 
-    async def connect(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def connect(self, timeout: Optional[float] = None) -> None:
         """
-        Establish connection to the DAP server.
-
-        When the transport exposes get_auth (e.g. task service), sends auth as the first
-        DAP command and fails connect if authentication fails.
+        Open the transport (WebSocket) without sending any authentication.
+        Authentication is handled at the RocketRideClient level via login().
 
         Args:
-            timeout: Optional overall timeout in milliseconds covering both the
-                WebSocket handshake and auth request.
-
-        Returns:
-            The auth response body dict (ConnectResult fields) on success, or {} for
-            transports that don't require authentication.
+            timeout: Optional timeout in milliseconds for the WebSocket handshake.
 
         Raises:
-            ConnectionError: If connection fails
-            TimeoutError: If connection times out
+            ConnectionError: If connection fails.
+            TimeoutError: If connection times out.
         """
-        # Track elapsed time so remaining budget can be passed to the auth request
-        start = time.monotonic() if timeout is not None else 0
-
-        # Establish transport connection (socket open; no auth on the wire)
         await self._transport.connect(timeout)
-
-        # Calculate remaining timeout for auth request
-        auth_timeout: Optional[float] = None
-        if timeout is not None:
-            elapsed_ms = (time.monotonic() - start) * 1000.0
-            auth_timeout = max(timeout - elapsed_ms, 0)
-
-        # Send auth as first DAP message only if the transport provides credentials
-        # (e.g. WebSocket to a task server). Transports without get_auth (e.g. stdio
-        # to a subprocess) skip auth entirely — the subprocess doesn't speak DAP.
-        auth_body: Dict[str, Any] = {}
-        if hasattr(self._transport, 'get_auth'):
-            auth = self._transport.get_auth() or ''
-            auth_args = {'auth': auth}
-            if getattr(self, '_client_display_name', None):
-                auth_args['clientName'] = self._client_display_name
-            if getattr(self, '_client_display_version', None):
-                auth_args['clientVersion'] = self._client_display_version
-            request = {
-                'type': 'request',
-                'command': 'auth',
-                'seq': self._next_seq(),
-                'arguments': auth_args,
-            }
-            try:
-                response = await self.request(request, timeout=auth_timeout)
-            except Exception:
-                await self._transport.disconnect()
-                raise
-            if not response.get('success', False):
-                message = response.get('message', 'Authentication failed')
-                await self._transport.disconnect()
-                raise AuthenticationException({'message': message})
-            auth_body = response.get('body') or {}
-
-        # Only now are we connected (transport up + authenticated)
-        self._authenticated = True
-        connection_info = self._transport.get_connection_info()
-        await self.on_connected(connection_info)
-        return auth_body
 
     async def disconnect(self) -> None:
         """

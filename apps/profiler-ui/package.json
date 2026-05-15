@@ -1,0 +1,33 @@
+{
+  "name": "@rocketride/profiler-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "cProfile process profiler — start/stop sessions, view reports",
+  "license": "MIT",
+  "appManifest": {
+    "id": "rocketride.profiler",
+    "publisher": "Aparavi Software AG",
+    "name": "Profiler",
+    "description": "CPU profiling for server and pipeline processes",
+    "categories": ["tools"],
+    "mode": "free",
+    "authenticated": true,
+    "showStatusBar": true
+  },
+  "scripts": {
+    "build": "pnpm rsbuild build",
+    "build:prod": "pnpm rsbuild build --env-mode production"
+  },
+  "dependencies": {
+    "@module-federation/rsbuild-plugin": "^0.9.0",
+    "shell-ui": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "1.1.0",
+    "@rsbuild/plugin-react": "1.0.7",
+    "typescript": "^5.3.0"
+  }
+}

@@ -28,11 +28,13 @@
 		"@rjsf/utils": "~5.20.1",
 		"@rjsf/validator-ajv8": "~5.20.1",
 		"@xyflow/react": "~12.3.4",
+		"@stripe/react-stripe-js": "^3.1.0",
+		"@stripe/stripe-js": "^5.5.0",
 		"rocketride": "workspace:*",
 		"clsx": "~2.1.1",
 		"d3": "~7.9.0",
 		"dagre": "~0.8.5",
-		"dompurify": "~3.2.5",
+		"dompurify": "~3.4.0",
 		"elkjs": "~0.9.3",
 		"fuzzysort": "~3.1.0",
 		"html-react-parser": "~5.2.3",
@@ -101,6 +103,7 @@
 		"./constants/*": "./src/constants/*"
 	},
 	"dependencies": {
-		"lucide-react": "^0.540.0"
+		"lucide-react": "^0.577.0",
+		"@cfworker/json-schema": "^4.1.1"
 	}
 }

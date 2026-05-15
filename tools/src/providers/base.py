@@ -414,7 +414,9 @@ class CloudProvider(ABC):
 
         # --- Warning messages for partial-result modes ---
         if primary_source != 'provider' and api_key is None:
-            report.warning = f'API key not set ({self.env_var}) — using {primary_source} as model source (no smoke tests).'
+            report.warning = (
+                f'API key not set ({self.env_var}) — using {primary_source} as model source (no smoke tests).'
+            )
         if discovery_skipped_due_to_strict_mode:
             report.discovery_skipped = True
 

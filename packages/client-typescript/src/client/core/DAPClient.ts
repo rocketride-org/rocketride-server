@@ -23,9 +23,8 @@
  */
 
 import { DAPBase } from './DAPBase.js';
-import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
+import { DAPMessage, RocketRideClientConfig, ConnectResult } from '../types/index.js';
 import { TransportBase } from './TransportBase.js';
-import { AuthenticationException } from '../exceptions/index.js';
 import { SDK_VERSION } from '../constants.js';
 
 /**
@@ -83,6 +82,9 @@ export class DAPClient extends DAPBase {
 	 * Sent alongside `_clientDisplayName` during authentication.
 	 */
 	protected _clientDisplayVersion?: string;
+
+	/** Auth response body from the last successful _dapConnect. Set before onConnected fires. */
+	protected _connectResult?: ConnectResult;
 
 	/**
 	 * Creates a DAPClient instance and configures request-timeout and client
@@ -310,81 +312,17 @@ export class DAPClient extends DAPBase {
 	}
 
 	/**
-	 * Establish connection to the DAP server.
+	 * Open the transport (WebSocket) without sending any authentication.
+	 * Authentication is handled at the RocketRideClient level via login().
 	 *
-	 * Opens the underlying WebSocket transport, then immediately sends an `auth`
-	 * request as the very first DAP message. If authentication succeeds, fires
-	 * `onConnected`. If it fails, closes the transport and throws an
-	 * `AuthenticationException` so callers can distinguish auth failures from
-	 * network errors.
-	 *
-	 * The optional `timeout` budget is split: first the WebSocket open consumes
-	 * some of it; the remainder is passed as the per-request timeout for the auth
-	 * round-trip. This prevents the combined operation from silently hanging
-	 * beyond the caller's expectation.
-	 *
-	 * @param timeout - Optional overall timeout in ms covering both the WebSocket handshake and auth request.
-	 * @returns The auth response body (ConnectResult) on success.
-	 * @throws AuthenticationException if the server rejects the credentials
-	 * @throws Error if the transport is not configured or the connection times out
+	 * @param timeout - Optional timeout in ms for the WebSocket handshake.
+	 * @throws Error if the transport is not configured or the connection times out.
 	 */
-	async _dapConnect(timeout?: number): Promise<Record<string, unknown>> {
-		// A transport must be bound before this method is called
+	async _dapConnect(timeout?: number): Promise<void> {
 		if (!this._transport) {
 			throw new Error('Transport not configured');
 		}
-
-		// Record the wall-clock start time so we can compute the remaining budget
-		// after the transport opens (only meaningful when a timeout was provided)
-		const start = timeout !== undefined ? Date.now() : 0;
-
-		// Open the underlying WebSocket (or other transport); this may itself honour
-		// the timeout when the transport implementation supports it
 		await this._transport.connect(timeout);
-
-		// Compute how much of the original budget is left for the auth round-trip
-		let authTimeout: number | undefined;
-		if (timeout !== undefined) {
-			const elapsed = Date.now() - start;
-			// Clamp to 0 so we don't pass a negative timeout to request()
-			authTimeout = Math.max(timeout - elapsed, 0);
-		}
-
-		// Build and send the auth request as the very first DAP message on this connection.
-		// The server expects `auth` to be the first command; any other command before auth
-		// will be rejected. Include display name and version so operators can identify clients.
-		const auth = this._transport.getAuth() ?? '';
-		const authArgs: Record<string, unknown> = { auth };
-		if (this._clientDisplayName) authArgs.clientName = this._clientDisplayName;
-		if (this._clientDisplayVersion) authArgs.clientVersion = this._clientDisplayVersion;
-		const resp = await this.request(
-			{
-				type: 'request',
-				command: 'auth',
-				seq: 0, // request() overwrites with next seq
-				arguments: authArgs,
-			},
-			authTimeout
-		);
-
-		// Check the server's verdict: success=false means wrong credentials or expired token
-		const success = (resp as { success?: boolean }).success;
-		if (!success) {
-			// Close the transport immediately — no further messages are meaningful
-			await this._transport.disconnect();
-			// Throw a typed exception so callers can catch auth failures separately
-			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
-		}
-
-		// Auth passed — now notify the rest of the stack that we are connected.
-		// We defer this call until after auth because the transport fires its own
-		// "connected" signal on socket open, but the logical connection (auth confirmed)
-		// only exists once the server acknowledges the credentials.
-		const connectionInfo = this._transport.getConnectionInfo();
-		await this.onConnected(connectionInfo);
-
-		// Return the body of the auth response (contains ConnectResult: user info, orgs, etc.)
-		return resp.body ?? {};
 	}
 
 	/**

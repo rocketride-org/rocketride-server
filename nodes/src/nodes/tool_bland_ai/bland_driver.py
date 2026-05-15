@@ -86,7 +86,9 @@ GET_CALL_SCHEMA: Dict[str, Any] = {
         },
         'wait_for_completion': {
             'type': 'boolean',
-            'description': ('If true, poll until the call finishes before returning (recommended for pipelines). Waits up to 5 minutes. Default: false.'),
+            'description': (
+                'If true, poll until the call finishes before returning (recommended for pipelines). Waits up to 5 minutes. Default: false.'
+            ),
         },
     },
 }
@@ -137,15 +139,21 @@ class BlandDriver(ToolsBase):
 
         self._tools = {
             'make_call': {
-                'description': ('Initiate an AI-powered outbound phone call via Bland AI. Required: phone_number (E.164 format) and task (instructions for the AI agent). Optional: first_sentence, voice, webhook (HTTPS), max_duration. Returns call_id to track the call.'),
+                'description': (
+                    'Initiate an AI-powered outbound phone call via Bland AI. Required: phone_number (E.164 format) and task (instructions for the AI agent). Optional: first_sentence, voice, webhook (HTTPS), max_duration. Returns call_id to track the call.'
+                ),
                 'schema': MAKE_CALL_SCHEMA,
             },
             'get_call': {
-                'description': ('Get details for a Bland AI call including status, transcript, recording URL, duration, and summary. Required: call_id. Set wait_for_completion=true to block until the call finishes (use this in pipelines to avoid polling).'),
+                'description': (
+                    'Get details for a Bland AI call including status, transcript, recording URL, duration, and summary. Required: call_id. Set wait_for_completion=true to block until the call finishes (use this in pipelines to avoid polling).'
+                ),
                 'schema': GET_CALL_SCHEMA,
             },
             'analyze_call': {
-                'description': ('Run AI analysis on a completed Bland AI call. Provide a goal and questions to extract structured insights from the transcript. Required: call_id. Optional: goal, questions.'),
+                'description': (
+                    'Run AI analysis on a completed Bland AI call. Provide a goal and questions to extract structured insights from the transcript. Required: call_id. Optional: goal, questions.'
+                ),
                 'schema': ANALYZE_CALL_SCHEMA,
             },
         }
@@ -168,7 +176,9 @@ class BlandDriver(ToolsBase):
         # Strip namespace prefix
         bare_name = tool_name.split('.', 1)[-1] if '.' in tool_name else tool_name
         if bare_name not in self._tools:
-            raise ValueError(f'Unknown tool {tool_name!r}. Available: {", ".join(f"{self._server_name}.{t}" for t in self._tools)}')
+            raise ValueError(
+                f'Unknown tool {tool_name!r}. Available: {", ".join(f"{self._server_name}.{t}" for t in self._tools)}'
+            )
 
         if not isinstance(input_obj, dict):
             raise TypeError('Tool input must be a JSON object')

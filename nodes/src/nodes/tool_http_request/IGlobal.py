@@ -37,7 +37,9 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 from .rate_limiter import DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_PER_MINUTE, DEFAULT_MAX_PER_SECOND, RateLimiter
 
 
-def _config_int(cfg: dict, key: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
+def _config_int(
+    cfg: dict, key: str, default: int, *, min_value: int | None = None, max_value: int | None = None
+) -> int:
     """Read an integer from *cfg*, falling back to *default*.
 
     Returns *default* when the key is missing, non-numeric, or <= 0.

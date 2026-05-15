@@ -26,25 +26,36 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const env = getenv();
+requireKeys(env, ['RR_STRIPE_PUBLISHABLE_KEY'], 'vscode:build-webview');
 
 export default defineConfig({
 	plugins: [pluginReact()],
 
 	source: {
+		// Inject public build-time config values into webview bundles.
+		// SECURITY: never add server-side secrets here — only publishable keys.
+		define: {
+			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
+			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || ''),
+		},
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'page-sidebar': './src/providers/views/PageSidebar/index.tsx',
-			'page-settings': './src/providers/views/PageSettings/index.tsx',
-			'page-project': './src/providers/views/PageProject/index.tsx',
-			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
-			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
-			'page-monitor': './src/providers/views/PageMonitor/index.tsx',
-			'page-status': './src/providers/views/PageStatus/index.tsx',
-			'page-account': './src/providers/views/PageAccount/index.tsx',
-			'page-billing': './src/providers/views/PageBilling/index.tsx',
+			'page-sidebar': './src/providers/views/Sidebar/index.tsx',
+			'page-settings': './src/providers/views/Settings/index.tsx',
+			'page-project': './src/providers/views/Project/index.tsx',
+			'page-deploy': './src/providers/views/Deploy/index.tsx',
+			'page-welcome': './src/providers/views/Welcome/index.tsx',
+			'page-monitor': './src/providers/views/Monitor/index.tsx',
+			'page-account': './src/providers/views/Account/index.tsx',
+			'page-auth': './src/providers/views/Auth/index.tsx',
 		},
 	},
 

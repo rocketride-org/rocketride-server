@@ -191,7 +191,9 @@ class IInstance(IInstanceBase):
             # Load the fixed stuff
             self.maxTokens = self.instance.invoke(IInvokeLLM.GetContextLength())
             self.tokenCounter = self.instance.invoke(IInvokeLLM.GetTokenCounter())
-            self.summarySplitter = RecursiveCharacterTextSplitter(chunk_size=self.maxTokens, length_function=self._getSummaryTokens)
+            self.summarySplitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.maxTokens, length_function=self._getSummaryTokens
+            )
 
             # Get an empty prompt and obtain # of tokens in it
             summaryQuestion = self._buildSummaryQuestion()

@@ -55,7 +55,7 @@
 		"configuration": {
 			"title": "RocketRide",
 			"properties": {
-				"rocketride.connectionMode": {
+				"rocketride.development.connectionMode": {
 					"type": "string",
 					"enum": [
 						"cloud",
@@ -65,20 +65,82 @@
 						"local"
 					],
 					"default": "local",
-					"description": "Connection mode for RocketRide debugging",
+					"description": "Development connection mode",
 					"enumDescriptions": [
 						"RocketRide Cloud – sign in with your RocketRide account",
 						"Docker – connect to your local Docker instance",
 						"Service – connect to your local RocketRide service",
-						"On-prem (your own hosted server) – needs host address and API key",
+						"Direct Connect – connect with host address and API key",
 						"Local (your local machine) – downloads and runs a local engine"
 					]
 				},
-				"rocketride.hostUrl": {
+				"rocketride.development.hostUrl": {
 					"type": "string",
-					"default": "http://localhost:5565",
-					"description": "Host URL for RocketRide service (used by both cloud and local modes). Host and port will be parsed from this URL.",
+					"default": "",
+					"description": "Host URL for development connection",
 					"format": "uri"
+				},
+				"rocketride.development.teamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID for the development connection"
+				},
+				"rocketride.development.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local development. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
+				},
+				"rocketride.development.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable full debug output from the local development engine (--trace=debugOut)"
+				},
+				"rocketride.development.local.engineArgs": {
+					"type": "string",
+					"default": "",
+					"description": "Additional arguments passed to the development engine subprocess"
+				},
+				"rocketride.deployment.connectionMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						null,
+						"cloud",
+						"docker",
+						"service",
+						"onprem",
+						"local"
+					],
+					"default": null,
+					"description": "Deployment connection mode (null = same as development)"
+				},
+				"rocketride.deployment.hostUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Host URL for deployment connection",
+					"format": "uri"
+				},
+				"rocketride.deployment.teamId": {
+					"type": "string",
+					"default": "",
+					"description": "Cloud team ID for the deployment connection"
+				},
+				"rocketride.deployment.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local deployment target"
+				},
+				"rocketride.deployment.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable debug output for the local deployment engine"
+				},
+				"rocketride.deployment.local.engineArgs": {
+					"type": "string",
+					"default": "",
+					"description": "Additional arguments passed to the deployment engine subprocess"
 				},
 				"rocketride.defaultPipelinePath": {
 					"type": "string",
@@ -89,26 +151,6 @@
 						"src/pipelines",
 						"workflows"
 					]
-				},
-				"rocketride.local.engineVersion": {
-					"type": "string",
-					"default": "latest",
-					"description": "Engine version to download. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
-				},
-				"rocketride.local.debugOutput": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable full debug output from the local engine (--trace=debugOut)"
-				},
-				"rocketride.engineArgs": {
-					"type": "string",
-					"default": "",
-					"description": "Additional arguments passed to the engine subprocess"
-				},
-				"rocketride.autoConnect": {
-					"type": "boolean",
-					"default": true,
-					"description": "Automatically connect to RocketRide server when extension activates"
 				},
 				"rocketride.welcomeDismissed": {
 					"type": "boolean",
@@ -129,62 +171,6 @@
 						"Do not automatically restart the pipeline",
 						"Prompt the user to restart the pipeline"
 					]
-				},
-				"rocketride.developmentTeamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID to use for development (which team's engine to connect to)"
-				},
-				"rocketride.deployTargetMode": {
-					"type": [
-						"string",
-						"null"
-					],
-					"enum": [
-						null,
-						"cloud",
-						"onprem",
-						"docker",
-						"service"
-					],
-					"default": null,
-					"description": "Deploy target mode (null = not configured / same as development mode)"
-				},
-				"rocketride.deployTargetTeamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID for the deployment target"
-				},
-				"rocketride.deployHostUrl": {
-					"type": "string",
-					"default": "",
-					"description": "Host URL for on-prem deploy target (separate from dev connection)"
-				},
-				"rocketride.deployAutoConnect": {
-					"type": "boolean",
-					"default": false,
-					"description": "Automatically connect to the deploy target when extension starts"
-				},
-				"rocketride.deploy.local.engineVersion": {
-					"type": "string",
-					"default": "latest",
-					"description": "Engine version for local deploy target"
-				},
-				"rocketride.deploy.local.debugOutput": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable debug output for the local deploy engine"
-				},
-				"rocketride.deployEngineArgs": {
-					"type": "string",
-					"default": "",
-					"description": "Additional command-line arguments for the deploy engine"
-				},
-				"rocketride.oauth2RootUrl": {
-					"type": "string",
-					"default": "https://oauth2.rocketride.ai",
-					"description": "Root OAuth2 URL for the refresh path (lambda) passed to the services OAuth2 endpoint. No UI to change it.",
-					"format": "uri"
 				},
 				"rocketride.integrations.autoAgentIntegration": {
 					"type": "boolean",
@@ -220,6 +206,69 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
+				},
+				"rocketride.connectionMode": {
+					"type": "string",
+					"default": "local",
+					"deprecationMessage": "Migrated to rocketride.development.connectionMode"
+				},
+				"rocketride.hostUrl": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.development.hostUrl"
+				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.development.teamId"
+				},
+				"rocketride.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"deprecationMessage": "Migrated to rocketride.development.local.engineVersion"
+				},
+				"rocketride.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"deprecationMessage": "Migrated to rocketride.development.local.debugOutput"
+				},
+				"rocketride.engineArgs": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.development.local.engineArgs"
+				},
+				"rocketride.deployTargetMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"deprecationMessage": "Migrated to rocketride.deployment.connectionMode"
+				},
+				"rocketride.deployHostUrl": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.deployment.hostUrl"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.deployment.teamId"
+				},
+				"rocketride.deploy.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
+				},
+				"rocketride.deploy.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"deprecationMessage": "Migrated to rocketride.deployment.local.debugOutput"
+				},
+				"rocketride.deployEngineArgs": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.deployment.local.engineArgs"
 				}
 			}
 		},
@@ -463,13 +512,13 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.16",
+		"adm-zip": "^0.5.17",
 		"chart.js": "^4.4.0",
-		"dockerode": "^4.0.9",
+		"dockerode": "^4.0.12",
 		"proper-lockfile": "^4.1.2",
 		"rocketride": "workspace:*",
 		"shared": "workspace:*",
-		"tar": "^7.5.8"
+		"tar": "^7.5.15"
 	},
 	"files": [
 		"README.md",

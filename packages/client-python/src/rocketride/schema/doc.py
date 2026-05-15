@@ -74,13 +74,23 @@ class Doc(BaseModel):
 
     type: str = Field(default='Document', description='Type identifier of the document.')
     page_content: Optional[str] = Field(None, description='The main text content of this document chunk.')
-    embedding_model: Optional[str] = Field(None, description='The AI model used to generate embeddings for this document.')
-    embedding: List[float] = Field(None, description='Vector representation for semantic search (usually hidden from end users).')
+    embedding_model: Optional[str] = Field(
+        None, description='The AI model used to generate embeddings for this document.'
+    )
+    embedding: List[float] = Field(
+        None, description='Vector representation for semantic search (usually hidden from end users).'
+    )
     score: float = Field(None, description='Relevance score - higher numbers mean more relevant to your query.')
     highlight_score: float = Field(None, description='Additional score for highlighted or featured content.')
-    context: Optional[List[str]] = Field(None, description='Additional contextual information related to this document.')
-    tokens: Optional[int] = Field(None, description='Number of tokens in this document (important for AI processing limits).')
-    metadata: Optional[DocMetadata] = Field(None, description='Information about the source file, location, permissions, and chunk details.')
+    context: Optional[List[str]] = Field(
+        None, description='Additional contextual information related to this document.'
+    )
+    tokens: Optional[int] = Field(
+        None, description='Number of tokens in this document (important for AI processing limits).'
+    )
+    metadata: Optional[DocMetadata] = Field(
+        None, description='Information about the source file, location, permissions, and chunk details.'
+    )
 
     def __repr__(self):
         """
