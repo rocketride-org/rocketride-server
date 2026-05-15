@@ -200,7 +200,9 @@ class S3Store(IStore):
                 # When IfMatch is used but key doesn't exist, S3 returns NoSuchKey
                 if self._is_no_such_key_error(put_error) and expected_version is not None:
                     # File state changed - trigger tenacity retry
-                    raise self._RaceConditionError(f'Race condition detected for {filename}: file deleted between check and write') from put_error
+                    raise self._RaceConditionError(
+                        f'Race condition detected for {filename}: file deleted between check and write'
+                    ) from put_error
                 raise
 
             new_etag = response.get('ETag', '').strip('"')
@@ -342,7 +344,9 @@ class S3Store(IStore):
                 # Lazily create multipart upload on first flush
                 if context['upload_id'] is None:
                     client = self._get_client()
-                    response = await asyncio.to_thread(client.create_multipart_upload, Bucket=self._bucket, Key=context['key'])
+                    response = await asyncio.to_thread(
+                        client.create_multipart_upload, Bucket=self._bucket, Key=context['key']
+                    )
                     context['upload_id'] = response['UploadId']
 
                 chunk = bytes(context['buffer'][: self._S3_MIN_PART_SIZE])

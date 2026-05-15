@@ -77,39 +77,6 @@
 			}
 		]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": ["Store text into the OpenSearch index. "],
-			"output": []
-		},
-		{
-			"lane": "documents",
-			"description": ["Ingest documents (embeddings) into the OpenSearch vector store."],
-			"output": []
-		},
-		{
-			"lane": "questions",
-			"description": "Searches the index for the best matching documents (text or vector).",
-			"output": [
-				{
-					"lane": "text",
-					"description": ["Produces text that is most similar to the given question."],
-					"output": []
-				},
-				{
-					"lane": "answers",
-					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
-					"output": []
-				},
-				{
-					"lane": "documents",
-					"description": ["Produces documents that contain the given question, the document id, and the retrieved text, when using index mode."],
-					"output": []
-				}
-			]
-		}
-	],
 	"fields": {
 		"opensearch.host": {
 			"title": "Host",

@@ -54,6 +54,7 @@ import { Edge, Position } from '@xyflow/react';
 import { useFlow } from '../../../hooks';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
+import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
 import { getIconPath } from '../../../util/get-icon-path';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
@@ -118,6 +119,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson, edges } = useFlow();
 	const { setQuickAddState } = useFlowGraph();
 	const { onOpenStatus, onOpenLink, serverHost } = useFlowProject();
+	const { isLocked } = useFlowPreferences();
 
 	// =========================================================================
 	// Service lookup — all service metadata comes from here, not from data
@@ -217,7 +219,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 			{isSourceNode && <RunButton nodeId={id} />}
 
 			{/* Top cap + optional invoke target diamond */}
-			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={setQuickAddState} />
+			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={isLocked ? undefined : setQuickAddState} />
 
 			{/* Header — icon, title, class type, gear, overflow menu, error badge */}
 			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} />
@@ -263,17 +265,18 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 							position={Position.Bottom}
 							invokeType={key}
 							isConnected={edges.some((edge: Edge) => edge.sourceHandle === `invoke-source.${key}` && edge.source === id)}
-							onClick={(e: React.MouseEvent) =>
-								setQuickAddState({
-									nodeId: id,
-									handleId: `invoke-source.${key}`,
-									laneType: '',
-									isSource: true,
-									position: { x: e.clientX, y: e.clientY },
-									mode: 'invoke',
-									invokeKey: key,
-								})
-							}
+							onClick={(e: React.MouseEvent) => {
+								if (!isLocked)
+									setQuickAddState({
+										nodeId: id,
+										handleId: `invoke-source.${key}`,
+										laneType: '',
+										isSource: true,
+										position: { x: e.clientX, y: e.clientY },
+										mode: 'invoke',
+										invokeKey: key,
+									});
+							}}
 						/>
 					))}
 				</div>

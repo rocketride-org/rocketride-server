@@ -1,5 +1,12 @@
 name: Release
 
+# Default least-privilege permissions for the workflow. Individual
+# release jobs below raise to write where they actually need it
+# (tag pushes, GitHub releases, package publishing).
+# Closes Scorecard TokenPermissionsID #516.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -101,6 +108,79 @@ jobs:
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         run: find release-assets -type f | sort
 
+      # --- GPG-sign server tarballs/zips ---
+      #
+      # Produces detached ASCII-armored signatures (.asc) attached to the
+      # GitHub release alongside the originals. Skips cleanly when the
+      # signing secrets aren't configured, so this is safe to merge before
+      # key generation.
+      #
+      # User verification:
+      #   gpg --verify rocketride-server-X.Y.Z-linux-x64.tar.gz.asc \
+      #                rocketride-server-X.Y.Z-linux-x64.tar.gz
+      #
+      # One-time setup:
+      #   1. Generate a dedicated release-signing key (offline, on a trusted machine):
+      #        gpg --quick-generate-key 'RocketRide Releases <releases@rocketride.ai>' ed25519 sign 2y
+      #   2. Export the private key and store as repo secret GPG_SIGNING_KEY:
+      #        gpg --armor --export-secret-keys releases@rocketride.ai
+      #   3. Store the key passphrase as repo secret GPG_SIGNING_PASSPHRASE.
+      #   4. Publish the public key for users:
+      #        gpg --armor --export releases@rocketride.ai > scripts/release-pubkey.asc
+      #      Commit it; also upload to keys.openpgp.org and add the
+      #      fingerprint to README/SECURITY.md.
+      - name: Check GPG signing availability
+        id: gpg_check
+        if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_SIGNING_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
+        run: |
+          # Require BOTH secrets — the signing step pipes the passphrase to
+          # gpg via --passphrase-fd 0, so a key-only setup would hard-fail
+          # at sign time. Skip cleanly on partial setup; surface which
+          # secret is missing for faster debugging.
+          if [ -n "${GPG_SIGNING_KEY:-}" ] && [ -n "${GPG_SIGNING_PASSPHRASE:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            missing=()
+            [ -z "${GPG_SIGNING_KEY:-}" ] && missing+=("GPG_SIGNING_KEY")
+            [ -z "${GPG_SIGNING_PASSPHRASE:-}" ] && missing+=("GPG_SIGNING_PASSPHRASE")
+            echo "::warning::Missing secret(s): ${missing[*]} — server tarballs will be released unsigned"
+          fi
+
+      - name: GPG-sign server artifacts
+        if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false') && steps.gpg_check.outputs.available == 'true'
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_SIGNING_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          echo "$GPG_SIGNING_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
+          echo "Signing with key ${KEY_ID}"
+          shopt -s nullglob
+          # Fail loudly if invoked with no input — reaching this step
+          # means both secrets are configured, so signing is expected
+          # to happen. Silent no-ops here would ship the release
+          # unsigned without any warning.
+          files=(release-assets/*.tar.gz release-assets/*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No server archives (.tar.gz/.zip) found in release-assets/ to sign"
+            ls -la release-assets/ || true
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "$GPG_SIGNING_PASSPHRASE" | gpg --batch --yes \
+              --pinentry-mode loopback --passphrase-fd 0 \
+              --local-user "$KEY_ID" \
+              --detach-sign --armor \
+              --output "${f}.asc" "$f"
+            echo "Signed ${f} -> ${f}.asc"
+          done
+          ls -la release-assets/
+
       # --- npm: rocketride ---
       - name: Set up Node.js
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
@@ -200,11 +280,35 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
       # --- Tag and GitHub Release ---
+      #
+      # IMPORTANT: tag push uses WORKFLOW_PAT (a Personal Access Token with
+      # `repo` + `workflow` scopes) instead of the default GITHUB_TOKEN.
+      #
+      # GitHub rejects any tag push from GITHUB_TOKEN whose target commit
+      # modifies files under `.github/workflows/`, with the error:
+      #
+      #   refusing to allow a GitHub App to create or update workflow
+      #   `.github/workflows/<file>` without `workflows` permission
+      #
+      # `workflows` is a token-level scope, not a YAML permission, so the
+      # only fix is to swap to a credential that has it. WORKFLOW_PAT is
+      # that credential. Without this, every nightly that lands on a
+      # workflow-touching commit silently bricks the prerelease pipeline:
+      # the cleanup job runs first and deletes existing -prerelease tags,
+      # then all 5 prerelease creation jobs fail to push the new ones,
+      # leaving the repo with zero prereleases until the next clean
+      # commit.
       - name: Create tag
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Swap the remote URL to authenticate with WORKFLOW_PAT for the
+          # push. This affects only this step's git config and goes away
+          # when the runner tears down.
+          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "${{ inputs.prerelease }}" = "true" ]; then
             git tag -f "${{ matrix.tag_name }}"
             git push -f origin "${{ matrix.tag_name }}"
@@ -227,7 +331,7 @@ jobs:
 
       - name: Create GitHub release
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ matrix.tag_name }}
           name: RocketRide ${{ matrix.name }} v${{ matrix.version }}${{ inputs.prerelease && ' (prerelease)' || '' }}

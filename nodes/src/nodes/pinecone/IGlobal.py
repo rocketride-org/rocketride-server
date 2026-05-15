@@ -139,10 +139,14 @@ class IGlobal(IGlobalTransform):
             if existing_collection:
                 is_serverless = 'serverless' in existing_collection.get('spec', {})
                 if mode == 'serverless-dense' and not is_serverless:
-                    warning(f"Collection '{collection}' exists and is pod-based but you selected serverless mode. Please select 'Pinecone Pod-Based Index' to use this collection")
+                    warning(
+                        f"Collection '{collection}' exists and is pod-based but you selected serverless mode. Please select 'Pinecone Pod-Based Index' to use this collection"
+                    )
                     return
                 if mode == 'pod-based' and is_serverless:
-                    warning(f"Collection '{collection}' exists and is serverless but you selected pod-based mode. Please select 'Pinecone Serverless Dense Index' to use this collection")
+                    warning(
+                        f"Collection '{collection}' exists and is serverless but you selected pod-based mode. Please select 'Pinecone Serverless Dense Index' to use this collection"
+                    )
                     return
 
         except Exception as e:

@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/chat-ui",
-	"version": "2.0.1",
+	"version": "2.1.0",
 	"description": "RocketRide AI Chat Interface",
 	"private": true,
 	"copylist": {
@@ -9,7 +9,7 @@
 	"dependencies": {
 		"rocketride": "workspace:*",
 		"@types/ws": "^8.18.1",
-		"lucide-react": "^0.540.0",
+		"lucide-react": "^0.577.0",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
 		"react-markdown": "^10.1.0",
@@ -19,8 +19,8 @@
 		"recharts": "^2.8.0",
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",
-		"web-vitals": "^5.1.0",
-		"ws": "^8.18.3"
+		"web-vitals": "^5.2.0",
+		"ws": "^8.20.1"
 	},
 	"devDependencies": {
 		"@rsbuild/core": "^0.4.0",
@@ -35,7 +35,7 @@
 		"@types/ws": "^8.18.1",
 		"autoprefixer": "^10.4.16",
 		"concurrently": "^8.2.2",
-		"postcss": "^8.4.32",
+		"postcss": "^8.5.10",
 		"rimraf": "^5.0.5",
 		"tailwindcss": "^3.3.6",
 		"typescript": "^5.2.2"

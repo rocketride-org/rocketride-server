@@ -124,13 +124,13 @@ def test_transcribe_requires_bytes():
     # to avoid loading. We only test the type check at the start of transcribe().
     from unittest.mock import patch, MagicMock
 
-    with patch('ai.common.models.audio.whisper.get_model_server_address', return_value=('localhost', 5590)):
+    with patch('ai.common.models.audio.whisper.get_model_server_address', return_value='localhost:5590'):
         with patch('ai.common.models.audio.whisper.ModelClient') as MockClient:
             mock_client = MagicMock()
             MockClient.return_value = mock_client
             w = Whisper('tiny', output_fields=['$text'])
             assert w._proxy_mode is True
-    # Type check is first in transcribe()
+    # Type check is first in transcribe() — no billing context needed
     with pytest.raises(TypeError, match='audio must be bytes'):
         w.transcribe([1, 2, 3])  # type: ignore
     with pytest.raises(TypeError, match='audio must be bytes'):

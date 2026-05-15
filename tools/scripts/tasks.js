@@ -2,7 +2,7 @@
  * Build tasks for model sync tooling
  *
  * Commands:
- *   models:update - Sync LLM model lists from provider APIs, then format services.json files
+ *   models:update - Updating models
  */
 
 const path = require('path');
@@ -106,7 +106,7 @@ module.exports = {
 		{
 			name: 'models:update',
 			action: () => ({
-				description: 'Sync LLM model lists from provider APIs and format JSON files',
+				description: 'Updating models',
 				steps: ['models:run-sync', 'models:prettier'],
 			}),
 		},

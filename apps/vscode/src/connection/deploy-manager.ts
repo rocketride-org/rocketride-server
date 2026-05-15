@@ -103,7 +103,7 @@ export class DeployManager extends ConnectionManager {
 	// =========================================================================
 
 	/** Events forwarded from the dev connection in shared mode. */
-	private static readonly FORWARDED_EVENTS = ['connectionStateChanged', 'connected', 'disconnected', 'error', 'event', 'servicesUpdated'];
+	private static readonly FORWARDED_EVENTS = ['shell:statusChange', 'shell:statusMessage', 'shell:connected', 'shell:disconnected', 'shell:error', 'shell:event', 'shell:accountUpdate', 'shell:servicesUpdated'];
 
 	/**
 	 * Subscribes to the dev connection and re-emits events under the deploy
@@ -206,9 +206,9 @@ export class DeployManager extends ConnectionManager {
 			this.startForwarding();
 			// Replay current dev state so listeners don't stay stale
 			const devStatus = this.getDevManager().getConnectionStatus();
-			this.emit('connectionStateChanged', devStatus);
+			this.emit('shell:statusChange', devStatus);
 			if (this.getDevManager().isConnected()) {
-				this.emit('connected');
+				this.emit('shell:connected');
 			}
 			return;
 		}
@@ -257,9 +257,9 @@ export class DeployManager extends ConnectionManager {
 
 		// Re-emit the dev connection's current state so listeners update
 		const devStatus = this.getDevManager().getConnectionStatus();
-		this.emit('connectionStateChanged', devStatus);
+		this.emit('shell:statusChange', devStatus);
 		if (this.getDevManager().isConnected()) {
-			this.emit('connected');
+			this.emit('shell:connected');
 		}
 	}
 

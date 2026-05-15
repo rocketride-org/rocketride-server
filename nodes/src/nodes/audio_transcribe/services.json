@@ -65,24 +65,6 @@
 		"audio": ["text"],
 		"video": ["text"]
 	},
-	"input": [
-		{
-			"lane": "audio",
-			"output": [
-				{
-					"lane": "text"
-				}
-			]
-		},
-		{
-			"lane": "video",
-			"output": [
-				{
-					"lane": "text"
-				}
-			]
-		}
-	],
 	//
 	//
 	//	Optional:

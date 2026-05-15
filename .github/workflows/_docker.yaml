@@ -1,5 +1,11 @@
 name: Docker
 
+# Default least-privilege permissions for the workflow. Individual jobs
+# below raise to write where they actually need it (image push to GHCR).
+# Closes Scorecard TokenPermissionsID #514.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -23,6 +29,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required for cosign keyless signing via Sigstore (GitHub OIDC).
+      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -56,6 +64,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -65,3 +74,17 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ inputs.server_version }}${{ inputs.prerelease && '-prerelease' || '' }}
             ${{ inputs.prerelease == false && format('ghcr.io/{0}/rocketride-engine:latest', github.repository_owner) || '' }}
+
+      # Cosign keyless signing via GitHub OIDC. Signs the image manifest by
+      # digest, which covers every tag pointing at it. Verification:
+      #   cosign verify ghcr.io/<owner>/rocketride-engine:<tag> \
+      #     --certificate-identity-regexp 'https://github\.com/<owner>/rocketride-server/.+' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Install cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: Sign image with cosign
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-engine
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

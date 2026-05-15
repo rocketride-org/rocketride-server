@@ -4,6 +4,7 @@
 // =============================================================================
 
 import React, { CSSProperties } from 'react';
+import { commonStyles } from '../../../themes/styles';
 
 // =============================================================================
 // STYLES
@@ -19,14 +20,10 @@ const variantStyles: Record<string, CSSProperties> = {
 
 const styles = {
 	pill: (variant: string): CSSProperties => ({
-		display: 'inline-flex',
-		alignItems: 'center',
+		...commonStyles.badge,
 		gap: 6,
 		padding: '3px 12px',
 		borderRadius: 12,
-		fontSize: 11,
-		fontWeight: 600,
-		letterSpacing: '0.3px',
 		whiteSpace: 'nowrap',
 		...variantStyles[variant],
 	}),

@@ -60,7 +60,7 @@ class TestConfig:
     def __init__(self) -> None:
         """Initialize test configuration from ROCKETRIDE_* environment variables."""
         self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
-        self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
+        self.auth = os.getenv('ROCKETRIDE_APIKEY', '')
         self.timeout = float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0'))
 
     def as_dict(self) -> Dict[str, Any]:
@@ -101,7 +101,9 @@ async def server_available():
     """Check server availability once per session."""
     available = await is_server_available()
     if not available:
-        pytest.skip(f"Server not available at {TEST_CONFIG.uri}. Run 'builder nodes:test' to start server automatically.")
+        pytest.skip(
+            f"Server not available at {TEST_CONFIG.uri}. Run 'builder nodes:test' to start server automatically."
+        )
     return True
 
 
@@ -149,7 +151,10 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line('markers', 'requires_server: mark test as requiring a running server')
     config.addinivalue_line('markers', 'node(name): mark test as testing a specific node')
-    config.addinivalue_line('markers', 'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)')
+    config.addinivalue_line(
+        'markers',
+        'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)',
+    )
 
 
 # =============================================================================

@@ -67,12 +67,6 @@
 	"lanes": {
 		"questions": []
 	},
-	"input": [
-		{
-			"lane": "questions",
-			"output": []
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

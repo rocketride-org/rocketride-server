@@ -39,7 +39,11 @@ class engLibHandler(logging.StreamHandler):
             msg = self.format(record)
 
             # skip known warnings
-            if any(name for levelno, name, pattern in self._known_errors if levelno == record.levelno and name == record.name and re.match(pattern, msg)):
+            if any(
+                name
+                for levelno, name, pattern in self._known_errors
+                if levelno == record.levelno and name == record.name and re.match(pattern, msg)
+            ):
                 return
 
             if record.levelno <= logging.INFO:
@@ -68,7 +72,11 @@ class engLibHandler(logging.StreamHandler):
             + r'.+<urllib3\.connection\.HTTPConnection object at 0x[0-9a-fA-F]+>'
             + r'.+/metadata/instance/compute/location\?format=text&api-version=\d\d\d\d-\d\d-\d\d$',
         ),
-        (logging.WARNING, 'msal.application', r"^Region configured \(('.*'|None)\) != region detected \(('.*'|None)\)$"),
+        (
+            logging.WARNING,
+            'msal.application',
+            r"^Region configured \(('.*'|None)\) != region detected \(('.*'|None)\)$",
+        ),
     ]
 
 

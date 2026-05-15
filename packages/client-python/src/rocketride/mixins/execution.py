@@ -55,8 +55,8 @@ Usage:
 
 import asyncio
 import json
-import re
 import copy
+import os
 from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
@@ -90,56 +90,6 @@ class ExecutionMixin(DAPClient):
         """Initialize pipeline execution capabilities."""
         super().__init__(**kwargs)
 
-    def _substitute_env_vars(self, value: str) -> str:
-        """
-        Substitute environment variables in a string.
-
-        Replaces ${ROCKETRIDE_*} patterns with values from client's env dictionary.
-        If variable is not found, leaves it unchanged.
-
-        Args:
-            value: String that may contain ${ROCKETRIDE_*} patterns
-
-        Returns:
-            String with variables replaced (or unchanged if not found)
-        """
-
-        def replacer(match):
-            var_name = match.group(1)
-            # Check if variable exists in client's env
-            if hasattr(self, '_env') and var_name in self._env:
-                return str(self._env[var_name])
-            # If not found, leave as is
-            return match.group(0)
-
-        # Match ${ROCKETRIDE_*} patterns
-        return re.sub(r'\$\{(ROCKETRIDE_[^}]+)\}', replacer, value)
-
-    def _process_env_substitution(self, obj: Any) -> Any:
-        """
-        Recursively process an object/list to substitute environment variables.
-
-        Only processes string values, leaving other types unchanged.
-
-        Args:
-            obj: Object to process (can be dict, list, str, or any other type)
-
-        Returns:
-            Processed object with environment variables substituted
-        """
-        if isinstance(obj, str):
-            # If it's a string, perform substitution
-            return self._substitute_env_vars(obj)
-        elif isinstance(obj, list):
-            # If it's a list, process each element
-            return [self._process_env_substitution(item) for item in obj]
-        elif isinstance(obj, dict):
-            # If it's a dict, process each value
-            return {key: self._process_env_substitution(value) for key, value in obj.items()}
-        else:
-            # For other types (int, float, bool, None), return as is
-            return obj
-
     async def use(
         self,
         *,
@@ -153,6 +103,8 @@ class ExecutionMixin(DAPClient):
         ttl: int = None,
         pipelineTraceLevel: str = None,
         name: str = None,
+        env: Dict[str, str] = None,
+        team_id: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -269,7 +221,9 @@ class ExecutionMixin(DAPClient):
                     loop = asyncio.get_running_loop()
                     pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
             except FileNotFoundError as err:
-                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
+                raise FileNotFoundError(
+                    f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration."
+                ) from err
         else:
             # Keep behavior consistent with filepath-based loading
             pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
@@ -277,17 +231,14 @@ class ExecutionMixin(DAPClient):
         # Create a deep copy to avoid modifying the original
         processed_config = copy.deepcopy(pipeline_config)
 
-        # Perform environment variable substitution
-        processed_config = self._process_env_substitution(processed_config)
-
-        # Override source if specified (after substitution)
+        # Override source if specified
         if source is not None:
             processed_config['source'] = source
 
         # Build execution request with all parameters
         arguments = {
-            'pipeline': processed_config,  # Use processed config with variables substituted
-            'args': args or [],  # Default to empty args list
+            'pipeline': processed_config,
+            'args': args or [],
         }
 
         # Add TTL if provided (server uses its default if not specified)
@@ -303,12 +254,20 @@ class ExecutionMixin(DAPClient):
             arguments['useExisting'] = use_existing
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
+        # Build ROCKETRIDE_* env from client's .env + caller overrides
+        rocket_env: Dict[str, str] = {}
+        if hasattr(self, '_env'):
+            for k, v in self._env.items():
+                if k.startswith('ROCKETRIDE_'):
+                    rocket_env[k] = v
+        if env:
+            rocket_env.update(env)
+        if rocket_env:
+            arguments['env'] = rocket_env
 
         # Derive display name from filepath if not explicitly provided
         effective_name = name
         if effective_name is None and filepath:
-            import os
-
             base = os.path.basename(filepath)
             for ext in ('.pipe.json', '.pipe'):
                 if base.endswith(ext):
@@ -317,6 +276,8 @@ class ExecutionMixin(DAPClient):
             effective_name = base
         if effective_name is not None:
             arguments['name'] = effective_name
+        if team_id is not None:
+            arguments['teamId'] = team_id
 
         # Send execution request to server
         response_body = await self.call('execute', **arguments)

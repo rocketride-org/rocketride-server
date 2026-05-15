@@ -12,7 +12,7 @@ import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
 
 const App: React.FC = () => {
-	const [isVSCode] = useState(() => window.parent !== window);
+	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
 
 	// Initialize VSCode state

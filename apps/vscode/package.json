@@ -2,7 +2,7 @@
 	"name": "rocketride",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.6",
+	"version": "1.1.0",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -512,13 +512,13 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.16",
+		"adm-zip": "^0.5.17",
 		"chart.js": "^4.4.0",
-		"dockerode": "^4.0.9",
+		"dockerode": "^4.0.12",
 		"proper-lockfile": "^4.1.2",
 		"rocketride": "workspace:*",
 		"shared": "workspace:*",
-		"tar": "^7.5.8"
+		"tar": "^7.5.15"
 	},
 	"files": [
 		"README.md",

@@ -1,15 +1,18 @@
+colors: false # disabled to fix terminal corruption on Windows
 pre-commit:
-  parallel: true
+  parallel: false # sequential to avoid ruff cache write conflicts
   commands:
     gitleaks:
       tags: security
       run: gitleaks protect --verbose --redact --staged --config .gitleaks.toml
-    eslint:
-      glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
-      run: npx eslint {staged_files}
-    prettier:
-      glob: '*.{js,ts,jsx,tsx,mjs,cjs,json,css,scss,html,md,yaml,yml}'
-      run: npx prettier --check {staged_files}
+    # Note: ESLint and Prettier are temporarily disabled in lefthook in order
+    #       to enable them later in both lefthook and CI workflow.
+    # eslint:
+    #   glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
+    #   run: npx eslint {staged_files}
+    # prettier:
+    #   glob: '*.{js,ts,jsx,tsx,mjs,cjs,json,css,scss,html,md,yaml,yml}'
+    #   run: npx prettier --check {staged_files}
     ruff-check:
       glob: '*.py'
       run: ruff check {staged_files}

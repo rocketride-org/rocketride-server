@@ -64,28 +64,6 @@
 		"documents": ["documents"],
 		"image": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"description": "Documents container images to embed.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents containg embeddings."
-				}
-			]
-		},
-		{
-			"lane": "image",
-			"description": "Documents container images to embed.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents containg embeddings."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

@@ -13,8 +13,8 @@
 
 import React, { useState } from 'react';
 import onpremIcon from '../../../../assets/onprem.svg';
-import { MessageData, settingsStyles as S } from '../../PageSettings/SettingsWebview';
-import { MessageDisplay } from '../../PageSettings/MessageDisplay';
+import { MessageData, settingsStyles as S } from '../../Settings/SettingsWebview';
+import { MessageDisplay } from '../../Settings/MessageDisplay';
 
 // =============================================================================
 // TYPES

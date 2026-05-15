@@ -39,22 +39,26 @@ const S = {
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** Balance number + unit row. */
-	balanceRow: {
+	/** Multi-resource balance list — one line per resource. */
+	balanceGrid: {
 		display: 'flex',
-		alignItems: 'baseline',
-		gap: 10,
+		flexDirection: 'column' as const,
+		gap: 4,
 		marginBottom: 16,
 	} as CSSProperties,
 
-	/** Large balance number. */
+	/** Single resource balance line. */
+	balanceItem: {
+	} as CSSProperties,
+
+	/** Balance label text. */
 	balance: {
-		fontSize: 28,
-		fontWeight: 700,
+		fontSize: 14,
+		fontWeight: 500,
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** "credits available" unit label. */
+	/** Resource type + unit label. */
 	balanceUnit: {
 		fontSize: 13,
 		color: 'var(--rr-text-secondary)',
@@ -132,16 +136,25 @@ const S = {
 // HELPERS
 // =============================================================================
 
-/** Formats a large credit number into a compact string (e.g. 55000 → "55.0k"). */
+/** Formats a credit number using the browser's locale (e.g. 55000 → "55,000"). */
 function formatCredits(n: number): string {
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
 	return n.toLocaleString();
 }
 
-/** Converts USD cents to a display string (e.g. 2900 → "$29", 1599 → "$15.99"). */
+/**
+ * Applies a label template from Stripe metadata for a given resource.
+ * Replaces ``{amount}`` with the formatted number. Falls back to
+ * ``"<amount> <resource>"`` when no label is configured.
+ */
+function applyLabel(resource: string, amount: number, labels: Record<string, string> | undefined): string {
+	const template = labels?.[resource];
+	if (template) return template.replace('{amount}', formatCredits(amount));
+	return `${formatCredits(amount)} ${resource}`;
+}
+
+/** Converts USD cents to a locale-aware display string (e.g. 2900 → "$29.00"). */
 function formatUsd(cents: number): string {
-	return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+	return (cents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
 // =============================================================================
@@ -193,10 +206,20 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 		<div style={S.container}>
 			<div style={S.heading}>Compute credits</div>
 
-			{/* Balance display */}
-			<div style={S.balanceRow}>
-				<span style={S.balance}>{balance ? formatCredits(balance.balance) : '—'}</span>
-				<span style={S.balanceUnit}>credits available</span>
+			{/* Balance display — one pill per resource type */}
+			<div style={S.balanceGrid}>
+				{balance && balance.balances && Object.keys(balance.balances).length > 0 ? (
+					Object.entries(balance.balances).map(([resource, amount]) => (
+						<div key={resource} style={S.balanceItem}>
+							<span style={S.balance}>{applyLabel(resource, amount, balance.labels)}</span>
+						</div>
+					))
+				) : (
+					<div style={S.balanceItem}>
+						<span style={S.balance}>—</span>
+						<span style={S.balanceUnit}>credits available</span>
+					</div>
+				)}
 			</div>
 
 			{/* Pack grid or empty state */}

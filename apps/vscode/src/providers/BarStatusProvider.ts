@@ -105,7 +105,7 @@ export class BarStatus {
 		}
 
 		try {
-			const statusListener = this.connectionManager.on('connectionStateChanged', (status: ConnectionStatus) => {
+			const statusListener = this.connectionManager.on('shell:statusChange', (status: ConnectionStatus) => {
 				this.handleConnectionStatusChange(status);
 			});
 

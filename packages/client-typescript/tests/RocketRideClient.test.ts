@@ -161,8 +161,8 @@ describe('RocketRideClient Integration Tests', () => {
 			});
 
 			// Retry a few times in case server is busy (tests may run in parallel)
-			const maxAttempts = 5;
-			const delayMs = 2000;
+			const maxAttempts = 10;
+			const delayMs = 1000;
 			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				try {
@@ -178,7 +178,7 @@ describe('RocketRideClient Integration Tests', () => {
 			expect(Object.values(TASK_STATE)).toContain(status!.state);
 
 			await client.terminate(result.token);
-		}, 90000);
+		}, TEST_CONFIG.timeout);
 
 		it(
 			'should terminate a pipeline',
@@ -1833,11 +1833,18 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-m${i}`);
 				}
 
-				// Create all pipelines concurrently
+				// Create all pipelines concurrently — each needs a unique project_id
+				// to avoid server-side contention during concurrent startup.
+				const MIXED_PROJECT_IDS = [
+					'a1b2c3d4-1111-4000-a000-000000000001',
+					'a1b2c3d4-1111-4000-a000-000000000002',
+					'a1b2c3d4-1111-4000-a000-000000000003',
+					'a1b2c3d4-1111-4000-a000-000000000004',
+				];
 				const pipelines = await Promise.all(
 					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
 						const result = await client.use({
-							pipeline: getEchoPipeline(),
+							pipeline: getEchoPipeline(MIXED_PROJECT_IDS[index]),
 							token: `${CONCURRENT_TOKEN}-m${index}`,
 						});
 						return { index, token: result.token };
@@ -1919,9 +1926,18 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-s${i}`);
 				}
 
-				// Create 4 independent subprocesses concurrently
+				// Create 4 independent subprocesses concurrently — each needs a
+				// unique project_id to avoid server-side contention during startup.
+				const CYCLE_PROJECT_IDS = [
+					'b2c3d4e5-2222-4000-b000-000000000001',
+					'b2c3d4e5-2222-4000-b000-000000000002',
+					'b2c3d4e5-2222-4000-b000-000000000003',
+					'b2c3d4e5-2222-4000-b000-000000000004',
+				];
 				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-s${i}`);
-				await Promise.all(tokens.map((token) => client.use({ pipeline: getEchoPipeline(), token })));
+				await Promise.all(tokens.map((token, i) =>
+					client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })
+				));
 				pipelineTokens.push(...tokens);
 
 				// Each pipeline independently cycles send/recv — all 4 run in parallel
@@ -1989,12 +2005,12 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					// fresh one.  This is what makes both clients fan into ONE shared
 					// eaas->subprocess _data_client.
 					const resA = await client.use({
-						pipeline: getEchoPipeline(),
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
 						token: SHARED_TOKEN,
 						useExisting: true,
 					});
 					const resB = await clientB.use({
-						pipeline: getEchoPipeline(),
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
 						token: SHARED_TOKEN,
 						useExisting: true,
 					});

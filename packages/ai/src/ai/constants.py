@@ -30,7 +30,7 @@ Global configuration values for metrics, billing, and system tuning.
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
 CONST_METRICS_SAMPLE_INTERVAL = 0.25  # seconds between metric samples (250ms)
-CONST_BILLING_REPORT_INTERVAL = 5 * 60.0  # seconds between billing reports (5 minutes)
+CONST_BILLING_REPORT_INTERVAL = 15.0  # 5 * 60.0  # seconds between billing reports (5 minutes)
 CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to stop gracefully
 
 # =============================================================================
@@ -44,6 +44,15 @@ CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing
 CONST_RATE_VCPU_HOUR = 1020  # tokens per vCPU-hour
 CONST_RATE_MEMORY_GB_HOUR = 100  # tokens per memory GB-hour
 CONST_RATE_GPU_GB_HOUR = 2140  # tokens per GPU GB-hour
+CONST_RATE_GPU_INFERENCE_SECOND = 0.594  # tokens per GPU-second of inference
+
+# =============================================================================
+# Custom Node Billing Rates (counter_name → tokens per unit)
+# =============================================================================
+CONST_CUSTOM_BILLING_RATES: dict[str, float] = {
+    'pagesProcessed': 5.0,  # tokens per page
+    # Add more as nodes are created
+}
 
 # =============================================================================
 # Task Engine Configuration

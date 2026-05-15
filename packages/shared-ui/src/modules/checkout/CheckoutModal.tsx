@@ -13,7 +13,7 @@
  *   4. Payment   → Stripe Elements <PaymentElement> collects card details
  *   5. Submit    → stripe.confirmPayment() (redirect: 'if_required')
  *   6. Confirm   → onConfirmPending notifies server
- *   7. Success   → onSuccess — host closes modal, server pushes updated subscribedApps
+ *   7. Success   → onSuccess — host closes modal, server pushes updated ConnectResult.apps
  *
  * All server communication flows through callback props — no SDK imports.
  */
@@ -23,6 +23,20 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
 import type { CheckoutModalProps, CheckoutPlan } from './types';
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Formats a credit grant line using the label template from Stripe metadata.
+ * Replaces ``{amount}`` with the localized number. Falls back to raw key.
+ */
+function formatGrant(resource: string, amount: number, labels: Record<string, string> | null | undefined): string {
+	const template = labels?.[resource];
+	if (template) return template.replace('{amount}', amount.toLocaleString());
+	return `${amount.toLocaleString()} ${resource}`;
+}
 
 // =============================================================================
 // STYLES
@@ -99,12 +113,8 @@ const S = {
 	} as CSSProperties,
 
 	planRecapLabel: {
-		fontSize: 11,
-		fontWeight: 600,
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
-		color: 'var(--rr-text-secondary)',
-		marginBottom: 4,
+		...commonStyles.labelUppercase,
+		marginBottom: 6,
 	} as CSSProperties,
 
 	planRecapName: {
@@ -240,7 +250,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 	/**
 	 * Confirms the Stripe payment, then notifies the server.
 	 * The server push (from confirm_pending and the webhook) will update
-	 * subscribedApps automatically.
+	 * ConnectResult.apps automatically.
 	 */
 	const handleSubmit = useCallback(
 		async (e: React.FormEvent) => {
@@ -272,7 +282,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 					// Non-fatal — the webhook will still update the DB
 				}
 
-				// Step 3: Close the modal. The server push will update subscribedApps.
+				// Step 3: Close the modal. The server push will update ConnectResult.apps.
 				onSuccess();
 			} catch (err: any) {
 				onError(err.message ?? 'An unexpected error occurred.');
@@ -451,6 +461,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ appName, appDescri
 									</div>
 								))}
 							</div>
+
+							{/* Credit grant details for the selected plan */}
+							{selectedPlan?.credits && (() => {
+								const { initial, recurring } = selectedPlan.credits!;
+								const labels = selectedPlan.creditLabels;
+								// Welcome bonus = initial - recurring (only show if > 0)
+								const bonuses = initial && recurring
+									? Object.entries(initial)
+										.map(([res, amt]) => ({ res, diff: amt - (recurring[res] ?? 0) }))
+										.filter(({ diff }) => diff > 0)
+									: [];
+								return (
+									<div style={{ marginBottom: 16, fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.7 }}>
+										{bonuses.length > 0 && (
+											<>
+												<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)' }}>As a Welcome gift</div>
+												{bonuses.map(({ res, diff }) => (
+													<div key={`b-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, diff, labels)} bonus</div>
+												))}
+											</>
+										)}
+										{recurring && (
+											<>
+												<div style={{ fontWeight: 600, color: 'var(--rr-text-primary)', marginTop: bonuses.length > 0 ? 6 : 0 }}>Monthly</div>
+												{Object.entries(recurring).map(([res, amt]) => (
+													<div key={`r-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, amt, labels)}</div>
+												))}
+											</>
+										)}
+									</div>
+								);
+							})()}
 
 							<button style={S.continueBtn(!selectedPlan)} disabled={!selectedPlan} onClick={handleContinue}>
 								Continue

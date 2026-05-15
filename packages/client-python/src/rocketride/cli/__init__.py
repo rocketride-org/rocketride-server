@@ -46,7 +46,7 @@ Usage:
     rocketride start --pipeline my_pipeline.json --apikey YOUR_KEY
     rocketride upload --files *.pdf --token PIPELINE_TOKEN
     rocketride status --token PIPELINE_TOKEN
-    
+
 For detailed help:
     rocketride --help
     rocketride start --help
