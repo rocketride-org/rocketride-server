@@ -36,7 +36,7 @@
 	},
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
-		"node": ">=18.0.0",
+		"node": ">=20.0.0",
 		"pnpm": ">=10.0.0"
 	},
 	"pnpm": {
@@ -54,6 +54,7 @@
 		"overrides": {
 			"cross-spawn": ">=6.0.6",
 			"dompurify": ">=3.4.0 <3.5.0",
+			"fast-uri": ">=3.1.2 <4",
 			"glob": ">=11.1.0",
 			"handlebars": ">=4.7.9 <5",
 			"js-yaml": ">=4.1.1",
@@ -63,9 +64,12 @@
 			"minimatch@5": ">=5.1.8 <6",
 			"minimatch@9": ">=9.0.7 <10",
 			"minimatch@10": ">=10.2.3 <11",
+			"picomatch@<2.3.2": ">=2.3.2 <3",
+			"picomatch@4": ">=4.0.4 <5",
 			"postcss": ">=8.4.31",
 			"protobufjs": ">=7.5.5 <8",
 			"qs": ">=6.14.1",
+			"serialize-javascript": ">=7.0.5 <8",
 			"undici": ">=7.24.0 <8"
 		},
 		"supportedArchitectures": {
