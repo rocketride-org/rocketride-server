@@ -34,7 +34,7 @@
 		"clsx": "~2.1.1",
 		"d3": "~7.9.0",
 		"dagre": "~0.8.5",
-		"dompurify": "~3.2.5",
+		"dompurify": "~3.4.0",
 		"elkjs": "~0.9.3",
 		"fuzzysort": "~3.1.0",
 		"html-react-parser": "~5.2.3",
