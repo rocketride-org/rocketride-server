@@ -1,0 +1,144 @@
+{
+	"title": "Text Chunker",
+	"protocol": "chunker://",
+	"classType": ["transform"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.chunker",
+	"prefix": "Chunker",
+	"description": ["A text chunking component that splits documents into smaller, semantically coherent ", "chunks for downstream processing such as embedding, retrieval, and LLM-based generation. ", "Supports multiple chunking strategies: recursive character splitting with configurable ", "separators, sentence-boundary splitting, and token-based splitting using tiktoken. ", "Each strategy supports configurable chunk size and overlap to balance context preservation ", "with chunk granularity."],
+	"icon": "chunker.svg",
+	"tile": ["Strategy: ${parameters.chunker.${profile}.strategy}", "Size: ${parameters.chunker.${profile}.chunk_size}"],
+	"lanes": {
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "documents",
+			"description": ["Receives documents and splits them into smaller chunks using the ", "configured chunking strategy. Each chunk is emitted as a separate ", "document with metadata tracking its position within the original."],
+			"output": [
+				{
+					"lane": "documents",
+					"description": ["Produces one document per chunk, with chunkId and parentId ", "metadata for downstream reassembly."],
+					"output": []
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "recursive",
+		"profiles": {
+			"recursive": {
+				"title": "Recursive Character - General-purpose, best balance of structure and size",
+				"strategy": "recursive",
+				"chunk_size": 1000,
+				"chunk_overlap": 200
+			},
+			"sentence": {
+				"title": "Sentence Boundary - Splits at sentence endings for coherent chunks",
+				"strategy": "sentence",
+				"chunk_size": 1000,
+				"chunk_overlap": 200
+			},
+			"token": {
+				"title": "Token-based - Splits by token count, ideal for LLM context windows",
+				"strategy": "token",
+				"chunk_size": 512,
+				"chunk_overlap": 50,
+				"encoding_name": "cl100k_base"
+			}
+		}
+	},
+	"fields": {
+		"chunker.chunk_size": {
+			"type": "number",
+			"title": "Chunk size",
+			"description": "Maximum size of each chunk (characters for recursive/sentence, tokens for token strategy)",
+			"default": 1000
+		},
+		"chunker.chunk_overlap": {
+			"type": "number",
+			"title": "Chunk overlap",
+			"description": "Number of characters or tokens to overlap between consecutive chunks",
+			"default": 200
+		},
+		"chunker.encoding_name": {
+			"type": "string",
+			"title": "Token encoding",
+			"description": "Tiktoken encoding name (only used with token strategy)",
+			"default": "cl100k_base",
+			"enum": [
+				["cl100k_base", "cl100k_base - GPT-4, GPT-3.5-turbo, text-embedding-ada-002"],
+				["o200k_base", "o200k_base - GPT-4o and newer models"],
+				["p50k_base", "p50k_base - Codex models"],
+				["r50k_base", "r50k_base - GPT-3 models"]
+			]
+		},
+		"chunker.recursive": {
+			"object": "recursive",
+			"properties": ["chunker.chunk_size", "chunker.chunk_overlap"]
+		},
+		"chunker.sentence": {
+			"object": "sentence",
+			"properties": ["chunker.chunk_size", "chunker.chunk_overlap"]
+		},
+		"chunker.token": {
+			"object": "token",
+			"properties": ["chunker.chunk_size", "chunker.chunk_overlap", "chunker.encoding_name"]
+		},
+		"chunker.profile": {
+			"title": "Chunking strategy",
+			"description": "Select the text chunking strategy",
+			"type": "string",
+			"default": "recursive",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "recursive",
+					"properties": ["chunker.recursive"]
+				},
+				{
+					"value": "sentence",
+					"properties": ["chunker.sentence"]
+				},
+				{
+					"value": "token",
+					"properties": ["chunker.token"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Text Chunker",
+			"properties": ["chunker.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["recursive"],
+		"outputs": ["documents"],
+		"cases": [
+			{
+				"name": "Chunk text into smaller pieces",
+				"documents": [
+					{
+						"page_content": "First paragraph with some content about machine learning.\n\nSecond paragraph about neural networks and deep learning architectures.\n\nThird paragraph covering natural language processing and transformers.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"chunkId": 0,
+							"nodeId": "test-node",
+							"parent": "/test"
+						}
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}
