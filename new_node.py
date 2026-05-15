@@ -75,7 +75,6 @@ _BASE_MAP: dict[str, tuple[str, str, list[str], list[str]]] = {
         "LLMBase",
         [
             "from rocketlib import IGlobalBase",
-            "from ai.common.chat import ChatBase",
         ],
         [
             "from ai.common.llm_base import LLMBase",
@@ -219,15 +218,13 @@ def _render_services_json(
     caps_json = json.dumps(capabilities)
     class_type_json = json.dumps(class_types)
 
-    register_block = ""
-    if register:
-        register_block = f'\t"register": "{register}",\n'
-
     # Construct a sensible tile expression
-    tile_expr = f"${{{fp}_config.profile}}" if len(class_types) == 1 else ""
+    tile_expr = f"${{{fp}.profile}}" if len(class_types) == 1 else ""
     tile_json = json.dumps([f"{title}: {tile_expr}"] if tile_expr else [])
 
     # Description split into sentence-sized chunks for array style
+    # NOTE: This regex splits on any '. ' sequence and will incorrectly split
+    # on abbreviations like 'e.g.' or 'i.e.' — acceptable for boilerplate text.
     desc_sentences = [s.strip() + " " for s in re.split(r"(?<=\.)\s+", description) if s.strip()]
     desc_json = json.dumps(desc_sentences, indent=None)
 
@@ -411,12 +408,6 @@ def _render_iglobal(
     global_base, _instance_base, global_imports, _instance_imports = base_entry
 
     extra_imports = "\n".join(global_imports)
-    req_block = ""
-    if has_requirements:
-        req_block = textwrap.dedent("""\
-
-            import os
-        """)
 
     begin_global_body = textwrap.indent(
         textwrap.dedent("""\
@@ -431,15 +422,6 @@ def _render_iglobal(
         textwrap.dedent("""\
             \"\"\"Tear down global state for this node.\"\"\"
             # TODO: implement cleanup
-            pass
-        """),
-        "        ",
-    )
-
-    validate_body = textwrap.indent(
-        textwrap.dedent("""\
-            \"\"\"Validate configuration before the pipeline starts.\"\"\"
-            # TODO: validate node configuration here
             pass
         """),
         "        ",
@@ -465,7 +447,7 @@ def _render_iglobal(
         + f'    """Global (per-pipeline) state for the {node_name} node."""\n'
         + "\n"
         + "    def validateConfig(self):\n"
-        + ("        \"\"\"Validate configuration before the pipeline starts.\"\"\"\n" if has_requirements else "")
+        + "        \"\"\"Validate configuration before the pipeline starts.\"\"\"\n"
         + (req_depends if has_requirements else "        # TODO: validate node configuration here\n        pass\n")
         + "\n"
         + "    def beginGlobal(self):\n"
@@ -700,11 +682,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--register",
-        choices=sorted(VALID_REGISTERS),
+        choices=sorted(VALID_REGISTERS) + ["none"],
         default="filter",
         help=(
             "Factory registration type. "
-            f"Valid values: {', '.join(sorted(VALID_REGISTERS))}. "
+            f"Valid values: {', '.join(sorted(VALID_REGISTERS))}, none. "
+            "Use 'none' to omit the register field entirely. "
             "Default: filter"
         ),
     )
@@ -755,11 +738,15 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    # Map the "none" sentinel string to Python None so scaffold() omits the
+    # register field entirely when the user passes --register none.
+    register: str | None = None if args.register == "none" else args.register
+
     scaffold(
         node_name=args.node_name,
         class_types=args.class_types,
         capabilities=args.capabilities,
-        register=args.register,
+        register=register,
         prefix=args.prefix,
         description=args.description,
         with_requirements=args.with_requirements,
