@@ -1,0 +1,51 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [{ "lane": "tags", "from": "webhook_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "ocr_1",
+			"provider": "ocr",
+			"config": {},
+			"input": [{ "lane": "image", "from": "parse_1" }],
+			"ui": { "position": { "x": 460, "y": 120 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "ner_1",
+			"provider": "ner",
+			"config": {},
+			"input": [
+				{ "lane": "text", "from": "parse_1" },
+				{ "lane": "text", "from": "ocr_1" }
+			],
+			"ui": { "position": { "x": 680, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "anonymize_1",
+			"provider": "anonymize",
+			"config": {},
+			"input": [{ "lane": "text", "from": "ner_1" }],
+			"ui": { "position": { "x": 900, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "anonymize_1" }],
+			"ui": { "position": { "x": 1120, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "6744c740-0cdb-4667-b471-6c31d17d92d2",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

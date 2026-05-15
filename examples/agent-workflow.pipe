@@ -1,0 +1,115 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_rocketride_1",
+			"provider": "agent_rocketride",
+			"config": {
+				"instructions": ["You are an orchestrator agent. Use the available tools and delegate to the research sub-agent when you need to gather information from the web. Synthesize all findings into a clear response."],
+				"max_waves": 15,
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-4o",
+				"openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 130, "y": 360 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "memory_internal_1",
+			"provider": "memory_internal",
+			"config": { "type": "memory_internal" },
+			"control": [
+				{ "classType": "memory", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 350, "y": 360 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_http_request_1",
+			"provider": "tool_http_request",
+			"config": { "type": "tool_http_request" },
+			"control": [
+				{ "classType": "tool", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 570, "y": 360 }, "measured": { "width": 150, "height": 40 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_python_1",
+			"provider": "tool_python",
+			"config": { "type": "tool_python" },
+			"control": [
+				{ "classType": "tool", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 790, "y": 360 }, "measured": { "width": 150, "height": 40 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_rocketride_2",
+			"provider": "agent_rocketride",
+			"config": {
+				"instructions": ["You are a research sub-agent. Use the HTTP request tool to gather information from the web. Summarize your findings clearly and return them to the orchestrator."],
+				"max_waves": 10,
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "tool", "from": "agent_rocketride_1" }
+			],
+			"ui": { "position": { "x": 460, "y": 520 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude",
+				"claude": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_rocketride_2" }
+			],
+			"ui": { "position": { "x": 350, "y": 680 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "memory_internal_2",
+			"provider": "memory_internal",
+			"config": { "type": "memory_internal" },
+			"control": [
+				{ "classType": "memory", "from": "agent_rocketride_2" }
+			],
+			"ui": { "position": { "x": 570, "y": 680 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_http_request_2",
+			"provider": "tool_http_request",
+			"config": { "type": "tool_http_request" },
+			"control": [
+				{ "classType": "tool", "from": "agent_rocketride_2" }
+			],
+			"ui": { "position": { "x": 790, "y": 680 }, "measured": { "width": 150, "height": 40 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "agent_rocketride_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "93a804e7-846b-4a7f-bcb1-5c3ade5157e3",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

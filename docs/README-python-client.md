@@ -7,14 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/rocketride/"><img src="https://img.shields.io/pypi/v/rocketride?color=222223&label=pypi" alt="PyPI"></a>
+  <a href="https://pypi.org/project/rocketride/"><img src="https://img.shields.io/pypi/v/rocketride?color=222223&label=PyPI" alt="PyPI"></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
-</p>
-
-<p align="center">
-  <a href="https://www.producthunt.com/products/rocketride?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-rocketride" target="_blank" rel="noopener noreferrer"><img alt="RocketRide - Your IDE is the new AI command center. | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1112116&amp;theme=light&amp;t=1774995997490"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
 ## Quick Start
@@ -36,6 +32,23 @@ async def main():
         await client.terminate(token)
 
 asyncio.run(main())
+```
+
+**Important:** `client.send()` / `client.send_files()` are intended for pipelines whose **source** is `webhook` or `dropper`.  
+If your pipeline source is `chat`, use `client.chat()` instead.
+
+If you need a minimal `.pipe` to test `send()` end-to-end, start with:
+
+```json
+{
+  "components": [
+    { "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
+    { "id": "response_text_1", "provider": "response_text", "config": { "laneName": "text" }, "input": [{ "lane": "text", "from": "webhook_1" }] }
+  ],
+  "project_id": "<your-project-id>",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "version": 1
+}
 ```
 
 Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
@@ -141,7 +154,7 @@ client = RocketRideClient(
 
 ```python
 async with RocketRideClient(uri="wss://cloud.rocketride.ai", auth=os.environ["ROCKETRIDE_APIKEY"]) as client:
-    result = await client.use(filepath="pipeline.json")
+    result = await client.use(filepath="pipeline.pipe")
     token = result["token"]
     await client.send(token, "Hello, pipeline!")
 ```
@@ -344,7 +357,7 @@ from rocketride.core.exceptions import PipeException, ExecutionException
 
 try:
     async with RocketRideClient(uri=uri, auth=auth) as client:
-        result = await client.use(filepath="pipeline.json")
+        result = await client.use(filepath="pipeline.pipe")
         await client.send(result["token"], data)
 except AuthenticationException:
     print("Bad credentials")
@@ -367,7 +380,7 @@ from rocketride import RocketRideClient
 async def main():
     client = RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key")
     await client.connect()
-    result = await client.use(filepath="pipeline.json")
+    result = await client.use(filepath="pipeline.pipe")
     token = result["token"]
     out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
     print(out)
@@ -428,7 +441,7 @@ from rocketride import RocketRideClient
 async def main():
     client = RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key")
     await client.connect()
-    result = await client.use(filepath="vectorize.json")
+    result = await client.use(filepath="vectorize.pipe")
     token = result["token"]
     await client.set_events(token, ["apaevt_status_upload", "apaevt_status_processing"])
 
@@ -460,7 +473,7 @@ from rocketride import RocketRideClient
 
 async def main():
     async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="ingest.json")
+        result = await client.use(filepath="ingest.pipe")
         token = result["token"]
         pipe = await client.pipe(token, objinfo={"name": "large.csv"}, mime_type="text/csv")
         await pipe.open()
@@ -486,7 +499,7 @@ from rocketride.schema import Question, Answer
 
 async def main():
     async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="chat_pipeline.json")
+        result = await client.use(filepath="chat_pipeline.pipe")
         token = result["token"]
         question = Question(expectJson=True)
         question.addInstruction("Format", "Return a JSON object with keys: summary, keywords.")
@@ -531,7 +544,7 @@ asyncio.run(main())
 The `rocketride` command is installed automatically with the package.
 
 ```bash
-rocketride start pipeline.json              # Start a pipeline
+rocketride start pipeline.pipe              # Start a pipeline
 rocketride upload *.pdf --token <token>      # Upload files to a running pipeline
 rocketride status --token <token>            # Monitor task progress
 rocketride stop --token <token>              # Terminate a running task

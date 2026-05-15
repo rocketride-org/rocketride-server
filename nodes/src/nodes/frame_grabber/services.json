@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -54,11 +54,8 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "frame_grabber.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/47zywca",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -67,26 +64,6 @@
 	"lanes": {
 		"video": ["image", "table", "documents"]
 	},
-	"input": [
-		{
-			"lane": "video",
-			"description": "Video to process.",
-			"output": [
-				{
-					"lane": "image",
-					"description": "Selected frames of the video."
-				},
-				{
-					"lane": "table",
-					"description": "Start times of selected frames of the video."
-				},
-				{
-					"lane": "documents",
-					"description": "Selected frames of the video as image documents with frame number and timestamp metadata."
-				}
-			]
-		}
-	],
 	//
 	//
 	//	Optional:
@@ -100,8 +77,7 @@
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"interval": {
-				"title": "Extract video frames at intervals",
-				"fps": 1
+				"title": "Extract video frames at intervals"
 			},
 			"transition": {
 				"title": "Extract video frames at scene transitions ",
@@ -114,7 +90,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

@@ -7,12 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **TypeScript client (`rocketride`)**: `DataPipe.open()` no longer marks a pipe opened before SSE subscription succeeds; if `setEvents` fails, the client best-efforts `close()` so the server pipe is not left half-open
+- **TypeScript client (`rocketride`)**: `getTaskStatus` applies a default per-request timeout of **15s**; callers may pass `options.timeout` (ms) or `{ timeout: false }` to skip the per-call override (falls back to the client request timeout behavior)
+- **TypeScript client (`rocketride`)**: `connect()` treats an empty or whitespace-only `ROCKETRIDE_APIKEY` entry in the client env snapshot as **unset**, so it does not override constructor-provided auth
+
+- **llm_gemini**: Updated model profiles to current Gemini lineup
+  - Added: `gemini-3.1-pro-preview`, `gemini-3.1-flash-image-preview`, `gemini-3.1-flash-lite-preview`, `gemini-3-flash-preview`, `gemini-3-pro-image-preview`
+  - Deprecated profiles retained for backwards compatibility:
+    - `gemini-3-pro-preview` → use `gemini-3.1-pro-preview`
+    - `gemini-3-pro-image` → use `gemini-3-pro-image-preview`
+    - `gemini-2_0-flash` → use `gemini-2.5-flash`
+    - `gemini-2_0-flash-lite` → use `gemini-2.5-flash-lite`
+  - Standardized profile key naming: `gemini-2.5-*` (dot notation) for consistency
+
+### Added
+
+- **Config**: `Config.getNodeConfig()` now emits warnings when deprecated profiles are used, with migration guidance from the profile's `migration` field
+
 ## [1.0.3] - 2026-03-01
 
 ### Added
+
 - Docker image for one-click deploy (#126)
 
 ### Fixed
+
 - Performance metrics reset on tab switch (#137)
 - Engine crash on malformed pipeline input (#134)
 

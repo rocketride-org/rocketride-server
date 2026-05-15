@@ -10,8 +10,10 @@ This module provides:
 
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.transformers')
@@ -499,8 +501,7 @@ def pipeline(
     output_fields = output_fields or _get_output_fields_for_task(task)
 
     if should_proxy:
-        host, port = server_addr
-        return PipelineProxy(task, model, port, host, output_fields, **kwargs)
+        return PipelineProxy(task, model, server_addr, output_fields, **kwargs)
     else:
         return PipelineLocal(task, model, output_fields, device, **kwargs)
 
@@ -512,8 +513,7 @@ class PipelineProxy:
         self,
         task: str,
         model: Optional[str],
-        port: int,
-        host: str,
+        address: str,
         output_fields: List[str],
         **kwargs,
     ):
@@ -522,7 +522,7 @@ class PipelineProxy:
         self.model = model
         self.output_fields = output_fields
         self.kwargs = kwargs
-        self._client = ModelClient(port, host)
+        self._client = ModelClient(address)
         self._metadata: dict = {}
 
         self._init_proxy()
@@ -542,9 +542,11 @@ class PipelineProxy:
         self._metadata = self._client.metadata
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Execute pipeline on inputs."""
+        """Execute pipeline on inputs via model server RPC."""
+        # Count inference call (ModelClient.send_command handles perf timing)
+        metrics.counter('gpu_inference_count', 1)
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'pipeline_call',
                 'inputs': inputs,
@@ -589,13 +591,34 @@ class PipelineLocal:
             logger.info('GPU processing disabled. Recommend using GPU for better performance.')
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Execute pipeline on inputs."""
+        """Execute pipeline on inputs locally with perf timing."""
         if isinstance(inputs, str):
             inputs = [inputs]
 
+        # Time each phase individually for billing/monitoring
+        t0 = time.perf_counter()
         preprocessed = TransformersLoader.preprocess(self._pipeline, inputs, self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         raw_output = TransformersLoader.inference(self._pipeline, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         results = TransformersLoader.postprocess(self._pipeline, raw_output, len(inputs), self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
+        metrics.counter('gpu_inference_count', 1)
 
         return results
 
@@ -632,8 +655,7 @@ class AutoModel:
         output_fields = output_fields or ['output']
 
         if should_proxy:
-            host, port = server_addr
-            return ModelProxy(model_name, port, host, output_fields, **kwargs)
+            return ModelProxy(model_name, server_addr, output_fields, **kwargs)
         else:
             return ModelLocal(model_name, output_fields, device, **kwargs)
 
@@ -644,8 +666,7 @@ class ModelProxy:
     def __init__(
         self,
         model_name: str,
-        port: int,
-        host: str,
+        address: str,
         output_fields: List[str],
         **kwargs,
     ):
@@ -653,7 +674,7 @@ class ModelProxy:
         self.model_name = model_name
         self.output_fields = output_fields
         self.kwargs = kwargs
-        self._client = ModelClient(port, host)
+        self._client = ModelClient(address)
 
         self._init_proxy()
 
@@ -667,9 +688,11 @@ class ModelProxy:
         )
 
     def generate(self, **kwargs) -> Any:
-        """Generate text (for language models)."""
+        """Generate text via model server RPC (for language models)."""
+        # Count inference call (ModelClient.send_command handles perf timing)
+        metrics.counter('gpu_inference_count', 1)
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'generate',
                 'inputs': kwargs,
@@ -700,13 +723,34 @@ class ModelLocal:
         )
 
     def __call__(self, inputs: Any, **kwargs) -> Any:
-        """Run model inference."""
+        """Run model inference locally with perf timing."""
         if isinstance(inputs, str):
             inputs = [inputs]
 
+        # Time each phase individually for billing/monitoring
+        t0 = time.perf_counter()
         preprocessed = TransformersLoader.preprocess(self._model, inputs, self._metadata)
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         raw_output = TransformersLoader.inference(self._model, preprocessed, self._metadata)
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
         results = TransformersLoader.postprocess(self._model, raw_output, len(inputs), self.output_fields)
+        t_post = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': t_post,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu + t_post,
+            }
+        )
+        metrics.counter('gpu_inference_count', 1)
 
         return results
 

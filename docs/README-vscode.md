@@ -7,14 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=marketplace" alt="VS Code Marketplace"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=Marketplace" alt="VS Code Marketplace"></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
-</p>
-
-<p align="center">
-  <a href="https://www.producthunt.com/products/rocketride" target="_blank" rel="noopener noreferrer"><img alt="RocketRide on Product Hunt" width="250" height="54" src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/producthunt-badge.png"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
 ## Quick Start

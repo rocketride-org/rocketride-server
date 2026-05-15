@@ -1,0 +1,116 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [{ "lane": "tags", "from": "webhook_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "preprocessor_langchain_1",
+			"provider": "preprocessor_langchain",
+			"config": {
+				"profile": "default",
+				"default": {
+					"mode": "strlen",
+					"splitter": "RecursiveCharacterTextSplitter",
+					"strlen": 512
+				},
+				"parameters": {}
+			},
+			"input": [{ "lane": "text", "from": "parse_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "embedding_transformer_1",
+			"provider": "embedding_transformer",
+			"config": { "profile": "miniLM", "parameters": {} },
+			"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+			"ui": { "position": { "x": 680, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "qdrant_1",
+			"provider": "qdrant",
+			"config": {
+				"profile": "local",
+				"local": {
+					"host": "${ROCKETRIDE_QDRANT_HOST}",
+					"port": 6333,
+					"collection": "${ROCKETRIDE_COLLECTION_NAME}"
+				},
+				"parameters": {}
+			},
+			"input": [{ "lane": "documents", "from": "embedding_transformer_1" }],
+			"ui": { "position": { "x": 900, "y": 200 }, "measured": { "width": 150, "height": 135 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "embedding_transformer_2",
+			"provider": "embedding_transformer",
+			"config": { "profile": "miniLM", "parameters": {} },
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "qdrant_2",
+			"provider": "qdrant",
+			"config": {
+				"profile": "local",
+				"local": {
+					"host": "${ROCKETRIDE_QDRANT_HOST}",
+					"port": 6333,
+					"collection": "${ROCKETRIDE_COLLECTION_NAME}"
+				},
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "embedding_transformer_2" }],
+			"ui": { "position": { "x": 460, "y": 500 }, "measured": { "width": 150, "height": 135 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "prompt_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": ["Use the provided context to answer the question accurately. If the context does not contain relevant information, say so."],
+				"parameters": {}
+			},
+			"input": [
+				{ "lane": "documents", "from": "qdrant_2" },
+				{ "lane": "questions", "from": "qdrant_2" }
+			],
+			"ui": { "position": { "x": 680, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-4o",
+				"openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "prompt_1" }],
+			"ui": { "position": { "x": 900, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "llm_openai_1" }],
+			"ui": { "position": { "x": 1120, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "1327e7c0-8479-4ab7-a319-c4dc944daeb5",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

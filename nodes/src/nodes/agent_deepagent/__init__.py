@@ -22,14 +22,17 @@
 # =============================================================================
 
 """
-Deep Agent (deepagents) node for RocketRide Engine.
+DeepAgent framework node package for RocketRide Engine.
 
-Exposes:
-- IGlobal: dependency bootstrap
-- IInstance: framework adapter implementing IInstanceGenericAgent
+This package does not directly export `IInstance` / `IGlobal` — each of the
+two DeepAgent logical types lives in its own sub-package and the engine loads
+them via the `path` field in their respective services.json files:
+
+- `nodes.agent_deepagent.deepagent_agent`    — `agent_deepagent` (standalone or hierarchical orchestrator)
+- `nodes.agent_deepagent.deepagent_subagent` — `agent_deepagent_subagent` (managed sub-agent)
+
+The shared DeepAgent framework code that both sub-packages import lives at
+this package level: `deepagent.py` and the shared `requirements.txt`.
 """
 
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance
-
-__all__ = ['IGlobal', 'IInstance']
+__all__: list[str] = []

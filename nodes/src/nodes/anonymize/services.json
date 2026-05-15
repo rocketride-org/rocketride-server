@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -53,11 +53,8 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/3Lam4Zd",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -66,19 +63,6 @@
 	"lanes": {
 		"text": ["text"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": "Text with sensitive information",
-			"min": 1,
-			"output": [
-				{
-					"lane": "text",
-					"description": "Anonymized text"
-				}
-			]
-		}
-	],
 	//
 	//	Test configuration for automated node testing
 	//
@@ -97,7 +81,7 @@
 	},
 	//
 	//	Full test configuration - tests all available profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{
@@ -234,7 +218,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

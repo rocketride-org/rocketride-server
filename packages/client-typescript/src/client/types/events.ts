@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { TASK_STATUS } from './task.js';
+import type { PIPELINE_RESULT } from './data.js';
 
 /**
  * Event type enumeration for sophisticated client subscription and event routing.
@@ -90,7 +90,7 @@ import { TASK_STATUS } from './task.js';
  * ```typescript
  * // Subscribe to debugging and detail events
  * const subscription = EVENT_TYPE.DEBUGGER | EVENT_TYPE.DETAIL;
- * 
+ *
  * // Check if client wants specific events
  * if (clientSubscription & EVENT_TYPE.SUMMARY) {
  *     sendSummaryUpdate(client, taskStatus);
@@ -117,157 +117,147 @@ export enum EVENT_TYPE {
 	FLOW = 1 << 4, // Binary: 010000
 
 	/** Task lifecycle events - start, stop, state changes, and task management */
-	TASK = 1 << 5, // Binary: 100000
+	TASK = 1 << 5,
+
+	/** Real-time node-to-UI messages emitted via monitorSSE() during pipeline execution */
+	SSE = 1 << 6,
+
+	/** Server-level events - connection added/removed, for admin dashboards */
+	DASHBOARD = 1 << 7,
 
 	/** Convenience combination - ALL events except NONE for comprehensive monitoring */
-	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK // Binary: 111111
-}
-
-/**
- * DAP event for task status updates with comprehensive processing statistics.
- * 
- * This event is sent whenever a task's status changes, providing real-time
- * visibility into task execution progress, error conditions, and performance
- * metrics. It contains the complete TASK_STATUS structure with all processing
- * statistics, error tracking, and operational state information.
- * 
- * Event Triggers:
- * - Task state changes (NONE → STARTING → RUNNING → COMPLETED, etc.)
- * - Processing progress updates (item counts, byte counts, rates)
- * - Error and warning conditions
- * - Service health status changes
- * - Pipeline component execution flow changes
- * 
- * Client Subscriptions:
- * - DETAIL: Real-time updates for immediate display
- * - SUMMARY: Periodic consolidated updates for dashboards
- * - ALL: Comprehensive monitoring for administrative tools
- * 
- * @example
- * ```typescript
- * function handleStatusUpdate(event: EVENT_STATUS_UPDATE): void {
- *     const status = event.body;
- *     console.log(`Task ${status.name} is ${status.state === 3 ? 'running' : 'idle'}`);
- *     console.log(`Progress: ${status.completedCount}/${status.totalCount} items`);
- * }
- * ```
- */
-export interface EVENT_STATUS_UPDATE {
-	/** DAP message type - always "event" for events */
-	type: 'event';
-
-	/** Event type identifier for status update events */
-	event: 'apaevt_status_update';
-
-	/** Complete task status information with processing statistics and metrics */
-	body: TASK_STATUS;
-
-	/** Additional DAP fields may be present but should be ignored by status handlers */
-	[key: string]: unknown;
+	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD,
 }
 
 /**
  * DAP event for task lifecycle management with discriminated union for type safety.
- * 
+ *
  * This event handles three distinct task lifecycle scenarios using TypeScript's
  * discriminated unions to provide strict type safety and prevent invalid field
  * combinations. Each action type has its own required fields and structure.
- * 
+ *
  * Action Types:
  * - 'running': Lists all currently running tasks for the client's API key
  * - 'begin': Notifies that a new task has started execution
  * - 'end': Notifies that a task has completed or terminated
- * 
+ *
  * Event Flow:
  * 1. Client subscribes to EVENT_TYPE.TASK
  * 2. Server immediately sends 'running' action with current task list
  * 3. As tasks start/stop, server sends 'begin'/'end' actions
- * 
+ *
  * Network Optimization:
  * - 'running' action sent only once per subscription to provide initial state
  * - 'begin'/'end' actions sent as lightweight notifications
  * - Only tasks belonging to client's API key are included
- * 
+ *
  * @example
  * ```typescript
- * function handleTaskEvent(event: EVENT_TASK): void {
+ * function handleTaskEvent(event: { body: TaskEvent }): void {
  *     if (event.body.action === 'running') {
- *         // TypeScript ensures tasks array exists
  *         console.log(`Found ${event.body.tasks.length} running tasks`);
  *         event.body.tasks.forEach(task => {
  *             console.log(`Task ${task.id} in project ${task.projectId}`);
  *         });
  *     } else {
- *         // TypeScript ensures id and body fields exist
- *         console.log(`Task ${event.id} has ${event.body.action}`);
+ *         console.log(`Task ${event.body.name} has ${event.body.action}`);
  *         console.log(`Project: ${event.body.projectId}, Source: ${event.body.source}`);
  *     }
  * }
  * ```
  */
-export type EVENT_TASK =
-	| {
-		/** DAP message type - always "event" for events */
-		type: 'event';
+/** Task info entry in the 'running' action payload. */
+interface TaskRunningEntry {
+	/** Unique task identifier. */
+	id: string;
+	/** Display name of the task (e.g. 'Parser1.Chat'). */
+	name: string;
+	/** Project identifier. */
+	projectId: string;
+	/** Source component entry point. */
+	source: string;
+}
 
-		/** Event type identifier for task lifecycle events */
-		event: 'apaevt_task';
+/** Snapshot of all active tasks, sent on initial subscription. */
+interface TaskEventRunning {
+	action: 'running';
+	tasks: TaskRunningEntry[];
+}
 
-		/** Event body for 'running' action - provides current task inventory */
-		body: {
-			/** Action identifier - 'running' provides snapshot of active tasks */
-			action: 'running';
+/** A task has started execution. */
+interface TaskEventBegin {
+	action: 'begin';
+	/** Display name of the task. */
+	name: string;
+	/** Project identifier. */
+	projectId: string;
+	/** Source component identifier. */
+	source: string;
+}
 
-			/** 
-			 * Array of currently running tasks belonging to client's API key.
-			 * Sent when client first subscribes to TASK events to provide
-			 * initial state without requiring separate query.
-			 */
-			tasks: Array<{
-				/** Unique task identifier for tracking and management */
-				id: string;
+/** A task has completed or been terminated. */
+interface TaskEventEnd {
+	action: 'end';
+	/** Display name of the task. */
+	name: string;
+	/** Project identifier. */
+	projectId: string;
+	/** Source component identifier. */
+	source: string;
+}
 
-				/** Project identifier for organization and permissions */
-				projectId: string;
+/** A task has been restarted. */
+interface TaskEventRestart {
+	action: 'restart';
+	/** Display name of the task. */
+	name: string;
+	/** Project identifier. */
+	projectId: string;
+	/** Source component identifier. */
+	source: string;
+}
 
-				/** Source component that serves as pipeline entry point */
-				source: string;
-			}>;
-		};
+/** Discriminated union of all apaevt_task event body shapes. */
+export type TaskEvent = TaskEventRunning | TaskEventBegin | TaskEventEnd | TaskEventRestart;
 
-		/** Additional DAP fields may be present but should be ignored */
-		[key: string]: unknown;
-	}
-	| {
-		/** DAP message type - always "event" for events */
-		type: 'event';
+/**
+ * DAP event for pipeline flow tracking — component execution and data flow visualization.
+ *
+ * Sent during pipeline execution to track data flowing through components.
+ * Each event represents a pipeline operation (begin, enter, leave, end) on
+ * a specific pipe within the pipeline.
+ *
+ * Client Subscriptions:
+ * - FLOW: Pipeline execution tracking
+ * - ALL: Comprehensive monitoring
+ */
+export interface TaskEventFlow {
+	/** Pipe index within the pipeline. */
+	id: number;
 
-		/** Event type identifier for task lifecycle events */
-		event: 'apaevt_task';
+	/** Operation type. */
+	op: 'begin' | 'enter' | 'leave' | 'end';
 
-		/** Event body for 'begin'/'end' actions - task lifecycle notifications */
-		body: {
-			/** 
-			 * Action identifier for task lifecycle events:
-			 * - 'begin': Task has started execution and is initializing
-			 * - 'end': Task has completed execution or been terminated
-			 */
-			action: 'begin' | 'end';
+	/** Component names in the current pipe's execution path. */
+	pipes: string[];
 
-			/** Project identifier for organization and permissions tracking */
-			projectId: string;
-
-			/** Source component identifier that serves as pipeline entry point */
-			source: string;
-		};
-
-		/** 
-		 * Task identifier for lifecycle tracking.
-		 * Required for begin/end actions to enable client-side task correlation
-		 * and status tracking across multiple related events.
-		 */
-		id: string;
-
-		/** Additional DAP fields may be present but should be ignored */
-		[key: string]: unknown;
+	/** Trace data — lane, input/output data, result, error. */
+	trace: {
+		lane?: string;
+		data?: Record<string, unknown>;
+		result?: string;
+		error?: string;
 	};
+
+	/**
+	 * Final pipeline result — populated on op === 'end' when trace level >= summary.
+	 * Contains result_types mapping plus dynamic fields (text, answers, documents, etc.).
+	 */
+	result?: PIPELINE_RESULT;
+
+	/** Project identifier. */
+	project_id: string;
+
+	/** Source component identifier (e.g. "chat_1"). */
+	source: string;
+}

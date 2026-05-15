@@ -36,20 +36,23 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
-import { BaseManager, ManagerInfo } from './base-manager';
+import { ManagerInfo } from './base-manager';
 import { EngineInstaller } from './engine-installer';
-import { ConfigManager, ConfigManagerInfo } from '../config';
+import { ConnectionGroupConfig } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
-export class EngineManager extends BaseManager {
+export class EngineManager extends EventEmitter {
 	private readonly installer: EngineInstaller;
 	private readonly logger = getLogger();
 	private child?: ChildProcess;
 	private started = false;
 	private actualPort?: number;
 	private pidFilePath?: string;
+	/** Last config passed to start(), used by getInfo(). */
+	private lastConfig?: ConnectionGroupConfig;
 
 	constructor(enginesRoot: string) {
 		super();
@@ -74,7 +77,9 @@ export class EngineManager extends BaseManager {
 	 * Installs the engine (if needed) and starts the engine process.
 	 * Emits 'status' events throughout for UI display.
 	 */
-	public async start(config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void> {
+	public async start(config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
+		this.lastConfig = config;
+
 		// --- Phase 1: Install ---
 		const versionSpec = config.local.engineVersion || 'latest';
 
@@ -95,7 +100,7 @@ export class EngineManager extends BaseManager {
 				if (value.message) {
 					this.emit('status', value.message);
 				}
-			}
+			},
 		};
 
 		let executablePath: string;
@@ -141,14 +146,20 @@ export class EngineManager extends BaseManager {
 			await this.stopProcess();
 		}
 
-		const effectiveArgs = ConfigManager.getInstance().getEffectiveEngineArgs();
+		// Build engine args from config — inject --trace=debugOut if enabled
+		const rawArgs = String(config.local.engineArgs || '').trim();
+		const effectiveArgs: string[] = [];
+		if (rawArgs) effectiveArgs.push(rawArgs);
+		if (config.local.debugOutput && !rawArgs.includes('--trace=')) {
+			effectiveArgs.push('--trace=debugOut');
+		}
 
 		const args = [
-			'--autoterm',  // Exit when VS Code closes (stdin monitoring)
+			'--autoterm', // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
 			'--host=localhost',
 			'--port=0',
-			...effectiveArgs
+			...effectiveArgs,
 		];
 
 		await this.startProcess(executablePath, args);
@@ -156,7 +167,7 @@ export class EngineManager extends BaseManager {
 
 		// Fire-and-forget cleanup of old version directories
 		const currentDir = path.dirname(executablePath);
-		this.installer.cleanupOldVersions(currentDir).catch(err => {
+		this.installer.cleanupOldVersions(currentDir).catch((err) => {
 			this.logger.output(`${icons.warning} Failed to clean up old engines: ${err}`);
 		});
 	}
@@ -167,14 +178,15 @@ export class EngineManager extends BaseManager {
 	public async stop(): Promise<void> {
 		this.emit('status', 'Stopping server...');
 		await this.stopProcess();
+		this.emit('status', 'Server stopped');
 	}
 
 	/**
 	 * Returns installed engine version info, or null if not installed.
 	 */
 	public getInfo(): ManagerInfo | null {
-		const versionSpec = ConfigManager.getInstance().getConfig().local.engineVersion || 'latest';
-		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
+		const versionSpec = this.lastConfig?.local.engineVersion || 'latest';
+		const channel = versionSpec === 'prerelease' ? ('pre' as const) : ('stable' as const);
 		const version = this.installer.getInstalledVersion(channel);
 		const publishedAt = this.installer.getInstalledPublishedAt(channel);
 		if (!version) {
@@ -195,10 +207,11 @@ export class EngineManager extends BaseManager {
 		this.logger.output(`${icons.launch} Starting DAP server: ${executablePath} ${args.join(' ')}`);
 
 		return new Promise((resolve, reject) => {
-			this.child = spawn(executablePath, args, {
+			const child = spawn(executablePath, args, {
 				cwd: path.dirname(executablePath),
 				stdio: 'pipe',
 			});
+			this.child = child;
 
 			let processReady = false;
 			let processErrored = false;
@@ -206,20 +219,18 @@ export class EngineManager extends BaseManager {
 			// Write PID file for in-use detection by cleanup.
 			// Capture the path in a local so async handlers only remove *their own*
 			// PID file — not one belonging to a newly started child.
-			const myPidFile = this.child.pid
-				? path.join(path.dirname(executablePath), `engine-${this.child.pid}.pid`)
-				: undefined;
+			const myPidFile = child.pid ? path.join(path.dirname(executablePath), `engine-${child.pid}.pid`) : undefined;
 
 			if (myPidFile) {
 				this.pidFilePath = myPidFile;
 				try {
-					fs.writeFileSync(myPidFile, String(this.child.pid));
+					fs.writeFileSync(myPidFile, String(child.pid));
 				} catch {
 					// Non-fatal — cleanup will use OS-level checks as fallback
 				}
 			}
 
-			this.child.on('error', (err) => {
+			child.on('error', (err) => {
 				if (!processReady && !processErrored) {
 					processErrored = true;
 					this.logger.output(`${icons.error} DAP server failed to launch: ${err.message}`);
@@ -228,22 +239,28 @@ export class EngineManager extends BaseManager {
 				}
 			});
 
-			this.child.on('exit', (code, signal) => {
+			child.on('exit', (code, signal) => {
 				// Clean up PID file on exit — only if it's still ours
 				this.removePidFile(myPidFile);
 
 				if (!processReady && !processErrored) {
 					processErrored = true;
 					this.logger.output(`${icons.error} DAP server exited during startup (code=${code}, signal=${signal})`);
-					this.cleanupProcess();
+					// Only clean up if this child is still the active one — a concurrent
+					// engine.start() may have already replaced this.child with a new process
+					if (this.child === child) {
+						this.cleanupProcess();
+					}
 					reject(new Error(`Process exited during startup: code=${code}, signal=${signal}`));
 					return;
 				}
 
 				// Normal exit after successful startup
 				this.logger.output(`${icons.stop} DAP server exited (code=${code}, signal=${signal})`);
-				this.started = false;
-				this.child = undefined;
+				if (this.child === child) {
+					this.started = false;
+					this.child = undefined;
+				}
 				this.emit('terminated', { code, signal });
 			});
 
@@ -263,7 +280,7 @@ export class EngineManager extends BaseManager {
 			};
 
 			// Monitor stdout for readiness
-			this.child.stdout?.on('data', (data) => {
+			child.stdout?.on('data', (data) => {
 				const output = data.toString();
 				for (const message of output.split('\n')) {
 					const msg = message.trim();
@@ -277,7 +294,7 @@ export class EngineManager extends BaseManager {
 			});
 
 			// Monitor stderr
-			this.child.stderr?.on('data', (data) => {
+			child.stderr?.on('data', (data) => {
 				const output = data.toString();
 				for (const message of output.split('\n')) {
 					const msg = message.trim();
@@ -307,12 +324,11 @@ export class EngineManager extends BaseManager {
 		this.actualPort = undefined;
 
 		return new Promise<void>((resolve) => {
+			// Force-kill fallback if graceful shutdown takes too long
 			const timeout = setTimeout(() => {
 				if (!child.killed) {
 					child.kill('SIGKILL');
 				}
-				this.removePidFile(pidFileToRemove);
-				resolve();
 			}, 5000);
 
 			child.once('exit', () => {

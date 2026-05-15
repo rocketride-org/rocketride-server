@@ -41,7 +41,9 @@ class RequestProcessing:
         self._client = client
         self._token = token
 
-    async def _send_stream(self, request: Request, unique_key: str = 'body') -> tuple[str, Union[Dict, Exception], Entry]:
+    async def _send_stream(
+        self, request: Request, unique_key: str = 'body'
+    ) -> tuple[str, Union[Dict, Exception], Entry]:
         """
         Send request stream directly through RocketRideClient.
 
@@ -108,7 +110,9 @@ class RequestProcessing:
                 # Get result before context manager closes
                 results = await pipe.close()
 
-                self._client.debug_message(f'Successfully streamed {total_bytes} bytes for {filename} through pipe {pipe.pipe_id}')
+                self._client.debug_message(
+                    f'Successfully streamed {total_bytes} bytes for {filename} through pipe {pipe.pipe_id}'
+                )
 
                 return (unique_key, results, obj)
 
@@ -167,7 +171,9 @@ class RequestProcessing:
                 results = await pipe.close()
 
                 # Output a message
-                self._client.debug_message(f'Successfully streamed {total_bytes} bytes for file {filename} through pipe {pipe.pipe_id}')
+                self._client.debug_message(
+                    f'Successfully streamed {total_bytes} bytes for file {filename} through pipe {pipe.pipe_id}'
+                )
 
                 return (unique_key, results, obj)
 
@@ -175,7 +181,9 @@ class RequestProcessing:
             self._client.debug_message(f'Error streaming file {filename}: {str(e)}')
             return (unique_key, e, obj)
 
-    async def _send_bytes(self, content: bytes, mime_type: str = 'text/plain', filename: Optional[str] = None, unique_key: str = '') -> tuple[str, Union[Dict, Exception], Entry]:
+    async def _send_bytes(
+        self, content: bytes, mime_type: str = 'text/plain', filename: Optional[str] = None, unique_key: str = ''
+    ) -> tuple[str, Union[Dict, Exception], Entry]:
         """
         Send bytes content through RocketRideClient.
 
@@ -202,7 +210,9 @@ class RequestProcessing:
 
             # Allocate a pipe
             async with await self._client.pipe(self._token, obj.toDict(), mime_type) as pipe:
-                self._client.debug_message(f'Opened pipe {pipe.pipe_id} for content "{filename}" with MIME type: {mime_type}')
+                self._client.debug_message(
+                    f'Opened pipe {pipe.pipe_id} for content "{filename}" with MIME type: {mime_type}'
+                )
 
                 # Write the content to pipe
                 await pipe.write(content)
@@ -243,7 +253,9 @@ class RequestProcessing:
         mimeType = request.headers.get('Content-Type', 'application/octet-stream')
         return self._getMimeType(mimeType)
 
-    def _processSingleResult(self, result: Union[Dict, Exception], obj: Entry, dataResults: DataResult, unique_key: str):
+    def _processSingleResult(
+        self, result: Union[Dict, Exception], obj: Entry, dataResults: DataResult, unique_key: str
+    ):
         """
         Process the result of a single upload.
 

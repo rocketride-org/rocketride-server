@@ -23,36 +23,17 @@
 """
 RocketRide CLI Store Command Implementation.
 
-This module provides the StoreCommand class for managing project and template storage
-through the RocketRide CLI. It uses the StoreMixin methods from the client
-to perform storage operations on the server.
+File system-style commands for managing the account file store.
 
-The store command supports atomic operations to prevent concurrent modification
-conflicts using version/ETag checking.
-
-Key Features:
-    - Save projects with atomic write operations
-    - Retrieve projects by ID
-    - Delete projects with version checking
-    - List all projects for authenticated user
-    - Save, retrieve, delete, and list templates (system-wide)
-    - Server-side storage with proper authentication
-
-Usage:
-    rocketride rrext_store save_project --project-id <id> --project-file <file> --apikey <key>
-    rocketride rrext_store get_project --project-id <id> --apikey <key>
-    rocketride rrext_store delete_project --project-id <id> --apikey <key>
-    rocketride rrext_store get_all_projects --apikey <key>
-    rocketride rrext_store save_template --template-id <id> --template-file <file> --apikey <key>
-    rocketride rrext_store get_template --template-id <id> --apikey <key>
-    rocketride rrext_store delete_template --template-id <id> --apikey <key>
-    rocketride rrext_store get_all_templates --apikey <key>
-
-Components:
-    StoreCommand: Main command implementation for project and template storage operations
+Commands:
+    rocketride store dir [path]                          - list directory
+    rocketride store type <path>                         - display file contents
+    rocketride store write <path> --file/--content       - write file
+    rocketride store rm <path>                           - delete file
+    rocketride store mkdir <path>                        - create directory
+    rocketride store stat <path>                         - file/dir metadata
 """
 
-import json
 from typing import TYPE_CHECKING
 from .base import BaseCommand
 
@@ -61,393 +42,145 @@ if TYPE_CHECKING:
 
 
 class StoreCommand(BaseCommand):
-    """
-    Command implementation for project storage operations.
-
-    Uses the client's StoreMixin methods to perform storage operations
-    with proper authentication and atomic conflict detection.
-
-    Example:
-        ```python
-        # Initialize and execute store command
-        command = StoreCommand(cli, args)
-        exit_code = await command.execute(client)
-        ```
-
-    Key Features:
-        - Server-side storage with authentication
-        - Atomic operations with version checking
-        - Uses client mixin methods for clean interface
-        - Proper error handling and user feedback
-    """
+    """Command implementation for file store operations."""
 
     def __init__(self, cli, args):
-        """
-        Initialize StoreCommand with CLI context and parsed arguments.
-
-        Args:
-            cli: CLI instance providing cancellation state and event handling
-            args: Parsed command line arguments containing subcommand and options
-        """
+        """Initialize StoreCommand."""
         super().__init__(cli, args)
 
-        # Map of subcommand names to handler methods
         self._subcommand_handlers = {
-            'save_project': self._save_project,
-            'get_project': self._get_project,
-            'delete_project': self._delete_project,
-            'get_all_projects': self._get_all_projects,
-            'save_template': self._save_template,
-            'get_template': self._get_template,
-            'delete_template': self._delete_template,
-            'get_all_templates': self._get_all_templates,
-            'save_log': self._save_log,
-            'get_log': self._get_log,
-            'list_logs': self._list_logs,
+            'dir': self._cmd_dir,
+            'type': self._cmd_type,
+            'write': self._cmd_write,
+            'rm': self._cmd_rm,
+            'mkdir': self._cmd_mkdir,
+            'stat': self._cmd_stat,
         }
 
-    def _load_pipeline_from_args(self, file_attr: str, json_attr: str) -> dict:
-        """
-        Load pipeline JSON from file or string argument.
-
-        Args:
-            file_attr: Name of the file argument attribute (e.g., 'project_file')
-            json_attr: Name of the JSON string argument attribute (e.g., 'project_json')
-
-        Returns:
-            dict: Parsed pipeline configuration
-
-        Raises:
-            ValueError: If arguments are invalid or missing
-            FileNotFoundError: If specified file doesn't exist
-            json.JSONDecodeError: If JSON is invalid
-        """
-        file_path = getattr(self.args, file_attr, None)
-        json_str = getattr(self.args, json_attr, None)
-
-        if file_path:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if not content:
-                    raise ValueError(f'Pipeline file is empty: {file_path}')
-                pipeline = json.loads(content)
-        elif json_str:
-            if not isinstance(json_str, str):
-                raise ValueError(f'Invalid JSON value (expected string, got {type(json_str).__name__})')
-            json_str_stripped = json_str.strip()
-            if not json_str_stripped:
-                raise ValueError('Pipeline JSON string is empty or contains only whitespace')
-            pipeline = json.loads(json_str_stripped)
-        else:
-            raise ValueError(f'Either --{file_attr.replace("_", "-")} or --{json_attr.replace("_", "-")} is required')
-
-        if not pipeline:
-            raise ValueError('Pipeline data cannot be empty')
-        if not isinstance(pipeline, dict):
-            raise ValueError('Pipeline must be a JSON object')
-
-        return pipeline
-
     async def execute(self, client: 'RocketRideClient') -> int:
-        """
-        Execute the store command based on subcommand.
-
-        Routes to the appropriate subcommand handler which uses the
-        client's mixin methods for storage operations.
-
-        Args:
-            client: Connected RocketRideClient instance for server communication
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
+        """Execute the store command based on subcommand."""
         try:
-            # Connect to server if not already connected
             if not self.cli.client.is_connected():
                 await self.cli.connect()
 
-            # Route to appropriate subcommand handler
             if handler := self._subcommand_handlers.get(self.args.store_subcommand):
                 return await handler(client)
             else:
                 raise ValueError(f'Unknown store subcommand: {self.args.store_subcommand}')
 
         except Exception as e:  # noqa: BLE001
-            print(f'Error executing store command: {e}')
+            print(f'Error: {e}')
             return 1
 
-    async def _save_project(self, client: 'RocketRideClient') -> int:
-        """
-        Save a project using the client's save_project method.
+    async def _cmd_dir(self, client: 'RocketRideClient') -> int:
+        """List directory contents."""
+        from datetime import datetime, timezone
 
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
+        path = getattr(self.args, 'path', '') or ''
+        result = await client.fs_list_dir(path)
 
-        # Load pipeline JSON
-        pipeline = self._load_pipeline_from_args('project_file', 'project_json')
+        entries = result.get('entries', [])
+        if not entries:
+            stat = await client.fs_stat(path) if path else {'exists': True, 'type': 'dir'}
+            if stat.get('exists') and stat.get('type') == 'dir':
+                print(f'    {0:>8,} File(s)  {0:>14,} bytes')
+                print(f'    {0:>8,} Dir(s)')
+                return 0
+            print('File Not Found')
+            return 0
 
-        # Get expected version (from args or auto-fetch)
-        expected_version = getattr(self.args, 'expected_version', None)
-        if not expected_version:
-            # Auto-fetch current version if updating existing project
+        total_size = 0
+        file_count = 0
+        dir_count = 0
+        for entry in entries:
+            modified = entry.get('modified')
+            if modified:
+                dt = datetime.fromtimestamp(modified, tz=timezone.utc)
+                date_str = dt.strftime('%m/%d/%Y  %I:%M %p')
+            else:
+                date_str = '                   '
+            if entry['type'] == 'dir':
+                print(f'{date_str}    <DIR>          {entry["name"]}')
+                dir_count += 1
+            else:
+                size = entry.get('size', 0)
+                total_size += size
+                print(f'{date_str}    {size:>14,} {entry["name"]}')
+                file_count += 1
+
+        print(f'    {file_count:>8,} File(s)  {total_size:>14,} bytes')
+        print(f'    {dir_count:>8,} Dir(s)')
+
+        return 0
+
+    async def _cmd_type(self, client: 'RocketRideClient') -> int:
+        """Display file contents."""
+        path = self.args.path
+        text = await client.fs_read_string(path)
+        print(text, end='')
+        return 0
+
+    async def _cmd_write(self, client: 'RocketRideClient') -> int:
+        """Write file from local file or inline content."""
+        path = self.args.path
+        file_path = getattr(self.args, 'file', None)
+        content = getattr(self.args, 'content', None)
+
+        if file_path:
+            info = await client.fs_open(path, 'w')
+            handle = info['handle']
             try:
-                existing = await client.get_project(project_id)
-                expected_version = existing.get('version')
-            except RuntimeError:
-                # Project doesn't exist yet - no version to check
-                pass
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        await client.fs_write(handle, chunk)
+                await client.fs_close(handle, 'w')
+            except Exception:
+                try:
+                    await client.fs_close(handle, 'w')
+                except Exception:
+                    pass
+                raise
+        elif content is not None:
+            await client.fs_write_string(path, content)
+        else:
+            raise ValueError('Either --file or --content is required')
 
-        # Call client mixin method
-        result = await client.save_project(project_id=project_id, pipeline=pipeline, expected_version=expected_version)
-
-        # Display success
-        print(json.dumps(result, indent=2))
+        print(f'Written: {path}')
         return 0
 
-    async def _get_project(self, client: 'RocketRideClient') -> int:
-        """
-        Get a project using the client's get_project method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
-
-        # Call client mixin method
-        result = await client.get_project(project_id)
-
-        # Display result
-        print(json.dumps(result, indent=2))
+    async def _cmd_rm(self, client: 'RocketRideClient') -> int:
+        """Delete a file."""
+        await client.fs_delete(self.args.path)
+        print(f'Deleted: {self.args.path}')
         return 0
 
-    async def _delete_project(self, client: 'RocketRideClient') -> int:
-        """
-        Delete a project using the client's delete_project method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
-
-        # Get expected version if provided
-        expected_version = getattr(self.args, 'expected_version', None)
-
-        # Call client mixin method
-        result = await client.delete_project(project_id=project_id, expected_version=expected_version)
-
-        # Display success
-        print(f'Project {project_id} deleted successfully')
-        if result.get('message'):
-            print(result['message'])
+    async def _cmd_mkdir(self, client: 'RocketRideClient') -> int:
+        """Create a directory."""
+        await client.fs_mkdir(self.args.path)
+        print(f'Created: {self.args.path}/')
         return 0
 
-    async def _get_all_projects(self, client: 'RocketRideClient') -> int:
-        """
-        List all projects using the client's get_all_projects method.
+    async def _cmd_stat(self, client: 'RocketRideClient') -> int:
+        """Get file/directory metadata."""
+        path = self.args.path
+        result = await client.fs_stat(path)
 
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        # Call client mixin method
-        result = await client.get_all_projects()
+        if not result.get('exists'):
+            print(f'{path}: not found')
+        else:
+            entry_type = result.get('type', 'unknown')
+            details = []
+            size = result.get('size')
+            if size is not None:
+                details.append(f'size: {size:,}')
+            modified = result.get('modified')
+            if modified:
+                from datetime import datetime, timezone
 
-        # Display results
-        print(json.dumps(result, indent=2))
-        return 0
-
-    # =========================================================================
-    # Template Operations (system-wide templates accessible to all users)
-    # =========================================================================
-
-    async def _save_template(self, client: 'RocketRideClient') -> int:
-        """
-        Save a template using the client's save_template method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        template_id = self.args.template_id
-        if not template_id:
-            raise ValueError('Template ID is required')
-
-        # Load pipeline JSON
-        pipeline = self._load_pipeline_from_args('template_file', 'template_json')
-
-        # Get expected version (from args or auto-fetch)
-        expected_version = getattr(self.args, 'expected_version', None)
-        if not expected_version:
-            # Auto-fetch current version if updating existing template
-            try:
-                existing = await client.get_template(template_id)
-                expected_version = existing.get('version')
-            except RuntimeError:
-                # Template doesn't exist yet - no version to check
-                pass
-
-        # Call client mixin method
-        result = await client.save_template(template_id=template_id, pipeline=pipeline, expected_version=expected_version)
-
-        # Display success
-        print(json.dumps(result, indent=2))
-        return 0
-
-    async def _get_template(self, client: 'RocketRideClient') -> int:
-        """
-        Get a template using the client's get_template method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        template_id = self.args.template_id
-        if not template_id:
-            raise ValueError('Template ID is required')
-
-        # Call client mixin method
-        result = await client.get_template(template_id)
-
-        # Display result
-        print(json.dumps(result, indent=2))
-        return 0
-
-    async def _delete_template(self, client: 'RocketRideClient') -> int:
-        """
-        Delete a template using the client's delete_template method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        template_id = self.args.template_id
-        if not template_id:
-            raise ValueError('Template ID is required')
-
-        # Get expected version if provided
-        expected_version = getattr(self.args, 'expected_version', None)
-
-        # Call client mixin method
-        result = await client.delete_template(template_id=template_id, expected_version=expected_version)
-
-        # Display success
-        print(f'Template {template_id} deleted successfully')
-        if result.get('message'):
-            print(result['message'])
-        return 0
-
-    async def _get_all_templates(self, client: 'RocketRideClient') -> int:
-        """
-        List all templates using the client's get_all_templates method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        # Call client mixin method
-        result = await client.get_all_templates()
-
-        # Display results
-        print(json.dumps(result, indent=2))
-        return 0
-
-    # =========================================================================
-    # Log Operations (per-project log files for historical tracking)
-    # =========================================================================
-
-    async def _save_log(self, client: 'RocketRideClient') -> int:
-        """
-        Save a log file using the client's save_log method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
-
-        source = self.args.source
-        if not source:
-            raise ValueError('Source is required')
-
-        # Load contents JSON
-        contents_json = getattr(self.args, 'contents_json', None)
-        if not contents_json:
-            raise ValueError('--contents-json is required')
-
-        contents = json.loads(contents_json)
-
-        # Call client mixin method
-        result = await client.save_log(
-            project_id=project_id,
-            source=source,
-            contents=contents,
-        )
-
-        # Display success
-        print(json.dumps(result, indent=2))
-        return 0
-
-    async def _get_log(self, client: 'RocketRideClient') -> int:
-        """
-        Get a log file using the client's get_log method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
-
-        source = self.args.source
-        if not source:
-            raise ValueError('Source is required')
-
-        start_time = getattr(self.args, 'start_time', None)
-        if start_time is None:
-            raise ValueError('Start time is required')
-
-        # Convert to float
-        start_time = float(start_time)
-
-        # Call client mixin method
-        result = await client.get_log(
-            project_id=project_id,
-            source=source,
-            start_time=start_time,
-        )
-
-        # Display result
-        print(json.dumps(result, indent=2))
-        return 0
-
-    async def _list_logs(self, client: 'RocketRideClient') -> int:
-        """
-        List log files using the client's list_logs method.
-
-        Returns:
-            Exit code: 0 for success, 1 for errors
-        """
-        project_id = self.args.project_id
-        if not project_id:
-            raise ValueError('Project ID is required')
-
-        # Get optional parameters
-        source = getattr(self.args, 'source', None)
-        page = getattr(self.args, 'page', None)
-        if page is not None:
-            page = int(page)
-
-        # Call client mixin method
-        result = await client.list_logs(
-            project_id=project_id,
-            source=source,
-            page=page,
-        )
-
-        # Display results
-        print(json.dumps(result, indent=2))
+                details.append(f'modified: {datetime.fromtimestamp(modified, tz=timezone.utc).isoformat()}')
+            suffix = f' ({", ".join(details)})' if details else ''
+            print(f'{path}: {entry_type}{suffix}')
         return 0

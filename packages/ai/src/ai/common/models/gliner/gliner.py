@@ -10,8 +10,10 @@ This module provides:
 
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.gliner')
@@ -340,8 +342,7 @@ class GLiNER:
         if should_proxy:
             # === REMOTE MODE ===
             self._proxy_mode = True
-            host, port = server_addr
-            self._client = ModelClient(port, host)
+            self._client = ModelClient(server_addr)
             self._model = None
             self._metadata = {}
             self._init_proxy()
@@ -393,9 +394,14 @@ class GLiNER:
         Returns:
             List of entity dicts with 'start', 'end', 'text', 'label', 'score' keys
         """
+        # Count inference call — perf timing handled per-mode below
+        metrics.counter('gpu_inference_count', 1)
+
         if self._proxy_mode:
+            # Model server mode — ModelClient.send_command handles perf timing
             return self._predict_remote(text, labels, threshold, flat_ner, multi_label)
         else:
+            # Local mode — time each phase
             return self._predict_local(text, labels, threshold, flat_ner, multi_label)
 
     def _predict_local(
@@ -406,18 +412,24 @@ class GLiNER:
         flat_ner: Optional[bool],
         multi_label: Optional[bool],
     ) -> List[Dict[str, Any]]:
-        """Execute local prediction using loader methods."""
+        """Execute local prediction with perf timing."""
         # Use provided values or defaults
         threshold = threshold if threshold is not None else self.threshold
         flat_ner = flat_ner if flat_ner is not None else self.flat_ner
         multi_label = multi_label if multi_label is not None else self.multi_label
 
-        # Use loader pipeline
+        # Preprocess phase — prepare text and labels for model
+        t0 = time.perf_counter()
         preprocessed = GLiNERLoader.preprocess(
             self._model,
             [{'text': text, 'labels': labels}],
             self._metadata,
         )
+        t_pre = (time.perf_counter() - t0) * 1000
+
+        # GPU inference phase — run entity prediction
+        # (GLiNER has no separate postprocess step — inference returns final results)
+        t0 = time.perf_counter()
         raw_output = GLiNERLoader.inference(
             self._model,
             preprocessed,
@@ -425,6 +437,19 @@ class GLiNER:
             threshold=threshold,
             flat_ner=flat_ner,
             multi_label=multi_label,
+        )
+        t_gpu = (time.perf_counter() - t0) * 1000
+
+        # Report all perf counters — same shape as model server response
+        # No postprocess for GLiNER — inference returns final entities directly
+        metrics.add_time(
+            {
+                'preprocess': t_pre,
+                'gpu': t_gpu,
+                'postprocess': 0,
+                'queue_wait': 0,
+                'latency': t_pre + t_gpu,
+            }
         )
 
         # Return the first (and only) result
@@ -445,7 +470,7 @@ class GLiNER:
         multi_label = multi_label if multi_label is not None else self.multi_label
 
         result = self._client.send_command(
-            'inference',
+            'rrext_ms_inference',
             {
                 'command': 'predict_entities',
                 'inputs': [{'text': text, 'labels': labels}],

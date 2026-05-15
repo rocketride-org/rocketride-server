@@ -1,7 +1,6 @@
 # Plugin OpenAI core
 openai
 langchain-openai
-tiktoken
 
 # LangChain deps
 langchain-core

@@ -16,66 +16,13 @@ from pathlib import Path
 
 import pytest
 
-_STUB_MODULE_NAMES = (
-    'depends',
-    'numpy',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.store',
-    'ai.common.config',
-)
+_STUB_MODULE_NAMES = ('numpy',)
 
 
 def _install_stubs() -> None:
     """Install lightweight stubs so weaviate.py can be imported in isolation."""
-    mod_depends = types.ModuleType('depends')
-    mod_depends.depends = lambda *_args, **_kwargs: None
-    sys.modules['depends'] = mod_depends
-
     mod_numpy = types.ModuleType('numpy')
     sys.modules['numpy'] = mod_numpy
-
-    ai_pkg = types.ModuleType('ai')
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    schema_mod = types.ModuleType('ai.common.schema')
-    store_mod = types.ModuleType('ai.common.store')
-    config_mod = types.ModuleType('ai.common.config')
-
-    class Doc:
-        pass
-
-    class DocFilter:
-        pass
-
-    class DocMetadata:
-        pass
-
-    class QuestionText:
-        pass
-
-    class DocumentStoreBase:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(_provider: object, _connConfig: object) -> dict:
-            return {}
-
-    schema_mod.Doc = Doc
-    schema_mod.DocFilter = DocFilter
-    schema_mod.DocMetadata = DocMetadata
-    schema_mod.QuestionText = QuestionText
-    store_mod.DocumentStoreBase = DocumentStoreBase
-    config_mod.Config = Config
-
-    sys.modules['ai'] = ai_pkg
-    sys.modules['ai.common'] = common_pkg
-    sys.modules['ai.common.schema'] = schema_mod
-    sys.modules['ai.common.store'] = store_mod
-    sys.modules['ai.common.config'] = config_mod
 
 
 @contextmanager
@@ -218,7 +165,15 @@ def test_mutation_updates_only_matching_object_ids(
     remaining_object_ids = [record['properties']['objectId'] for record in collection._storage.values()]
     assert remaining_object_ids == expected_remaining_object_ids
 
-    obj1 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-1']
-    obj2 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-2']
+    obj1 = [
+        record['properties']['isDeleted']
+        for record in collection._storage.values()
+        if record['properties']['objectId'] == 'obj-1'
+    ]
+    obj2 = [
+        record['properties']['isDeleted']
+        for record in collection._storage.values()
+        if record['properties']['objectId'] == 'obj-2'
+    ]
     assert obj1 == expected_obj1_is_deleted
     assert obj2 == expected_obj2_is_deleted

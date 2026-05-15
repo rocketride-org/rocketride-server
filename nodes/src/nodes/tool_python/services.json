@@ -8,6 +8,7 @@
 	"path": "nodes.tool_python",
 	"prefix": "python",
 	"icon": "python.svg",
+	"documentation": "https://docs.rocketride.org",
 	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed."],
 	"tile": ["Tool: python.execute"],
 	"lanes": {},

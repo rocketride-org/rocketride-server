@@ -30,78 +30,78 @@ namespace ap {
 //	u"blah"	<-- char16_t (ucs2/16)
 //	U"blah"	<-- char32_t (utf32)
 //	L"blah"	<-- windows utf16, linux utf32
-inline Text operator"" _t(const char *str, std::size_t count) noexcept {
+inline Text operator""_t(const char *str, std::size_t count) noexcept {
     return {str, count};
 }
-inline Text operator"" _utf8(const char *str, std::size_t count) noexcept {
+inline Text operator""_utf8(const char *str, std::size_t count) noexcept {
     return {str, count};
 }
-inline Utf16 operator"" _utf16(const char16_t *str,
+inline Utf16 operator""_utf16(const char16_t *str,
                                std::size_t count) noexcept {
     return {str, count};
 }
-inline Utf32 operator"" _utf32(const char32_t *str,
+inline Utf32 operator""_utf32(const char32_t *str,
                                std::size_t count) noexcept {
     return {str, count};
 }
 
 #if ROCKETRIDE_PLAT_WIN
 static_assert(sizeof(wchar_t) == 2, "Expected wchar_t size mismatch");
-inline Utf16 operator"" _utf16(const wchar_t *str, std::size_t count) noexcept {
+inline Utf16 operator""_utf16(const wchar_t *str, std::size_t count) noexcept {
     return {str, count};
 }
-inline Utf16 operator"" _txtos(const wchar_t *str, std::size_t count) noexcept {
+inline Utf16 operator""_txtos(const wchar_t *str, std::size_t count) noexcept {
     return {str, count};
 }
 #else
 static_assert(sizeof(wchar_t) == 4, "Expected wchar_t size mismatch");
-inline Utf32 operator"" _utf32(const wchar_t *str, std::size_t count) noexcept {
+inline Utf32 operator""_utf32(const wchar_t *str, std::size_t count) noexcept {
     return {str, count};
 }
 #endif
 
-constexpr TextView operator"" _tv(const Utf8Chr *str,
+constexpr TextView operator""_tv(const Utf8Chr *str,
                                   std::size_t count) noexcept {
     return {str, count};
 }
-constexpr TextView operator"" _tv(const char8_t *str,
+constexpr TextView operator""_tv(const char8_t *str,
                                   std::size_t count) noexcept {
     return {str, count};
 }
-constexpr Utf16View operator"" _tv(const Utf16Chr *str,
+constexpr Utf16View operator""_tv(const Utf16Chr *str,
                                    std::size_t count) noexcept {
     return {str, count};
 }
 #if ROCKETRIDE_PLAT_WIN
-constexpr Utf16View operator"" _tv(const char16_t *str,
+constexpr Utf16View operator""_tv(const char16_t *str,
                                    std::size_t count) noexcept {
     return {str, count};
 }
 #endif
-constexpr Utf32View operator"" _tv(const Utf32Chr *str,
+constexpr Utf32View operator""_tv(const Utf32Chr *str,
                                    std::size_t count) noexcept {
     return {str, count};
 }
 
-constexpr iTextView operator"" _itv(const Utf8Chr *str,
+constexpr iTextView operator""_itv(const Utf8Chr *str,
                                     std::size_t count) noexcept {
     return {str, count};
 }
-constexpr iTextView operator"" _itv(const char8_t *str,
+constexpr iTextView operator""_itv(const char8_t *str,
                                     std::size_t count) noexcept {
     return {str, count};
 }
-constexpr iUtf16View operator"" _itv(const Utf16Chr *str,
+constexpr iUtf16View operator""_itv(const Utf16Chr *str,
                                      std::size_t count) noexcept {
     return {str, count};
 }
 #if ROCKETRIDE_PLAT_WIN
-constexpr iUtf16View operator"" _itv(const char16_t *str,
+constexpr iUtf16View operator""_itv(const char16_t *str,
                                      std::size_t count) noexcept {
     return {str, count};
 }
 #endif
-constexpr iUtf32View operator"" _itv(const Utf32Chr *str,
+constexpr iUtf32View operator""_itv(const Utf32Chr *str,
                                      std::size_t count) noexcept {
     return {str, count};
 }

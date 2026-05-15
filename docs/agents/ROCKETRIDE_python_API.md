@@ -957,7 +957,7 @@ Common error scenarios:
 
 ## Requirements
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - WebSocket connection to RocketRide DAP server
 - Valid API key for authentication
 

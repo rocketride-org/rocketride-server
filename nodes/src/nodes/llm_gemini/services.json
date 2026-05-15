@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,128 +47,206 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to Gemini models for advanced natural language ",
-		"processing. It supports tasks such as text generation, summarization, question ",
-		"answering, and chat-based interactions. With access to state-of-the-art language ",
-		"models like Gemini-2.0-pro, this component enables high-quality, context-aware responses and ",
-		"creative text generation. Configurable with API keys and deployment options, it allows ",
-		"seamless integration into AI-driven workflows with scalable performance."
-	],
+	"description": ["A component that connects to Gemini models for advanced natural language ", "processing. It supports tasks such as text generation, summarization, question ", "answering, and chat-based interactions. With access to state-of-the-art language ", "models like Gemini-3.1-pro with 1M token context window, this component enables ", "high-quality, context-aware responses and creative text generation. Configurable ", "with API keys and deployment options, it allows seamless integration into AI-driven ", "workflows with scalable performance."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "gemini.svg",
-	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oLbC8P",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
+	//		the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_gemini.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_gemini.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
-	"input": [
-		{
-			"lane": "questions",
-			"output": [
-				{
-					"lane": "answers"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
 	//		itself
 	//
-		"preconfig": {
-			"default": "gemini-3-pro",
-			"profiles": {
-				"custom": {
-					"model": "",
-					"modelTotalTokens": 1114112,
-					"outputTokens": 65536,
-					"apikey": ""
-				},
-				"gemini-3-pro": {
-					"model": "models/gemini-3-pro-preview",
-					"title": "Gemini 3 Pro",
-					"modelTotalTokens": 1114112,
-					"outputTokens": 65536,
-					"apikey": ""
-				},
-				"gemini-3-pro-image": {
-					"model": "models/gemini-3-pro-image-preview",
-					"title": "Gemini 3 Pro Image",
-					"modelTotalTokens": 98304,
-					"outputTokens": 32768,
-					"apikey": ""
-				},
-				"gemini-2_5-pro": {
-					"model": "models/gemini-2.5-pro",
-					"title": "Gemini 2.5 Pro",
-					"modelTotalTokens": 1114112,
-					"outputTokens": 65536,
-					"apikey": ""
-				},
-				"gemini-2_5-flash": {
-					"model": "models/gemini-2.5-flash",
-					"title": "Gemini 2.5 Flash",
-					"modelTotalTokens": 1114112,
-					"outputTokens": 65536,
-					"apikey": ""
-				},
-				"gemini-2_5-flash-lite": {
-					"model": "models/gemini-2.5-flash-lite",
-					"title": "Gemini 2.5 Flash Lite",
-					"modelTotalTokens": 1114112,
-					"outputTokens": 65536,
-					"apikey": ""
-				},
-				"gemini-2_5-flash-image": {
-					"model": "models/gemini-2.5-flash-image",
-					"title": "Gemini 2.5 Flash Image",
-					"modelTotalTokens": 98304,
-					"outputTokens": 32768,
-					"apikey": ""
-				},
-				"gemini-2_0-flash": {
-					"model": "models/gemini-2.0-flash",
-					"title": "Gemini 2.0 Flash",
-					"modelTotalTokens": 1056768,
-					"outputTokens": 8192,
-					"apikey": ""
-				},
-				"gemini-2_0-flash-lite": {
-					"model": "models/gemini-2.0-flash-lite",
-					"title": "Gemini 2.0 Flash Lite",
-					"modelTotalTokens": 1056768,
-					"outputTokens": 8192,
-					"apikey": ""
-				}
+	"preconfig": {
+		"default": "gemini-3.1-pro-preview",
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 1114112,
+				"modelOutputTokens": 65536,
+				"apikey": ""
+			},
+			"gemini-3.1-pro-preview": {
+				"title": "Gemini 3.1 Pro",
+				"model": "models/gemini-3.1-pro-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"gemini-3.1-flash-image-preview": {
+				"title": "Gemini 3.1 Flash Image Preview",
+				"model": "models/gemini-3.1-flash-image-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"gemini-3.1-flash-lite-preview": {
+				"title": "Gemini 3.1 Flash Lite",
+				"model": "models/gemini-3.1-flash-lite-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"gemini-3-flash-preview": {
+				"title": "Gemini 3 Flash Preview",
+				"model": "models/gemini-3-flash-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"gemini-3-pro-image-preview": {
+				"title": "Gemini 3 Pro Image Preview",
+				"model": "models/gemini-3-pro-image-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 65536, // sync_models.config.json
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"gemini-2.5-pro": {
+				"title": "Gemini 2.5 Pro",
+				"model": "models/gemini-2.5-pro",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"gemini-2.5-flash": {
+				"title": "Gemini 2.5 Flash",
+				"model": "models/gemini-2.5-flash",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"gemini-2.5-flash-lite": {
+				"title": "Gemini 2.5 Flash Lite",
+				"model": "models/gemini-2.5-flash-lite",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"gemini-2.5-flash-image": {
+				"title": "Gemini 2.5 Flash Image",
+				"model": "models/gemini-2.5-flash-image",
+				"modelSource": "manual",
+				"modelTotalTokens": 32768, // sync_models.config.json
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"gemini-3-pro-preview": {
+				"title": "Gemini 3 Pro Preview",
+				"model": "models/gemini-3-pro-preview",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
+				"deprecated": true,
+				"migration": "Please use 'gemini-3.1-pro-preview' instead",
+				"apikey": ""
+			},
+			"gemini-3-pro-image": {
+				"title": "Gemini 3 Pro Image",
+				"model": "models/gemini-3-pro-image",
+				"modelSource": "manual",
+				"modelTotalTokens": 98304,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "Please use 'gemini-3-pro-image-preview' instead",
+				"apikey": ""
+			},
+			"gemini-2_0-flash": {
+				"title": "Gemini 2.0 Flash",
+				"model": "models/gemini-2.0-flash",
+				"modelSource": "manual",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65535,
+				"deprecated": true,
+				"migration": "Please use 'gemini-2.5-flash' instead",
+				"apikey": ""
+			},
+			"gemini-2_0-flash-lite": {
+				"title": "Gemini 2.0 Flash Lite",
+				"model": "models/gemini-2.0-flash-lite",
+				"modelSource": "manual",
+				"modelOutputTokens": 65536,
+				"deprecated": true,
+				"migration": "Please use 'gemini-2.5-flash-lite' instead",
+				"apikey": ""
+			},
+			"models-gemini-2-5-flash-lite-preview-09-2025": {
+				"title": "Google: Gemini 2.5 Flash Lite Preview 09-2025",
+				"model": "models/gemini-2.5-flash-lite-preview-09-2025",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-2-5-pro-preview": {
+				"title": "Google: Gemini 2.5 Pro Preview 06-05",
+				"model": "models/gemini-2.5-pro-preview",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-2-5-pro-preview-05-06": {
+				"title": "Google: Gemini 2.5 Pro Preview 05-06",
+				"model": "models/gemini-2.5-pro-preview-05-06",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65535, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-1-pro-preview-customtools": {
+				"title": "Google: Gemini 3.1 Pro Preview Custom Tools",
+				"model": "models/gemini-3.1-pro-preview-customtools",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // sync_models.config.json
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-flash-latest": {
+				"title": "Google Gemini Flash Latest",
+				"model": "models/gemini-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-pro-latest": {
+				"title": "Google Gemini Pro Latest",
+				"model": "models/gemini-pro-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
 			}
-		},
+		}
+	},
 
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -201,139 +275,174 @@
 				"ui:widget": "ApiKeyWidget"
 			}
 		},
-		"gemini.gemini-3-pro": {
-			"object": "gemini-3-pro",
-			"properties": [
-			"gemini.apikey"
-			]
+		"gemini.gemini-3.1-pro-preview": {
+			"object": "gemini-3.1-pro-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-3.1-flash-image-preview": {
+			"object": "gemini-3.1-flash-image-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-3.1-flash-lite-preview": {
+			"object": "gemini-3.1-flash-lite-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-3-flash-preview": {
+			"object": "gemini-3-flash-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-3-pro-image-preview": {
+			"object": "gemini-3-pro-image-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-2.5-pro": {
+			"object": "gemini-2.5-pro",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-2.5-flash": {
+			"object": "gemini-2.5-flash",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-2.5-flash-lite": {
+			"object": "gemini-2.5-flash-lite",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-2.5-flash-image": {
+			"object": "gemini-2.5-flash-image",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.gemini-3-pro-preview": {
+			"object": "gemini-3-pro-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-3-pro-image": {
 			"object": "gemini-3-pro-image",
-			"properties": [
-			"gemini.apikey"
-			]
-		},
-		"gemini.gemini-2_5-pro": {
-			"object": "gemini-2_5-pro",
-			"properties": [
-			"gemini.apikey"
-			]
-		},
-		"gemini.gemini-2_5-flash": {
-			"object": "gemini-2_5-flash",
-			"properties": [
-			"gemini.apikey"
-			]
-		},
-		"gemini.gemini-2_5-flash-lite": {
-			"object": "gemini-2_5-flash-lite",
-			"properties": [
-			"gemini.apikey"
-			]
-		},
-		"gemini.gemini-2_5-flash-image": {
-			"object": "gemini-2_5-flash-image",
-			"properties": [
-			"gemini.apikey"
-			]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2_0-flash": {
 			"object": "gemini-2_0-flash",
-			"properties": [
-			"gemini.apikey"
-			]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2_0-flash-lite": {
 			"object": "gemini-2_0-flash-lite",
-			"properties": [
-			"gemini.apikey"
-			]
-		},
-		"gemini.gemini-2_5-pro-preview": {
-			"object": "gemini-2_5-pro-preview",
-			"properties": [
-			"gemini.apikey"
-			]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.custom": {
 			"object": "custom",
-			"properties": [
-			"gemini.model",
-			"gemini.modelTotalTokens",
-			"gemini.outputTokens",
-			"gemini.apikey"
-			]
+			"properties": ["gemini.model", "gemini.modelTotalTokens", "gemini.outputTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.profile": {
 			"title": "Model",
 			"description": "Gemini LLM model",
 			"type": "string",
-			"default": "gemini-3-pro",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"default": "gemini-3.1-pro-preview",
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
-			{
-				"value": "custom",
-				"properties": [
-				"gemini.custom"
-				]
-			},
-			{
-				"value": "gemini-3-pro",
-				"properties": [
-				"gemini.gemini-3-pro"
-				]
-			},
-			{
-				"value": "gemini-3-pro-image",
-				"properties": [
-				"gemini.gemini-3-pro-image"
-				]
-			},
-			{
-				"value": "gemini-2_5-pro",
-				"properties": [
-				"gemini.gemini-2_5-pro"
-				]
-			},
-			{
-				"value": "gemini-2_5-flash",
-				"properties": [
-				"gemini.gemini-2_5-flash"
-				]
-			},
-			{
-				"value": "gemini-2_5-flash-lite",
-				"properties": [
-				"gemini.gemini-2_5-flash-lite"
-				]
-			},
-			{
-				"value": "gemini-2_5-flash-image",
-				"properties": [
-				"gemini.gemini-2_5-flash-image"
-				]
-			},
-			{
-				"value": "gemini-2_0-flash",
-				"properties": [
-				"gemini.gemini-2_0-flash"
-				]
-			},
-			{
-				"value": "gemini-2_0-flash-lite",
-				"properties": [
-				"gemini.gemini-2_0-flash-lite"
-				]
-			},
-			{
-				"value": "gemini-2_5-pro-preview",
-				"properties": [
-				"gemini.gemini-2_5-pro-preview"
-				]
-			}
+				{
+					"value": "custom",
+					"properties": ["gemini.custom"]
+				},
+				{
+					"value": "gemini-3.1-pro-preview",
+					"properties": ["gemini.gemini-3.1-pro-preview"]
+				},
+				{
+					"value": "gemini-3.1-flash-image-preview",
+					"properties": ["gemini.gemini-3.1-flash-image-preview"]
+				},
+				{
+					"value": "gemini-3.1-flash-lite-preview",
+					"properties": ["gemini.gemini-3.1-flash-lite-preview"]
+				},
+				{
+					"value": "gemini-3-flash-preview",
+					"properties": ["gemini.gemini-3-flash-preview"]
+				},
+				{
+					"value": "gemini-3-pro-image-preview",
+					"properties": ["gemini.gemini-3-pro-image-preview"]
+				},
+				{
+					"value": "gemini-2.5-pro",
+					"properties": ["gemini.gemini-2.5-pro"]
+				},
+				{
+					"value": "gemini-2.5-flash",
+					"properties": ["gemini.gemini-2.5-flash"]
+				},
+				{
+					"value": "gemini-2.5-flash-lite",
+					"properties": ["gemini.gemini-2.5-flash-lite"]
+				},
+				{
+					"value": "gemini-2.5-flash-image",
+					"properties": ["gemini.gemini-2.5-flash-image"]
+				},
+				{
+					"value": "gemini-3-pro-preview",
+					"properties": ["gemini.gemini-3-pro-preview"]
+				},
+				{
+					"value": "gemini-3-pro-image",
+					"properties": ["gemini.gemini-3-pro-image"]
+				},
+				{
+					"value": "gemini-2_0-flash",
+					"properties": ["gemini.gemini-2_0-flash"]
+				},
+				{
+					"value": "gemini-2_0-flash-lite",
+					"properties": ["gemini.gemini-2_0-flash-lite"]
+				},
+				{
+					"value": "models-gemini-2-5-flash-lite-preview-09-2025",
+					"properties": ["gemini.models-gemini-2-5-flash-lite-preview-09-2025"]
+				},
+				{
+					"value": "models-gemini-2-5-pro-preview",
+					"properties": ["gemini.models-gemini-2-5-pro-preview"]
+				},
+				{
+					"value": "models-gemini-2-5-pro-preview-05-06",
+					"properties": ["gemini.models-gemini-2-5-pro-preview-05-06"]
+				},
+				{
+					"value": "models-gemini-3-1-pro-preview-customtools",
+					"properties": ["gemini.models-gemini-3-1-pro-preview-customtools"]
+				},
+				{
+					"value": "models-gemini-flash-latest",
+					"properties": ["gemini.models-gemini-flash-latest"]
+				},
+				{
+					"value": "models-gemini-pro-latest",
+					"properties": ["gemini.models-gemini-pro-latest"]
+				}
 			]
+		},
+		"gemini.models-gemini-2-5-flash-lite-preview-09-2025": {
+			"object": "models-gemini-2-5-flash-lite-preview-09-2025",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-2-5-pro-preview": {
+			"object": "models-gemini-2-5-pro-preview",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-2-5-pro-preview-05-06": {
+			"object": "models-gemini-2-5-pro-preview-05-06",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-3-1-pro-preview-customtools": {
+			"object": "models-gemini-3-1-pro-preview-customtools",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-flash-latest": {
+			"object": "models-gemini-flash-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"gemini.models-gemini-pro-latest": {
+			"object": "models-gemini-pro-latest",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
 	//
@@ -345,9 +454,28 @@
 		{
 			"section": "Pipe",
 			"title": "Gemini",
-			"properties": [
-				"gemini.profile"
-			]
+			"properties": ["gemini.profile"]
 		}
-	]
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing.
+	//		Runs against a local test server with mocked google.genai so no
+	//		real API key is required. ROCKETRIDE_MOCK must point to nodes/test/mocks.
+	//
+	"test": {
+		"profiles": ["gemini-2.5-flash"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

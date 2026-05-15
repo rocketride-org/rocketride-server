@@ -363,9 +363,7 @@ class TestS3Store:
         content = await store.read_file(filename)
 
         assert content == 'Test data'
-        mock_s3_client.get_object.assert_called_once_with(
-            Bucket='test-bucket', Key='prefix/test/file.txt'
-        )
+        mock_s3_client.get_object.assert_called_once_with(Bucket='test-bucket', Key='prefix/test/file.txt')
 
     @pytest.mark.asyncio
     async def test_read_nonexistent_file(self, store, mock_s3_client):
@@ -470,9 +468,7 @@ class TestS3Store:
         mock_s3_client.put_object.return_value = {'ETag': '"new-etag-456"'}
 
         # Call with expected_version but file doesn't exist
-        new_version = await store.write_file_atomic(
-            filename, data, expected_version=stale_version
-        )
+        new_version = await store.write_file_atomic(filename, data, expected_version=stale_version)
 
         # Should succeed and return new version
         assert new_version == 'new-etag-456'
@@ -483,9 +479,7 @@ class TestS3Store:
         assert 'IfMatch' not in call_kwargs  # No conditional header
 
     @pytest.mark.asyncio
-    async def test_write_atomic_race_condition_file_deleted_between_check_and_write(
-        self, store, mock_s3_client
-    ):
+    async def test_write_atomic_race_condition_file_deleted_between_check_and_write(self, store, mock_s3_client):
         """Test atomic write handles race condition: file deleted between head_object and put_object.
 
         Scenario:
@@ -515,9 +509,7 @@ class TestS3Store:
             {'ETag': '"recreated-etag"'},  # Second attempt without IfMatch succeeds
         ]
 
-        new_version = await store.write_file_atomic(
-            filename, data, expected_version=expected_version
-        )
+        new_version = await store.write_file_atomic(filename, data, expected_version=expected_version)
 
         # Should succeed with new version
         assert new_version == 'recreated-etag'
@@ -537,9 +529,7 @@ class TestS3Store:
         assert 'IfMatch' not in second_call_kwargs
 
     @pytest.mark.asyncio
-    async def test_write_atomic_race_condition_retries_exhausted(
-        self, store, mock_s3_client, monkeypatch
-    ):
+    async def test_write_atomic_race_condition_retries_exhausted(self, store, mock_s3_client, monkeypatch):
         """Test atomic write fails after max retries on persistent race condition.
 
         Scenario: File keeps getting deleted between check and write, exhausting all retries.
@@ -568,9 +558,7 @@ class TestS3Store:
 
         # Should fail after STORE_MAX_RETRY_ATTEMPTS
         with pytest.raises(S3Store._RaceConditionError):
-            await store.write_file_atomic(
-                filename, data, expected_version=expected_version
-            )
+            await store.write_file_atomic(filename, data, expected_version=expected_version)
 
         # Verify put_object was called STORE_MAX_RETRY_ATTEMPTS times
         assert mock_s3_client.put_object.call_count == STORE_MAX_RETRY_ATTEMPTS
@@ -863,46 +851,12 @@ class TestAzureBlobStore:
 
 
 # ============================================================================
-# Project Operations Tests
+# Store.get_file_store Tests
 # ============================================================================
 
 
-class TestStorePathConstruction:
-    """Test Store path construction for projects and templates."""
-
-    def test_construct_path_with_item_id(self):
-        """Test generic path construction with item ID."""
-        path = Store._construct_path(['some', 'base', 'path'], 'item-123')
-        assert path == 'some/base/path/item-123.json'
-
-    def test_construct_path_without_item_id(self):
-        """Test generic path construction without item ID (directory)."""
-        path = Store._construct_path(['some', 'base', 'path'])
-        assert path == 'some/base/path/'
-
-    def test_construct_store_path_with_project_id(self):
-        """Test project path includes users/ prefix."""
-        path = Store._construct_store_path('client-123', 'proj-456')
-        assert path == 'users/client-123/.projects/proj-456.json'
-
-    def test_construct_store_path_without_project_id(self):
-        """Test project directory path includes users/ prefix."""
-        path = Store._construct_store_path('client-123')
-        assert path == 'users/client-123/.projects/'
-
-    def test_construct_template_path_with_template_id(self):
-        """Test template path uses system/.templates."""
-        path = Store._construct_template_path('tmpl-123')
-        assert path == 'system/.templates/tmpl-123.json'
-
-    def test_construct_template_path_without_template_id(self):
-        """Test template directory path uses system/.templates."""
-        path = Store._construct_template_path()
-        assert path == 'system/.templates/'
-
-
-class TestStoreProjects:
-    """Test Store project operations (get_all_projects)."""
+class TestStoreFileStore:
+    """Test Store.get_file_store returns a working FileStore."""
 
     @pytest.fixture
     def temp_dir(self):
@@ -917,666 +871,47 @@ class TestStoreProjects:
         url = f'filesystem://{temp_dir}'
         return Store.create(url=url)
 
-    @pytest.fixture
-    def account_info(self):
-        """Create mock AccountInfo."""
-        from ai.account import AccountInfo
+    def test_get_file_store_returns_file_store(self, store):
+        """Test that get_file_store returns a FileStore instance."""
+        from ai.account.file_store import FileStore
 
-        return AccountInfo(clientid='test-user-123')
+        fs = store.get_file_store('test-user')
+        assert isinstance(fs, FileStore)
 
-    @pytest.mark.asyncio
-    async def test_get_all_projects_with_nested_pipeline_structure(self, store, account_info):
-        """Test that get_all_projects correctly extracts sources from pipeline components."""
-        project_id = 'test-proj-001'
-        pipeline_data = {
-            'source': 'source_1',
-            'name': 'Test Pipeline',
-            'components': [
-                {
-                    'id': 'source_1',
-                    'provider': 'filesystem',
-                    'config': {
-                        'mode': 'Source',
-                        'name': 'Filesystem Source',
-                        'path': '/data/input',
-                    },
-                },
-                {
-                    'id': 'source_2',
-                    'provider': 's3',
-                    'config': {'mode': 'Source', 'name': 'S3 Source', 'bucket': 'my-bucket'},
-                },
-                {
-                    'id': 'processor_1',
-                    'provider': 'transform',
-                    'config': {'mode': 'Transform', 'name': 'Data Processor'},
-                },
-            ],
-        }
+    def test_get_file_store_caches_by_client_id(self, store):
+        """Test that the same FileStore is returned for the same client_id."""
+        fs1 = store.get_file_store('user-1')
+        fs2 = store.get_file_store('user-1')
+        fs3 = store.get_file_store('user-2')
 
-        # Save the project
-        result = await store.save_project(account_info, project_id, pipeline_data)
-        assert result['success'] is True
-
-        # Get all projects and verify sources are extracted correctly
-        all_projects = await store.get_all_projects(account_info)
-
-        assert all_projects['success'] is True
-        assert all_projects['count'] == 1
-
-        project = all_projects['projects'][0]
-        assert project['id'] == project_id
-        assert project['name'] == 'Test Pipeline'
-        assert project['totalComponents'] == 3  # 2 sources + 1 processor
-
-        # Verify only Source components are included in sources array
-        assert len(project['sources']) == 2
-
-        source_ids = [s['id'] for s in project['sources']]
-        assert 'source_1' in source_ids
-        assert 'source_2' in source_ids
-        assert 'processor_1' not in source_ids  # Transform should not be included
-
-        # Verify source details
-        fs_source = next(s for s in project['sources'] if s['id'] == 'source_1')
-        assert fs_source['provider'] == 'filesystem'
-        assert fs_source['name'] == 'Filesystem Source'
-
-        s3_source = next(s for s in project['sources'] if s['id'] == 'source_2')
-        assert s3_source['provider'] == 's3'
-        assert s3_source['name'] == 'S3 Source'
+        assert fs1 is fs2
+        assert fs1 is not fs3
 
     @pytest.mark.asyncio
-    async def test_get_all_projects_with_empty_pipeline(self, store, account_info):
-        """Test get_all_projects with empty components list."""
-        project_id = 'empty-proj'
-        pipeline_data = {
-            'source': 'source_1',
-            'name': 'Empty Pipeline',
-            'components': [],
-        }
+    async def test_file_store_write_and_read(self, store):
+        """Test writing and reading via FileStore."""
+        fs = store.get_file_store('test-user')
 
-        await store.save_project(account_info, project_id, pipeline_data)
+        await fs.write('test.txt', b'Hello, World!')
+        data = await fs.read('test.txt')
 
-        all_projects = await store.get_all_projects(account_info)
-
-        assert all_projects['success'] is True
-        assert all_projects['count'] == 1
-
-        project = all_projects['projects'][0]
-        assert project['name'] == 'Empty Pipeline'
-        assert project['sources'] == []
-        assert project['totalComponents'] == 0
+        assert data == b'Hello, World!'
 
     @pytest.mark.asyncio
-    async def test_get_all_projects_with_missing_name(self, store, account_info):
-        """Test get_all_projects defaults to 'Untitled' when project has no name."""
-        project_id = 'no-name-proj'
-        pipeline_data = {
-            'source': 'source_1',
-            'components': [
-                {
-                    'id': 'source_1',
-                    'provider': 'filesystem',
-                    'config': {'mode': 'Source', 'name': 'Legacy Source'},
-                }
-            ],
-        }
-
-        await store.save_project(account_info, project_id, pipeline_data)
-
-        all_projects = await store.get_all_projects(account_info)
-
-        assert all_projects['success'] is True
-        assert all_projects['count'] == 1
-
-        project = all_projects['projects'][0]
-        assert project['name'] == 'Untitled'
-        assert len(project['sources']) == 1
-        assert project['totalComponents'] == 1
-
-
-# ============================================================================
-# Template Operations Tests
-# ============================================================================
-
-
-class TestStoreTemplates:
-    """Test Store template operations (system-wide templates)."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        """Create temporary directory for tests."""
-        temp_path = tempfile.mkdtemp()
-        yield temp_path
-        shutil.rmtree(temp_path, ignore_errors=True)
-
-    @pytest.fixture
-    def store(self, temp_dir):
-        """Create store instance."""
-        url = f'filesystem://{temp_dir}'
-        return Store.create(url=url)
-
-    @pytest.mark.asyncio
-    async def test_save_and_get_template(self, store):
-        """Test saving and retrieving a template."""
-        template_id = 'tmpl-001'
-        pipeline_data = {
-            'name': 'Test Template',
-            'source': 'source_1',
-            'components': [
-                {
-                    'id': 'source_1',
-                    'provider': 'filesystem',
-                    'config': {
-                        'mode': 'Source',
-                        'name': 'Template Source',
-                        'path': '/data/template',
-                    },
-                }
-            ],
-        }
-
-        # Save template
-        save_result = await store.save_template(template_id, pipeline_data)
-        assert save_result['success'] is True
-        assert save_result['template_id'] == template_id
-        assert 'version' in save_result
-
-        # Get template
-        get_result = await store.get_template(template_id)
-        assert get_result['success'] is True
-        assert get_result['pipeline']['name'] == 'Test Template'
-        assert 'version' in get_result
-
-    @pytest.mark.asyncio
-    async def test_update_template_with_version(self, store):
-        """Test updating a template with version check."""
-        template_id = 'tmpl-002'
-        pipeline_data = {
-            'name': 'Original Template',
-            'source': 'source_1',
-            'components': [],
-        }
-
-        # Save initial template
-        save_result = await store.save_template(template_id, pipeline_data)
-        version = save_result['version']
-
-        # Update with correct version
-        updated_pipeline = {
-            'name': 'Updated Template',
-            'source': 'source_1',
-            'components': [],
-        }
-        update_result = await store.save_template(
-            template_id, updated_pipeline, expected_version=version
-        )
-        assert update_result['success'] is True
-        assert update_result['version'] != version  # Version should change
-
-        # Verify update
-        get_result = await store.get_template(template_id)
-        assert get_result['pipeline']['name'] == 'Updated Template'
-
-    @pytest.mark.asyncio
-    async def test_delete_template(self, store):
-        """Test deleting a template."""
-        template_id = 'tmpl-003'
-        pipeline_data = {
-            'name': 'Delete Me Template',
-            'source': 'source_1',
-            'components': [],
-        }
-
-        # Save template
-        save_result = await store.save_template(template_id, pipeline_data)
-        version = save_result['version']
-
-        # Delete template
-        delete_result = await store.delete_template(template_id, expected_version=version)
-        assert delete_result['success'] is True
-        assert delete_result['template_id'] == template_id
-
-        # Verify deletion
-        with pytest.raises(StorageError):
-            await store.get_template(template_id)
-
-    @pytest.mark.asyncio
-    async def test_get_all_templates(self, store):
-        """Test listing all templates."""
-        # Save multiple templates
-        for i in range(3):
-            pipeline_data = {
-                'source': 'source_1',
-                'name': f'Template {i}',
-                'components': [
-                    {
-                        'id': 'source_1',
-                        'provider': 'filesystem',
-                        'config': {'mode': 'Source', 'name': f'Source {i}'},
-                    }
-                ],
-            }
-            await store.save_template(f'tmpl-{i:03d}', pipeline_data)
-
-        # Get all templates
-        all_templates = await store.get_all_templates()
-
-        assert all_templates['success'] is True
-        assert all_templates['count'] == 3
-
-        template_ids = [t['id'] for t in all_templates['templates']]
-        assert 'tmpl-000' in template_ids
-        assert 'tmpl-001' in template_ids
-        assert 'tmpl-002' in template_ids
-
-        # Verify each template has correct structure
-        for template in all_templates['templates']:
-            assert 'name' in template
-            assert 'sources' in template
-            assert 'totalComponents' in template
-            assert template['totalComponents'] == 1  # Each has 1 component
-
-    @pytest.mark.asyncio
-    async def test_get_all_templates_empty(self, store):
-        """Test listing templates when none exist."""
-        all_templates = await store.get_all_templates()
-
-        assert all_templates['success'] is True
-        assert all_templates['count'] == 0
-        assert all_templates['templates'] == []
-
-    @pytest.mark.asyncio
-    async def test_template_validation_errors(self, store):
-        """Test validation errors for template operations."""
-        # Empty template_id
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_template('', {'name': 'Test'})
-        assert 'template_id is required' in str(exc_info.value)
-
-        # Empty pipeline
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_template('tmpl-test', None)
-        assert 'pipeline is required' in str(exc_info.value)
-
-        # Empty template_id for get
-        with pytest.raises(ValueError) as exc_info:
-            await store.get_template('')
-        assert 'template_id is required' in str(exc_info.value)
-
-        # Empty template_id for delete
-        with pytest.raises(ValueError) as exc_info:
-            await store.delete_template('')
-        assert 'template_id is required' in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_template_not_found(self, store):
-        """Test getting a non-existent template."""
-        with pytest.raises(StorageError) as exc_info:
-            await store.get_template('nonexistent-template')
-        assert 'not found' in str(exc_info.value).lower()
-
-
-# ============================================================================
-# Integration Tests
-# ============================================================================
-
-
-# ============================================================================
-# Log Operations Tests
-# ============================================================================
-
-
-class TestStoreLogPathConstruction:
-    """Test Store path construction for log files."""
-
-    def test_construct_log_path_with_filename(self):
-        """Test log path construction with filename."""
-        path = Store._construct_log_path(
-            'client-123', 'proj-456', 'source_1-1234567890.123.log'
-        )
-        assert path == 'users/client-123/.logs/proj-456/source_1-1234567890.123.log'
-
-    def test_construct_log_path_without_filename(self):
-        """Test log path construction without filename (directory)."""
-        path = Store._construct_log_path('client-123', 'proj-456')
-        assert path == 'users/client-123/.logs/proj-456/'
-
-
-class TestStoreLogs:
-    """Test Store log operations (save_log, get_log, list_logs)."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        """Create temporary directory for tests."""
-        temp_path = tempfile.mkdtemp()
-        yield temp_path
-        shutil.rmtree(temp_path, ignore_errors=True)
-
-    @pytest.fixture
-    def store(self, temp_dir):
-        """Create store instance."""
-        url = f'filesystem://{temp_dir}'
-        return Store.create(url=url)
-
-    @pytest.fixture
-    def account_info(self):
-        """Create mock AccountInfo."""
-        from ai.account import AccountInfo
-
-        return AccountInfo(clientid='test-user-123')
-
-    @pytest.fixture
-    def sample_log_contents(self):
-        """Sample log contents matching the status update event format."""
-        return {
-            'type': 'event',
-            'seq': 79,
-            'event': 'apaevt_status_update',
-            'body': {
-                'name': 'atl-confluence_1',
-                'project_id': '851018af-1616-4d24-a544-9009339a8542',
-                'source': 'atl-confluence_1',
-                'completed': True,
-                'state': 5,
-                'startTime': 1764337626.6564875,
-                'endTime': 1764337716.5507987,
-                'debuggerAttached': False,
-                'status': 'Completed',
-                'warnings': [],
-                'errors': [],
-                'currentObject': '',
-                'currentSize': 0,
-                'notes': [],
-                'totalSize': 810034,
-                'totalCount': 15,
-                'completedSize': 810034,
-                'completedCount': 15,
-                'failedSize': 0,
-                'failedCount': 0,
-                'wordsSize': 0,
-                'wordsCount': 0,
-                'rateSize': 975944,
-                'rateCount': 18,
-                'serviceUp': False,
-                'exitCode': 0,
-                'exitMessage': '',
-                'pipeflow': {'totalPipes': 3, 'byPipe': {'0': [], '1': [], '2': []}},
-                'metrics': {
-                    'cpu_percent': 0.0,
-                    'cpu_memory_mb': 0.0,
-                    'gpu_memory_mb': 0.0,
-                    'peak_cpu_percent': 0.0,
-                    'peak_cpu_memory_mb': 0.0,
-                    'peak_gpu_memory_mb': 0.0,
-                    'avg_cpu_percent': 0.0,
-                    'avg_cpu_memory_mb': 0.0,
-                    'avg_gpu_memory_mb': 0.0,
-                },
-                'tokens': {
-                    'cpu_utilization': 6.0,
-                    'cpu_memory': 0.7,
-                    'gpu_memory': 0.0,
-                    'total': 6.7,
-                },
-                '__id': 'e6e29a87.atl-confluence_1',
-            },
-        }
-
-    @pytest.mark.asyncio
-    async def test_save_and_get_log(self, store, account_info, sample_log_contents):
-        """Test saving and retrieving a log file."""
-        project_id = 'proj-001'
-        source = 'source_1'
-
-        # Save log
-        save_result = await store.save_log(
-            account_info, project_id, source, sample_log_contents
-        )
-        assert save_result['success'] is True
-        assert 'filename' in save_result
-        expected_filename = f'{source}-{sample_log_contents["body"]["startTime"]}.log'
-        assert save_result['filename'] == expected_filename
-
-        # Get log
-        start_time = sample_log_contents['body']['startTime']
-        get_result = await store.get_log(account_info, project_id, source, start_time)
-        assert get_result['success'] is True
-        assert get_result['contents'] == sample_log_contents
-
-    @pytest.mark.asyncio
-    async def test_save_log_overwrites_existing(
-        self, store, account_info, sample_log_contents
-    ):
-        """Test that save_log overwrites existing log file."""
-        project_id = 'proj-001'
-        source = 'source_1'
-
-        # Save initial log
-        await store.save_log(account_info, project_id, source, sample_log_contents)
-
-        # Modify contents and save again (same source and startTime)
-        modified_contents = sample_log_contents.copy()
-        modified_contents['body'] = sample_log_contents['body'].copy()
-        modified_contents['body']['status'] = 'Updated'
-        modified_contents['body']['completedCount'] = 20
-
-        await store.save_log(account_info, project_id, source, modified_contents)
-
-        # Verify the file was overwritten
-        start_time = sample_log_contents['body']['startTime']
-        get_result = await store.get_log(account_info, project_id, source, start_time)
-        assert get_result['contents']['body']['status'] == 'Updated'
-        assert get_result['contents']['body']['completedCount'] == 20
-
-    @pytest.mark.asyncio
-    async def test_list_logs_empty(self, store, account_info):
-        """Test listing logs when none exist."""
-        result = await store.list_logs(account_info, 'nonexistent-proj')
-
-        assert result['success'] is True
-        assert result['logs'] == []
-        assert result['count'] == 0
-        assert result['total_count'] == 0
-        assert result['page'] == 0
-        assert result['total_pages'] == 1
-
-    @pytest.mark.asyncio
-    async def test_list_logs_all(self, store, account_info, sample_log_contents):
-        """Test listing all logs for a project."""
-        project_id = 'proj-001'
-
-        # Save multiple logs with different sources and start times
-        sources = ['source_1', 'source_2', 'source_1']
-        start_times = [1000000.0, 2000000.0, 3000000.0]
-
-        for source, start_time in zip(sources, start_times):
-            contents = sample_log_contents.copy()
-            contents['body'] = sample_log_contents['body'].copy()
-            contents['body']['startTime'] = start_time
-            contents['body']['source'] = source
-            await store.save_log(account_info, project_id, source, contents)
-
-        # List all logs
-        result = await store.list_logs(account_info, project_id)
-
-        assert result['success'] is True
-        assert result['count'] == 3
-        assert result['total_count'] == 3
-        assert len(result['logs']) == 3
-
-    @pytest.mark.asyncio
-    async def test_list_logs_filter_by_source(
-        self, store, account_info, sample_log_contents
-    ):
-        """Test filtering logs by source name."""
-        project_id = 'proj-001'
-
-        # Save logs for different sources
-        for source, start_time in [
-            ('source_1', 1000000.0),
-            ('source_2', 2000000.0),
-            ('source_1', 3000000.0),
-        ]:
-            contents = sample_log_contents.copy()
-            contents['body'] = sample_log_contents['body'].copy()
-            contents['body']['startTime'] = start_time
-            contents['body']['source'] = source
-            await store.save_log(account_info, project_id, source, contents)
-
-        # List only source_1 logs
-        result = await store.list_logs(account_info, project_id, source='source_1')
-
-        assert result['success'] is True
-        assert result['count'] == 2
-        assert result['total_count'] == 2
-        for log in result['logs']:
-            assert log.startswith('source_1-')
-
-    @pytest.mark.asyncio
-    async def test_list_logs_pagination(self, store, account_info, sample_log_contents):
-        """Test log listing pagination."""
-        from ai.account.store import LOG_PAGE_SIZE
-
-        project_id = 'proj-001'
-        source = 'source_1'
-
-        # Create more logs than one page
-        num_logs = LOG_PAGE_SIZE + 10
-        for i in range(num_logs):
-            contents = sample_log_contents.copy()
-            contents['body'] = sample_log_contents['body'].copy()
-            contents['body']['startTime'] = float(1000000 + i)
-            await store.save_log(account_info, project_id, source, contents)
-
-        # Get first page
-        result_page0 = await store.list_logs(account_info, project_id, page=0)
-        assert result_page0['success'] is True
-        assert result_page0['count'] == LOG_PAGE_SIZE
-        assert result_page0['total_count'] == num_logs
-        assert result_page0['page'] == 0
-        assert result_page0['total_pages'] == 2
-
-        # Get second page
-        result_page1 = await store.list_logs(account_info, project_id, page=1)
-        assert result_page1['success'] is True
-        assert result_page1['count'] == 10
-        assert result_page1['total_count'] == num_logs
-        assert result_page1['page'] == 1
-
-        # Verify no overlap between pages
-        page0_logs = set(result_page0['logs'])
-        page1_logs = set(result_page1['logs'])
-        assert page0_logs.isdisjoint(page1_logs)
-
-    @pytest.mark.asyncio
-    async def test_list_logs_negative_page(
-        self, store, account_info, sample_log_contents
-    ):
-        """Test that negative page numbers default to 0."""
-        project_id = 'proj-001'
-
-        contents = sample_log_contents.copy()
-        contents['body'] = sample_log_contents['body'].copy()
-        await store.save_log(account_info, project_id, 'source_1', contents)
-
-        result = await store.list_logs(account_info, project_id, page=-5)
-        assert result['page'] == 0
-
-    @pytest.mark.asyncio
-    async def test_list_logs_none_page(self, store, account_info, sample_log_contents):
-        """Test that None page defaults to 0."""
-        project_id = 'proj-001'
-
-        contents = sample_log_contents.copy()
-        contents['body'] = sample_log_contents['body'].copy()
-        await store.save_log(account_info, project_id, 'source_1', contents)
-
-        result = await store.list_logs(account_info, project_id, page=None)
-        assert result['page'] == 0
-
-    @pytest.mark.asyncio
-    async def test_get_log_not_found(self, store, account_info):
-        """Test getting a non-existent log file."""
-        with pytest.raises(StorageError) as exc_info:
-            await store.get_log(account_info, 'proj-001', 'source_1', 9999999.0)
-        assert 'not found' in str(exc_info.value).lower()
-
-    @pytest.mark.asyncio
-    async def test_save_log_validation_errors(
-        self, store, account_info, sample_log_contents
-    ):
-        """Test validation errors for save_log."""
-        # Missing project_id
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_log(account_info, '', 'source_1', sample_log_contents)
-        assert 'project_id is required' in str(exc_info.value)
-
-        # Missing source
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_log(account_info, 'proj-001', '', sample_log_contents)
-        assert 'source is required' in str(exc_info.value)
-
-        # Missing contents
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_log(account_info, 'proj-001', 'source_1', None)
-        assert 'contents is required' in str(exc_info.value)
-
-        # Missing startTime in contents
-        with pytest.raises(ValueError) as exc_info:
-            await store.save_log(account_info, 'proj-001', 'source_1', {'body': {}})
-        assert 'body.startTime' in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_get_log_validation_errors(self, store, account_info):
-        """Test validation errors for get_log."""
-        # Missing project_id
-        with pytest.raises(ValueError) as exc_info:
-            await store.get_log(account_info, '', 'source_1', 1234567.0)
-        assert 'project_id is required' in str(exc_info.value)
-
-        # Missing source
-        with pytest.raises(ValueError) as exc_info:
-            await store.get_log(account_info, 'proj-001', '', 1234567.0)
-        assert 'source is required' in str(exc_info.value)
-
-        # Missing start_time
-        with pytest.raises(ValueError) as exc_info:
-            await store.get_log(account_info, 'proj-001', 'source_1', None)
-        assert 'start_time is required' in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_list_logs_validation_errors(self, store, account_info):
-        """Test validation errors for list_logs."""
-        # Missing project_id
-        with pytest.raises(ValueError) as exc_info:
-            await store.list_logs(account_info, '')
-        assert 'project_id is required' in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_log_files_sorted(self, store, account_info, sample_log_contents):
-        """Test that log files are returned in sorted order."""
-        project_id = 'proj-001'
-        source = 'source_1'
-
-        # Save logs in random order
-        start_times = [3000000.0, 1000000.0, 2000000.0]
-        for start_time in start_times:
-            contents = sample_log_contents.copy()
-            contents['body'] = sample_log_contents['body'].copy()
-            contents['body']['startTime'] = start_time
-            await store.save_log(account_info, project_id, source, contents)
-
-        # List logs and verify sorted order
-        result = await store.list_logs(account_info, project_id)
-        logs = result['logs']
-
-        assert logs == sorted(logs)
+    async def test_file_store_isolation(self, store):
+        """Test that different client_ids have isolated storage."""
+        fs1 = store.get_file_store('user-1')
+        fs2 = store.get_file_store('user-2')
+
+        await fs1.write('shared-name.txt', b'user-1 data')
+        await fs2.write('shared-name.txt', b'user-2 data')
+
+        assert await fs1.read('shared-name.txt') == b'user-1 data'
+        assert await fs2.read('shared-name.txt') == b'user-2 data'
 
 
 class TestStoreIntegration:
-    """Integration tests using real filesystem."""
+    """Integration tests using real filesystem via Store + FileStore."""
 
     @pytest.fixture
     def temp_dir(self):
@@ -1587,22 +922,22 @@ class TestStoreIntegration:
 
     @pytest.mark.asyncio
     async def test_end_to_end_workflow(self, temp_dir):
-        """Test complete workflow: create store, write, read."""
-        # Create store via factory
+        """Test complete workflow: create store, get FileStore, write, read."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
+        fs = store.get_file_store('test-user')
 
         # Write multiple files
-        await store.write_file('logs/app.log', 'Application started\n')
-        await store.write_file('logs/app.log', 'Processing data\n')  # Overwrite
-        await store.write_file('data/config.json', '{"key": "value"}')
+        await fs.write('logs/app.log', b'Application started\n')
+        await fs.write('logs/app.log', b'Processing data\n')  # Overwrite
+        await fs.write('data/config.json', b'{"key": "value"}')
 
         # Read files
-        log_content = await store.read_file('logs/app.log')
-        config_content = await store.read_file('data/config.json')
+        log_content = await fs.read('logs/app.log')
+        config_content = await fs.read('data/config.json')
 
-        assert log_content == 'Processing data\n'
-        assert config_content == '{"key": "value"}'
+        assert log_content == b'Processing data\n'
+        assert config_content == b'{"key": "value"}'
 
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, temp_dir):
@@ -1611,20 +946,79 @@ class TestStoreIntegration:
 
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
+        fs = store.get_file_store('test-user')
 
         # Write multiple files concurrently
-        tasks = [
-            store.write_file(f'file{i}.txt', f'Content {i}') for i in range(10)
-        ]
+        tasks = [fs.write(f'file{i}.txt', f'Content {i}'.encode()) for i in range(10)]
         await asyncio.gather(*tasks)
 
         # Read files concurrently
-        tasks = [store.read_file(f'file{i}.txt') for i in range(10)]
+        tasks = [fs.read(f'file{i}.txt') for i in range(10)]
         results = await asyncio.gather(*tasks)
 
         # Verify all files were written correctly
         for i, content in enumerate(results):
-            assert content == f'Content {i}'
+            assert content == f'Content {i}'.encode()
+
+    @pytest.mark.asyncio
+    async def test_handle_based_write_and_read(self, temp_dir):
+        """Test handle-based streaming write and read."""
+        url = f'filesystem://{temp_dir}'
+        store = Store.create(url=url)
+        fs = store.get_file_store('test-user')
+
+        # Write in chunks via handles
+        handle_id = await fs.open_write('chunked.bin', connection_id=1)
+        await fs.write_chunk(handle_id, b'chunk-1-')
+        await fs.write_chunk(handle_id, b'chunk-2-')
+        await fs.write_chunk(handle_id, b'chunk-3')
+        await fs.close_write(handle_id)
+
+        # Read back via handles
+        info = await fs.open_read('chunked.bin', connection_id=1)
+        assert info['size'] == 23  # len('chunk-1-chunk-2-chunk-3')
+        data = await fs.read_chunk(info['handle'], offset=0)
+        await fs.close_read(info['handle'])
+
+        assert data == b'chunk-1-chunk-2-chunk-3'
+
+    @pytest.mark.asyncio
+    async def test_close_all_handles_on_disconnect(self, temp_dir):
+        """Test that close_all_handles commits and cleans up."""
+        url = f'filesystem://{temp_dir}'
+        store = Store.create(url=url)
+        fs = store.get_file_store('test-user')
+
+        # Open a write handle and write some data
+        handle_id = await fs.open_write('disconnect.bin', connection_id=42)
+        await fs.write_chunk(handle_id, b'partial-data')
+
+        # Simulate disconnect — should commit what was written
+        await fs.close_all_handles(connection_id=42)
+
+        # Data should be committed and readable
+        data = await fs.read('disconnect.bin')
+        assert data == b'partial-data'
+
+        # Write lock should be released — a new write must succeed
+        handle_id2 = await fs.open_write('disconnect.bin', connection_id=43)
+        await fs.close_write(handle_id2)
+
+    @pytest.mark.asyncio
+    async def test_write_lock_prevents_double_open(self, temp_dir):
+        """Test that opening the same file for writing twice raises an error."""
+        url = f'filesystem://{temp_dir}'
+        store = Store.create(url=url)
+        fs = store.get_file_store('test-user')
+
+        handle_id = await fs.open_write('locked.bin', connection_id=1)
+
+        with pytest.raises(StorageError) as exc_info:
+            await fs.open_write('locked.bin', connection_id=2)
+        assert 'already open for writing' in str(exc_info.value)
+
+        # Clean up
+        await fs.close_write(handle_id)
 
 
 if __name__ == '__main__':
