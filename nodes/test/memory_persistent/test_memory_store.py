@@ -66,7 +66,9 @@ def test_inmemory_increment_is_atomic_under_concurrent_writes():
 
     result = backend.get('session-atomic', 'counter')
     assert result['ok'] is True
-    assert result['value'] == num_threads * increments_per_thread, f'Expected {num_threads * increments_per_thread}, got {result["value"]} (race condition — increment is not atomic)'
+    assert result['value'] == num_threads * increments_per_thread, (
+        f'Expected {num_threads * increments_per_thread}, got {result["value"]} (race condition — increment is not atomic)'
+    )
 
 
 def test_inmemory_increment_returns_new_value_like_redis_incrby():
@@ -110,7 +112,9 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
 
     # Key must have expired with the session, not outlasted it
     got_after = backend.get('session-ttl', 'late_key')
-    assert got_after['ok'] is False, 'Late-added key should inherit remaining session TTL and be purged when the session expires; got stragglers instead.'
+    assert got_after['ok'] is False, (
+        'Late-added key should inherit remaining session TTL and be purged when the session expires; got stragglers instead.'
+    )
 
 
 def test_inmemory_create_prunes_expired_session_before_duplicate_check():

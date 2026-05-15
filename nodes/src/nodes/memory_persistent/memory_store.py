@@ -35,7 +35,9 @@ _LOGGER = logging.getLogger(__name__)
 def _validate_session_id(session_id: str) -> None:
     """Validate session_id to prevent path traversal or injection in Redis keys."""
     if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
-        raise ValueError(f'Invalid session_id: {session_id!r}. Must be 1-128 alphanumeric characters, hyphens, or underscores.')
+        raise ValueError(
+            f'Invalid session_id: {session_id!r}. Must be 1-128 alphanumeric characters, hyphens, or underscores.'
+        )
 
 
 def _validate_key(key: str) -> None:
@@ -306,7 +308,9 @@ class RedisBackend(MemoryBackend):
         rr:memory:__sessions__            — set of all session IDs
     """
 
-    def __init__(self, host: str = 'localhost', port: int = 6379, password: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(
+        self, host: str = 'localhost', port: int = 6379, password: Optional[str] = None, **kwargs: Any
+    ) -> None:
         """Connect to Redis with the given host, port, and optional password."""
         import redis as redis_lib
 
@@ -547,7 +551,11 @@ class RedisBackend(MemoryBackend):
             if err is not None:
                 return err
             # Get the last N entries
-            raw_entries = self._client.lrange(self._history_key(session_id), -limit, -1) if limit > 0 else self._client.lrange(self._history_key(session_id), 0, -1)
+            raw_entries = (
+                self._client.lrange(self._history_key(session_id), -limit, -1)
+                if limit > 0
+                else self._client.lrange(self._history_key(session_id), 0, -1)
+            )
             entries = [json.loads(e) for e in raw_entries]
             return {'ok': True, 'session_id': session_id, 'entries': entries}
 
