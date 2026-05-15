@@ -2093,9 +2093,19 @@ class TestConcurrentPipelineOperations:
             for i in range(PIPELINE_COUNT):
                 await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
 
-            # Create pipelines concurrently
+            # Create pipelines concurrently — each needs a unique project_id
+            # to avoid server-side contention during concurrent startup.
+            MIXED_PROJECT_IDS = [
+                'a1b2c3d4-1111-4000-a000-000000000001',
+                'a1b2c3d4-1111-4000-a000-000000000002',
+                'a1b2c3d4-1111-4000-a000-000000000003',
+                'a1b2c3d4-1111-4000-a000-000000000004',
+            ]
+
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-m{index}')
+                result = await client.use(
+                    pipeline=get_echo_pipeline(MIXED_PROJECT_IDS[index]), token=f'{self.CONCURRENT_TOKEN}-m{index}'
+                )
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(PIPELINE_COUNT)]
@@ -2190,9 +2200,21 @@ class TestConcurrentPipelineOperations:
             for i in range(SUBPROCESS_COUNT):
                 await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-s{i}')
 
-            # Create 4 independent subprocesses concurrently
+            # Create 4 independent subprocesses concurrently — each needs a
+            # unique project_id to avoid server-side contention during startup.
+            CYCLE_PROJECT_IDS = [
+                'b2c3d4e5-2222-4000-b000-000000000001',
+                'b2c3d4e5-2222-4000-b000-000000000002',
+                'b2c3d4e5-2222-4000-b000-000000000003',
+                'b2c3d4e5-2222-4000-b000-000000000004',
+            ]
             sub_tokens = [f'{self.CONCURRENT_TOKEN}-s{i}' for i in range(SUBPROCESS_COUNT)]
-            await asyncio.gather(*[client.use(pipeline=get_echo_pipeline(), token=token) for token in sub_tokens])
+            await asyncio.gather(
+                *[
+                    client.use(pipeline=get_echo_pipeline(CYCLE_PROJECT_IDS[i]), token=token)
+                    for i, token in enumerate(sub_tokens)
+                ]
+            )
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2259,8 +2281,16 @@ class TestConcurrentPipelineOperations:
             # client.use() attaches to the existing task instead of starting a
             # fresh one.  This is what makes both clients fan into ONE shared
             # eaas->subprocess _data_client.
-            res_a = await client_a.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
-            res_b = await client_b.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
+            res_a = await client_a.use(
+                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+                token=SHARED_TOKEN,
+                use_existing=True,
+            )
+            res_b = await client_b.use(
+                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+                token=SHARED_TOKEN,
+                use_existing=True,
+            )
             assert res_b['token'] == res_a['token']
 
             # Generate distinct payloads per client so we can verify no cross-routing.
