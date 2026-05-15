@@ -14,21 +14,20 @@ test_should_handle_chat_workflow_with_multiple_interactions).
 import json
 
 # Stub response returned by ChatOpenAI.invoke() - mirrors LangChain AIMessage
-MOCK_LLM_RESPONSE = (
-    'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set '
-    'so tests run without API keys or external services.'
-)
+MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
 
 # Mock embedding dimension (OpenAI text-embedding-3-small default)
 MOCK_EMBEDDING_DIM = 1536
 
 # Responses for tests that expect specific content (client-python chat tests)
-_CONSTITUTION_JSON = json.dumps({
-    'text': 'We the People of the United States, in Order to form a more perfect Union, '
-            'establish Justice, insure domestic Tranquility, provide for the common defence, '
-            'promote the general Welfare, and secure the Blessings of Liberty to ourselves '
-            'and our Posterity, do ordain and establish this Constitution for the United States of America.'
-})
+_CONSTITUTION_JSON = json.dumps(
+    {
+        'text': 'We the People of the United States, in Order to form a more perfect Union, '
+        'establish Justice, insure domestic Tranquility, provide for the common defence, '
+        'promote the general Welfare, and secure the Blessings of Liberty to ourselves '
+        'and our Posterity, do ordain and establish this Constitution for the United States of America.'
+    }
+)
 _MATH_JSON = json.dumps({'result': 20, 'operation': 'multiplication'})
 
 

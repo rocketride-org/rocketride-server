@@ -3,25 +3,88 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-import React from 'react';
+import React, { CSSProperties } from 'react';
 import type { DashboardResponse, DashboardTask } from '../types';
 import { StatCard } from './StatCard';
 import { StatusPill } from './StatusPill';
 import { formatUptime, formatTimeAgo, formatNumber } from '../util';
+import { commonStyles } from '../../../themes/styles';
 
 // =============================================================================
-// Types
+// STYLES
 // =============================================================================
 
-interface OverviewTabProps {
-	data: DashboardResponse;
-}
+const styles = {
+	statsRow: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+		gap: 12,
+		marginBottom: 20,
+	} as CSSProperties,
+	grid2col: {
+		display: 'grid',
+		gridTemplateColumns: '1fr 1fr',
+		gap: 16,
+	} as CSSProperties,
+	table: {
+		width: '100%',
+		borderCollapse: 'collapse',
+		fontSize: 13,
+	} as CSSProperties,
+	mono: {
+		...commonStyles.fontMono,
+		fontVariantNumeric: 'tabular-nums',
+	} as CSSProperties,
+	taskName: {
+		fontWeight: 500,
+		color: 'var(--rr-text-primary)',
+		fontVariantNumeric: 'tabular-nums',
+	} as CSSProperties,
+	taskSecondary: {
+		fontSize: 11,
+		color: 'var(--rr-text-disabled)',
+		marginTop: 2,
+	} as CSSProperties,
+	msgBadge: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 3,
+		fontSize: 11,
+		fontVariantNumeric: 'tabular-nums',
+		marginRight: 6,
+	} as CSSProperties,
+	msgIn: { color: 'var(--rr-color-success)', fontSize: 8 } as CSSProperties,
+	msgOut: { color: 'var(--rr-border-focus)', fontSize: 8 } as CSSProperties,
+	miniBar: { width: 80 } as CSSProperties,
+	miniBarLabel: {
+		fontSize: 10,
+		color: 'var(--rr-text-disabled)',
+		marginBottom: 2,
+		display: 'flex',
+		justifyContent: 'space-between',
+	} as CSSProperties,
+	miniBarTrack: {
+		height: 4,
+		background: 'color-mix(in srgb, var(--rr-border) 30%, transparent)',
+		borderRadius: 2,
+		overflow: 'hidden',
+	} as CSSProperties,
+	miniBarFillCpu: {
+		height: '100%',
+		borderRadius: 2,
+		background: 'var(--rr-border-focus)',
+	} as CSSProperties,
+	miniBarFillMem: {
+		height: '100%',
+		borderRadius: 2,
+		background: 'var(--rr-accent)',
+	} as CSSProperties,
+};
 
 // =============================================================================
-// Helpers
+// HELPERS
 // =============================================================================
 
-/** Aggregate metrics across all running tasks. */
 function aggregateMetrics(tasks: DashboardTask[]) {
 	let totalCpu = 0;
 	let totalMem = 0;
@@ -49,75 +112,75 @@ function getTaskStatePill(task: DashboardTask) {
 	if (task.idleTime > 0 && task.ttl > 0 && task.idleTime > task.ttl * 0.8) {
 		return <StatusPill label="idle (ttl)" variant="warning" />;
 	}
-	return <StatusPill label="running" variant="success" pulse />;
+	return <StatusPill label="running" variant="success" />;
 }
 
 // =============================================================================
-// Component
+// COMPONENT
 // =============================================================================
 
-export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
+export const OverviewTab: React.FC<{ data: DashboardResponse }> = ({ data }) => {
 	const { overview, connections, tasks } = data;
 	const runningTasks = tasks.filter((t) => !t.completed);
 	const completedTasks = tasks.filter((t) => t.completed);
 	const agg = aggregateMetrics(tasks);
 
 	return (
-		<div className="sm-overview">
+		<div>
 			{/* Primary stats */}
-			<div className="sm-stats-row">
-				<StatCard label="Active Connections" value={overview.totalConnections} colorClass="sm-color-success" accentClass="sm-accent-green" subtitle={`${connections.length} active`} />
-				<StatCard label="Active Tasks" value={overview.activeTasks} colorClass="sm-color-accent" accentClass="sm-accent-blue" />
-				<StatCard label="Uptime" value={formatUptime(overview.serverUptime)} colorClass="sm-color-info" accentClass="sm-accent-cyan" />
+			<div style={styles.statsRow}>
+				<StatCard label="Active Connections" value={overview.totalConnections} colorClass="success" accentClass="green" subtitle={`${connections.length} active`} />
+				<StatCard label="Active Tasks" value={overview.activeTasks} colorClass="accent" accentClass="blue" />
+				<StatCard label="Uptime" value={formatUptime(overview.serverUptime)} colorClass="info" accentClass="cyan" />
 			</div>
 
-			{/* Aggregated resource metrics (only shown when tasks are running) */}
+			{/* Aggregated resource metrics */}
 			{runningTasks.length > 0 && (
-				<div className="sm-stats-row">
-					<StatCard label="Total CPU" value={`${agg.totalCpu.toFixed(1)}%`} accentClass="sm-accent-blue" subtitle={`across ${runningTasks.length} task${runningTasks.length > 1 ? 's' : ''}`} />
-					<StatCard label="Total Memory" value={`${agg.totalMem.toFixed(0)} MB`} accentClass="sm-accent-orange" />
-					{agg.totalGpu > 0 && <StatCard label="GPU Memory" value={`${agg.totalGpu.toFixed(0)} MB`} accentClass="sm-accent-cyan" />}
-					<StatCard label="Completions" value={formatNumber(agg.totalCompletions)} accentClass="sm-accent-green" />
+				<div style={styles.statsRow}>
+					<StatCard label="Total CPU" value={`${agg.totalCpu.toFixed(1)}%`} accentClass="blue" subtitle={`across ${runningTasks.length} task${runningTasks.length > 1 ? 's' : ''}`} />
+					<StatCard label="Total Memory" value={`${agg.totalMem.toFixed(0)} MB`} accentClass="orange" />
+					{agg.totalGpu > 0 && <StatCard label="GPU Memory" value={`${agg.totalGpu.toFixed(0)} MB`} accentClass="cyan" />}
+					<StatCard label="Completions" value={formatNumber(agg.totalCompletions)} accentClass="green" />
 				</div>
 			)}
 
-			<div className="sm-grid-2col">
-				{/* Connections table with message counts */}
-				<div className="sm-card">
-					<div className="sm-card-header">
+			<div style={styles.grid2col}>
+				{/* Connections table */}
+				<div style={commonStyles.card}>
+					<div style={commonStyles.cardHeader}>
 						<span>Connections</span>
-						<span className="sm-text-muted">{connections.length} active</span>
+						<span style={commonStyles.textMuted}>{connections.length} active</span>
 					</div>
-					<table className="sm-table">
+					<table style={styles.table}>
 						<thead>
 							<tr>
-								<th>ID</th>
-								<th>Account</th>
-								<th>Connected</th>
-								<th>Messages</th>
-								<th>Tasks</th>
+								<th style={commonStyles.tableHeader}>ID</th>
+								<th style={commonStyles.tableHeader}>Account</th>
+								<th style={commonStyles.tableHeader}>Connected</th>
+								<th style={commonStyles.tableHeader}>Messages</th>
+								<th style={commonStyles.tableHeader}>Tasks</th>
 							</tr>
 						</thead>
 						<tbody>
 							{connections.map((conn) => (
 								<tr key={conn.id}>
-									<td className="sm-mono">#{conn.id}</td>
-									<td>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</td>
-									<td className="sm-text-muted">{formatTimeAgo(conn.connectedAt)}</td>
-									<td>
-										<span className="sm-msg-badge">
-											<span className="sm-msg-in">&#9660;</span> {formatNumber(conn.messagesIn)}
+									<td style={{ ...commonStyles.tableCell, ...styles.mono }}>#{conn.id}</td>
+									<td style={commonStyles.tableCell}>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</td>
+									<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>{formatTimeAgo(conn.connectedAt)}</td>
+									<td style={commonStyles.tableCell}>
+										<span style={styles.msgBadge}>
+											<span style={styles.msgIn}>&#9660;</span> {formatNumber(conn.messagesIn)}
 										</span>
-										<span className="sm-msg-badge">
-											<span className="sm-msg-out">&#9650;</span> {formatNumber(conn.messagesOut)}
+										<span style={styles.msgBadge}>
+											<span style={styles.msgOut}>&#9650;</span> {formatNumber(conn.messagesOut)}
 										</span>
 									</td>
-									<td className="sm-mono">{conn.attachedTasks.length}</td>
+									<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{conn.attachedTasks.length}</td>
 								</tr>
 							))}
 							{connections.length === 0 && (
 								<tr>
-									<td colSpan={5} className="sm-text-muted sm-text-center">
+									<td colSpan={5} style={{ ...commonStyles.tableCell, ...commonStyles.empty }}>
 										No connections
 									</td>
 								</tr>
@@ -126,20 +189,20 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 					</table>
 				</div>
 
-				{/* Tasks table with inline metrics */}
-				<div className="sm-card">
-					<div className="sm-card-header">
+				{/* Tasks table */}
+				<div style={commonStyles.card}>
+					<div style={commonStyles.cardHeader}>
 						<span>Tasks</span>
-						<span className="sm-text-muted">{runningTasks.length} running</span>
+						<span style={commonStyles.textMuted}>{runningTasks.length} running</span>
 					</div>
-					<table className="sm-table">
+					<table style={styles.table}>
 						<thead>
 							<tr>
-								<th>Task</th>
-								<th>Elapsed</th>
-								<th>CPU</th>
-								<th>MEM</th>
-								<th>Status</th>
+								<th style={commonStyles.tableHeader}>Task</th>
+								<th style={commonStyles.tableHeader}>Elapsed</th>
+								<th style={commonStyles.tableHeader}>CPU</th>
+								<th style={commonStyles.tableHeader}>MEM</th>
+								<th style={commonStyles.tableHeader}>Status</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -149,42 +212,42 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 								const mem = m?.cpu_memory_mb ?? 0;
 								return (
 									<tr key={task.id}>
-										<td>
-											<div className="sm-task-name">{task.name || task.id}</div>
-											<div className="sm-task-secondary">
+										<td style={commonStyles.tableCell}>
+											<div style={styles.taskName}>{task.name || task.id}</div>
+											<div style={styles.taskSecondary}>
 												{task.provider} &middot; {task.projectId?.slice(0, 8)}
 											</div>
 										</td>
-										<td className="sm-mono">{formatUptime(task.elapsedTime)}</td>
-										<td>
-											<div className="sm-mini-bar">
-												<div className="sm-mini-bar-label">
+										<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{formatUptime(task.elapsedTime)}</td>
+										<td style={commonStyles.tableCell}>
+											<div style={styles.miniBar}>
+												<div style={styles.miniBarLabel}>
 													<span></span>
 													<span>{cpu.toFixed(0)}%</span>
 												</div>
-												<div className="sm-mini-bar-track">
-													<div className="sm-mini-bar-fill sm-mini-bar-cpu" style={{ width: `${Math.min(cpu, 100)}%` }} />
+												<div style={styles.miniBarTrack}>
+													<div style={{ ...styles.miniBarFillCpu, width: `${Math.min(cpu, 100)}%` }} />
 												</div>
 											</div>
 										</td>
-										<td>
-											<div className="sm-mini-bar">
-												<div className="sm-mini-bar-label">
+										<td style={commonStyles.tableCell}>
+											<div style={styles.miniBar}>
+												<div style={styles.miniBarLabel}>
 													<span></span>
 													<span>{mem.toFixed(0)}M</span>
 												</div>
-												<div className="sm-mini-bar-track">
-													<div className="sm-mini-bar-fill sm-mini-bar-mem" style={{ width: `${Math.min((mem / 2048) * 100, 100)}%` }} />
+												<div style={styles.miniBarTrack}>
+													<div style={{ ...styles.miniBarFillMem, width: `${Math.min((mem / 2048) * 100, 100)}%` }} />
 												</div>
 											</div>
 										</td>
-										<td>{getTaskStatePill(task)}</td>
+										<td style={commonStyles.tableCell}>{getTaskStatePill(task)}</td>
 									</tr>
 								);
 							})}
 							{runningTasks.length === 0 && (
 								<tr>
-									<td colSpan={5} className="sm-text-muted sm-text-center">
+									<td colSpan={5} style={{ ...commonStyles.tableCell, ...commonStyles.empty }}>
 										No running tasks
 									</td>
 								</tr>
@@ -196,34 +259,34 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 
 			{/* Recently completed */}
 			{completedTasks.length > 0 && (
-				<div className="sm-card" style={{ marginTop: 16 }}>
-					<div className="sm-card-header">
+				<div style={{ ...commonStyles.card, marginTop: 16 }}>
+					<div style={commonStyles.cardHeader}>
 						<span>Recently Completed</span>
-						<span className="sm-text-muted">{completedTasks.length}</span>
+						<span style={commonStyles.textMuted}>{completedTasks.length}</span>
 					</div>
-					<table className="sm-table">
+					<table style={styles.table}>
 						<thead>
 							<tr>
-								<th>Task</th>
-								<th>Source</th>
-								<th>Duration</th>
-								<th>Exit</th>
-								<th>Ended</th>
+								<th style={commonStyles.tableHeader}>Task</th>
+								<th style={commonStyles.tableHeader}>Source</th>
+								<th style={commonStyles.tableHeader}>Duration</th>
+								<th style={commonStyles.tableHeader}>Exit</th>
+								<th style={commonStyles.tableHeader}>Ended</th>
 							</tr>
 						</thead>
 						<tbody>
 							{completedTasks.slice(0, 5).map((task) => (
 								<tr key={task.id}>
-									<td>
-										<div className="sm-task-name">{task.name || task.id}</div>
-										<div className="sm-task-secondary">
+									<td style={commonStyles.tableCell}>
+										<div style={styles.taskName}>{task.name || task.id}</div>
+										<div style={styles.taskSecondary}>
 											{task.provider} &middot; {task.projectId?.slice(0, 8)}
 										</div>
 									</td>
-									<td>{task.source}</td>
-									<td className="sm-mono">{formatUptime(task.elapsedTime)}</td>
-									<td>{task.exitCode === 0 ? <StatusPill label="0" variant="success" /> : <StatusPill label={String(task.exitCode ?? '?')} variant="error" />}</td>
-									<td className="sm-text-muted">{task.endTime ? formatTimeAgo(task.endTime) : '-'}</td>
+									<td style={commonStyles.tableCell}>{task.source}</td>
+									<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{formatUptime(task.elapsedTime)}</td>
+									<td style={commonStyles.tableCell}>{task.exitCode === 0 ? <StatusPill label="0" variant="success" /> : <StatusPill label={String(task.exitCode ?? '?')} variant="error" />}</td>
+									<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>{task.endTime ? formatTimeAgo(task.endTime) : '-'}</td>
 								</tr>
 							))}
 						</tbody>

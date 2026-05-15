@@ -492,7 +492,14 @@ class DAPBase:
             # Build the error
             return error(msg, file=file, lineno=lineno)
 
-    def build_request(self, command: str, *, token: str = None, arguments: Optional[Dict[str, Any]] = None, data: Union[bytes, str] = None) -> Dict[str, Any]:
+    def build_request(
+        self,
+        command: str,
+        *,
+        token: str = None,
+        arguments: Optional[Dict[str, Any]] = None,
+        data: Union[bytes, str] = None,
+    ) -> Dict[str, Any]:
         """
         Build a DAP request message following the protocol specification.
 
@@ -532,9 +539,11 @@ class DAPBase:
             'command': command,  # The DAP command to execute
         }
 
-        # Include token for task correlation
+        # Include token for task correlation (inside arguments)
         if token is not None:
-            request['token'] = token
+            if arguments is None:
+                arguments = {}
+            arguments['token'] = token
 
         # Include command arguments if provided
         if arguments is not None:

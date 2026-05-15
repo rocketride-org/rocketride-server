@@ -106,7 +106,18 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
    - Testing performed
    - Breaking changes (if any)
 
-5. Wait for code review and address feedback
+5. **Ensure all CI checks pass** before requesting a review. If you see unexpected failures (compilation errors, test failures unrelated to your changes), your branch is likely out of date with `develop`. Rebase before pushing:
+
+   ```bash
+   git fetch origin
+   git rebase origin/develop
+   ```
+
+   PRs with failing checks will not be reviewed until the checks are green.
+
+   If compilation still fails after rebasing and there is no open issue tracking it, and the code compiles cleanly on your machine — you've found a bug in CI or the build itself. Please open an issue and feel free to follow up with a PR to fix it.
+
+6. Wait for code review and address feedback
 
 ## Code Style Guidelines
 

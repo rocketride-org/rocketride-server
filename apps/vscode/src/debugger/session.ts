@@ -35,12 +35,10 @@ import { RocketRideClient, DAPMessage, ConnectionException } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConfigManager } from '../config';
+import { ConnectionManager } from '../connection/connection';
 import { GenericEvent, GenericResponse, GenericRequest } from '../shared/types/protocol';
 
-import {
-	LaunchRequest,
-	AttachRequest
-} from '../shared/types/protocol';
+import { LaunchRequest, AttachRequest } from '../shared/types/protocol';
 
 /**
  * Debug Adapter with individual RocketRideClient connection
@@ -80,11 +78,12 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 
 	private async initializeConnection(): Promise<void> {
 		const rocketrideConfig = this.configManager.getConfig();
-		const uri = this.configManager.getHttpUrl();
+		// Use the dev connection manager's URL (accounts for local port override)
+		const uri = ConnectionManager.getInstance().getHttpUrl();
 
 		let apiKey: string | undefined;
-		if (rocketrideConfig.connectionMode === 'cloud' || rocketrideConfig.connectionMode === 'onprem') {
-			apiKey = rocketrideConfig.apiKey;
+		if (rocketrideConfig.development.connectionMode === 'cloud' || rocketrideConfig.development.connectionMode === 'onprem') {
+			apiKey = rocketrideConfig.development.apiKey;
 		} else {
 			apiKey = 'MYAPIKEY';
 		}
@@ -101,7 +100,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 				this.emitEvent({
 					type: 'event',
 					event: 'terminated',
-					body: {}
+					body: {},
 				});
 			},
 			onConnectError: async (error: ConnectionException) => {
@@ -119,7 +118,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 				this.emitEvent({
 					type: 'event',
 					event: 'terminated',
-					body: {}
+					body: {},
 				});
 			},
 		});
@@ -128,14 +127,14 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 	private emitResponse(message: GenericResponse): void {
 		this.messageEmitter.fire({
 			...message,
-			seq: this.getNextSeq()
+			seq: this.getNextSeq(),
 		});
 	}
 
 	private emitEvent(message: GenericEvent): void {
 		this.messageEmitter.fire({
 			...message,
-			seq: this.getNextSeq()
+			seq: this.getNextSeq(),
 		});
 	}
 
@@ -157,7 +156,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 
 			await this.client.connect();
 
-			this.apiHost = this.configManager.getHttpUrl();
+			this.apiHost = ConnectionManager.getInstance().getHttpUrl();
 
 			if (type === 'launch') {
 				const [uri, content] = await this.loadPipeline(session);
@@ -259,8 +258,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		try {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
-				message.arguments.args = this.configManager.getEffectiveEngineArgs();
-
+				message.arguments.args = this.configManager.getEngineArgs('development');
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;
 			}
@@ -268,32 +266,31 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			// Include token in the request
 			message.token = this.token;
 
-			const response = await this.client.dapRequest(
-				message.command,
-				message.arguments,
-				message.token
-			);
+			const body = await this.client.call(message.command, message.arguments, { token: message.token });
 
-			// Cast DAPMessage to GenericResponse
-			const genericResponse = response as unknown as GenericResponse;
-
-			if (this.isLaunchRequest(message) && genericResponse.body?.token) {
-				this.token = genericResponse.body.token as string;
+			if (this.isLaunchRequest(message) && body?.token) {
+				this.token = body.token as string;
 			}
 
-			if (this.isAttachRequest(message) && genericResponse.body?.pipeline) {
-				this.pipeline = genericResponse.body.pipeline as Record<string, unknown>;
+			if (this.isAttachRequest(message) && body?.pipeline) {
+				this.pipeline = body.pipeline as Record<string, unknown>;
 			}
 
-			this.emitResponse(genericResponse);
-
+			// Build a synthetic GenericResponse for the emitter
+			this.emitResponse({
+				type: 'response',
+				request_seq: message.seq,
+				command: message.command,
+				success: true,
+				body,
+			} as unknown as GenericResponse);
 		} catch (error) {
 			this.emitResponse({
 				type: 'response',
 				request_seq: message.seq,
 				command: message.command,
 				success: false,
-				message: error instanceof Error ? error.message : String(error)
+				message: error instanceof Error ? error.message : String(error),
 			});
 		}
 	}

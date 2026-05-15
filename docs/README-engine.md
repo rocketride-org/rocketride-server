@@ -20,13 +20,13 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 
 ### Build Options (CMake)
 
-| Option | Default | Description |
-|---|---|---|
-| `BUILD_TESTS` | `ON` | Build test suites |
-| `BUILD_DOCS` | `OFF` | Generate documentation |
-| `ENABLE_PYTHON` | `ON` | Enable Python integration |
-| `SHOW_BUILD_TIME` | `ON` | Show build time measurement |
-| `ROCKETRIDE_UNITY_BATCH_SIZE` | - | Unity build batch size |
+| Option                        | Default | Description                 |
+| ----------------------------- | ------- | --------------------------- |
+| `BUILD_TESTS`                 | `ON`    | Build test suites           |
+| `BUILD_DOCS`                  | `OFF`   | Generate documentation      |
+| `ENABLE_PYTHON`               | `ON`    | Enable Python integration   |
+| `SHOW_BUILD_TIME`             | `ON`    | Show build time measurement |
+| `ROCKETRIDE_UNITY_BATCH_SIZE` | -       | Unity build batch size      |
 
 ---
 
@@ -58,61 +58,61 @@ Reads JSON task configuration from stdin for interactive or debugger-driven exec
 
 ### Core Control
 
-| Option | Description |
-|---|---|
-| `--stream` | Read streaming task configuration from stdin |
-| `--autoterm` | Auto-terminate engine when stdin closes |
-| `--verify` | Verification mode (CI/CD support) |
-| `--args` | Output command-line arguments for debugging |
-| `--break` | Debug break on start |
-| `--diag` | Enable diagnostic mode |
-| `--testArgs` | Enable test argument mode |
+| Option       | Description                                  |
+| ------------ | -------------------------------------------- |
+| `--stream`   | Read streaming task configuration from stdin |
+| `--autoterm` | Auto-terminate engine when stdin closes      |
+| `--verify`   | Verification mode (CI/CD support)            |
+| `--args`     | Output command-line arguments for debugging  |
+| `--break`    | Debug break on start                         |
+| `--diag`     | Enable diagnostic mode                       |
+| `--testArgs` | Enable test argument mode                    |
 
 ### Path Configuration
 
-| Option | Description |
-|---|---|
-| `--paths.base PATH` | Base directory for all paths (sets data, control, cache, logs) |
-| `--paths.data PATH` | Data directory (storage for processed data) |
-| `--paths.control PATH` | Control directory (task coordination files) |
-| `--paths.cache PATH` | Cache directory (temporary processing data) |
-| `--paths.log PATH` | Log directory (engine and task logs) |
+| Option                 | Description                                                    |
+| ---------------------- | -------------------------------------------------------------- |
+| `--paths.base PATH`    | Base directory for all paths (sets data, control, cache, logs) |
+| `--paths.data PATH`    | Data directory (storage for processed data)                    |
+| `--paths.control PATH` | Control directory (task coordination files)                    |
+| `--paths.cache PATH`   | Cache directory (temporary processing data)                    |
+| `--paths.log PATH`     | Log directory (engine and task logs)                           |
 
 Path resolution supports `~` for the user home directory on both Unix and Windows.
 
 ### Engine Options
 
-| Option | Description |
-|---|---|
-| `--monitor TYPE` | Monitor type: `Console`, `App`, or `TestConsole` |
-| `--pipeline CONFIG` | Pipeline configuration override |
-| `--nodeId ID` | Set engine node identifier |
-| `--java` | Enable Java/Tika support |
-| `--python` | Enable Python integration |
-| `--tika` | External Tika service support |
-| `--serviceCategory CAT` | Service category filter |
-| `--serviceName NAME` | Service name filter |
-| `--url.keystorenet URL` | Remote keystore URL |
+| Option                  | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `--monitor TYPE`        | Monitor type: `Console`, `App`, or `TestConsole` |
+| `--pipeline CONFIG`     | Pipeline configuration override                  |
+| `--nodeId ID`           | Set engine node identifier                       |
+| `--java`                | Enable Java/Tika support                         |
+| `--python`              | Enable Python integration                        |
+| `--tika`                | External Tika service support                    |
+| `--serviceCategory CAT` | Service category filter                          |
+| `--serviceName NAME`    | Service name filter                              |
+| `--url.keystorenet URL` | Remote keystore URL                              |
 
 ### Logging Options
 
-| Option | Description |
-|---|---|
-| `--trace LEVELS` | Enable trace logging (e.g. `Job`, `Service`, `All`) |
-| `--log.file PATH` | Log to file instead of stdout |
-| `--log.dateTimeFormat` | Include datetime in log output |
-| `--log.includeDateTime` | Include date/time in log lines |
-| `--log.includeThreadId` | Include thread ID in log lines |
-| `--log.includeThreadName` | Include thread name in log lines |
-| `--log.includeFile` | Include source file info in log lines |
-| `--log.includeFunction` | Include function name in log lines |
-| `--log.includeMemory` | Include memory usage metrics |
-| `--log.includeDiskLoad` | Include disk load metrics |
-| `--log.isAtty` | Terminal output formatting |
-| `--log.forceDecoration` | Force decorated output |
-| `--log.disableAllColors` | Disable colored output |
-| `--log.truncate` | Truncate log files on start |
-| `--icu.text` | ICU text processing configuration |
+| Option                    | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `--trace LEVELS`          | Enable trace logging (e.g. `Job`, `Service`, `All`) |
+| `--log.file PATH`         | Log to file instead of stdout                       |
+| `--log.dateTimeFormat`    | Include datetime in log output                      |
+| `--log.includeDateTime`   | Include date/time in log lines                      |
+| `--log.includeThreadId`   | Include thread ID in log lines                      |
+| `--log.includeThreadName` | Include thread name in log lines                    |
+| `--log.includeFile`       | Include source file info in log lines               |
+| `--log.includeFunction`   | Include function name in log lines                  |
+| `--log.includeMemory`     | Include memory usage metrics                        |
+| `--log.includeDiskLoad`   | Include disk load metrics                           |
+| `--log.isAtty`            | Terminal output formatting                          |
+| `--log.forceDecoration`   | Force decorated output                              |
+| `--log.disableAllColors`  | Disable colored output                              |
+| `--log.truncate`          | Truncate log files on start                         |
+| `--icu.text`              | ICU text processing configuration                   |
 
 ---
 
@@ -122,45 +122,45 @@ The engine uses a factory-based task system. Tasks are defined in JSON and dispa
 
 ### Data Processing
 
-| Task | Description |
-|---|---|
-| `ClassifyFiles` | ML-based file classification |
-| `Transform` | Data transformation pipelines |
-| `Tokenize` | Text tokenization |
-| `SearchBatch` | Batch search operations |
-| `CommitScan` | Finalize scan operations |
-| `ScanCatalog` | Catalog-based scanning |
-| `ScanConsole` | Interactive console scanning |
+| Task            | Description                   |
+| --------------- | ----------------------------- |
+| `ClassifyFiles` | ML-based file classification  |
+| `Transform`     | Data transformation pipelines |
+| `Tokenize`      | Text tokenization             |
+| `SearchBatch`   | Batch search operations       |
+| `CommitScan`    | Finalize scan operations      |
+| `ScanCatalog`   | Catalog-based scanning        |
+| `ScanConsole`   | Interactive console scanning  |
 
 ### Pipeline Actions
 
-| Task | Description |
-|---|---|
-| `Copy` | Data copying operations |
-| `Export` | Data export to external formats |
-| `Remove` | Data deletion |
-| `Verify` | Integrity verification |
-| `Stat` | File statistics |
-| `Classify` | Content classification |
-| `Permissions` | ACL management |
-| `UpdateObjects` | Metadata updates |
+| Task            | Description                     |
+| --------------- | ------------------------------- |
+| `Copy`          | Data copying operations         |
+| `Export`        | Data export to external formats |
+| `Remove`        | Data deletion                   |
+| `Verify`        | Integrity verification          |
+| `Stat`          | File statistics                 |
+| `Classify`      | Content classification          |
+| `Permissions`   | ACL management                  |
+| `UpdateObjects` | Metadata updates                |
 
 ### Service Management
 
-| Task | Description |
-|---|---|
-| `ConfigureService` | Configure data sources/endpoints |
-| `Services` | Service enumeration and control |
-| `Exec` | Execute external commands/scripts |
+| Task               | Description                       |
+| ------------------ | --------------------------------- |
+| `ConfigureService` | Configure data sources/endpoints  |
+| `Services`         | Service enumeration and control   |
+| `Exec`             | Execute external commands/scripts |
 
 ### Utilities
 
-| Task | Description |
-|---|---|
-| `Sysinfo` | System information gathering |
-| `GenerateKey` | Cryptographic key generation |
-| `ValidateRegex` | Regex pattern validation |
-| `MonitorTest` | Monitor health testing |
+| Task            | Description                  |
+| --------------- | ---------------------------- |
+| `Sysinfo`       | System information gathering |
+| `GenerateKey`   | Cryptographic key generation |
+| `ValidateRegex` | Regex pattern validation     |
+| `MonitorTest`   | Monitor health testing       |
 
 ---
 
@@ -172,10 +172,10 @@ The engine loads a `user.json` from the current working directory or the executa
 
 ```json
 {
-  "variables": {
-    "key1": "value1",
-    "key2": "value2"
-  }
+	"variables": {
+		"key1": "value1",
+		"key2": "value2"
+	}
 }
 ```
 
@@ -183,13 +183,13 @@ Variables defined here can be referenced in task configurations using `%key1%` s
 
 ### Built-in Variables
 
-| Variable | Description |
-|---|---|
-| `%testdata%` | Test data directory |
-| `%execPath%` | Engine executable path |
-| `%cwd%` | Current working directory |
-| `%NodeId%` | Node identifier |
-| `%plat%` | Platform identifier |
+| Variable     | Description               |
+| ------------ | ------------------------- |
+| `%testdata%` | Test data directory       |
+| `%execPath%` | Engine executable path    |
+| `%cwd%`      | Current working directory |
+| `%NodeId%`   | Node identifier           |
+| `%plat%`     | Platform identifier       |
 
 ### Configuration Precedence
 
@@ -215,11 +215,11 @@ The engine supports multiple data source endpoints through its store/pipeline sy
 
 ## Monitor Types
 
-| Type | Description |
-|---|---|
-| `Console` | Human-readable output (default) |
-| `App` | Machine-parseable JSON telemetry output |
-| `TestConsole` | Test harness output |
+| Type          | Description                             |
+| ------------- | --------------------------------------- |
+| `Console`     | Human-readable output (default)         |
+| `App`         | Machine-parseable JSON telemetry output |
+| `TestConsole` | Test harness output                     |
 
 Set with `--monitor TYPE`.
 
@@ -271,6 +271,35 @@ When extending the engine with Python (custom nodes, filter callbacks), Pydantic
 - **Python 3.10** -- optional, for Python integration
 - **Java** -- optional, for Tika document processing
 - **vcpkg packages** -- replxx, tinyxml2, breakpad, etc.
+
+### Tika Media Parsing — External Tool Requirements
+
+Tika's `CompositeExternalParser` (auto-registered via `tika-parsers-standard-package`) shells out to external command-line tools for media metadata extraction. These tools must be installed and available on `PATH`:
+
+| Tool         | Handles                                                   | Required for      |
+| ------------ | --------------------------------------------------------- | ----------------- |
+| **ffmpeg**   | `video/avi`, `video/mpeg`, `video/x-msvideo`              | AVI/MPEG metadata |
+| **exiftool** | `video/mp4`, `video/avi`, `video/mpeg`, `video/x-msvideo` | MP4 metadata      |
+| **sox**      | `audio/*` (mp3, wav, ogg, and others)                     | Audio metadata    |
+
+**If these tools are absent, `CompositeExternalParser` throws a `TikaException` that aborts the entire file extraction — including the media stream delivery to Python nodes.** No warning is shown in the engine UI; the exception is caught and silently logged by the Java layer.
+
+When a required tool is missing, the OS fails to start the process, producing an `IOException` which Tika wraps into a `TikaException`. Note that `ExternalParser.check()` is a static utility method and is **not** automatically invoked during parsing — the failure surfaces at process-launch time, not during a pre-flight check.
+
+**To disable external parsers** (when the tools are not installed), add the following to `tika-config.xml`:
+
+```xml
+<properties>
+  <parsers>
+    <parser class="org.apache.tika.parser.DefaultParser">
+      <parser-exclude class="org.apache.tika.parser.external.ExternalParser"/>
+      <parser-exclude class="org.apache.tika.parser.external.CompositeExternalParser"/>
+    </parser>
+  </parsers>
+</properties>
+```
+
+This causes Tika to fall back to its built-in Java parsers (e.g. `Mp4Parser`) which handle media streams without any external tools.
 
 ---
 

@@ -55,8 +55,8 @@ Usage:
 
 import asyncio
 import json
-import re
 import copy
+import os
 from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
@@ -90,56 +90,6 @@ class ExecutionMixin(DAPClient):
         """Initialize pipeline execution capabilities."""
         super().__init__(**kwargs)
 
-    def _substitute_env_vars(self, value: str) -> str:
-        """
-        Substitute environment variables in a string.
-
-        Replaces ${ROCKETRIDE_*} patterns with values from client's env dictionary.
-        If variable is not found, leaves it unchanged.
-
-        Args:
-            value: String that may contain ${ROCKETRIDE_*} patterns
-
-        Returns:
-            String with variables replaced (or unchanged if not found)
-        """
-
-        def replacer(match):
-            var_name = match.group(1)
-            # Check if variable exists in client's env
-            if hasattr(self, '_env') and var_name in self._env:
-                return str(self._env[var_name])
-            # If not found, leave as is
-            return match.group(0)
-
-        # Match ${ROCKETRIDE_*} patterns
-        return re.sub(r'\$\{(ROCKETRIDE_[^}]+)\}', replacer, value)
-
-    def _process_env_substitution(self, obj: Any) -> Any:
-        """
-        Recursively process an object/list to substitute environment variables.
-
-        Only processes string values, leaving other types unchanged.
-
-        Args:
-            obj: Object to process (can be dict, list, str, or any other type)
-
-        Returns:
-            Processed object with environment variables substituted
-        """
-        if isinstance(obj, str):
-            # If it's a string, perform substitution
-            return self._substitute_env_vars(obj)
-        elif isinstance(obj, list):
-            # If it's a list, process each element
-            return [self._process_env_substitution(item) for item in obj]
-        elif isinstance(obj, dict):
-            # If it's a dict, process each value
-            return {key: self._process_env_substitution(value) for key, value in obj.items()}
-        else:
-            # For other types (int, float, bool, None), return as is
-            return obj
-
     async def use(
         self,
         *,
@@ -152,6 +102,9 @@ class ExecutionMixin(DAPClient):
         args: List[str] = None,
         ttl: int = None,
         pipelineTraceLevel: str = None,
+        name: str = None,
+        env: Dict[str, str] = None,
+        team_id: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -268,7 +221,9 @@ class ExecutionMixin(DAPClient):
                     loop = asyncio.get_running_loop()
                     pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
             except FileNotFoundError as err:
-                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
+                raise FileNotFoundError(
+                    f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration."
+                ) from err
         else:
             # Keep behavior consistent with filepath-based loading
             pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
@@ -276,17 +231,14 @@ class ExecutionMixin(DAPClient):
         # Create a deep copy to avoid modifying the original
         processed_config = copy.deepcopy(pipeline_config)
 
-        # Perform environment variable substitution
-        processed_config = self._process_env_substitution(processed_config)
-
-        # Override source if specified (after substitution)
+        # Override source if specified
         if source is not None:
             processed_config['source'] = source
 
         # Build execution request with all parameters
         arguments = {
-            'pipeline': processed_config,  # Use processed config with variables substituted
-            'args': args or [],  # Default to empty args list
+            'pipeline': processed_config,
+            'args': args or [],
         }
 
         # Add TTL if provided (server uses its default if not specified)
@@ -302,19 +254,35 @@ class ExecutionMixin(DAPClient):
             arguments['useExisting'] = use_existing
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
+        # Build ROCKETRIDE_* env from client's .env + caller overrides
+        rocket_env: Dict[str, str] = {}
+        if hasattr(self, '_env'):
+            for k, v in self._env.items():
+                if k.startswith('ROCKETRIDE_'):
+                    rocket_env[k] = v
+        if env:
+            rocket_env.update(env)
+        if rocket_env:
+            arguments['env'] = rocket_env
+
+        # Derive display name from filepath if not explicitly provided
+        effective_name = name
+        if effective_name is None and filepath:
+            base = os.path.basename(filepath)
+            for ext in ('.pipe.json', '.pipe'):
+                if base.endswith(ext):
+                    base = base[: -len(ext)]
+                    break
+            effective_name = base
+        if effective_name is not None:
+            arguments['name'] = effective_name
+        if team_id is not None:
+            arguments['teamId'] = team_id
 
         # Send execution request to server
-        request = self.build_request(command='execute', arguments=arguments)
-        response = await self.request(request)
-
-        # Check for execution errors
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Unknown execution error')
-            self.debug_message(f'Pipeline execution failed: {error_msg}')
-            raise RuntimeError(error_msg)
+        response_body = await self.call('execute', **arguments)
 
         # Extract and validate response
-        response_body = response.get('body', {})
         task_token = response_body.get('token', '')
 
         if not task_token:
@@ -360,14 +328,45 @@ class ExecutionMixin(DAPClient):
             - Termination is final - pipelines cannot be restarted
         """
         # Send termination request
-        request = self.build_request(command='terminate', token=token)
-        response = await self.request(request)
+        await self.call('terminate', token=token)
 
-        # Check for termination errors
+    async def restart(
+        self,
+        *,
+        project_id: str,
+        source: str,
+        pipeline: PipelineConfig,
+        token: Optional[str] = None,
+    ) -> None:
+        """
+        Restart a running pipeline with a new configuration.
+
+        Looks up the existing task by project/source, terminates it, and starts
+        a new execution in one server round-trip.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+            pipeline: The pipeline configuration to restart with.
+            token: Existing task token (optional; resolved server-side if omitted).
+
+        Raises:
+            RuntimeError: If the restart fails.
+        """
+        # token='*' scopes the request; the task's own token goes in arguments
+        request = self.build_request(
+            command='restart',
+            token='*',
+            arguments={
+                'token': token,
+                'projectId': project_id,
+                'source': source,
+                'pipeline': pipeline,
+            },
+        )
+        response = await self.request(request)
         if self.did_fail(response):
-            error_msg = response.get('message', 'Unknown termination error')
-            self.debug_message(f'Pipeline termination failed: {error_msg}')
-            raise RuntimeError(error_msg)
+            raise RuntimeError(response.get('message', 'Restart failed'))
 
     async def get_task_status(self, token: str) -> TASK_STATUS:
         """
@@ -435,14 +434,24 @@ class ExecutionMixin(DAPClient):
             - Performance metrics help optimize pipeline configurations
         """
         # Send status request
-        request = self.build_request(command='rrext_get_task_status', token=token)
-        response = await self.request(request)
+        return await self.call('rrext_get_task_status', token=token)
 
-        # Check for status retrieval errors
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Unknown status retrieval error')
-            self.debug_message(f'Pipeline status retrieval failed: {error_msg}')
-            raise RuntimeError(error_msg)
+    async def get_task_token(self, project_id: str, source: str) -> str | None:
+        """
+        Resolve a running task's token from its project ID and source component.
 
-        # Return status information
-        return response.get('body', {})
+        The token is required for operations like terminate and restart.
+        Returns None if no task is currently running for the given project/source.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+
+        Returns:
+            The task token string, or None if no running task was found.
+        """
+        try:
+            body = await self.call('rrext_get_token', projectId=project_id, source=source)
+            return body.get('token')
+        except RuntimeError:
+            return None

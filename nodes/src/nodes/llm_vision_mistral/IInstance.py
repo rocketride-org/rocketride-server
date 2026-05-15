@@ -22,12 +22,13 @@
 # =============================================================================
 
 from .IGlobal import IGlobal
-from nodes.llm_base import IInstanceGenericLLM
+from ai.common.llm_base import LLMBase
+from ai.common.resilience import CircuitBreakerOpenError
 from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
 
 
-class IInstance(IInstanceGenericLLM):
+class IInstance(LLMBase):
     """Instance handler for the Mistral Vision AI node."""
 
     IGlobal: IGlobal
@@ -64,10 +65,12 @@ class IInstance(IInstanceGenericLLM):
             question.addQuestion(self.IGlobal._chat._prompt)
 
             # Call the LLM and get the answer
-            answer = self.IGlobal._chat.chat(question)
-
-            # Send the answer to the pipeline as text
-            self.instance.writeText(answer.getText())
+            try:
+                answer = self._question(question)
+                # Send the answer to the pipeline as text
+                self.instance.writeText(answer.getText())
+            except CircuitBreakerOpenError as e:
+                self._mark_current_object_retry(e)
 
             # Clear the image data
             self.image_data = None
@@ -101,7 +104,10 @@ class IInstance(IInstanceGenericLLM):
             question.addQuestion(self.IGlobal._chat._prompt)
 
             try:
-                answer = self.IGlobal._chat.chat(question)
+                answer = self._question(question)
+            except CircuitBreakerOpenError as e:
+                self._mark_current_object_retry(e)
+                break
             except Exception as e:
                 warning(f'Mistral Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
                 continue

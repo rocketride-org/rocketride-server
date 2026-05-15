@@ -1,0 +1,171 @@
+name: Experimental release
+run-name: Experimental release ${{ inputs.ref }} → -${{ inputs.tag_suffix }}
+
+# Workshop / experimental releases from non-develop branches.
+#
+# Use case: build the engine + client packages from a feature branch and
+# publish a GitHub Release (with binaries attached) under a custom tag
+# suffix so workshop attendees can `gh release download` from it.
+#
+# Distinct from nightly.yaml/release.yaml because:
+#   - nightly.yaml hard-codes the `-prerelease` suffix and its
+#     `cleanup-prereleases` step would wipe develop's current
+#     prerelease tags if run from another branch.
+#   - release.yaml has no suffix and auto-publishes to
+#     npm / PyPI / VS Code Marketplace, which we MUST NOT do for
+#     workshop builds.
+#
+# This workflow: tag + GitHub Release only. No registry publishing,
+# no prerelease cleanup, no side effects on develop's release pipeline.
+
+# Top-level least-privilege; the release job below escalates.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch / tag / sha to build from (e.g. exp/chicago-workshop)'
+        required: true
+        type: string
+      tag_suffix:
+        description: 'Suffix appended to the version tag (e.g. "experimental" → server-vX.Y.Z-experimental)'
+        required: true
+        type: string
+      products:
+        description: 'Comma-separated products to release: server, vscode, client-typescript, client-python, client-mcp'
+        required: false
+        type: string
+        default: 'server'
+
+jobs:
+  init:
+    name: Initialize
+    uses: ./.github/workflows/_init.yaml
+    with:
+      ref: ${{ inputs.ref }}
+
+  build:
+    name: Build
+    needs: init
+    uses: ./.github/workflows/_build.yaml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: ${{ inputs.ref }}
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
+      package: true
+    secrets: inherit
+
+  # Build a flat matrix from the comma-separated `products` input.
+  # Each row carries the per-product version (read from init outputs)
+  # and the artifact download pattern from _build.yaml's upload names.
+  resolve-matrix:
+    name: Resolve product matrix
+    needs: init
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.build.outputs.include }}
+    steps:
+      - id: build
+        env:
+          PRODUCTS: ${{ inputs.products }}
+          SERVER_VERSION: ${{ needs.init.outputs.server_version }}
+          VSCODE_VERSION: ${{ needs.init.outputs.vscode_version }}
+          CLIENT_MCP_VERSION: ${{ needs.init.outputs.client_mcp_version }}
+          CLIENT_PYTHON_VERSION: ${{ needs.init.outputs.client_python_version }}
+          CLIENT_TYPESCRIPT_VERSION: ${{ needs.init.outputs.client_typescript_version }}
+          TAG_SUFFIX: ${{ inputs.tag_suffix }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          PRODUCTS = [p.strip() for p in os.environ['PRODUCTS'].split(',') if p.strip()]
+          # type -> (display name, version env var, download pattern)
+          DEFS = {
+              'server':            ('Server',             'SERVER_VERSION',            'server-artifacts-*'),
+              'vscode':            ('VS Code Extension',  'VSCODE_VERSION',            'vscode-artifacts'),
+              'client-typescript': ('TypeScript Client',  'CLIENT_TYPESCRIPT_VERSION', 'typescript-client-artifacts'),
+              'client-python':     ('Python Client',      'CLIENT_PYTHON_VERSION',     'python-client-artifacts'),
+              'client-mcp':        ('MCP Client',         'CLIENT_MCP_VERSION',        'mcp-client-artifacts'),
+          }
+          suffix = os.environ['TAG_SUFFIX']
+          rows = []
+          for p in PRODUCTS:
+              if p not in DEFS:
+                  raise SystemExit(f"Unknown product: {p}. Allowed: {sorted(DEFS)}")
+              name, ver_key, pattern = DEFS[p]
+              ver = os.environ[ver_key]
+              rows.append({
+                  'type': p,
+                  'name': name,
+                  'version': ver,
+                  'tag_name': f"{p}-v{ver}-{suffix}",
+                  'download_pattern': pattern,
+              })
+          print(f"include={json.dumps(rows)}")
+          PY
+
+  release:
+    name: Release ${{ matrix.name }}
+    needs: [init, build, resolve-matrix]
+    runs-on: ubuntu-latest
+    # Tag push + GitHub Release creation need write to contents.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve-matrix.outputs.include) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ${{ matrix.download_pattern }}
+          merge-multiple: true
+          path: release-assets
+
+      - name: List artifacts
+        run: find release-assets -type f | sort
+
+      # Tag push goes through WORKFLOW_PAT for the same reason _release.yaml
+      # uses it: GITHUB_TOKEN is refused on tags whose target commits touch
+      # files under .github/workflows/. Force-push so re-running this
+      # workflow on the same branch + tag_suffix replaces cleanly.
+      - name: Create / replace tag
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          git tag -f "${{ matrix.tag_name }}"
+          git push -f origin "${{ matrix.tag_name }}"
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ matrix.tag_name }}
+          name: RocketRide ${{ matrix.name }} v${{ matrix.version }} (${{ inputs.tag_suffix }})
+          # Always mark experimental builds as prerelease so they don't take
+          # the "Latest" badge on the Releases page over real releases.
+          prerelease: true
+          body: |
+            Experimental build from `${{ inputs.ref }}` (commit `${{ github.sha }}`).
+            Suffix: `${{ inputs.tag_suffix }}`.
+
+            Not produced by the normal release pipeline — see workshop / experimental usage notes.
+          files: release-assets/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

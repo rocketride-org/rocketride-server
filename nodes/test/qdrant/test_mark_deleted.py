@@ -60,15 +60,7 @@ _mock_config_mod = MagicMock()
 _mock_schema_mod = MagicMock()
 
 for name, mock in {
-    'depends': MagicMock(),
-    'engLib': MagicMock(),
-    'rocketlib': MagicMock(),
     'numpy': MagicMock(),
-    'ai': MagicMock(),
-    'ai.common': MagicMock(),
-    'ai.common.schema': _mock_schema_mod,
-    'ai.common.store': _mock_store_mod,
-    'ai.common.config': _mock_config_mod,
     'qdrant_client': MagicMock(),
     'qdrant_client.models': MagicMock(),
     'qdrant_client.http': MagicMock(),
@@ -105,6 +97,7 @@ def _make_store() -> Store:
     store.modelName = 'test-model'
     store.threshold_search = 0.5
     store.collectionLock = threading.Lock()
+    store._checkCollectionExists = lambda: True
     return store
 
 
@@ -124,7 +117,9 @@ class TestQdrantMarkDeleted:
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'meta': {'isDeleted': True}}, f'Expected {{"meta": {{"isDeleted": true}}}} but got {kwargs["payload"]}'
+        assert kwargs['payload'] == {'meta': {'isDeleted': True}}, (
+            f'Expected {{"meta": {{"isDeleted": true}}}} but got {kwargs["payload"]}'
+        )
 
     def test_markActive_writes_meta_isDeleted_false(self):
         """MarkActive must set meta.isDeleted = False, not top-level isDeleted."""
@@ -134,7 +129,9 @@ class TestQdrantMarkDeleted:
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'meta': {'isDeleted': False}}, f'Expected {{"meta": {{"isDeleted": false}}}} but got {kwargs["payload"]}'
+        assert kwargs['payload'] == {'meta': {'isDeleted': False}}, (
+            f'Expected {{"meta": {{"isDeleted": false}}}} but got {kwargs["payload"]}'
+        )
 
     def test_markDeleted_skips_when_collection_missing(self):
         """MarkDeleted is a no-op when the collection does not exist."""

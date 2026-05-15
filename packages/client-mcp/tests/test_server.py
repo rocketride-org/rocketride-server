@@ -11,6 +11,7 @@ import rocketride_mcp.server as server_mod
 
 def test_format_result_text_basic() -> None:
     from rocketride_mcp.server import _format_result_text
+
     text = _format_result_text('ToolName', '/path/to/file', {})
     assert 'ToolName' in text
     assert '/path/to/file' in text
@@ -19,24 +20,28 @@ def test_format_result_text_basic() -> None:
 
 def test_format_result_text_with_text_list() -> None:
     from rocketride_mcp.server import _format_result_text
+
     text = _format_result_text('T', 'f', {'text': ['a', 'b']})
     assert 'a' in text and 'b' in text
 
 
 def test_format_result_text_with_text_str() -> None:
     from rocketride_mcp.server import _format_result_text
+
     text = _format_result_text('T', 'f', {'text': 'single'})
     assert 'single' in text
 
 
 def test_format_result_text_non_dict_result() -> None:
     from rocketride_mcp.server import _format_result_text
+
     text = _format_result_text('T', 'f', {'text': 123})
     assert 'Sent data to pipeline' in text
 
 
 async def test_dynamic_tools_raises_when_client_none() -> None:
     from rocketride_mcp.server import _dynamic_tools
+
     with patch.object(server_mod, '_client', None):
         with pytest.raises(RuntimeError, match='Client is not connected'):
             await _dynamic_tools()
@@ -44,6 +49,7 @@ async def test_dynamic_tools_raises_when_client_none() -> None:
 
 async def test_handle_call_raises_when_client_none() -> None:
     from rocketride_mcp.server import _handle_call
+
     with patch.object(server_mod, '_client', None):
         with pytest.raises(RuntimeError, match='Client is not connected'):
             await _handle_call('ToolName', {})
@@ -51,6 +57,7 @@ async def test_handle_call_raises_when_client_none() -> None:
 
 async def test_handle_call_success() -> None:
     from rocketride_mcp.server import _handle_call
+
     mock_client = MagicMock()
     with patch.object(server_mod, '_client', mock_client):
         with patch('rocketride_mcp.server.execute_tool', new_callable=AsyncMock) as run:
@@ -63,6 +70,7 @@ async def test_handle_call_success() -> None:
 
 async def test_handle_call_error_status() -> None:
     from rocketride_mcp.server import _handle_call
+
     mock_client = MagicMock()
     with patch.object(server_mod, '_client', mock_client):
         with patch('rocketride_mcp.server.execute_tool', new_callable=AsyncMock) as run:

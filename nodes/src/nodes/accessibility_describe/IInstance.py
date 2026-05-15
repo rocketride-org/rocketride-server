@@ -22,11 +22,12 @@
 # =============================================================================
 
 from .IGlobal import IGlobal
-from nodes.llm_base import IInstanceGenericLLM
+from ai.common.llm_base import LLMBase
+from ai.common.resilience import CircuitBreakerOpenError
 from rocketlib import AVI_ACTION
 
 
-class IInstance(IInstanceGenericLLM):
+class IInstance(LLMBase):
     """Instance handler for the Accessibility Scene Description node.
 
     Accepts image input and produces an accessibility-optimized text description
@@ -38,6 +39,7 @@ class IInstance(IInstanceGenericLLM):
     IGlobal: IGlobal
 
     def __init__(self):
+        """Initialize per-instance image buffer state."""
         super().__init__()
         self.image_data: bytearray | None = None
 
@@ -76,10 +78,12 @@ class IInstance(IInstanceGenericLLM):
                 question.addQuestion(self.IGlobal.chat.prompt)
 
                 # Call the vision model and get the accessibility description
-                answer = self.IGlobal.chat.chat(question)
+                answer = self._question(question)
 
                 # Emit the description as text output
                 self.instance.writeText(answer.getText())
+            except CircuitBreakerOpenError as e:
+                self._mark_current_object_retry(e)
             finally:
                 # Always clean up to prevent stale data on next invocation
                 self.image_data = None

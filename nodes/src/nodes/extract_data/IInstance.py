@@ -49,7 +49,9 @@ class IInstance(IInstanceBase):
         Returns:
             List[Doc]: A list of documents with extracted definitions.
         """
-        question: Question = Question(type=QuestionType.QUESTION, expectJson=True, role='You are a master at extracting data from text documents.')
+        question: Question = Question(
+            type=QuestionType.QUESTION, expectJson=True, role='You are a master at extracting data from text documents.'
+        )
 
         question.addInstruction(
             'Data Extraction',
@@ -117,7 +119,7 @@ class IInstance(IInstanceBase):
         # Add the documents text
         question.addDocuments(text)
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         self.writeAnswers(result)
 

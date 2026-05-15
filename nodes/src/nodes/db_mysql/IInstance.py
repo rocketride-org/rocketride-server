@@ -17,3 +17,6 @@ class IInstance(DatabaseInstanceBase):
 
     def _db_display_name(self) -> str:
         return 'MySQL'
+
+    def _db_dialect(self) -> str:
+        return 'mysql'

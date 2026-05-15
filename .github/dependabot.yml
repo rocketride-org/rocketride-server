@@ -1,0 +1,310 @@
+# =============================================================================
+# Dependabot configuration for rocketride-server
+# =============================================================================
+#
+# Goal: predictable, low-noise weekly dependency updates plus immediate
+# security PRs (which are managed separately by GitHub's automated security
+# fixes feature, already enabled at the repo level).
+#
+# Strategy:
+#   - One ecosystem entry per package manifest location
+#   - Group minor/patch updates aggressively to keep the PR queue small
+#   - Major-version updates remain individual so they get full review
+#   - Weekly cadence on Mondays (lines up with team's sprint kickoff)
+#
+# Drop at .github/dependabot.yml
+# =============================================================================
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # npm (pnpm) — root workspace
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      # One PR for all minor/patch production-dep bumps
+      npm-production:
+        applies-to: version-updates
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      # One PR for all minor/patch dev-dep bumps
+      npm-development:
+        applies-to: version-updates
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # Don't auto-create major-version update PRs — they need human attention
+    # and tend to break things. Use `pnpm outdated` manually for those.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # The root-level groups (npm-production, npm-development) span the
+      # whole pnpm workspace, so rsbuild/rslib/rspack updates that the
+      # per-app ecosystems ignore still get re-emitted here. PR #866
+      # tried to *downgrade* @rsbuild/* from 1.x to 0.7.10 across seven
+      # workspaces because chat-ui/dropper-ui are pinned to 0.4.x and
+      # Dependabot harmonised to the floor. Match the per-app ignores at
+      # the root to keep the npm-development group from re-creating that.
+      - dependency-name: "@rsbuild/*"
+      - dependency-name: "@rslib/*"
+      - dependency-name: "@rspack/*"
+
+  # ---------------------------------------------------------------------------
+  # npm — packages/client-typescript (published SDK)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/packages/client-typescript"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-typescript"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      client-typescript-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # npm — packages/shared-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/packages/shared-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      shared-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # rsbuild/rslib/rspack are pre-1.x or early-1.x and ship breaking
+      # changes in minor releases (e.g. @rslib/core 0.13 → 0.21 broke the
+      # rollup-dts pipeline in PR #860). semver-minor ignore wouldn't fit
+      # — we still want minors for other deps. These are upgraded manually
+      # in coordinated bumps across shared-ui + apps/{chat,dropper}-ui.
+      - dependency-name: "@rsbuild/*"
+      - dependency-name: "@rslib/*"
+      - dependency-name: "@rspack/*"
+
+  # ---------------------------------------------------------------------------
+  # npm — apps/dropper-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/apps/dropper-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      dropper-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # See shared-ui ecosystem above. Apps are pinned to @rsbuild 0.4.x
+      # while shared-ui is on 1.x; 0.x → 0.x bumps (e.g. #855: 0.4 → 0.7)
+      # strand the apps at an intermediate version. Upgrade together.
+      - dependency-name: "@rsbuild/*"
+
+  # ---------------------------------------------------------------------------
+  # npm — apps/chat-ui
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/apps/chat-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: deps"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      chat-ui-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # See shared-ui ecosystem above. Same pattern as dropper-ui:
+      # apps pinned to 0.x while shared-ui is on 1.x — block intermediate
+      # 0.x → 0.x bumps (e.g. #854: 0.4 → 0.7) to avoid stranding.
+      - dependency-name: "@rsbuild/*"
+
+  # ---------------------------------------------------------------------------
+  # Python — root pyproject.toml (covers most ai/nodes deps via workspace)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      python-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # Python — published SDK
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/packages/client-python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # Python — MCP client SDK
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/packages/client-mcp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: sdk-python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # Python — pipeline node deps (ML/AI runtime)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: nodes"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Node deps include large ML libs (torch, transformers); group them
+    # so we don't get ten "bump torch" PRs across minor versions.
+    groups:
+      nodes-deps:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # The semver-major rule above only catches `version-update:*`
+      # update-types. Pip `requirement-update` PRs (where Dependabot
+      # rewrites a `>=X,<Y` constraint to a higher Y) take a different
+      # classification path and slipped through — see #839
+      # (elasticsearch 8→9) and #857 (google-genai 1→2). Pin these by
+      # name so the requirement-update path is also blocked.
+      - dependency-name: "elasticsearch"
+      - dependency-name: "google-genai"
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions — workflow file SHA pin updates
+  # ---------------------------------------------------------------------------
+  # Matches the team's existing supply-chain-defense pattern of pinning
+  # third-party actions to commit SHAs (see secret-scan.yml). Dependabot
+  # opens PRs to bump those SHAs when upstream releases.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "area: ci"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      gh-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

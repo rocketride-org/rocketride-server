@@ -67,8 +67,7 @@ class IGlobal(IGlobalBase):
 
         segments = result.get('$segments') or []
         return [
-            SimpleNamespace(text=s.get('text', ''), start=s.get('start', 0.0), end=s.get('end', 0.0))
-            for s in segments
+            SimpleNamespace(text=s.get('text', ''), start=s.get('start', 0.0), end=s.get('end', 0.0)) for s in segments
         ]
 
     def _audio_to_pcm_bytes(self, audio: Any) -> bytes:

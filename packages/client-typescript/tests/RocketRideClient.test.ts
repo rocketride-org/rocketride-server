@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@j
 import { getEchoPipeline } from './echo.pipeline';
 import { getChatPipeline } from './chat.pipeline';
 // Skip chat tests when no LLM API key is available (must match env vars used by chat.pipeline.ts)
-const hasLLMKey = !!(process.env.ROCKETRIDE_APIKEY_OPENAI || process.env.ROCKETRIDE_APIKEY_ANTHROPIC || process.env.ROCKETRIDE_APIKEY_GEMINI || process.env.ROCKETRIDE_HOST_OLLAMA);
+const hasLLMKey = !!(process.env.ROCKETRIDE_OPENAI_KEY || process.env.ROCKETRIDE_ANTHROPIC_KEY || process.env.ROCKETRIDE_GEMINI_KEY || process.env.ROCKETRIDE_OLLAMA_HOST);
 const describeIfLLM = hasLLMKey ? describe : describe.skip;
 const itIfLLM = hasLLMKey ? it : it.skip;
 
@@ -35,10 +35,10 @@ const itIfLLM = hasLLMKey ? it : it.skip;
  * Environment Variables:
  *
  * 	ROCKETRIDE_APIKEY - General API key for RocketRide server
- * 	ROCKETRIDE_APIKEY_OPENAI - API key for OpenAI (GPT-4)
- * 	ROCKETRIDE_APIKEY_ANTHROPIC - API key for Anthropic (Claude-3 Sonnet)
- * 	ROCKETRIDE_APIKEY_GEMINI - API key for Gemini (Gemini Pro model)
- * 	ROCKETRIDE_HOST_OLLAMA - Host URL for local Ollama server
+ * 	ROCKETRIDE_OPENAI_KEY - API key for OpenAI (GPT-4)
+ * 	ROCKETRIDE_ANTHROPIC_KEY - API key for Anthropic (Claude-3 Sonnet)
+ * 	ROCKETRIDE_GEMINI_KEY - API key for Gemini (Gemini Pro model)
+ * 	ROCKETRIDE_OLLAMA_HOST - Host URL for local Ollama server
  *
  *  Note: Only one of the LLM settings needs to be set for chat pipeline tests.
  */
@@ -71,10 +71,7 @@ describe('RocketRideClient Integration Tests', () => {
 	afterEach(async () => {
 		if (client.isConnected()) {
 			// Use a bounded timeout so teardown never hangs the suite
-			await Promise.race([
-				client.disconnect(),
-				new Promise<void>(resolve => setTimeout(resolve, 10000)),
-			]);
+			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
 		}
 	});
 
@@ -125,7 +122,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Pipeline Operations', () => {
-		const PIPELINE_TOKEN = 'TS-PIPELINE-OPS';
+		const PIPELINE_TOKEN = 'TS-PL';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -160,8 +157,8 @@ describe('RocketRideClient Integration Tests', () => {
 			});
 
 			// Retry a few times in case server is busy (tests may run in parallel)
-			const maxAttempts = 5;
-			const delayMs = 2000;
+			const maxAttempts = 10;
+			const delayMs = 1000;
 			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				try {
@@ -177,7 +174,7 @@ describe('RocketRideClient Integration Tests', () => {
 			expect(Object.values(TASK_STATE)).toContain(status!.state);
 
 			await client.terminate(result.token);
-		}, 90000);
+		}, TEST_CONFIG.timeout);
 
 		it(
 			'should terminate a pipeline',
@@ -194,7 +191,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Data Operations', () => {
-		const DATA_TOKEN = 'TS-DATA-OPS';
+		const DATA_TOKEN = 'TS-DA';
 		let pipelineToken: string;
 
 		beforeEach(async () => {
@@ -475,7 +472,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describeIfLLM('Chat Operations', () => {
-		const CHAT_TOKEN = 'TS-CHAT-OPS';
+		const CHAT_TOKEN = 'TS-CH';
 		let chatToken: string;
 
 		beforeEach(async () => {
@@ -747,7 +744,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Event Handling', () => {
-		const EVENT_TOKEN = 'TS-EVENT-OPS';
+		const EVENT_TOKEN = 'TS-EV';
 		let eventToken: string;
 		let receivedEvents: any[] = [];
 
@@ -1159,7 +1156,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Error Handling', () => {
-		const ERROR_TOKEN = 'TS-ERROR-OPS';
+		const ERROR_TOKEN = 'TS-ER';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -1217,7 +1214,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('End-to-End Workflow', () => {
-		const E2E_TOKEN = 'TS-E2E-WORKFLOW';
+		const E2E_TOKEN = 'TS-E2';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -1648,7 +1645,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	});
 
 	describe('Concurrent Pipeline Operations', () => {
-		const CONCURRENT_TOKEN = 'TS-CONCURRENT-OPS';
+		const CONCURRENT_TOKEN = 'TS-CC';
 		const PIPELINE_COUNT = 16;
 		let pipelineTokens: string[] = [];
 
@@ -1672,97 +1669,101 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 						}
 					})
 				),
-				new Promise<void>(resolve => setTimeout(resolve, 15000)),
+				new Promise<void>((resolve) => setTimeout(resolve, 15000)),
 			]);
 			pipelineTokens = [];
 		});
 
-		it('should handle 16 concurrent pipelines with unique data', async () => {
-			// Create all pipelines concurrently
-			const pipelines = await Promise.all(
-				Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
-					const result = await client.use({
-						pipeline: getEchoPipeline(),
-						token: CONCURRENT_TOKEN,
-						useExisting: true,
-					});
-					return { index, token: result.token };
-				})
-			);
-			pipelineTokens = pipelines.map((p) => p.token);
+		it(
+			'should handle 16 concurrent pipelines with unique data',
+			async () => {
+				// Create all pipelines concurrently
+				const pipelines = await Promise.all(
+					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
+						const result = await client.use({
+							pipeline: getEchoPipeline(),
+							token: CONCURRENT_TOKEN,
+							useExisting: true,
+						});
+						return { index, token: result.token };
+					})
+				);
+				pipelineTokens = pipelines.map((p) => p.token);
 
-			// Generate unique test data for each pipeline
-			const testData = pipelines.map((pipeline, index) => ({
-				pipelineIndex: index,
-				token: pipeline.token,
-				text: `Pipeline-${index} unique test data: ${Math.random().toString(36).substring(2)} timestamp-${Date.now()}-${index}`,
-				expectedId: `pipeline-${index}-response`,
-			}));
+				// Generate unique test data for each pipeline
+				const testData = pipelines.map((pipeline, index) => ({
+					pipelineIndex: index,
+					token: pipeline.token,
+					text: `Pipeline-${index} unique test data: ${Math.random().toString(36).substring(2)} timestamp-${Date.now()}-${index}`,
+					expectedId: `pipeline-${index}-response`,
+				}));
 
-			// Send data to all pipelines concurrently with random delays
-			const sendPromises = testData.map(async (data, _index) => {
-				// Add random delay (0-100ms) to simulate real-world timing variations
-				await new Promise((resolve) => setTimeout(resolve, Math.random() * 100));
+				// Send data to all pipelines concurrently with random delays
+				const sendPromises = testData.map(async (data, _index) => {
+					// Add random delay (0-100ms) to simulate real-world timing variations
+					await new Promise((resolve) => setTimeout(resolve, Math.random() * 100));
 
-				const result: PIPELINE_RESULT | undefined = await client.send(data.token, data.text, {}, 'text/plain');
+					const result: PIPELINE_RESULT | undefined = await client.send(data.token, data.text, {}, 'text/plain');
 
-				return {
-					pipelineIndex: data.pipelineIndex,
-					originalText: data.text,
-					response: result,
-				};
-			});
+					return {
+						pipelineIndex: data.pipelineIndex,
+						originalText: data.text,
+						response: result,
+					};
+				});
 
-			// Wait for all sends to complete
-			const results = await Promise.all(sendPromises);
+				// Wait for all sends to complete
+				const results = await Promise.all(sendPromises);
 
-			// Validate that each pipeline received its correct data
-			expect(results).toHaveLength(PIPELINE_COUNT);
+				// Validate that each pipeline received its correct data
+				expect(results).toHaveLength(PIPELINE_COUNT);
 
-			// Check each result individually
-			for (const result of results) {
-				const { pipelineIndex, originalText, response } = result;
+				// Check each result individually
+				for (const result of results) {
+					const { pipelineIndex, originalText, response } = result;
 
-				// Validate basic response structure
-				expect(response).toBeDefined();
+					// Validate basic response structure
+					expect(response).toBeDefined();
 
-				if (!response) throw new Error('Response is undefined');
+					if (!response) throw new Error('Response is undefined');
 
-				expect(typeof response).toBe('object');
-				expect(response.name).toBeDefined();
-				expect(response.objectId).toBeDefined();
-				expect(response.objectId).toMatch(/^[0-9a-f-]{36}$/);
+					expect(typeof response).toBe('object');
+					expect(response.name).toBeDefined();
+					expect(response.objectId).toBeDefined();
+					expect(response.objectId).toMatch(/^[0-9a-f-]{36}$/);
 
-				// Should have processed content with text/plain MIME type
-				expect(response.result_types).toBeDefined();
-				expect(response.result_types!.text).toBe('text');
+					// Should have processed content with text/plain MIME type
+					expect(response.result_types).toBeDefined();
+					expect(response.result_types!.text).toBe('text');
 
-				// Validate the echoed text matches what we sent
-				expect(response.text).toBeDefined();
-				expect(Array.isArray(response.text)).toBe(true);
-				expect(response.text.length).toBeGreaterThan(0);
+					// Validate the echoed text matches what we sent
+					expect(response.text).toBeDefined();
+					expect(Array.isArray(response.text)).toBe(true);
+					expect(response.text.length).toBeGreaterThan(0);
 
-				// The response should contain our original text (includes pipeline index and timestamp)
-				const responseText = response.text[0];
-				expect(responseText).toContain(originalText);
-				expect(responseText).toContain(`Pipeline-${pipelineIndex}`);
-			}
+					// The response should contain our original text (includes pipeline index and timestamp)
+					const responseText = response.text[0];
+					expect(responseText).toContain(originalText);
+					expect(responseText).toContain(`Pipeline-${pipelineIndex}`);
+				}
 
-			// Verify no cross-contamination between pipelines
-			const uniqueTexts = new Set(results.map((r) => r.response!.text[0]));
-			expect(uniqueTexts.size).toBe(PIPELINE_COUNT); // All responses should be unique
+				// Verify no cross-contamination between pipelines
+				const uniqueTexts = new Set(results.map((r) => r.response!.text[0]));
+				expect(uniqueTexts.size).toBe(PIPELINE_COUNT); // All responses should be unique
 
-			// Verify all pipeline indices are represented
-			const pipelineIndices = results.map((r) => r.pipelineIndex).sort((a, b) => a - b);
-			const expectedIndices = Array.from({ length: PIPELINE_COUNT }, (_, i) => i);
-			expect(pipelineIndices).toEqual(expectedIndices);
-		}, TEST_CONFIG.timeout);
+				// Verify all pipeline indices are represented
+				const pipelineIndices = results.map((r) => r.pipelineIndex).sort((a, b) => a - b);
+				const expectedIndices = Array.from({ length: PIPELINE_COUNT }, (_, i) => i);
+				expect(pipelineIndices).toEqual(expectedIndices);
+			},
+			TEST_CONFIG.timeout
+		);
 
 		it('should handle concurrent data sends to the same pipeline', async () => {
 			// Create a single pipeline
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: `${CONCURRENT_TOKEN}-single`,
+				token: `${CONCURRENT_TOKEN}-1p`,
 			});
 			pipelineTokens = [result.token];
 
@@ -1816,125 +1817,253 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			expect(uniqueResponseTexts.size).toBe(SEND_COUNT);
 		});
 
-		it('should handle mixed concurrent pipeline and send operations', async () => {
-			// This test runs 4 pipelines × 3 sends = 12 operations, needs extended timeout
-			const PIPELINE_COUNT = 4;
-			const SENDS_PER_PIPELINE = 3;
+		it(
+			'should handle mixed concurrent pipeline and send operations',
+			async () => {
+				// This test runs 4 pipelines × 3 sends = 12 operations, needs extended timeout
+				const PIPELINE_COUNT = 4;
+				const SENDS_PER_PIPELINE = 3;
 
-			// Create all pipelines concurrently
-			const pipelines = await Promise.all(
-				Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
-					const result = await client.use({
-						pipeline: getEchoPipeline(),
-						token: `${CONCURRENT_TOKEN}-mixed-${index}`,
-					});
-					return { index, token: result.token };
-				})
-			);
-			pipelineTokens = pipelines.map((p) => p.token);
-
-			// Generate test data for multiple sends per pipeline
-			const allSendPromises = pipelines.flatMap((pipeline) =>
-				Array.from({ length: SENDS_PER_PIPELINE }, (_, sendIndex) => ({
-					pipelineIndex: pipeline.index,
-					sendIndex,
-					token: pipeline.token,
-					text: `Mixed-P${pipeline.index}-S${sendIndex}: ${Math.random().toString(36).substring(2)} time-${Date.now()}-${pipeline.index}-${sendIndex}`,
-				}))
-			);
-
-			// Execute all sends concurrently across all pipelines
-			const sendResults = await Promise.all(
-				allSendPromises.map(async (data) => {
-					// Random delay to simulate realistic timing
-					await new Promise((resolve) => setTimeout(resolve, Math.random() * 200));
-
-					const response: PIPELINE_RESULT | undefined = await client.send(data.token, data.text, {}, 'text/plain');
-
-					return {
-						pipelineIndex: data.pipelineIndex,
-						sendIndex: data.sendIndex,
-						originalText: data.text,
-						response,
-					};
-				})
-			);
-
-			// Validate results
-			const totalExpectedSends = PIPELINE_COUNT * SENDS_PER_PIPELINE;
-			expect(sendResults).toHaveLength(totalExpectedSends);
-
-			// Group results by pipeline to verify separation
-			const resultsByPipeline = sendResults.reduce(
-				(acc, result) => {
-					if (!acc[result.pipelineIndex]) {
-						acc[result.pipelineIndex] = [];
-					}
-					acc[result.pipelineIndex].push(result);
-					return acc;
-				},
-				{} as Record<number, typeof sendResults>
-			);
-
-			// Verify each pipeline received exactly the right number of sends
-			for (let i = 0; i < PIPELINE_COUNT; i++) {
-				expect(resultsByPipeline[i]).toHaveLength(SENDS_PER_PIPELINE);
-			}
-
-			// Verify data integrity - each response should contain its original text
-			for (const result of sendResults) {
-				const responseText = result.response!.text[0];
-				expect(responseText).toContain(result.originalText);
-				expect(responseText).toContain(`Mixed-P${result.pipelineIndex}-S${result.sendIndex}`);
-			}
-
-			// Verify no cross-contamination - all responses should be unique
-			const allResponseTexts = sendResults.map((r) => r.response!.text[0]);
-			const uniqueResponseTexts = new Set(allResponseTexts);
-			expect(uniqueResponseTexts.size).toBe(totalExpectedSends);
-		}, TEST_CONFIG.timeout);
-
-		it('should handle 4 independent pipelines each cycling 32 send/recv operations', async () => {
-			const SUBPROCESS_COUNT = 4;
-			const CYCLES_PER_PIPELINE = 32;
-
-			// Create 4 independent subprocesses concurrently
-			const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-stress-${i}`);
-			await Promise.all(tokens.map((token) => client.use({ pipeline: getEchoPipeline(), token })));
-			pipelineTokens.push(...tokens);
-
-			// Each pipeline independently cycles send/recv — all 4 run in parallel.
-			// Individual send failures are retried once to tolerate transient
-			// "Connection closed" errors under heavy concurrent load.
-			async function runPipeline(token: string, pipelineIndex: number) {
-				const results = [];
-				for (let cycle = 0; cycle < CYCLES_PER_PIPELINE; cycle++) {
-					const text = `pipe-${pipelineIndex}-cycle-${cycle}-${Math.random().toString(36).slice(2)}`;
-					let result: PIPELINE_RESULT | undefined;
-					try {
-						result = await client.send(token, text, {}, 'text/plain');
-					} catch {
-						// Retry once — the server may have briefly dropped the
-						// WebSocket frame under heavy concurrent load.
-						await new Promise(resolve => setTimeout(resolve, 250));
-						result = await client.send(token, text, {}, 'text/plain');
-					}
-					expect(result).toBeDefined();
-					expect(result!.text[0]).toContain(text);
-					results.push({ text, response: result!.text[0] });
+				// Clean up any leftover pipelines from previous runs
+				for (let i = 0; i < PIPELINE_COUNT; i++) {
+					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-m${i}`);
 				}
-				return results;
-			}
 
-			const allResults = await Promise.all(tokens.map((token, i) => runPipeline(token, i)));
+				// Create all pipelines concurrently — each needs a unique project_id
+				// to avoid server-side contention during concurrent startup.
+				const MIXED_PROJECT_IDS = [
+					'a1b2c3d4-1111-4000-a000-000000000001',
+					'a1b2c3d4-1111-4000-a000-000000000002',
+					'a1b2c3d4-1111-4000-a000-000000000003',
+					'a1b2c3d4-1111-4000-a000-000000000004',
+				];
+				const pipelines = await Promise.all(
+					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
+						const result = await client.use({
+							pipeline: getEchoPipeline(MIXED_PROJECT_IDS[index]),
+							token: `${CONCURRENT_TOKEN}-m${index}`,
+						});
+						return { index, token: result.token };
+					})
+				);
+				pipelineTokens = pipelines.map((p) => p.token);
 
-			// All 128 results present
-			expect(allResults.flat()).toHaveLength(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
+				// Generate test data for multiple sends per pipeline
+				const allSendPromises = pipelines.flatMap((pipeline) =>
+					Array.from({ length: SENDS_PER_PIPELINE }, (_, sendIndex) => ({
+						pipelineIndex: pipeline.index,
+						sendIndex,
+						token: pipeline.token,
+						text: `Mixed-P${pipeline.index}-S${sendIndex}: ${Math.random().toString(36).substring(2)} time-${Date.now()}-${pipeline.index}-${sendIndex}`,
+					}))
+				);
 
-			// All responses unique across all pipelines and cycles
-			const unique = new Set(allResults.flat().map((r) => r.response));
-			expect(unique.size).toBe(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
-		}, TEST_CONFIG.timeout);
+				// Execute all sends concurrently across all pipelines
+				const sendResults = await Promise.all(
+					allSendPromises.map(async (data) => {
+						// Random delay to simulate realistic timing
+						await new Promise((resolve) => setTimeout(resolve, Math.random() * 200));
+
+						const response: PIPELINE_RESULT | undefined = await client.send(data.token, data.text, {}, 'text/plain');
+
+						return {
+							pipelineIndex: data.pipelineIndex,
+							sendIndex: data.sendIndex,
+							originalText: data.text,
+							response,
+						};
+					})
+				);
+
+				// Validate results
+				const totalExpectedSends = PIPELINE_COUNT * SENDS_PER_PIPELINE;
+				expect(sendResults).toHaveLength(totalExpectedSends);
+
+				// Group results by pipeline to verify separation
+				const resultsByPipeline = sendResults.reduce(
+					(acc, result) => {
+						if (!acc[result.pipelineIndex]) {
+							acc[result.pipelineIndex] = [];
+						}
+						acc[result.pipelineIndex].push(result);
+						return acc;
+					},
+					{} as Record<number, typeof sendResults>
+				);
+
+				// Verify each pipeline received exactly the right number of sends
+				for (let i = 0; i < PIPELINE_COUNT; i++) {
+					expect(resultsByPipeline[i]).toHaveLength(SENDS_PER_PIPELINE);
+				}
+
+				// Verify data integrity - each response should contain its original text
+				for (const result of sendResults) {
+					const responseText = result.response!.text[0];
+					expect(responseText).toContain(result.originalText);
+					expect(responseText).toContain(`Mixed-P${result.pipelineIndex}-S${result.sendIndex}`);
+				}
+
+				// Verify no cross-contamination - all responses should be unique
+				const allResponseTexts = sendResults.map((r) => r.response!.text[0]);
+				const uniqueResponseTexts = new Set(allResponseTexts);
+				expect(uniqueResponseTexts.size).toBe(totalExpectedSends);
+			},
+			TEST_CONFIG.timeout
+		);
+
+		it(
+			'should handle 4 independent pipelines each cycling 32 send/recv operations',
+			async () => {
+				const SUBPROCESS_COUNT = 4;
+				const CYCLES_PER_PIPELINE = 32;
+
+				// Clean up any leftover pipelines from previous runs
+				for (let i = 0; i < SUBPROCESS_COUNT; i++) {
+					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-s${i}`);
+				}
+
+				// Create 4 independent subprocesses concurrently — each needs a
+				// unique project_id to avoid server-side contention during startup.
+				const CYCLE_PROJECT_IDS = [
+					'b2c3d4e5-2222-4000-b000-000000000001',
+					'b2c3d4e5-2222-4000-b000-000000000002',
+					'b2c3d4e5-2222-4000-b000-000000000003',
+					'b2c3d4e5-2222-4000-b000-000000000004',
+				];
+				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-s${i}`);
+				await Promise.all(tokens.map((token, i) =>
+					client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })
+				));
+				pipelineTokens.push(...tokens);
+
+				// Each pipeline independently cycles send/recv — all 4 run in parallel
+				async function runPipeline(token: string, pipelineIndex: number) {
+					const results = [];
+					for (let cycle = 0; cycle < CYCLES_PER_PIPELINE; cycle++) {
+						const text = `pipe-${pipelineIndex}-cycle-${cycle}-${Math.random().toString(36).slice(2)}`;
+						const result = await client.send(token, text, {}, 'text/plain');
+						expect(result).toBeDefined();
+						expect(result!.text[0]).toContain(text);
+						results.push({ text, response: result!.text[0] });
+					}
+					return results;
+				}
+
+				const allResults = await Promise.all(tokens.map((token, i) => runPipeline(token, i)));
+
+				// All 128 results present
+				expect(allResults.flat()).toHaveLength(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
+
+				// All responses unique across all pipelines and cycles
+				const unique = new Set(allResults.flat().map((r) => r.response));
+				expect(unique.size).toBe(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
+			},
+			TEST_CONFIG.timeout
+		);
+
+		it(
+			'should handle two independent clients sending concurrently to the same task',
+			async () => {
+				// Two-client variant of the concurrent-sends test, designed to exercise
+				// eaas's outbound _data_client multiplexing.  When two independent
+				// RocketRideClient instances share a backend task (via useExisting), eaas
+				// proxies their requests over a single connection to the subprocess
+				// (data_server.DataConn).  Each inbound client has its own DAP seq counter,
+				// so they independently issue overlapping seqs (e.g. both reach seq=4
+				// within milliseconds of each other).  If eaas's _send_data forwarded the
+				// inbound dict verbatim, those colliding seqs would clobber the outbound
+				// _data_client._pending_requests map and one of the responses would be
+				// silently dropped, hanging the originating client forever.  The fix
+				// builds a fresh outbound DAP packet via dap_request() so the
+				// eaas->subprocess hop allocates its own unique seq from
+				// _data_client._next_seq(), and rebuilds the inbound response envelope so
+				// the original client still sees its own seq in request_seq.
+				//
+				// Note: the single-client concurrent test above does NOT exercise this
+				// path because one client has one monotonic seq counter — it never
+				// collides with itself.  Two independent clients fanning into one task
+				// are the necessary precondition.
+				const SHARED_TOKEN = `${CONCURRENT_TOKEN}-cs`;
+				const SENDS_PER_CLIENT = 12;
+
+				// Spin up a SECOND independent client.  The first client is the outer
+				// `client` from the parent describe block.  Each client has its own DAP
+				// connection, its own seq counter, and its own _pending_requests map.
+				const clientB = new RocketRideClient({
+					auth: TEST_CONFIG.auth,
+					uri: TEST_CONFIG.uri,
+				});
+				try {
+					await clientB.connect();
+
+					// Both clients use the SAME task via useExisting so the second
+					// client.use() attaches to the existing task instead of starting a
+					// fresh one.  This is what makes both clients fan into ONE shared
+					// eaas->subprocess _data_client.
+					const resA = await client.use({
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+						token: SHARED_TOKEN,
+						useExisting: true,
+					});
+					const resB = await clientB.use({
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+						token: SHARED_TOKEN,
+						useExisting: true,
+					});
+					expect(resB.token).toBe(resA.token);
+					pipelineTokens.push(resA.token);
+
+					// Generate distinct payloads per client so we can verify no
+					// cross-routing.
+					const dataA = Array.from({ length: SENDS_PER_CLIENT }, (_, i) => ({
+						index: i,
+						text: `clientA-send-${i}: ${Math.random().toString(36).slice(2)} time-${Date.now()}-A-${i}`,
+					}));
+					const dataB = Array.from({ length: SENDS_PER_CLIENT }, (_, i) => ({
+						index: i,
+						text: `clientB-send-${i}: ${Math.random().toString(36).slice(2)} time-${Date.now()}-B-${i}`,
+					}));
+
+					// Fire both clients' sends concurrently.  Pre-fix this would hang on
+					// whichever pipe lost the seq collision race.
+					const sendsA = dataA.map(async (d) => {
+						await new Promise((resolve) => setTimeout(resolve, Math.random() * 50));
+						const response: PIPELINE_RESULT | undefined = await client.send(resA.token, d.text, {}, 'text/plain');
+						return { client: 'A' as const, index: d.index, originalText: d.text, response };
+					});
+					const sendsB = dataB.map(async (d) => {
+						await new Promise((resolve) => setTimeout(resolve, Math.random() * 50));
+						const response: PIPELINE_RESULT | undefined = await clientB.send(resB.token, d.text, {}, 'text/plain');
+						return { client: 'B' as const, index: d.index, originalText: d.text, response };
+					});
+
+					const allResults = await Promise.all([...sendsA, ...sendsB]);
+
+					// Every send must have completed (no hangs).
+					expect(allResults).toHaveLength(SENDS_PER_CLIENT * 2);
+
+					// Each response must contain its own original text AND the right
+					// client tag (proves no cross-routing between clients).
+					for (const r of allResults) {
+						expect(r.response).toBeDefined();
+						if (!r.response) throw new Error('Response is undefined');
+						const responseText = r.response.text[0];
+						expect(responseText).toContain(r.originalText);
+						expect(responseText).toContain(`client${r.client}-send-${r.index}`);
+					}
+
+					// No two responses share the same text — final guard against
+					// cross-contamination.
+					const uniqueTexts = new Set(allResults.map((r) => r.response!.text[0]));
+					expect(uniqueTexts.size).toBe(SENDS_PER_CLIENT * 2);
+				} finally {
+					if (clientB.isConnected()) {
+						await Promise.race([clientB.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+					}
+				}
+			},
+			TEST_CONFIG.timeout
+		);
 	});
 
 	// ============================================================================

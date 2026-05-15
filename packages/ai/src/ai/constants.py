@@ -30,7 +30,7 @@ Global configuration values for metrics, billing, and system tuning.
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
 CONST_METRICS_SAMPLE_INTERVAL = 0.25  # seconds between metric samples (250ms)
-CONST_BILLING_REPORT_INTERVAL = 5 * 60.0  # seconds between billing reports (5 minutes)
+CONST_BILLING_REPORT_INTERVAL = 15.0  # 5 * 60.0  # seconds between billing reports (5 minutes)
 CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to stop gracefully
 
 # =============================================================================
@@ -44,6 +44,15 @@ CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing
 CONST_RATE_VCPU_HOUR = 1020  # tokens per vCPU-hour
 CONST_RATE_MEMORY_GB_HOUR = 100  # tokens per memory GB-hour
 CONST_RATE_GPU_GB_HOUR = 2140  # tokens per GPU GB-hour
+CONST_RATE_GPU_INFERENCE_SECOND = 0.594  # tokens per GPU-second of inference
+
+# =============================================================================
+# Custom Node Billing Rates (counter_name → tokens per unit)
+# =============================================================================
+CONST_CUSTOM_BILLING_RATES: dict[str, float] = {
+    'pagesProcessed': 5.0,  # tokens per page
+    # Add more as nodes are created
+}
 
 # =============================================================================
 # Task Engine Configuration
@@ -56,7 +65,7 @@ CONST_READY_POLL_INTERVAL = 0.250  # seconds between readiness checks
 CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/stdout/stderr buffers (16MB)
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
-CONST_TTL_CHECK = 60 # check for tasks to kill every 60 seconds
+CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================
 # Task Server Configuration
@@ -67,8 +76,13 @@ CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 # =============================================================================
 # Web Server Configuration
 # =============================================================================
+CONST_AUTH_PENDING_TIMEOUT = 600  # seconds before an OAuth-pending connection is dropped (10 minutes)
+CONST_MAX_PENDING_OAUTH_STATES = 500  # global cap on simultaneous OAuth state nonces
+CONST_MAX_UNAUTHED_CONNS_PER_IP = 10  # max unauthenticated WebSocket connections per client IP
+CONST_MAX_UNAUTHED_IPS = 10_000  # global cap on distinct IPs holding unauthenticated slots
+CONST_AUTH_MAX_ATTEMPTS_PER_CONN = 5  # max rrext_account_authenticate calls per connection
 CONST_DEFAULT_WEB_PORT = 5565  # default web server port
-CONST_DEFAULT_WEB_HOST = '0.0.0.0'  # default bind address (all interfaces)
+CONST_DEFAULT_WEB_HOST = 'localhost'  # default bind address (localhost only; use 0.0.0.0 in Docker/K8s)
 CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in bytes (250MB)
 
 # =============================================================================
@@ -98,7 +112,7 @@ CONST_TRANSPORT_PROCESS_WAIT_TIMEOUT = 5.0  # seconds to wait for process termin
 # Model Server Configuration
 # =============================================================================
 CONST_MODEL_SERVER_PORT = 5590  # default model server port
-CONST_MODEL_SERVER_HOST = '0.0.0.0'  # default bind address (all interfaces)
+CONST_MODEL_SERVER_HOST = 'localhost'  # default bind address (localhost only; use 0.0.0.0 in Docker/K8s)
 CONST_MODEL_QUEUE_SCALE_UP_THRESHOLD = 50  # queue depth to trigger replica addition
 CONST_MODEL_QUEUE_SCALE_DOWN_THRESHOLD = 5  # queue depth to trigger replica removal
 CONST_MODEL_QUEUE_SCALE_UP_DELAY = 30  # seconds to wait before scaling up

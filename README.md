@@ -76,9 +76,9 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 ## Building Your First Pipe
 
-1. All pipelines are recognized with the `*.pipe` format. Each pipeline and configuration is a JSON object - but the extension in your IDE will render within our visual builder canvas.
+1. All pipelines are recognized with the `*.pipe` format. Each pipeline and its configuration are JSON objects - but the extension in your IDE will render within our visual builder canvas.
 
-2. All pipelines begin with source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
+2. All pipelines begin with a source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
 
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
@@ -97,7 +97,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
      docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
      ```
 
-   - **Local deployment** - Download the runtime of your choice as a standalone process in the 'Deploy' page of the `Connection Manager`
+   - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
 6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 

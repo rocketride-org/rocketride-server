@@ -28,7 +28,7 @@ data flow through the RocketRide pipeline system.
 
 Usage:
     from echo_pipeline import get_echo_pipeline
-    
+
     pipeline = get_echo_pipeline()
     token = await client.use(pipeline)
 """
@@ -36,13 +36,17 @@ Usage:
 from typing import Dict, Any
 
 
-def get_echo_pipeline() -> Dict[str, Any]:
+def get_echo_pipeline(project_id: str = 'e612b741-748c-4b35-a8b7-186797a8ea42') -> Dict[str, Any]:
     """
     Get the echo pipeline configuration.
-    
+
     This pipeline receives data and returns it unchanged, making it ideal
     for testing basic connectivity and data transmission.
-    
+
+    Args:
+        project_id: Unique project identifier. Concurrent pipelines must use
+            distinct project_ids to avoid server-side contention during startup.
+
     Returns:
         Echo pipeline configuration.
     """
@@ -67,5 +71,5 @@ def get_echo_pipeline() -> Dict[str, Any]:
             },
         ],
         'source': 'webhook_1',
-        'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42',
+        'project_id': project_id,
     }

@@ -29,4 +29,3 @@ from . import MockWeaviateClient
 
 # Re-export for import compatibility
 WeaviateClient = MockWeaviateClient
-

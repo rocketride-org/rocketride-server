@@ -115,7 +115,12 @@ def process_ms_permissions_bulk(
                 continue
 
             # Create batch request for this item
-            batch_request = {'id': str(idx), 'method': 'GET', 'url': url, 'headers': {'Content-Type': 'application/json'}}
+            batch_request = {
+                'id': str(idx),
+                'method': 'GET',
+                'url': url,
+                'headers': {'Content-Type': 'application/json'},
+            }
             batch_requests.append(batch_request)
             item_id_map[str(idx)] = item_object
 
@@ -144,7 +149,9 @@ def process_ms_permissions_bulk(
                     engLib.debug(f'Batch request attempt {attempt + 1} failed with error: {request_err}')
                     raise Exception(f'Batch request attempt {attempt + 1} failed with error: {request_err}')
 
-                engLib.debug(f'Batch request attempt {attempt + 1} failed with error: {request_err}, retrying in a {wait} seconds...')
+                engLib.debug(
+                    f'Batch request attempt {attempt + 1} failed with error: {request_err}, retrying in a {wait} seconds...'
+                )
                 time.sleep(wait)
                 attempt += 1
                 continue
@@ -160,7 +167,9 @@ def process_ms_permissions_bulk(
                 engLib.debug(f'Batch request failed after {attempt + 1} attempts (status {response.status_code})')
                 raise Exception(f'Batch request failed after {attempt + 1} attempts (status {response.status_code})')
 
-            engLib.debug(f'Batch request attempt {attempt + 1} failed with status {response.status_code}, retrying in a {wait} seconds...')
+            engLib.debug(
+                f'Batch request attempt {attempt + 1} failed with status {response.status_code}, retrying in a {wait} seconds...'
+            )
             time.sleep(wait)
             attempt += 1
             continue
@@ -180,7 +189,15 @@ def process_ms_permissions_bulk(
                         try:
                             json_response = resp.get('body', {})
                             # Process MS permissions using the same logic as individual processing
-                            process_ms_permissions(item_object, json_response, tenant_id, add_permissions_lambda, add_user_info_lambda, add_group_info_lambda, check_uuid)
+                            process_ms_permissions(
+                                item_object,
+                                json_response,
+                                tenant_id,
+                                add_permissions_lambda,
+                                add_user_info_lambda,
+                                add_group_info_lambda,
+                                check_uuid,
+                            )
                         except Exception as perm_err:
                             engLib.debug(f'Failed to process permissions for object "{item_object.path}": {perm_err}')
                             item_object.completionCode(engLib.Ec.Error, str(perm_err))
@@ -190,8 +207,12 @@ def process_ms_permissions_bulk(
                         item_object.completionCode(engLib.Ec.NotFound, 'not found')
 
                     elif status == status_codes.too_many_requests:  # 429 - throttling
-                        engLib.debug(f'Object "{item_object.path}" failed with HTTP Too Many Requests (throttling), marking for retry')
-                        wait_before_return = max(1, wait_before_return, get_wait_time_lambda(1, resp.get('headers', {})))
+                        engLib.debug(
+                            f'Object "{item_object.path}" failed with HTTP Too Many Requests (throttling), marking for retry'
+                        )
+                        wait_before_return = max(
+                            1, wait_before_return, get_wait_time_lambda(1, resp.get('headers', {}))
+                        )
                         item_object.completionCode(engLib.Ec.Retry, 'Too Many Requests (throttling)')
 
                     else:  # Other error
@@ -204,7 +225,9 @@ def process_ms_permissions_bulk(
         engLib.debug(f'No response for {len(item_id_map)}, marking them for retry')
         # Mark remaining items (that didn't receive a response) for retry
         for request_id, item_object in item_id_map.items():
-            engLib.debug(f'process_ms_permissions_bulk: no response received for "{item_object.path}" marking for retry')
+            engLib.debug(
+                f'process_ms_permissions_bulk: no response received for "{item_object.path}" marking for retry'
+            )
             item_object.completionCode(engLib.Ec.Retry, 'no response received from batch request')
 
         if wait_before_return > 0:
@@ -221,7 +244,15 @@ def process_ms_permissions_bulk(
                 item_object.completionCode(engLib.Ec.Error, str(fallback_err))
 
 
-def process_ms_permissions(item_object: any, json_response: dict, tenant_id: str, addPermissionsLambda: any, addUserInfoLambda: any, addGroupInfoLambda: any, check_uuid: bool = True):
+def process_ms_permissions(
+    item_object: any,
+    json_response: dict,
+    tenant_id: str,
+    addPermissionsLambda: any,
+    addUserInfoLambda: any,
+    addGroupInfoLambda: any,
+    check_uuid: bool = True,
+):
     """Process Microsoft Permissions.
 
     Args:
@@ -293,7 +324,9 @@ def process_ms_permissions(item_object: any, json_response: dict, tenant_id: str
         #       OneDrive for Business and SharePoint document libraries don't return the inheritedFrom property.
         #       grantedTo and grantedToIdentities are deprecated going forward and the response will be migrated
         #       to grantedToV2 and grantedToIdentitiesV2 respectively under appropriate property names.
-        engLib.debug(f'grantedToV2={len(value.get("grantedToV2", {})) > 0}; grantedToIdentitiesV2={len(value.get("grantedToIdentitiesV2", {})) > 0}; inheritedFrom={len(value.get("inheritedFrom", [])) > 0};')
+        engLib.debug(
+            f'grantedToV2={len(value.get("grantedToV2", {})) > 0}; grantedToIdentitiesV2={len(value.get("grantedToIdentitiesV2", {})) > 0}; inheritedFrom={len(value.get("inheritedFrom", [])) > 0};'
+        )
 
         # process grantedToV2 - it represents SharePointIdentitySet
         process_sharepoint_identity_set(value.get('grantedToV2', {}))

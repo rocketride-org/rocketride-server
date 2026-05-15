@@ -1,177 +1,179 @@
 /**
  * Module Registry - Auto-discovers and manages build modules
- * 
+ *
  * Finds tasks.js files throughout the project and registers them.
  */
 const path = require('path');
 const { exists } = require('./fs');
 
 class ModuleRegistry {
-    constructor() {
-        this.modules = new Map();
-    }
+	constructor() {
+		this.modules = new Map();
+	}
 
-    /**
-     * Discover all tasks.js files in the project
-     * Searches for scripts/tasks.js in packages/, apps/, and nodes/
-     */
-    async discover(rootDir) {
-        const { glob } = require('glob');
-        const parse = require('gitignore-globs');
+	/**
+	 * Discover all tasks.js files in the project
+	 * Searches for scripts/tasks.js in packages/, apps/, and nodes/
+	 */
+	async discover(rootDir) {
+		const { glob } = require('glob');
+		const parse = require('gitignore-globs');
 
-        const gitignorePath = path.join(rootDir, '.gitignore');
-        const gitignore = await exists(gitignorePath) ? parse(gitignorePath) : [];
+		const gitignorePath = path.join(rootDir, '.gitignore');
+		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
 
-        const taskFiles = await glob([
-            '{packages,apps,nodes,examples}/**/scripts/tasks.js',
-            'scripts/tasks.js',
-        ], {
-            cwd: rootDir,
-            ignore: gitignore,
-            absolute: true,
-            nodir: true
-        });
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools}/**/scripts/tasks.js', 'scripts/tasks.js'], {
+			cwd: rootDir,
+			ignore: gitignore,
+			absolute: true,
+			nodir: true,
+		});
 
-        for (const taskFile of taskFiles) {
-            await this._loadModule(taskFile);
-        }
+		for (const taskFile of taskFiles) {
+			await this._loadModule(taskFile);
+		}
 
-        return this;
-    }
+		return this;
+	}
 
-    async _loadModule(filePath) {
-        try {
-            // Clear require cache for hot reloading during development
-            delete require.cache[require.resolve(filePath)];
+	async _loadModule(filePath) {
+		try {
+			// Clear require cache for hot reloading during development
+			delete require.cache[require.resolve(filePath)];
 
-            const mod = require(filePath);
+			const exported = require(filePath);
 
-            if (!mod.name) {
-                console.warn(`  Warning: ${filePath} missing 'name' property, skipping`);
-                return;
-            }
+			// A tasks.js may export either a single module object {name, actions}
+			// or an array of such objects. Array form lets one file register
+			// several modules under different action prefixes — useful when an
+			// overlay (e.g. extension/) wants to expose multiple action namespaces
+			// without spawning a `<sub>/scripts/tasks.js` per namespace.
+			const mods = Array.isArray(exported) ? exported : [exported];
 
-            // Store the module's directory for context
-            mod._path = path.dirname(filePath);
-            mod._file = filePath;
+			for (const mod of mods) {
+				if (!mod || !mod.name) {
+					console.warn(`  Warning: ${filePath} entry missing 'name' property, skipping`);
+					continue;
+				}
 
-            this.modules.set(mod.name, mod);
-        } catch (err) {
-            console.warn(`  Warning: Could not load ${filePath}: ${err.message}`);
-        }
-    }
+				// Store the module's directory for context
+				mod._path = path.dirname(filePath);
+				mod._file = filePath;
 
-    /**
-     * Get a module by name
-     */
-    get(name) {
-        return this.modules.get(name);
-    }
+				this.modules.set(mod.name, mod);
+			}
+		} catch (err) {
+			console.warn(`  Warning: Could not load ${filePath}: ${err.message}`);
+		}
+	}
 
-    /**
-     * Check if a module exists
-     */
-    has(name) {
-        return this.modules.has(name);
-    }
+	/**
+	 * Get a module by name
+	 */
+	get(name) {
+		return this.modules.get(name);
+	}
 
-    /**
-     * Get all module names
-     */
-    names() {
-        return Array.from(this.modules.keys());
-    }
+	/**
+	 * Check if a module exists
+	 */
+	has(name) {
+		return this.modules.has(name);
+	}
 
-    /**
-     * List all public actions (actions with descriptions)
-     * 
-     * Actions with descriptions are shown in `builder --help`.
-     * Actions without descriptions are internal/private but still callable.
-     */
-    listCommands(options) {
-        const result = [];
+	/**
+	 * Get all module names
+	 */
+	names() {
+		return Array.from(this.modules.keys());
+	}
 
-        for (const [moduleName, mod] of this.modules) {
-            if (!mod.actions) continue;
+	/**
+	 * List all public actions (actions with descriptions)
+	 *
+	 * Actions with descriptions are shown in `builder --help`.
+	 * Actions without descriptions are internal/private but still callable.
+	 */
+	listCommands(options) {
+		const result = [];
 
-            for (const actionDef of mod.actions) {
-                const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action(options)
-                    : actionDef.action;
+		for (const [moduleName, mod] of this.modules) {
+			if (!mod.actions) continue;
 
-                // Only list actions that have descriptions (public actions)
-                if (actionObj?.description) {
-                    result.push({
-                        module: moduleName,
-                        command: actionDef.name,
-                        full: actionDef.name,
-                        description: actionObj.description
-                    });
-                }
-            }
-        }
+			for (const actionDef of mod.actions) {
+				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
 
-        return result.sort((a, b) => a.full.localeCompare(b.full));
-    }
+				// Only list actions that have descriptions (public actions)
+				if (actionObj?.description) {
+					result.push({
+						module: moduleName,
+						command: actionDef.name,
+						full: actionDef.name,
+						description: actionObj.description,
+					});
+				}
+			}
+		}
 
-    /**
-     * Get an action by name (module:action-name format)
-     * Looks up from the module's top-level actions array
-     * 
-     * @param {string} actionName - Action name like 'vcpkg:clone' or 'java:setup-jdk'
-     * @returns {object|null} The action definition { name, action } or null if not found
-     */
-    getAction(actionName) {
-        // Parse module:action format
-        const colonIdx = actionName.indexOf(':');
-        if (colonIdx === -1) return null;
+		return result.sort((a, b) => a.full.localeCompare(b.full));
+	}
 
-        const moduleName = actionName.substring(0, colonIdx);
-        const mod = this.modules.get(moduleName);
-        if (!mod) return null;
+	/**
+	 * Get an action by name (module:action-name format)
+	 * Looks up from the module's top-level actions array
+	 *
+	 * @param {string} actionName - Action name like 'vcpkg:clone' or 'java:setup-jdk'
+	 * @returns {object|null} The action definition { name, action } or null if not found
+	 */
+	getAction(actionName) {
+		// Parse module:action format
+		const colonIdx = actionName.indexOf(':');
+		if (colonIdx === -1) return null;
 
-        // Look up in the module's actions array
-        if (!mod.actions) return null;
+		const moduleName = actionName.substring(0, colonIdx);
+		const mod = this.modules.get(moduleName);
+		if (!mod) return null;
 
-        return mod.actions.find(a => a.name === actionName) || null;
-    }
+		// Look up in the module's actions array
+		if (!mod.actions) return null;
 
-    /**
-     * List all registered actions across all modules
-     * @returns {Array} Array of { name, description, module }
-     */
-    listActions(options) {
-        const actions = [];
+		return mod.actions.find((a) => a.name === actionName) || null;
+	}
 
-        for (const [moduleName, mod] of this.modules) {
-            if (!mod.actions) continue;
+	/**
+	 * List all registered actions across all modules
+	 * @returns {Array} Array of { name, description, module }
+	 */
+	listActions(options) {
+		const actions = [];
 
-            for (const actionDef of mod.actions) {
-                const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action(options)
-                    : actionDef.action;
-                actions.push({
-                    name: actionDef.name,
-                    description: actionObj?.description || '',
-                    module: moduleName
-                });
-            }
-        }
+		for (const [moduleName, mod] of this.modules) {
+			if (!mod.actions) continue;
 
-        return actions.sort((a, b) => a.name.localeCompare(b.name));
-    }
+			for (const actionDef of mod.actions) {
+				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
+				actions.push({
+					name: actionDef.name,
+					description: actionObj?.description || '',
+					module: moduleName,
+				});
+			}
+		}
 
-    /**
-     * Print discovered modules
-     */
-    printDiscovered() {
-        console.log('Discovered modules:');
-        for (const [name, mod] of this.modules) {
-            const actions = (mod.actions || []).map(a => a.name).join(', ');
-            console.log(`  ${name.padEnd(20)} ${mod.description || ''}`);
-            console.log(`    Actions: ${actions}`);
-        }
-    }
+		return actions.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Print discovered modules
+	 */
+	printDiscovered() {
+		console.log('Discovered modules:');
+		for (const [name, mod] of this.modules) {
+			const actions = (mod.actions || []).map((a) => a.name).join(', ');
+			console.log(`  ${name.padEnd(20)} ${mod.description || ''}`);
+			console.log(`    Actions: ${actions}`);
+		}
+	}
 }
 
 module.exports = new ModuleRegistry();

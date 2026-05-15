@@ -20,8 +20,9 @@ Usage::
     from .planner import plan
 
     result = plan(
-        agent_input=agent_input,
-        host=host,
+        agent_base=self,
+        context=context,
+        question=question,
         waves=waves,
         instructions=instructions,
         current_scratch=current_scratch,
@@ -34,11 +35,9 @@ import json
 from typing import Any, Dict, List
 
 from rocketlib import debug
-from rocketlib.types import IInvokeLLM
 
-from ai.common.agent import safe_str
+from ai.common.agent import AgentBase, AgentContext, safe_str
 from ai.common.schema import Question
-from ai.common.agent.types import AgentInput, AgentHost
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +54,7 @@ SYSTEM_ROLE = 'You are RocketRide Wave, a planning agent that solves tasks step-
 # ---------------------------------------------------------------------------
 
 
-def _build_all_tool_descriptions(host: AgentHost) -> str:
+def _build_all_tool_descriptions(context: AgentContext) -> str:
     """
     Build full tool descriptor JSON for all available tools.
 
@@ -68,7 +67,7 @@ def _build_all_tool_descriptions(host: AgentHost) -> str:
     from regular tools — it is executed locally, not through the tool pipeline).
     """
     lines: List[str] = []
-    for td in host.tools.query():
+    for td in context.tools.list:
         # Defensively handle both dict descriptors and object-style descriptors
         name = td.get('name', '') if isinstance(td, dict) else safe_str(getattr(td, 'name', ''))
         if not name:
@@ -103,8 +102,8 @@ def _json_default(obj: Any) -> Any:
 
 def _build_wave_question(
     *,
-    agent_input: AgentInput,
-    host: AgentHost,
+    context: AgentContext,
+    question: Question,
     waves: List[Dict[str, Any]],
     instructions: List[str],
     scratch: str = '',
@@ -123,8 +122,8 @@ def _build_wave_question(
       - The planning question itself
     """
     # Deep-copy so we can mutate (add goals, clear questions) without touching
-    # the original AgentInput that the outer loop holds across iterations.
-    q = agent_input.question.model_copy(deep=True)
+    # the original question that the outer loop holds across iterations.
+    q = question.model_copy(deep=True)
     q.role = SYSTEM_ROLE
     # Instructs the schema layer to expect and parse a JSON response from the LLM
     q.expectJson = True
@@ -143,7 +142,7 @@ def _build_wave_question(
 
     # Collect all tool descriptors from connected nodes via the host's tool
     # discovery mechanism.  Each descriptor is one compact JSON line.
-    tools_block = _build_all_tool_descriptions(host)
+    tools_block = _build_all_tool_descriptions(context)
 
     # memory.peek is injected separately from regular tools because:
     # 1. It is executed locally in the executor (not routed through the tool
@@ -153,7 +152,9 @@ def _build_wave_question(
     peek_descriptor = json.dumps(
         {
             'name': 'memory.peek',
-            'description': ('Extract data from a stored result using a JMESPath expression, or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.'),
+            'description': (
+                'Extract data from a stored result using a JMESPath expression, or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.'
+            ),
             'inputSchema': {
                 'type': 'object',
                 'required': ['key'],
@@ -161,12 +162,20 @@ def _build_wave_question(
                     'key': {'type': 'string', 'description': 'Memory key to read from'},
                     'path': {
                         'type': 'string',
-                        'description': ('JMESPath expression to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at 50 items — use indexed paths for specific elements.'),
+                        'description': (
+                            'JMESPath expression to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at 50 items — use indexed paths for specific elements.'
+                        ),
                     },
                     # offset/length enable chunked reading of large raw values
                     # when the LLM needs to page through data too large to load at once
-                    'offset': {'type': 'integer', 'description': 'Character offset for chunk reading (default 0). Only when path is omitted.'},
-                    'length': {'type': 'integer', 'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.'},
+                    'offset': {
+                        'type': 'integer',
+                        'description': 'Character offset for chunk reading (default 0). Only when path is omitted.',
+                    },
+                    'length': {
+                        'type': 'integer',
+                        'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.',
+                    },
                 },
             },
             'outputSchema': {
@@ -177,7 +186,10 @@ def _build_wave_question(
                     'offset': {'type': 'integer', 'description': 'Character offset used (chunk mode only)'},
                     'total_chars': {'type': 'integer', 'description': 'Total length of the value (chunk mode only)'},
                     'truncated': {'type': 'boolean', 'description': 'True if an array result was capped'},
-                    'returned_items': {'type': 'integer', 'description': 'Number of array items returned when truncated'},
+                    'returned_items': {
+                        'type': 'integer',
+                        'description': 'Number of array items returned when truncated',
+                    },
                     'total_items': {'type': 'integer', 'description': 'Total array length when truncated'},
                 },
             },
@@ -385,7 +397,9 @@ def _build_wave_question(
     if all_results:
         # indent=2 for readability in the prompt; _json_default handles any
         # non-serializable values that sneak through from tool result summaries
-        q.addContext('Previous tool results:\n' + json.dumps(all_results, ensure_ascii=False, indent=2, default=_json_default))
+        q.addContext(
+            'Previous tool results:\n' + json.dumps(all_results, ensure_ascii=False, indent=2, default=_json_default)
+        )
 
     # This is the actual planning question — placed last so it is the freshest
     # thing in the LLM's context window when it generates its response.
@@ -400,8 +414,9 @@ def _build_wave_question(
 
 def plan(
     *,
-    agent_input: AgentInput,
-    host: AgentHost,
+    agent_base: AgentBase,
+    context: AgentContext,
+    question: Question,
     waves: List[Dict[str, Any]],
     instructions: List[str],
     current_scratch: str = '',
@@ -413,8 +428,10 @@ def plan(
     The LLM either plans a wave of tool calls or returns a final answer directly.
 
     Args:
-        agent_input: The original user request (question, documents, context).
-        host: The agent host providing tool query/get and LLM access.
+        agent_base: The driver instance — used to call ``call_llm`` for
+            LLM invocation through the AgentBase host adapter.
+        context: The current agent run context (carries the host channels).
+        question: The original user request (question, documents, context).
         waves: History of prior waves (calls + results) for context.
         instructions: Additional user-specified instructions to include.
         current_scratch: The LLM's working notes from the previous iteration.
@@ -426,17 +443,19 @@ def plan(
           - ``{}`` — empty (LLM returned nothing useful).
     """
     wave_prompt = _build_wave_question(
-        agent_input=agent_input,
-        host=host,
+        context=context,
+        question=question,
         waves=waves,
         instructions=instructions,
         scratch=current_scratch,
     )
     debug(f'plan: request {wave_prompt.getPrompt()}')
 
-    # Single LLM call — the response is parsed as JSON by getJson().
-    # The schema layer enforces the fenced-JSON format requested via expectJson.
-    result = host.llm.invoke(IInvokeLLM(op='ask', question=wave_prompt)).getJson()
+    # Single LLM call routed through AgentBase.call_llm_json — like
+    # call_llm but returns the parsed JSON dict instead of extracted
+    # text.  The wave_prompt is built with expectJson=True so the
+    # schema layer parses the response as JSON.
+    result = agent_base.call_llm_json(context, wave_prompt)
     debug(f'plan: result={json.dumps(result, ensure_ascii=False, default=str)[:500]}')
 
     # Diagnostic trace file — append each REQUEST/RESULT pair for offline

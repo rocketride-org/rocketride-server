@@ -11,6 +11,7 @@ export type ThemeTokens = {
 	'--rr-palette-mode': string;
 	'--rr-bg-default': string;
 	'--rr-bg-paper': string;
+	'--rr-bg-surface': string;
 	'--rr-bg-surface-alt': string;
 	'--rr-fg-titleBar-active': string;
 	'--rr-fg-titleBar-inactive': string;
@@ -20,6 +21,7 @@ export type ThemeTokens = {
 	'--rr-fg-widget': string;
 	'--rr-bg-widget-header': string;
 	'--rr-bg-widget-hover': string;
+	'--rr-bg-toolbar-hover': string;
 	'--rr-shadow-widget': string;
 	'--rr-font-family-widget': string;
 	'--rr-font-size-widget': string;

@@ -1,0 +1,32 @@
+{
+	"compilerOptions": {
+		"target": "ES2020",
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"jsx": "react-jsx",
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitReturns": true,
+		"noImplicitOverride": true,
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
+		"forceConsistentCasingInFileNames": true,
+		"skipLibCheck": true,
+		"allowJs": true,
+		"checkJs": false,
+		"paths": {
+			"shared": ["../../packages/shared-ui/src/index.ts"],
+			"shared/*": ["../../packages/shared-ui/src/*"],
+			"shell-ui": ["./src/index.ts"]
+		}
+	},
+	"include": ["src/**/*", "*.ts", "*.tsx"],
+	"exclude": ["node_modules", "dist", "build"]
+}

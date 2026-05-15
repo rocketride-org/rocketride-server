@@ -57,7 +57,6 @@ Usage:
 
     # Define a pipeline configuration
     config: PipelineConfig = {
-        'name': 'My Pipeline',
         'project_id': 'my-project',
         'source': 'webhook_input',
         'components': [
@@ -131,10 +130,14 @@ class PipelineConfig(TypedDict, total=False):
     of connected components that transform, analyze, or route information.
     """
 
-    name: str  # Human-readable pipeline name
     description: str  # Pipeline description
     version: int  # Pipeline version number
     components: list[PipelineComponent]  # Array of pipeline components - REQUIRED
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
     viewport: dict[str, Any]  # UI viewport settings for visual editors
+    docRevision: int  # Editor document revision counter for change tracking
+    isLocked: bool  # Whether the canvas is locked from editing
+    snapToGrid: bool  # Whether node snapping to grid is enabled
+    snapGridSize: list[int]  # Grid size for snapping [x, y]
+    editorMode: str  # Active editor mode (e.g. 'design', 'status', 'flow')

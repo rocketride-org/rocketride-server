@@ -26,29 +26,42 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const env = getenv();
+requireKeys(env, ['RR_STRIPE_PUBLISHABLE_KEY'], 'vscode:build-webview');
 
 export default defineConfig({
 	plugins: [pluginReact()],
 
 	source: {
+		// Inject public build-time config values into webview bundles.
+		// SECURITY: never add server-side secrets here — only publishable keys.
+		define: {
+			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
+			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || ''),
+		},
 		include: ['./src/**/*'],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'page-connection': './src/providers/views/PageConnection/index.tsx',
-			'page-settings': './src/providers/views/PageSettings/index.tsx',
-			'page-editor': './src/providers/views/PageEditor/index.tsx',
-			'page-status': './src/providers/views/PageStatus/index.tsx',
-			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
-			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
-			'page-dashboard': './src/providers/views/PageDashboard/index.tsx',
+			'page-sidebar': './src/providers/views/Sidebar/index.tsx',
+			'page-settings': './src/providers/views/Settings/index.tsx',
+			'page-project': './src/providers/views/Project/index.tsx',
+			'page-deploy': './src/providers/views/Deploy/index.tsx',
+			'page-welcome': './src/providers/views/Welcome/index.tsx',
+			'page-monitor': './src/providers/views/Monitor/index.tsx',
+			'page-account': './src/providers/views/Account/index.tsx',
+			'page-auth': './src/providers/views/Auth/index.tsx',
 		},
 	},
 
 	resolve: {
 		alias: {
-			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 TaskCommands: DAP Command Handler for Task Management.
 
@@ -30,6 +52,8 @@ The actual task execution and management is delegated to the TaskServer.
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
+from ai.account import account
+from ai.account.models import resolve_task_permissions
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -79,7 +103,9 @@ class TaskCommands(DAPConn):
             transport (TransportBase): Communication transport layer for DAP messages
             **kwargs: Additional arguments passed to parent DAPConn constructor
         """
-        # Map of store subcommand names to handler methods
+        # Map of store subcommand names to handler methods.
+        # Populated here so new subcommands can be added without touching the
+        # dispatcher logic in on_rrext_store.
         self._store_subcommand_handlers = {
             'fs_open': self._store_fs_open,
             'fs_read': self._store_fs_read,
@@ -88,7 +114,9 @@ class TaskCommands(DAPConn):
             'fs_delete': self._store_fs_delete,
             'fs_list_dir': self._store_fs_list_dir,
             'fs_mkdir': self._store_fs_mkdir,
+            'fs_rmdir': self._store_fs_rmdir,
             'fs_stat': self._store_fs_stat,
+            'fs_rename': self._store_fs_rename,
         }
 
     async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,15 +145,45 @@ class TaskCommands(DAPConn):
             args = request.get('arguments') or {}
             pipeline = args.get('pipeline')
             if pipeline is not None:
+                # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
+
+            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Resolve org_id by walking the organizations/teams tree.
+            org_id = ''
+            for org in self._account_info.organizations or []:
+                for team in org.get('teams', []):
+                    if team.get('id') == team_id:
+                        org_id = org.get('id', '')
+                        break
+                if org_id:
+                    break
+
+            # Build merged environment for pipeline variable resolution.
+            # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
+            # Security: only accept ROCKETRIDE_* keys from the caller
+            raw_env = args.get('env', {})
+            caller_env = {k: v for k, v in raw_env.items() if k.startswith('ROCKETRIDE_')}
+            merged_env = await account.get_merged_env(
+                user_id=self._account_info.userId,
+                org_id=org_id,
+                team_id=team_id,
+            )
+            # Caller-supplied env overrides on top
+            merged_env.update(caller_env)
 
             # Start the task without debugger attachment
             response = await self._server.start_task(
-                self._account_info.apikey,
                 request,
                 self,
                 wait_for_running=True,
-                client_id=self._account_info.clientid,
+                client_id=self._account_info.userId,
+                user_id=self._account_info.userId,
+                team_id=team_id,
+                org_id=org_id,
+                env=merged_env,
             )
 
             # Confirm successful task execution startup
@@ -159,7 +217,6 @@ class TaskCommands(DAPConn):
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
-                self._account_info.apikey,
                 request,
                 self,
                 wait_for_running=True,
@@ -224,6 +281,35 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
+    async def on_rrext_get_pipeline(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_get_pipeline' command to retrieve the unresolved pipeline for a task.
+
+        Returns the original pipeline dict as stored on the task — placeholders such as
+        ${ROCKETRIDE_API_KEY} are NOT substituted, so no secrets are exposed.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - token (str): Task token to query
+
+        Returns:
+            Dict[str, Any]: DAP response with pipeline in body:
+                - pipeline (Dict): The unresolved pipeline configuration
+
+        Raises:
+            Exception: If the task cannot be found or the caller lacks task.monitor permission
+        """
+        try:
+            # Step 1: locate the task — verifies task.monitor permission.
+            task = self.get_task(request, 'task.monitor')
+
+            # Step 2: return the unresolved pipeline (${...} placeholders intact).
+            return self.build_response(request, body={'pipeline': task._pipeline})
+
+        except Exception as e:
+            self.debug_message(f'Failed to get pipeline from task: {str(e)}')
+            raise
+
     async def on_rrext_get_token(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle DAP 'rrext_status' command to retrieve the current status of a task.
@@ -253,12 +339,10 @@ class TaskCommands(DAPConn):
             project_id = args.get('projectId', None)
             source = args.get('source', None)
 
-            # Get the task control
-            control = self._server.get_task_control_by_project(project_id, source)
-
-            # Verify the caller owns this task
-            if control.apikey != self._account_info.apikey:
-                raise PermissionError('Access denied: task belongs to a different account')
+            # Get the task control (ownership + permission check inside)
+            control = self._server.get_task_control_by_project(
+                project_id, source, self._account_info, require='task.monitor'
+            )
 
             # Return successful response with status data
             return self.build_response(
@@ -296,9 +380,9 @@ class TaskCommands(DAPConn):
 
             tasks = []
 
-            # Iterate all tasks and include only those owned by this apikey
+            # Iterate all tasks the caller has access to (own, teammate, or org admin).
             for control in self._server._task_control.values():
-                if control.apikey != self._account_info.apikey:
+                if not resolve_task_permissions(self._account_info, control.teamId):
                     continue
 
                 # Get current status for name and status string
@@ -307,12 +391,18 @@ class TaskCommands(DAPConn):
                 # Read name and description from the flat project
                 project = control.pipeline or {}
                 pipeline_name = project.get('name') if isinstance(project, dict) else None
-                pipeline_desc = project.get('description') if isinstance(project, dict) and isinstance(project.get('description'), str) else None
+                pipeline_desc = (
+                    project.get('description')
+                    if isinstance(project, dict) and isinstance(project.get('description'), str)
+                    else None
+                )
 
-                # Build the name and description
+                # Build the name and description; fall back to source/default if not present.
                 name = pipeline_name or control.source
                 description = pipeline_desc or 'RocketRide DTC MCP Tool'
 
+                # Only include tasks that are actively running — completed or
+                # queued tasks are not surfaced to the caller.
                 if status.state == TASK_STATE.RUNNING.value:
                     tasks.append(
                         {
@@ -364,7 +454,8 @@ class TaskCommands(DAPConn):
             if not subcommand:
                 raise ValueError('Subcommand is required')
 
-            # Dispatch to appropriate handler
+            # Dispatch to appropriate handler using the pre-built lookup dict.
+            # The walrus operator assigns the handler if found; None triggers else.
             if handler := self._store_subcommand_handlers.get(subcommand):
                 return await handler(request, args)
             else:
@@ -375,83 +466,265 @@ class TaskCommands(DAPConn):
             raise
 
     def _get_file_store(self):
-        """Get a FileStore scoped to the authenticated user."""
-        return self._server.store.get_file_store(self._account_info.clientid)
+        """
+        Get a FileStore scoped to the authenticated user.
+
+        Returns:
+            FileStore: A file-store instance that isolates all paths under
+                the current user's storage namespace.
+        """
+        # Scope the file store to the calling user so users cannot access each
+        # other's files through the store API.
+        return self._server.store.get_file_store(self._account_info.userId)
 
     # =========================================================================
     # Generic File Store Handlers
     # =========================================================================
 
     async def _store_fs_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Open a file handle for reading or writing."""
+        """
+        Open a file handle for reading or writing.
+
+        For write mode (``mode='w'``) the backend creates a new write handle and
+        returns its ID.  For read mode (default) the backend opens the file,
+        validates it exists, and returns metadata alongside the handle ID.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path``.  Optional ``mode``
+                (``'r'`` or ``'w'``, defaults to ``'r'``).
+
+        Returns:
+            Dict[str, Any]: DAP response.
+                Write mode: ``body.handle`` — the new write handle ID.
+                Read mode:  result from ``fs.open_read`` (includes handle + metadata).
+        """
         fs = self._get_file_store()
         path = args.get('path')
         mode = args.get('mode', 'r')
 
         if mode == 'w':
+            # Create a write handle; the connection_id is used to tie the handle
+            # lifetime to this connection so it is cleaned up on disconnect.
             handle_id = await fs.open_write(path, self._connection_id)
             return self.build_response(request, body={'handle': handle_id})
         else:
+            # Open for reading; returns handle ID plus file metadata (size, etc.).
             result = await fs.open_read(path, self._connection_id)
             return self.build_response(request, body=result)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Read data from an open read handle."""
+        """
+        Read data from an open read handle.
+
+        Clamps ``offset`` and ``length`` to safe values before forwarding to the
+        backend so that a misbehaving client cannot request an unbounded read.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``handle``.  Optional ``offset``
+                (default 0) and ``length`` (default and max 4 MiB).
+
+        Returns:
+            Dict[str, Any]: DAP response with ``body.size`` (bytes read) and
+                ``arguments.data`` (the raw bytes).
+        """
         fs = self._get_file_store()
         handle = args.get('handle')
         offset = args.get('offset', 0)
         length = args.get('length', 4_194_304)
 
-        # Clamp client-supplied values
+        # Clamp client-supplied values to safe defaults.
+        # Negative or non-integer offsets are reset to 0.
         if not isinstance(offset, int) or offset < 0:
             offset = 0
+        # Non-positive or non-integer lengths are reset to the default chunk size.
         if not isinstance(length, int) or length <= 0:
             length = 4_194_304
+        # Cap the length at 4 MiB to prevent memory exhaustion from large reads.
         length = min(length, 4_194_304)
 
+        # Read the chunk from the file store backend.
         data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
+
+        # Build the response: body carries the byte count; arguments carries the
+        # raw data separately so the protocol can handle binary payloads correctly.
         response = self.build_response(request, body={'size': len(data)})
         response['arguments'] = {'data': data}
         return response
 
     async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Write data to an open write handle."""
+        """
+        Write data to an open write handle.
+
+        Accepts both ``bytes`` and ``str`` data; strings are UTF-8 encoded before
+        being forwarded to the backend.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``handle``.  Optional ``data``
+                (bytes or str, defaults to empty bytes).
+
+        Returns:
+            Dict[str, Any]: DAP response with ``body.bytesWritten`` containing the
+                number of bytes actually written.
+        """
         fs = self._get_file_store()
         handle = args.get('handle')
         data = args.get('data', b'')
+
+        # Normalise string data to bytes so the backend always receives bytes.
         if isinstance(data, str):
             data = data.encode('utf-8')
+
+        # Write the chunk and return the actual byte count confirmed by the backend.
         written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
         return self.build_response(request, body={'bytesWritten': written})
 
     async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Close a file handle."""
+        """
+        Close a file handle.
+
+        Dispatches to the correct close method based on the handle mode so that
+        the backend can flush write buffers for write handles.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``handle``.  Optional ``mode``
+                (``'r'`` or ``'w'``, defaults to ``'r'``).
+
+        Returns:
+            Dict[str, Any]: Empty success DAP response.
+        """
         fs = self._get_file_store()
         handle = args.get('handle')
         mode = args.get('mode', 'r')
 
         if mode == 'w':
+            # Flush and close a write handle; triggers any finalisation (e.g. S3 upload).
             await fs.close_write(handle, connection_id=self._connection_id)
         else:
+            # Release a read handle and free associated resources.
             await fs.close_read(handle, connection_id=self._connection_id)
         return self.build_response(request)
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete file from file store."""
+        """
+        Delete file from file store.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path`` — the file to delete.
+
+        Returns:
+            Dict[str, Any]: Empty success DAP response.
+        """
+        # Delegate deletion to the user-scoped file store.
         await self._get_file_store().delete(args.get('path'))
         return self.build_response(request)
 
     async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """List directory contents."""
+        """
+        List directory contents.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Optional ``path`` — directory to list
+                (defaults to the root of the user's store, i.e. ``''``).
+
+        Returns:
+            Dict[str, Any]: DAP response with directory listing as the body.
+        """
+        # Delegate to the file store; default to the root path if not specified.
         result = await self._get_file_store().list_dir(args.get('path', ''))
         return self.build_response(request, body=result)
 
     async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Create directory."""
+        """
+        Create directory.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path`` — the directory to create.
+
+        Returns:
+            Dict[str, Any]: Empty success DAP response.
+        """
+        # Create the directory in the user-scoped file store.
         await self._get_file_store().mkdir(args.get('path'))
         return self.build_response(request)
 
+    async def _store_fs_rmdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove directory.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path`` (non-empty string). Optional
+                ``recursive`` (strict bool; any non-bool value is rejected rather than
+                coerced). If ``True`` the directory and all its contents are removed;
+                if ``False`` the call fails when the directory is non-empty.
+
+        Returns:
+            Dict[str, Any]: Empty success DAP response, or a DAP error response if
+                ``path`` is missing/empty or ``recursive`` is not a bool.
+        """
+        # Validate path is a non-empty string before touching the store — the
+        # FileStore layer rejects empty paths, but an early error here produces
+        # a cleaner DAP-level message.
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'rmdir requires a non-empty "path" string')
+
+        # Accept only an explicit bool for ``recursive`` — avoid silently enabling
+        # recursive deletion when the client sends a non-bool truthy value (e.g.
+        # a string or a dict).
+        recursive = args.get('recursive', False)
+        if not isinstance(recursive, bool):
+            return self.build_error(request, 'rmdir "recursive" must be a boolean')
+
+        # Remove the directory; pass the recursive flag from the client.
+        await self._get_file_store().rmdir(path, recursive=recursive)
+        return self.build_response(request)
+
     async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get file/directory metadata."""
+        """
+        Get file/directory metadata.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path`` — the path to stat.
+
+        Returns:
+            Dict[str, Any]: DAP response with metadata (size, modified time, type,
+                etc.) as the body.
+        """
+        # Retrieve metadata for the given path from the user-scoped store.
         result = await self._get_file_store().stat(args.get('path'))
         return self.build_response(request, body=result)
+
+    async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Rename a file or directory.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``old_path`` (current path) and
+                ``new_path`` (desired path). Both are required non-empty strings.
+
+        Returns:
+            Dict[str, Any]: Empty success DAP response, or a DAP error response if
+                either argument is missing or not a non-empty string.
+        """
+        # Validate both paths up front so FileStore.rename does not receive None
+        # and fail with a less actionable error further down the stack.
+        old_path = args.get('old_path')
+        new_path = args.get('new_path')
+        if not isinstance(old_path, str) or not old_path:
+            return self.build_error(request, 'rename requires a non-empty "old_path" string')
+        if not isinstance(new_path, str) or not new_path:
+            return self.build_error(request, 'rename requires a non-empty "new_path" string')
+
+        # Delegate the rename operation to the user-scoped file store backend.
+        await self._get_file_store().rename(old_path, new_path)
+        return self.build_response(request)

@@ -56,7 +56,9 @@ class Context:
 
         best_contexts = {}
         for doc_id, group in groupby(answers, key=lambda x: x.document.id):
-            max_context = max(group, key=attrgetter('score'))  # select the answer span with the highest confidence score
+            max_context = max(
+                group, key=attrgetter('score')
+            )  # select the answer span with the highest confidence score
 
             # Create the highlight and update the context
             highlight = [
