@@ -225,6 +225,7 @@ class DAPClient(DAPBase):
             # Send request through transport
             await self._send(message)
         except Exception:
+            self._pending_requests.pop(seq, None)
             self.raise_exception(ConnectionError('Could not send request'))
 
         try:
