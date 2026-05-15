@@ -483,7 +483,13 @@ class TestHistorySummarization:
         """With many messages and tight budget, first + placeholder + last should appear."""
         messages = [
             {'role': 'system', 'content': 'Be helpful.'},
-        ] + [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'This is a medium length message number {i} in the conversation.'} for i in range(10)]
+        ] + [
+            {
+                'role': 'user' if i % 2 == 0 else 'assistant',
+                'content': f'This is a medium length message number {i} in the conversation.',
+            }
+            for i in range(10)
+        ]
         result = optimizer.summarize_history(messages, 50)
         assert result[0]['content'] == 'Be helpful.'
         # Should have been compressed
@@ -871,7 +877,9 @@ class TestIInstanceLifecycle:
             inst.writeQuestions(q)
 
         # The debug log about discarding should have been called
-        mock_debug.assert_any_call('context_optimizer: optimized question text produced but question.questions is empty, discarding: optimized question text')
+        mock_debug.assert_any_call(
+            'context_optimizer: optimized question text produced but question.questions is empty, discarding: optimized question text'
+        )
         # Question should still be forwarded
         inst.instance.writeQuestions.assert_called_once()
 
