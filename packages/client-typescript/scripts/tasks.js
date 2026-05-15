@@ -32,7 +32,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
@@ -221,12 +221,13 @@ function makeCopyToServerStaticAction() {
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			// Check for --testport from CLI options or direct options
-			const testport = options.testport || ctx.options?.testport;
-			if (testport) {
-				ctx.port = testport;
-				task.output = `Using existing server on port ${ctx.port}`;
-				return { port: ctx.port, server: null };
+			// Check for --taskserver from CLI options or direct options
+			const taskserver = options.taskserver || ctx.options?.taskserver;
+			if (taskserver) {
+				const parsed = parseServerAddress(taskserver);
+				ctx.port = parsed.port;
+				task.output = `Using existing server at ${parsed.uri}`;
+				return { port: parsed.port, server: null, serverUri: parsed.uri };
 			}
 
 			task.output = 'Starting server...';
@@ -235,6 +236,12 @@ function makeStartTestServerAction(options = {}) {
 				script: 'ai/eaas.py',
 				trace: options.trace,
 				basePort: 30000,
+				// CI for fork PRs doesn't have repo secrets; the integration tests
+				// expect a shared API key between server and client. Default to the
+				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
+				env: {
+					ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+				},
 				onOutput: (text) => {
 					if (taskComplete) return;
 					const lines = text.trim().split('\n');
@@ -273,11 +280,13 @@ function makeRunJestAction(options = {}) {
 			// Load .env for test configuration
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-			const port = ctx.brackets?.['ts-test-server']?.port || ctx.port;
+			const bracket = ctx.brackets?.['ts-test-server'];
+			const port = bracket?.port || ctx.port;
+			const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
 			const testEnv = {
 				...process.env,
-				ROCKETRIDE_URI: `http://localhost:${port}`,
+				ROCKETRIDE_URI: serverUri,
 			};
 
 			const jestArgs = ['jest', '--verbose', '--colors'];
@@ -319,14 +328,14 @@ module.exports = {
 		{
 			name: 'client-typescript:build',
 			action: () => ({
-				description: 'Build TypeScript client',
+				description: 'Build client-typescript',
 				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync'],
 			}),
 		},
 		{
 			name: 'client-typescript:test',
 			action: () => ({
-				description: 'Test TypeScript client',
+				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
 					parallel(['ai:build', 'nodes:build', 'client-python:build', 'client-typescript:build'], 'Build dependencies'),
@@ -342,7 +351,7 @@ module.exports = {
 		{
 			name: 'client-typescript:clean',
 			action: () => ({
-				description: 'Clean TypeScript client',
+				description: 'Cleaning client-typescript',
 				run: async (ctx, task) => {
 					await removeDirs([LOCAL_DIST]);
 					await removeDirAndParents(PROJECT_ROOT, [PACKAGE_DIST, SERVER_STATIC_DIR, path.join(BUILD_ROOT, 'clients', 'typescript')]);

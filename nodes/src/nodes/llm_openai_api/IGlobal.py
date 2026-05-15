@@ -19,7 +19,14 @@ class IGlobal(IGlobalBase):
             requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
             depends(requirements)
 
-            from openai import OpenAI, APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                OpenAIError,
+                AuthenticationError,
+                RateLimitError,
+                APIConnectionError,
+            )
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)

@@ -1,0 +1,478 @@
+{
+	// ==========================================================================
+	// Per-provider configuration for the sync_models tool.
+	//
+	// Each key under "providers" must match a key in _PROVIDER_REGISTRY and
+	// _SERVICES_JSON_PATHS in sync_models.py.
+	//
+	// TOKEN LIMIT PRIORITY (highest → lowest):
+	//   1. token_limit_overrides (this file)  — always wins
+	//   2. context_window from provider API   — normal mode only
+	//   3. LiteLLM model database             — unless --no-litellm
+	//   4. default_context_window             — new models only
+	//   5. 16384 hardcoded fallback           — new models only, flagged as ?
+	// ==========================================================================
+	"providers": {
+		// ----------------------------------------------------------------------
+		// OpenAI — GPT and o-series chat models
+		// Uses openai.OpenAI SDK. Mistral also uses this client (OpenAI-compat).
+		// ----------------------------------------------------------------------
+		"llm_openai": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_OPENAI_KEY",
+			"module": "openai",
+			"models_endpoint": "https://api.openai.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			// model_filter controls which models from the API are considered.
+			// include_prefixes: if non-empty, model must start with one of these.
+			// exclude_patterns: substring match anywhere in model ID.
+			// exclude_exact: exact model ID match (for bare legacy aliases).
+			"model_filter": {
+				"include_prefixes": ["gpt-", "o1", "o3", "o4", "chatgpt-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "tts", "whisper", "dall-e", "audio", "realtime", "davinci", "babbage", "curie", "ada", "instruct", "search", "transcribe", "codex", "image"],
+				// Pro-tier models are Responses-API-only (not v1/chat/completions).  The
+				// chat smoke test would fail every run, so list them explicitly here.
+				"exclude_exact": ["o1-pro", "gpt-5-pro", "gpt-5.2-pro", "gpt-5.5-pro"]
+			},
+			// Drop models with dated snapshot suffixes like -2024-04-09 or -0613.
+			// These are point-in-time snapshots; keep only the canonical aliases.
+			"exclude_dated_snapshots": true,
+			// Per-provider protected profiles (merged with default_protected_profiles).
+			"protected_profiles": [["custom", "2126-04-09"]],
+			// Fallback context window for brand-new models when API + litellm have no data.
+			"default_context_window": 128000,
+			// Override token limits when the provider API and litellm are unreliable.
+			// Comment out to let litellm drive — restore when litellm has wrong values.
+			"token_limit_overrides": {
+				// "gpt-3.5-turbo": 16385,
+				// "gpt-3.5-turbo-16k": 16385,
+				// "gpt-3.5-turbo-1106": 16385,
+				// "gpt-3.5-turbo-0125": 16385,
+				// "gpt-4": 8192,
+				// "gpt-4-0613": 8192,
+				// "gpt-4-turbo": 128000,
+				// "gpt-4o": 128000,
+				// "gpt-4o-mini": 128000,
+				// "gpt-4.1": 1047576,
+				// "gpt-4.1-mini": 1047576,
+				// "gpt-4.1-nano": 1047576,
+				// "gpt-5": 400000,
+				// "gpt-5.1": 400000,
+				// "gpt-5.2": 400000,
+				// "gpt-5-mini": 400000,
+				// "gpt-5-nano": 400000,
+				// "gpt-5.4": 1050000,
+				// "gpt-5.4-pro": 1050000,
+				// "gpt-5.4-mini": 400000,
+				// "gpt-5.4-nano": 400000,
+				// "o1": 200000,
+				// "o3": 200000,
+				// "o3-mini": 200000,
+				// "o4-mini": 200000
+			}
+		},
+		// ----------------------------------------------------------------------
+		// OpenAI Embeddings — text-embedding-* models only
+		// Same API key as llm_openai; different filter and smoke test.
+		// ----------------------------------------------------------------------
+		"embedding_openai": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_OPENAI_KEY",
+			"module": "openai",
+			"models_endpoint": "https://api.openai.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "embed",
+			// Disabled: embedding model IDs are stable and do not need automated sync.
+			// Run explicitly with --provider embedding_openai to sync on demand.
+			"enabled": false,
+			// OpenRouter does not carry embedding models — disable its fallback so
+			// the three active text-embedding-* profiles are never wrongly deprecated.
+			"use_openrouter": false,
+			"model_filter": {
+				"include_prefixes": ["text-embedding-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": []
+			},
+			"token_limit_overrides": {
+				// "text-embedding-3-small": 8191,
+				// "text-embedding-3-large": 8191,
+				// "text-embedding-ada-002": 8191
+			}
+		},
+		// ----------------------------------------------------------------------
+		// Anthropic — Claude models
+		//
+		// WARNING: litellm swaps max_output_tokens with the context window for
+		// Anthropic models (e.g. reports 64000 for claude-sonnet-4-6 instead of
+		// 1000000). All token_limit_overrides below are intentionally active.
+		// ----------------------------------------------------------------------
+		"llm_anthropic": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_ANTHROPIC_KEY",
+			"module": "anthropic",
+			"models_endpoint": "https://api.anthropic.com/v1/models",
+			"auth_header": "x-api-key",
+			"auth_prefix": "",
+			// Anthropic requires this version header on every request.
+			"extra_headers": {
+				"anthropic-version": "2023-06-01"
+			},
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["claude-"],
+				"exclude_prefixes": [],
+				// Exclude Vertex-style IDs (e.g. claude-3-5-haiku@20241022) added by litellm
+				"exclude_patterns": ["@"]
+			},
+			// Authoritative context windows (from https://docs.anthropic.com/en/docs/about-claude/models/overview):
+			//   claude-opus-4-6, claude-sonnet-4-6 → 1,000,000 tokens
+			//   all other Claude models             → 200,000 tokens
+			//
+			// WARNING: litellm reports max_output_tokens as the context window for Anthropic models
+			// (e.g. 64000 for claude-sonnet-4-6 instead of 1000000). Always override here.
+			"token_limit_overrides": {
+				// "claude-opus-4-6":             1000000,
+				// "claude-sonnet-4-6":           1000000,
+				// "claude-haiku-4-5":             200000,
+				// "claude-sonnet-4-5":            200000,
+				// "claude-opus-4-5":              200000,
+				// "claude-3-5-haiku-20241022":    200000,
+				// "claude-3-5-sonnet-20241022":   200000,
+				// "claude-3-opus-20240229":       200000,
+				// "claude-3-haiku-20240307":      200000
+			}
+		},
+		// ----------------------------------------------------------------------
+		// Google Gemini
+		// Uses google-genai SDK (from google import genai).
+		// The API returns context_window (input_token_limit) directly.
+		// ----------------------------------------------------------------------
+		"llm_gemini": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_GEMINI_KEY",
+			"module": "gemini",
+			"models_endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+			"auth_in_url": true,
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["gemini-", "models/gemini-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "aqa", "attribution"]
+			},
+			// Verified token limits from Google (source of truth).
+			// Google API returns input_token_limit directly but these override
+			// any stale OpenRouter / LiteLLM values.
+			"token_limit_overrides": {
+				"models/gemini-3.1-pro-preview": 1048576,
+				"models/gemini-3.1-flash-image-preview": 131072,
+				"models/gemini-3.1-flash-lite-preview": 1048576,
+				"models/gemini-3-flash-preview": 1048576,
+				"models/gemini-3-pro-image-preview": 65536,
+				"models/gemini-2.5-pro": 1048576,
+				"models/gemini-2.5-flash": 1048576,
+				"models/gemini-2.5-flash-lite": 1048576,
+				"models/gemini-2.5-flash-image": 32768,
+				"models/gemini-3.1-pro-preview-customtools": 1048576
+			}
+		},
+		// ----------------------------------------------------------------------
+		// Mistral
+		// Uses openai.OpenAI pointed at https://api.mistral.ai/v1 (OpenAI-compat).
+		// Excludes audio, vision, OCR and realtime model families.
+		// exclude_exact removes the legacy bare "mistral-medium" alias (no version).
+		// ----------------------------------------------------------------------
+		"llm_mistral": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_MISTRAL_KEY",
+			"module": "mistral",
+			"models_endpoint": "https://api.mistral.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				// These profiles use Mistral's versioned API IDs (e.g. "mistral-medium-2508")
+				// which OpenRouter doesn't list — it uses short canonical names instead
+				// ("mistral-medium-3.1"). Without protection the no-key fallback path would
+				// wrongly deprecate them.  They are confirmed active on docs.mistral.ai.
+				["mistral-medium", "2026-10-09"],
+				["mistral-small", "2026-10-09"],
+				["magistral-medium", "2026-10-09"],
+				["magistral-small", "2026-10-09"],
+				// devstral-medium and devstral-small are versioned-alias short names.
+				// OpenRouter lists only the dated snapshot "devstral-2512"; Mistral's
+				// own API accepts both. Protect so the OpenRouter fallback path can't
+				// deprecate them.
+				["devstral-medium", "2026-10-09"],
+				["devstral-small", "2026-10-09"]
+			],
+			"model_filter": {
+				// All Mistral model families — needed for OpenRouter fallback mode where the
+				// full catalogue is iterated and models without matching prefixes must be excluded.
+				"include_prefixes": ["mistral-", "codestral-", "magistral-", "devstral-", "ministral-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": [
+					"embed",
+					"moderation",
+					"voxtral", // audio/voice models
+					"pixtral", // vision models
+					"ocr", // OCR-specific models
+					"realtime", // streaming/realtime API only
+					"transcribe", // audio transcription
+					"tts" // text-to-speech
+				],
+				// Legacy alias with no version info — superseded by mistral-medium-2505
+				"exclude_exact": ["mistral-medium"]
+			},
+			"token_limit_overrides": {
+				// "mistral-medium-latest": 131072,
+				// "mistral-large-latest": 131072,
+				// "mistral-large-2512": 131072,
+				// "mistral-medium-2505": 131072,
+				// "mistral-small-latest": 32768,
+				// "mistral-small-2503": 32768,
+				// "codestral-2501": 256000,
+				// "codestral-latest": 256000,
+				// "magistral-medium-2506": 131072,
+				// "magistral-medium-latest": 131072,
+				// "magistral-small-2506": 131072,
+				// "magistral-small-latest": 131072,
+				// "devstral-medium-2505": 131072,
+				// "devstral-medium-latest": 131072,
+				// "devstral-small-2505": 32768,
+				// "devstral-small-latest": 32768,
+				// "ministral-14b-2412": 131072,
+				// "ministral-14b-latest": 131072,
+				// "ministral-8b-2410": 131072,
+				// "ministral-8b-latest": 131072,
+				// "ministral-3b-2410": 131072,
+				// "ministral-3b-latest": 131072
+			}
+		},
+		// ----------------------------------------------------------------------
+		// DeepSeek — cloud API models only (deepseek-reasoner, deepseek-chat)
+		// Note: local Ollama-style DeepSeek profiles (deepseek-r1:*b) are NOT
+		// managed by this tool — they belong to Handler B (Ollama registry).
+		// ----------------------------------------------------------------------
+		"llm_deepseek": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_DEEPSEEK_KEY",
+			"module": "deepseek",
+			"models_endpoint": "https://api.deepseek.com/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["deepseek-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": []
+			},
+			// Local Ollama profiles use Ollama's model:size format (e.g. deepseek-r1:7b)
+			// which never appears in any cloud API. Protect all of them permanently.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["deepseek-r1-1_5b", "2026-10-09"],
+				["deepseek-r1-7b", "2026-10-09"],
+				["deepseek-r1-8b", "2026-10-09"],
+				["deepseek-r1-14b", "2026-10-09"],
+				["deepseek-r1-32b", "2026-10-09"],
+				["deepseek-r1-70b", "2026-10-09"],
+				["deepseek-r1-671b", "2026-10-09"],
+				["deepseek-v3", "2026-10-09"]
+			],
+			"token_limit_overrides": {
+				// "deepseek-reasoner": 65536,
+				// "deepseek-chat": 65536
+			}
+		},
+		// ----------------------------------------------------------------------
+		// xAI — Grok models
+		// Excludes image generation, embedding and vision-only variants.
+		// ----------------------------------------------------------------------
+		"llm_xai": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_XAI_KEY",
+			"module": "xai",
+			"models_endpoint": "https://api.x.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["grok-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["image", "embed", "vision"]
+			},
+			// grok-4-1-fast-reasoning / grok-4-1-fast-non-reasoning use all-hyphen model IDs
+			// while OpenRouter lists them as grok-4.1-fast-reasoning (dot form). The key-collision
+			// fix in merger.py handles re-matching them, but protect them here as an extra guard
+			// so the OpenRouter fallback never re-deprecates them without an API key.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["grok-4-1-fast-reasoning", "2026-10-09"],
+				["grok-4-1-fast-non-reasoning", "2026-10-09"]
+			],
+			"token_limit_overrides": {
+				// "grok-4": 131072,
+				// "grok-4-fast": 131072,
+				// "grok-4-heavy": 131072,
+				// "grok-4-5-heavy": 131072,
+				// "grok-3": 131072,
+				// "grok-3-fast": 131072,
+				// "grok-3-mini": 131072,
+				// "grok-3-mini-fast": 131072,
+				// "grok-code-fast-1": 131072
+			}
+		},
+		// ----------------------------------------------------------------------
+		// Perplexity — Sonar search-augmented models
+		// ----------------------------------------------------------------------
+		"llm_perplexity": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_PERPLEXITY_KEY",
+			"module": "perplexity",
+			"models_endpoint": "https://api.perplexity.ai/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["sonar"],
+				"exclude_prefixes": [],
+				"exclude_patterns": []
+			},
+			"token_limit_overrides": {
+				// "sonar-pro": 200000,
+				// "sonar": 200000,
+				// "sonar-reasoning-pro": 128000,
+				// "sonar-reasoning": 128000,
+				// "sonar-deep-research": 128000
+			}
+		},
+		// ----------------------------------------------------------------------
+		// Qwen (Alibaba DashScope) — text chat models only
+		// Excludes embedding, vision, audio and VL (vision-language) variants.
+		// ----------------------------------------------------------------------
+		"llm_qwen": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_QWEN_KEY",
+			"module": "qwen",
+			"models_endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["qwen-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embed", "vision", "audio", "vl"]
+			},
+			// qwen-flash and qwen-plus are DashScope short aliases. OpenRouter uses
+			// full HuggingFace IDs (qwen-2.5-7b-instruct etc.) and doesn't list these
+			// aliases — protect them so the OpenRouter fallback won't deprecate them.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["qwen-plus", "2026-10-09"],
+				["qwen-flash", "2026-10-09"]
+			],
+			"token_limit_overrides": {
+				// "qwen-plus": 131072,
+				// "qwen-flash": 131072,
+				// "qwen-turbo": 131072,
+				// "qwen-max": 32768
+			}
+		}
+	},
+	// --------------------------------------------------------------------------
+	// Profile keys that must NEVER be deprecated, for every provider.
+	// Per-provider protected_profiles are merged with this list.
+	// "custom" is the user-defined free-form profile present in every node.
+	// --------------------------------------------------------------------------
+	"default_protected_profiles": [["custom", "2126-04-09"]],
+	// --------------------------------------------------------------------------
+	// Conventions for deriving profile keys from model IDs.
+	// Applied by merger._make_profile_key() — documented here for reference only,
+	// not read at runtime.
+	// --------------------------------------------------------------------------
+	"profile_key_conventions": {
+		"replacements": [
+			[".", "-"],
+			["_", "-"],
+			["/", "-"],
+			[":", "-"]
+		],
+		"lowercase": true,
+		"note": "Profile keys are derived from model IDs: dots/underscores/slashes/colons → hyphens, lowercase"
+	},
+	// --------------------------------------------------------------------------
+	// Title generation — prefix → display prefix mappings.
+	// Applied to new profiles only (existing titles are preserved).
+	// The remainder after stripping the prefix is title-cased per hyphen segment.
+	// e.g. "mistral-medium-latest" → "Mistral Medium Latest"
+	// --------------------------------------------------------------------------
+	"title_mappings": {
+		"gpt-": "GPT-",
+		"claude-": "Claude ",
+		"gemini-": "Gemini ",
+		"mistral-": "Mistral ",
+		"deepseek-": "DeepSeek ",
+		"grok-": "Grok ",
+		"sonar": "Sonar",
+		"qwen-": "Qwen ",
+		"text-embedding-": "Text Embedding ",
+		"o1": "o1",
+		"o3": "o3",
+		"o4": "o4"
+	},
+	// --------------------------------------------------------------------------
+	// Output token limits (modelOutputTokens).
+	//
+	// Priority: overrides (this section) > litellm max_output_tokens > defaults.
+	//
+	// Anthropic output limits (https://docs.anthropic.com/en/docs/about-claude/models/overview):
+	//   claude-opus-4-6:           128,000 output tokens
+	//   claude-sonnet-4-6:          64,000 output tokens
+	//   claude-haiku-4-5:           64,000 output tokens
+	//   claude-sonnet-4-5:          64,000 output tokens
+	//   claude-opus-4-5:            64,000 output tokens
+	//   claude-3-5-haiku-20241022:   8,192 output tokens
+	//   claude-3-5-sonnet-20241022:  8,192 output tokens
+	//   claude-3-opus-20240229:      4,096 output tokens
+	//   claude-3-haiku-20240307:     4,096 output tokens
+	// --------------------------------------------------------------------------
+	"model_output_tokens": {
+		"defaults": {
+			"chat": 4096, // fallback for all chat models without a specific override
+			"embed": 0 // embedding models have no output tokens
+		},
+		"overrides": {
+			// // Anthropic — see comment block above for source
+			// "claude-opus-4-6": 131072,
+			// "claude-sonnet-4-6": 65536,
+			// "claude-haiku-4-5": 65536,
+			// "claude-sonnet-4-5": 65536,
+			// "claude-opus-4-5": 65536,
+			// "claude-3-5-haiku-20241022": 8192,
+			// "claude-3-5-sonnet-20241022": 8192,
+			// "claude-3-opus-20240229": 4096,
+			// "claude-3-haiku-20240307": 4096,
+			// // OpenAI
+			// "gpt-4o": 16384,
+			// "gpt-4o-mini": 16384,
+			// // Google Gemini
+			// "gemini-2.5-pro": 65536,
+			// "gemini-2.5-flash": 65536
+		}
+	},
+	// --------------------------------------------------------------------------
+	// Deprecation policy (informational — not yet enforced by the tool).
+	// deprecated_since_key: field name written into deprecated profiles.
+	// grace_period_releases: number of releases before a deprecated profile
+	//   is eligible for removal.
+	// --------------------------------------------------------------------------
+	"deprecation": {
+		"grace_period_releases": 2,
+		"deprecated_since_key": "deprecatedSince"
+	}
+}

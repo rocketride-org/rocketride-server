@@ -77,4 +77,6 @@ class DeepAgentSubagentDriver(DeepAgentDriver):
         as a top-level pipeline agent. The services.subagent.json declares no
         ``questions`` lane, so this method is unreachable under the happy path.
         """
-        raise NotImplementedError('DeepAgent Subagent cannot be invoked directly; wire it into a DeepAgent via the deepagent channel.')
+        raise NotImplementedError(
+            'DeepAgent Subagent cannot be invoked directly; wire it into a DeepAgent via the deepagent channel.'
+        )

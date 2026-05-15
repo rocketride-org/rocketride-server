@@ -57,7 +57,7 @@ import asyncio
 import mimetypes
 from pathlib import Path
 from typing import Dict, Any, List, Union, Tuple, Optional
-from ..core import DAPClient
+from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
 
@@ -106,7 +106,15 @@ class DataMixin(DAPClient):
             # Results available after pipe closes
         """
 
-        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None):
+        def __init__(
+            self,
+            client,
+            token: str,
+            objinfo: Dict[str, Any] = None,
+            mime_type: str = None,
+            provider: str = None,
+            on_sse=None,
+        ):
             """
             Create a new data pipe (usually called via client.pipe()).
 
@@ -150,7 +158,8 @@ class DataMixin(DAPClient):
                 self: The opened pipe instance for method chaining
 
             Raises:
-                RuntimeError: If pipe is already opened or if opening fails
+                RuntimeError: If the pipe is already opened.
+                PipeException: If the server rejects the open request.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/plain")
@@ -174,7 +183,17 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message') or 'Your pipeline is not currently running.')
+                msg = response.get('message') or 'Failed to open a data pipe.'
+                msg = (
+                    f'{msg}\n\n'
+                    'Common causes:\n'
+                    "- Pipeline isn't running (wrong token or task terminated)\n"
+                    '- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n'
+                    '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
+                )
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True
@@ -197,7 +216,8 @@ class DataMixin(DAPClient):
                 buffer: Data to send (must be bytes, not string)
 
             Raises:
-                RuntimeError: If pipe not opened or write fails
+                RuntimeError: If the pipe is not opened.
+                PipeException: If the server reports a write failure.
                 ValueError: If buffer is not bytes
 
             Example:
@@ -224,7 +244,10 @@ class DataMixin(DAPClient):
             response = await self._client.request(request)
 
             if self._client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Failed to write to pipe'))
+                msg = response.get('message') or 'Failed to write to a data pipe.'
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
         async def close(self) -> PIPELINE_RESULT:
             """
@@ -235,6 +258,9 @@ class DataMixin(DAPClient):
 
             Returns:
                 Dict: Results from processing the data you sent
+
+            Raises:
+                PipeException: If the server reports a failure while finalizing the pipe.
 
             Example:
                 pipe = await client.pipe(token, mimetype="text/csv")
@@ -259,7 +285,10 @@ class DataMixin(DAPClient):
                 response = await self._client.request(request)
 
                 if self._client.did_fail(response):
-                    raise RuntimeError(response.get('message', 'Failed to close pipe'))
+                    msg = response.get('message') or 'Failed to close a data pipe.'
+                    response = dict(response)
+                    response['message'] = msg
+                    raise PipeException(response)
 
                 return response.get('body', {})
 
@@ -293,7 +322,9 @@ class DataMixin(DAPClient):
         out['size'] = size if size else 1
         return out
 
-    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe:
+    async def pipe(
+        self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None
+    ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
 
@@ -356,7 +387,7 @@ class DataMixin(DAPClient):
 
         Raises:
             ValueError: If data is not string or bytes
-            RuntimeError: If sending fails
+            PipeException: If the server rejects the underlying pipe open/write/close.
 
         Example:
             # Send text data
@@ -642,7 +673,10 @@ class DataMixin(DAPClient):
         # Create a coroutine for every file - let server handle queuing
         self.debug_message(f'Starting upload of {len(normalized_files)} files (token={token})')
 
-        upload_tasks = [upload_file(index, filepath, objinfo, mimetype) for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)]
+        upload_tasks = [
+            upload_file(index, filepath, objinfo, mimetype)
+            for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)
+        ]
 
         # Wait for all uploads to complete
         await asyncio.gather(*upload_tasks, return_exceptions=True)
@@ -652,6 +686,8 @@ class DataMixin(DAPClient):
         failed_uploads = len(results) - successful_uploads
         total_bytes = sum(r.get('bytes_sent', 0) for r in results if r and r.get('action') == 'complete')
 
-        self.debug_message(f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred (token={token})')
+        self.debug_message(
+            f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred (token={token})'
+        )
 
         return results

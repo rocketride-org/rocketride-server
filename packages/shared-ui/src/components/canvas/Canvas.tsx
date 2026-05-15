@@ -42,7 +42,6 @@ import FlowContainer from './components/FlowContainer';
 import FlowCanvas from './components/FlowCanvas';
 import { IProject, IValidateResponse, ITaskStatus } from './types';
 import { getMuiTheme } from '../../themes/getMuiTheme';
-import { isInVSCode } from '../../themes/vscode';
 import { buildInventory } from './util/helpers';
 import { IServiceCatalog } from './types';
 
@@ -112,6 +111,9 @@ export interface IFlowProps {
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
 
+	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
+	isSubscribed?: boolean;
+
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
 
@@ -123,13 +125,16 @@ export interface IFlowProps {
 
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+
+	/** When true, the canvas is fully read-only: no editing, no adding nodes, no run/stop. */
+	isReadonly?: boolean;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, isDirty, isNew, onSave }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, isReadonly = false }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -174,48 +179,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					overflow: 'hidden',
 				}}
 			>
-				<FlowContainer
-					oauth2RootUrl={oauth2RootUrl}
-					project={project}
-					servicesJson={servicesJson}
-					inventory={inventory}
-					taskStatuses={taskStatuses}
-					componentPipeCounts={componentPipeCounts}
-					totalPipes={totalPipes}
-					handleValidatePipeline={handleValidatePipeline}
-					onOpenLink={onOpenLink}
-					getPreference={getPreference}
-					setPreference={setPreference}
-					onContentChanged={onContentChanged}
-					onViewportChange={onViewportChange}
-					onUndo={onUndo}
-					onRedo={onRedo}
-					onRunPipeline={onRunPipeline}
-					onStopPipeline={onStopPipeline}
-					onOpenStatus={onOpenStatus}
-					serverHost={serverHost}
-					isConnected={isConnected}
-					initialViewport={initialViewport}
-					isDirty={isDirty}
-					isNew={isNew}
-					onSave={onSave}
-					features={{
-						addNode: true,
-						addAnnotation: true,
-						fitView: true,
-						zoomIn: true,
-						zoomOut: true,
-						lock: true,
-						undo: !isInVSCode(),
-						redo: !isInVSCode(),
-						keyboardShortcuts: true,
-						logs: false,
-						save: true,
-						saveAs: true,
-						importExport: false,
-						moreOptions: false,
-					}}
-				>
+				<FlowContainer oauth2RootUrl={oauth2RootUrl} project={project} servicesJson={servicesJson} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} isReadonly={isReadonly}>
 					<FlowCanvas />
 				</FlowContainer>
 			</div>

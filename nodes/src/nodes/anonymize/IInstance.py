@@ -27,15 +27,26 @@ from .IGlobal import IGlobal
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal  # Reference to a global context providing recognizer functionality
-    
+
     # Default PII labels for zero-shot NER when no classifications provided
     DEFAULT_PII_LABELS = [
-        'person', 'name', 'email', 'phone number', 'address',
-        'social security number', 'credit card number', 'date of birth',
-        'organization', 'company', 'location', 'ip address',
-        'bank account', 'passport number', 'driver license'
+        'person',
+        'name',
+        'email',
+        'phone number',
+        'address',
+        'social security number',
+        'credit card number',
+        'date of birth',
+        'organization',
+        'company',
+        'location',
+        'ip address',
+        'bank account',
+        'passport number',
+        'driver license',
     ]
-    
+
     #
     # Current object context properties
     #
@@ -53,13 +64,15 @@ class IInstance(IInstanceBase):
 
     def writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict):
         self.has_classifications = True
-        self.target_object_text = self.IGlobal.recognizer.handleClassifications(classifications, self.target_object_text, classificationPolicy, classificationRules)
+        self.target_object_text = self.IGlobal.recognizer.handleClassifications(
+            classifications, self.target_object_text, classificationPolicy, classificationRules
+        )
 
     def closing(self):
         if not self.has_classifications:
             # No classifications received - anonymize with default PII labels
             self.target_object_text = self.IGlobal.recognizer.process(self.target_object_text, self.DEFAULT_PII_LABELS)
-        
+
         # Resume the writeText lane
         self.instance.writeText(self.target_object_text)
 

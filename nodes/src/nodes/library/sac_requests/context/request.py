@@ -35,8 +35,40 @@ import requests  # type: ignore
 from requests.models import Response  # type: ignore
 
 from ..constants.defaults import DEFAULT_EXP_MAX_RETRY
-from ..constants.general import AUTH, AUTHORIZATION, BASIC_AUTH, BEARER_TOKEN, DATA, DELETE, GET, HEAD, HEADERS, NO_AUTH, OPTIONS, PARAMS, PATCH, POST, PUT, REQ_LOGGER, RETRY_AFTER, URL
-from ..constants.messages import BASIC_AUTH_PARAMS_MISSING, CONNECTION_ERROR, HTTP_ERROR, MISSING_AUTH_TOKEN, REQ_WAIT_TIME, REQ_ATTEMPT_EXCEEDED, REQUEST_ERROR, SSL_ERROR, TIMEOUT_ERROR, TOO_MANY_REQUESTS, INVALID_AUTH_TOKEN, UNKNOWN_AUTH_TYPE
+from ..constants.general import (
+    AUTH,
+    AUTHORIZATION,
+    BASIC_AUTH,
+    BEARER_TOKEN,
+    DATA,
+    DELETE,
+    GET,
+    HEAD,
+    HEADERS,
+    NO_AUTH,
+    OPTIONS,
+    PARAMS,
+    PATCH,
+    POST,
+    PUT,
+    REQ_LOGGER,
+    RETRY_AFTER,
+    URL,
+)
+from ..constants.messages import (
+    BASIC_AUTH_PARAMS_MISSING,
+    CONNECTION_ERROR,
+    HTTP_ERROR,
+    MISSING_AUTH_TOKEN,
+    REQ_WAIT_TIME,
+    REQ_ATTEMPT_EXCEEDED,
+    REQUEST_ERROR,
+    SSL_ERROR,
+    TIMEOUT_ERROR,
+    TOO_MANY_REQUESTS,
+    INVALID_AUTH_TOKEN,
+    UNKNOWN_AUTH_TYPE,
+)
 from .config import HttpConfig
 from .endpoint import Endpoint
 from .headers import HttpHeaders
@@ -52,7 +84,14 @@ from ..utils.validators import is_too_many_requests, is_access_denied
 class HttpRequest:
     """Http Request wrapper to handle retries and timeouts."""
 
-    def __init__(self, url: HttpURL, config: HttpConfig, headers: HttpHeaders, auth_type: str = NO_AUTH, refresh_headers: Callable[[], Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        url: HttpURL,
+        config: HttpConfig,
+        headers: HttpHeaders,
+        auth_type: str = NO_AUTH,
+        refresh_headers: Callable[[], Dict[str, Any]] = None,
+    ) -> None:
         """Initialise HTTP requests.
 
         :param url: Http Request URL
@@ -193,7 +232,14 @@ class HttpRequest:
             # TODO: Other authentications methods will be handled.  # pylint: disable=fixme
             pass
 
-    def _prepare(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Dict[str, Any]:  # pylint: disable=line-too-long
+    def _prepare(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:  # pylint: disable=line-too-long
         """Prepare the request.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -392,7 +438,14 @@ class HttpRequest:
         """Close http connection."""
         self.session.close()
 
-    def get(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def get(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send get request with headers and query parameters.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -412,7 +465,14 @@ class HttpRequest:
         # Send the get request
         return self._send(GET, **kwargs)
 
-    def head(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def head(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send head request with headers, data, and parameters.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -432,7 +492,14 @@ class HttpRequest:
         # Send the head request
         return self._send(HEAD, **kwargs)
 
-    def post(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def post(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send post request with headers, data, and parameters.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -452,7 +519,14 @@ class HttpRequest:
         # Send the post request
         return self._send(POST, **kwargs)
 
-    def put(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def put(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send put request with headers and query parameters.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -472,7 +546,14 @@ class HttpRequest:
         # Send the put request
         return self._send(PUT, **kwargs)
 
-    def delete(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def delete(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send delete request with headers and query parameters.
 
         :param endpoint: Endpoint to which the request is to be sent
@@ -492,7 +573,14 @@ class HttpRequest:
         # Send the delete request
         return self._send(DELETE, **kwargs)
 
-    def patch(self, endpoint: str, headers: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None, **kwargs: Dict[str, Any]) -> Response:
+    def patch(
+        self,
+        endpoint: str,
+        headers: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        **kwargs: Dict[str, Any],
+    ) -> Response:
         """Send patch request with headers, data, and parameters.
 
         :param endpoint: Endpoint to which the request is to be sent

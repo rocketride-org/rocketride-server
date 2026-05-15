@@ -45,6 +45,10 @@ export type { DashboardResponse, DashboardOverview, DashboardConnection, Dashboa
 export { SidebarView } from './modules/sidebar/SidebarView';
 export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
 
+// --- Explorer module (generic file tree panel) -------------------------------
+export { Explorer } from './modules/explorer';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
@@ -73,6 +77,24 @@ export type { IAccountViewProps } from './modules/account/AccountView';
 export { BillingView } from './modules/billing';
 export type { IBillingViewProps } from './modules/billing';
 export { CreditsPanel } from './modules/billing';
+
+// --- Checkout module (subscription checkout flow) ----------------------------
+export { CheckoutModal } from './modules/checkout';
+export type { CheckoutModalProps, CheckoutPlan } from './modules/checkout';
+
+// --- Chat module (conversational chat surface) --------------------------------
+export { ChatView } from './modules/chat';
+export type { IChatViewProps, ChatMessage, ChatViewProps, UseChatMessagesOptions, TextResult } from './modules/chat';
+export { MessageList, MessageBubble, ChatInputField, MarkdownRenderer, ChartRenderer, TypingIndicator } from './modules/chat';
+export { useChatMessages } from './modules/chat';
+export type { UseChatMessagesReturn } from './modules/chat';
+
+// --- Shell connection types ---------------------------------------------------
+export type { ShellConnectionEventMap, IConnectionManager, ShellAppEntry } from './types/shell';
+
+// --- Connection state types (shared across shell-ui and VSCode) ---------------
+export { ConnectionState } from './types/connection';
+export type { ConnectionMode, ConnectionStatus, ManagerInfo, IAuthProvider } from './types/connection';
 
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';

@@ -176,7 +176,6 @@ class IEndpoint(IEndpointBase):
 
         # Create our data server to accept incoming data
         self.server.use('data')
-        self.server.use('profiler')
 
         # Run the  server
         self.server.run()

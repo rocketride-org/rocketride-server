@@ -161,7 +161,11 @@ class CrewManager(CrewBase):
         #    A no-nodeId invoke stops at the first successful handler, so we iterate
         #    each crewai node individually with nodeId= to reach all of them.
         crewai_node_ids = pSelf.instance.getControllerNodeIds('crewai')
-        debug('crewai_manager fan-out: getControllerNodeIds("crewai") returned {} ids: {!r}'.format(len(crewai_node_ids or []), crewai_node_ids))
+        debug(
+            'crewai_manager fan-out: getControllerNodeIds("crewai") returned {} ids: {!r}'.format(
+                len(crewai_node_ids or []), crewai_node_ids
+            )
+        )
         if not crewai_node_ids:
             raise RuntimeError('CrewAI Manager: no sub-agents connected on the crewai channel')
 
@@ -293,13 +297,17 @@ class CrewManager(CrewBase):
             verbose=False,
         )
 
-        debug('agent_crewai_manager kicking off crew with {} sub-agents run_id={}'.format(len(sub_agents), context.run_id))
+        debug(
+            'agent_crewai_manager kicking off crew with {} sub-agents run_id={}'.format(len(sub_agents), context.run_id)
+        )
 
         # Submit the kickoff coroutine to the process-wide shared loop -- same
         # pattern as CrewAgent._run.  See crewai_runner.py for why this is the
         # required scope (CrewAI's singletons are process-wide, so the loop
         # serializing access to them must be process-wide too).
-        result = self._iGlobal._kickoff_runner.submit(context, crew.akickoff(inputs={'user_request': prompt} if prompt else {}))
+        result = self._iGlobal._kickoff_runner.submit(
+            context, crew.akickoff(inputs={'user_request': prompt} if prompt else {})
+        )
 
         # Result extraction: prefer the last completed task's output (clean result)
         # over result.raw, which in hierarchical mode contains the full manager
@@ -317,7 +325,11 @@ class CrewManager(CrewBase):
 
         if not final_text:
             # Fall back to result.raw with the same ReAct stripping.
-            raw = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+            raw = (
+                self._safe_str(getattr(result, 'raw', None))
+                or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None))
+                or self._safe_str(result)
+            )
             final_text = _strip_react_preamble(raw)
 
         return final_text, result

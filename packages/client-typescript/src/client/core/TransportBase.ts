@@ -126,18 +126,6 @@ export abstract class TransportBase {
 	}
 
 	/**
-	 * Auth credential for connect flow (e.g. first DAP auth command). Default none.
-	 */
-	getAuth(): string | undefined {
-		return undefined;
-	}
-
-	/**
-	 * Update auth credential. Takes effect on the next connect().
-	 */
-	setAuth(_auth: string): void {}
-
-	/**
 	 * Update connection URI. Takes effect on the next connect().
 	 */
 	setUri(_uri: string): void {}

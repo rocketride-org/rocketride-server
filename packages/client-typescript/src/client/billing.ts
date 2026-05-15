@@ -64,18 +64,18 @@ export class BillingApi {
 	}
 
 	/**
-	 * Fetches the active subscription plans (prices) for a Stripe product.
+	 * Fetches the active subscription plans (prices) for an app.
 	 *
 	 * Plans are returned sorted month-first, year-second, formatted for
-	 * display in the checkout plan picker. The server calls
-	 * `stripe.Price.list()` so pricing changes in the Stripe dashboard
-	 * are reflected immediately.
+	 * display in the checkout plan picker. The server resolves the app's
+	 * Stripe product internally and calls `stripe.Price.list()` so pricing
+	 * changes in the Stripe dashboard are reflected immediately.
 	 *
-	 * @param productId - Stripe prod_* identifier from AppManifestEntry.stripeProductId.
+	 * @param appId - App identifier (e.g. "rocketride.pipeBuilder").
 	 * @returns Array of StripePlan objects ready for display.
 	 */
-	async getProductPrices(productId: string): Promise<StripePlan[]> {
-		const body = await this.client.call('rrext_account_billing', { subcommand: 'prices', productId });
+	async getProductPrices(appId: string): Promise<StripePlan[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'prices', appId });
 		return body.plans ?? [];
 	}
 

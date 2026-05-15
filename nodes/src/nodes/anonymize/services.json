@@ -63,19 +63,6 @@
 	"lanes": {
 		"text": ["text"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": "Text with sensitive information",
-			"min": 1,
-			"output": [
-				{
-					"lane": "text",
-					"description": "Anonymized text"
-				}
-			]
-		}
-	],
 	//
 	//	Test configuration for automated node testing
 	//
@@ -94,7 +81,7 @@
 	},
 	//
 	//	Full test configuration - tests all available profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

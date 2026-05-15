@@ -64,16 +64,6 @@
 		"documents": ["documents"],
 		"questions": ["questions"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"output": [
-				{
-					"lane": "documents"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
@@ -202,7 +192,7 @@
 	},
 	//
 	//	Full test configuration - tests all sentence-transformer profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

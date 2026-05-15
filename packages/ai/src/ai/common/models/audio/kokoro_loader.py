@@ -45,6 +45,7 @@ class KokoroLoader(BaseLoader):
 
         try:
             import en_core_web_sm  # noqa: F401
+
             return
         except ImportError:
             pass

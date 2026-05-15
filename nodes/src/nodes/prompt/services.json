@@ -71,33 +71,6 @@
 		"table": [],
 		"questions": ["questions"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"description": "Documents input - collected for merging with prompt",
-			"output": []
-		},
-		{
-			"lane": "text",
-			"description": "Text input - collected for merging with prompt",
-			"output": []
-		},
-		{
-			"lane": "table",
-			"description": "Table input - collected for merging with prompt",
-			"output": []
-		},
-		{
-			"lane": "questions",
-			"description": "Questions input - triggers merging of all collected inputs with prompt",
-			"output": [
-				{
-					"lane": "questions",
-					"description": "Enhanced questions with prompt (merged from all input types: questions, documents, text, table)"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

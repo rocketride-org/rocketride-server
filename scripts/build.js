@@ -74,6 +74,9 @@ function parseArgs(args) {
 			options.listDeps = true;
 		} else if (arg === '--list-modules') {
 			options.listModules = true;
+		} else if (arg.startsWith('--models=')) {
+			options.models = options.models || [];
+			options.models.push(arg.substring('--models='.length));
 		} else if (arg.startsWith('--pytest=')) {
 			options.pytest = options.pytest || [];
 			options.pytest.push(arg.substring('--pytest='.length));
@@ -81,8 +84,8 @@ function parseArgs(args) {
 			options.pytestPattern = arg.substring('--pytest-pattern='.length);
 		} else if (arg.startsWith('--pytest-preinstall=')) {
 			options.pytestPreinstall = arg.substring('--pytest-preinstall='.length);
-        } else if (arg.startsWith('--pytest-parallel=')) {
-            options.pytestParallel = arg.substring('--pytest-parallel='.length);
+		} else if (arg.startsWith('--pytest-parallel=')) {
+			options.pytestParallel = arg.substring('--pytest-parallel='.length);
 		} else if (arg.startsWith('--jest=')) {
 			options.jest = options.jest || [];
 			options.jest.push(arg.substring('--jest='.length));
@@ -92,8 +95,8 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--trace=')) {
 			options.trace = options.trace || [];
 			options.trace.push(arg.substring('--trace='.length));
-		} else if (arg.startsWith('--testport=')) {
-			options.testport = parseInt(arg.substring('--testport='.length), 10);
+		} else if (arg.startsWith('--taskserver=')) {
+			options.taskserver = arg.substring('--taskserver='.length);
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
@@ -104,6 +107,8 @@ function parseArgs(args) {
 			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
 			process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
 			process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
+		} else if (arg.startsWith('--simulate-gpus=') || arg.startsWith('--simulate_gpus=')) {
+			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
 			options.nodownload = true;
 		} else if (arg.startsWith('--arch=')) {
@@ -118,6 +123,12 @@ function parseArgs(args) {
 			}
 		} else if (arg === '--saas') {
 			options.saas = true;
+		} else if (arg === '--modelserver') {
+			// Bare --modelserver: start a local model server
+			options.modelserver = true;
+		} else if (arg.startsWith('--modelserver=')) {
+			// --modelserver=host:port or port: use an existing model server at that address
+			options.modelserver = arg.substring('--modelserver='.length);
 		} else if (arg.startsWith('--version=')) {
 			options.buildVersion = arg.substring('--version='.length);
 		} else if (arg.startsWith('--hash=')) {
@@ -197,29 +208,33 @@ Actions:`);
 
 	console.log(`
 Options:
-  --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
-  --force, -f         Force rebuild (ignore cache/state)
-  --verbose, -v       Show detailed output
-  --sequential, -s    Run modules sequentially (default: parallel)
-  --nodownload        Force compile from source (skip prebuilt download)
   --arch=arm|intel    Target architecture (macOS cross-compile)
-  --pytest="args"           Pass arguments to pytest (can be repeated)
-  --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
-  --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated, e.g. "dep1>=10,dep2")
-  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
-  --jest="args"             Pass arguments to Jest (can be repeated)
+  --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
-  --trace="a,b,c"     Enable trace output (passed to engine/tests)
-  --testport=N        Use existing server on port N for tests (skip build/start)
-  --log=FILE          Write output to FILE (grouped by module)
-  --overlay-root=DIR  Set overlay root directory
-  --version=VERSION   Set full build version x.x.x.x
+  --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
-  --stamp=STAMP       Set build stamp
-  --list-modules      List all registered modules
+  --help, -h          Show this help message
+  --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
-  --help, -h          Show this help message
+  --list-modules      List all registered modules
+  --log=FILE          Write output to FILE (grouped by module)
+  --models="args"     Pass arguments to sync_models (can be repeated)
+  --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
+  --nodownload        Force compile from source (skip prebuilt download)
+  --overlay-root=DIR  Set overlay root directory
+  --pytest="args"     Pass arguments to pytest (can be repeated)
+  --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
+  --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
+  --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
+  --saas              Enable SaaS mode
+  --sequential, -s    Run modules sequentially (default: parallel)
+  --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
+  --stamp=STAMP       Set build stamp
+  --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
+  --trace="a,b,c"     Enable trace output (passed to engine/tests)
+  --verbose, -v       Show detailed output
+  --version=VERSION   Set full build version x.x.x.x
 
 Examples:
   builder server:build             # Build server

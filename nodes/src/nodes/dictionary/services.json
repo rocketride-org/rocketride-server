@@ -69,17 +69,6 @@
 	"lanes": {
 		"text": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Outputs a series of documents, each one containing a dictionary item."
-				}
-			]
-		}
-	],
 	//
 	// Optional:
 	//		Local fields definitions - these define fields only for the

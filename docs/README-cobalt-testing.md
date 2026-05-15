@@ -18,7 +18,7 @@ RocketRide's pipeline nodes handle LLM calls, vector database queries, embedding
 ## Directory Structure
 
 ```text
-test/cobalt/
+nodes/test/cobalt/
   cobalt.toml                     # Cobalt configuration (thresholds, concurrency)
   conftest.py                     # Shared pytest fixtures (mock client, datasets)
   requirements.txt                # Python dependencies for Cobalt tests
@@ -40,7 +40,7 @@ test/cobalt/
 
 ```bash
 # Install test dependencies
-pip install -r test/cobalt/requirements.txt
+pip install -r nodes/test/cobalt/requirements.txt
 pip install pytest
 ```
 
@@ -48,29 +48,29 @@ pip install pytest
 
 ```bash
 # Run only Cobalt-marked tests
-pytest test/cobalt/ -m cobalt -v
+pytest nodes/test/cobalt/ -m cobalt -v
 
 # Run all Cobalt tests with detailed output
-pytest test/cobalt/ -v --tb=long
+pytest nodes/test/cobalt/ -v --tb=long
 ```
 
 ### Run Specific Experiment Suites
 
 ```bash
 # LLM quality experiments only
-pytest test/cobalt/experiments/test_llm_quality.py -v
+pytest nodes/test/cobalt/experiments/test_llm_quality.py -v
 
 # RAG quality experiments only
-pytest test/cobalt/experiments/test_rag_quality.py -v
+pytest nodes/test/cobalt/experiments/test_rag_quality.py -v
 
 # Reranking quality experiments only
-pytest test/cobalt/experiments/test_rerank_quality.py -v
+pytest nodes/test/cobalt/experiments/test_rerank_quality.py -v
 ```
 
 ### Run a Single Test
 
 ```bash
-pytest test/cobalt/experiments/test_llm_quality.py::TestLLMOutputQuality::test_response_relevance -v
+pytest nodes/test/cobalt/experiments/test_llm_quality.py::TestLLMOutputQuality::test_response_relevance -v
 ```
 
 ### No API Keys Required
@@ -81,10 +81,10 @@ All experiments use mocked pipeline responses and deterministic evaluators. No r
 
 ### 1. Create a New Experiment File
 
-Create a new file in `test/cobalt/experiments/` following the naming convention `test_<domain>_quality.py`:
+Create a new file in `nodes/test/cobalt/experiments/` following the naming convention `test_<domain>_quality.py`:
 
 ```python
-# test/cobalt/experiments/test_embedding_quality.py
+# nodes/test/cobalt/experiments/test_embedding_quality.py
 
 import pytest
 from evaluators.relevance import evaluate_relevance
@@ -103,7 +103,7 @@ class TestEmbeddingQuality:
 
 ### 2. Use Existing Evaluators
 
-Import evaluators from `test/cobalt/evaluators/`:
+Import evaluators from `nodes/test/cobalt/evaluators/`:
 
 - `evaluate_relevance(output, expected)` -- keyword overlap + length ratio
 - `evaluate_grounding(output, context)` -- sentence-level context grounding
@@ -111,7 +111,7 @@ Import evaluators from `test/cobalt/evaluators/`:
 
 ### 3. Create Custom Evaluators
 
-Add new evaluators in `test/cobalt/evaluators/`. Every evaluator must:
+Add new evaluators in `nodes/test/cobalt/evaluators/`. Every evaluator must:
 
 - Be deterministic (no randomness)
 - Work offline (no API calls)
@@ -134,8 +134,8 @@ Add a step to your CI workflow that runs Cobalt experiments:
 ```yaml
 - name: Run Cobalt experiments
   run: |
-    pip install -r test/cobalt/requirements.txt
-    pytest test/cobalt/ -m cobalt -v --tb=short
+    pip install -r nodes/test/cobalt/requirements.txt
+    pytest nodes/test/cobalt/ -m cobalt -v --tb=short
 ```
 
 ### Quality Gates

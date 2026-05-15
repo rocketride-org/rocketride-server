@@ -1,5 +1,11 @@
 name: Initialize
 
+# Default least-privilege permissions for the workflow. The init job
+# only reads the repo to compute version/build variables; no writes
+# needed. Closes Scorecard TokenPermissionsID #515.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:

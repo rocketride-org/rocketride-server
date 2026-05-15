@@ -52,5 +52,5 @@ MODE_VSTORE = 'vstore'
 # -----------------------------------------------------------------------------
 # Validation
 # -----------------------------------------------------------------------------
-VALID_MATCH_OPERATORS = ("and", "or", "exact")
+VALID_MATCH_OPERATORS = ('and', 'or', 'exact')
 """Allowed values for text search match operator (and/or/exact phrase)."""

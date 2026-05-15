@@ -201,6 +201,13 @@ export interface RocketRideClientConfig {
 	/** Optional function to output a debug message */
 	onDebugMessage?: (message: string) => void;
 
+	/**
+	 * Open a public (unauthenticated) connection.
+	 * Only ``rrext_public_*`` commands may be sent. The connection is
+	 * permanently public — call connect() on a separate client to authenticate.
+	 */
+	public?: boolean;
+
 	/** Maintain the connection */
 	persist?: boolean;
 
@@ -209,6 +216,9 @@ export interface RocketRideClientConfig {
 
 	/** Max total time in ms to keep retrying connections. Default: undefined (forever). */
 	maxRetryTime?: number;
+
+	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
+	wsPath?: string;
 
 	/** Client module name for debugging and identification */
 	module?: string;
@@ -303,6 +313,8 @@ export interface OrgInfo {
  * an `apaext_account` event (e.g. after a plan change). The `userToken`
  * field is used for subsequent reconnects in persist mode.
  */
+
+
 export interface ConnectResult {
 	/**
 	 * Short-lived RocketRide session token (`rr_…`) that can be replayed on
@@ -353,9 +365,132 @@ export interface ConnectResult {
 	organizations: OrgInfo[];
 
 	/**
-	 * App IDs the user's primary organisation is currently subscribed to.
-	 * Only includes subscriptions with status `active`, `trialing`, or `past_due`.
-	 * Empty for free-tier orgs with no paid app subscriptions.
+	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
+	 * OSS: all apps with ``appStatus: "free"``, ``onDesktop: true``.
+	 * SaaS: populated from the ``app_users`` table, enriched with billing info.
 	 */
-	subscribedApps: string[];
+	apps: AppManifestEntry[];
+
+	/**
+	 * Server capability tags describing the account provider in use.
+	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
+	 */
+	capabilities: string[];
+}
+
+/**
+ * A single app entry in the server-provided manifest.
+ *
+ * Same shape as the build-time apps.json entries, extended with
+ * optional pricing and visibility metadata for SaaS deployments.
+ */
+export interface AppManifestEntry {
+	/** Unique app identifier (e.g. "rocketride.pipeBuilder"). */
+	id: string;
+
+	/** Module Federation remote name (e.g. "rocketride_pipeBuilder"). */
+	moduleId: string;
+
+	/** Human-readable app name. */
+	name: string;
+
+	/** Short description of the app. */
+	description?: string;
+
+	/** URL path to the app's icon (e.g. "/shell/apps/rocket-ui/icon.svg"). */
+	icon?: string;
+
+	/** Category tags for filtering (e.g. ["pipelines", "ai"]). */
+	categories?: string[];
+
+	/** App-specific setting definitions. */
+	settings?: unknown[];
+
+	/** URL to the app's Module Federation remote entry file. */
+	entry: string;
+
+	/** App version string (semver). */
+	version?: string;
+
+	/** Visibility scope: "public", "org", "team", or "user". */
+	ownerType?: string;
+
+	/** Whether the app UI requires authentication to render. Default true. */
+	authenticated?: boolean;
+
+	/** Whether to show the header bar when this app is active. Default true. */
+	showHeader?: boolean;
+
+	/** Whether to show the status bar when this app is active. Default true. */
+	showStatusBar?: boolean;
+
+	/** Whether the app is visible to unauthenticated users. Default true. */
+	public?: boolean;
+
+	/** Stripe product ID (SaaS paid apps only). */
+	stripeProductId?: string;
+
+	/** Available pricing tiers (SaaS paid apps only). */
+	stripePrices?: StripePriceEntry[];
+
+	/** App lifecycle status: 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled'. */
+	appStatus?: string;
+
+	/** Whether this app is on the user's desktop. */
+	onDesktop?: boolean;
+
+	/** Total seats on the subscription (only for subscribed paid apps). */
+	seats?: number;
+
+	/** Seats currently occupied in this org (only for subscribed paid apps). */
+	seatsUsed?: number;
+
+	/** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
+	features?: string[];
+}
+
+/**
+ * A Stripe pricing tier for a paid app.
+ */
+export interface StripePriceEntry {
+	/** Stripe price ID (price_*). */
+	priceId: string;
+
+	/** Human-readable label (e.g. "Monthly"). */
+	nickname: string;
+
+	/** Price in smallest currency unit (cents). */
+	amountCents: number;
+
+	/** ISO 4217 currency code (e.g. "usd"). */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
+	interval: string;
+}
+
+/**
+ * Server metadata returned by the pre-auth info probe.
+ *
+ * Obtained via {@link RocketRideClient.getServerInfo} which sends an
+ * `auth` request with `infoOnly: true`. The server responds without
+ * requiring credentials.
+ */
+export interface ServerInfoResult {
+	/** Server engine version string. */
+	version: string;
+
+	/** Capability tags: `['oss']` for open-source, `['saas']` for cloud. */
+	capabilities: string[];
+
+	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
+	platform?: string;
+
+	/**
+	 * Public apps visible without authentication.
+	 *
+	 * Returned by the pre-auth probe so the shell can render
+	 * public apps (e.g. landing page) before login.
+	 */
+	apps?: AppManifestEntry[];
 }

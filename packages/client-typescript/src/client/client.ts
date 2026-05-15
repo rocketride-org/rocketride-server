@@ -24,13 +24,14 @@
 
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
-import { AuthenticationException, ConnectionException } from './exceptions/index.js';
+import { DatabaseApi } from './database.js';
+import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -116,7 +117,8 @@ export class DataPipe {
 	 * unique pipe ID that is used for subsequent operations.
 	 *
 	 * @returns This DataPipe instance (for method chaining)
-	 * @throws Error if the pipe is already opened or if the pipeline is not running
+	 * @throws Error if the pipe is already opened
+	 * @throws PipeException if the server rejects the open request
 	 */
 	async open(): Promise<DataPipe> {
 		if (this._opened) {
@@ -136,17 +138,34 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			throw new Error(response.message || 'Your pipeline is not currently running.');
+			const base = response.message || 'Failed to open a data pipe.';
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			throw new PipeException({ ...response, message: msg });
 		}
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
-		this._opened = true;
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
-			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			try {
+				await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			} catch (err) {
+				// Roll back: don't leave the pipe half-open on the server.
+				try {
+					await this.close();
+				} catch {
+					// Best-effort cleanup
+				}
+				const errMsg = err instanceof Error ? err.message : String(err);
+				const msg = `Failed to subscribe to SSE events for this data pipe.\n\n${errMsg}`;
+				throw new PipeException({ message: msg });
+			}
+
 			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
 		}
+
+		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
+		this._opened = true;
 
 		return this;
 	}
@@ -158,7 +177,8 @@ export class DataPipe {
 	 * multiple times to stream large datasets. The pipe must be opened first.
 	 *
 	 * @param buffer - Data to write, must be a Uint8Array
-	 * @throws Error if the pipe is not opened, buffer is invalid, or write fails
+	 * @throws Error if the pipe is not opened or buffer is invalid
+	 * @throws PipeException if the server reports a write failure
 	 */
 	async write(buffer: Uint8Array): Promise<void> {
 		if (!this._opened) {
@@ -181,7 +201,8 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			throw new Error(response.message || 'Failed to write to pipe');
+			const msg = response.message || 'Failed to write to a data pipe.';
+			throw new PipeException({ ...response, message: msg });
 		}
 	}
 
@@ -193,10 +214,12 @@ export class DataPipe {
 	 * the pipe cannot be reopened or written to again.
 	 *
 	 * @returns The processing result from the server, or undefined if already closed
-	 * @throws Error if closing the pipe fails
+	 * @throws PipeException if the server reports a failure while finalizing the pipe
 	 */
 	async close(): Promise<PIPELINE_RESULT | undefined> {
-		if (!this._opened || this._closed) {
+		// Allow closing after a failed open() path where the server assigned a pipe_id
+		// but we never flipped _opened=true (e.g., SSE subscription failure).
+		if (this._closed || (this._pipeId === undefined && !this._opened)) {
 			return;
 		}
 
@@ -212,12 +235,14 @@ export class DataPipe {
 			const response = await this._client.request(request);
 
 			if (this._client.didFail(response)) {
-				throw new Error(response.message || 'Failed to close pipe');
+				const msg = response.message || 'Failed to close a data pipe.';
+				throw new PipeException({ ...response, message: msg });
 			}
 
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+			this._opened = false;
 
 			// Unregister SSE callback and scoped monitor subscription
 			if (this._onSSE !== undefined && this._pipeId !== undefined) {
@@ -266,6 +291,7 @@ export type MonitorKey = { token: string } | { projectId: string; source: string
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
 	private _apikey?: string;
+	private _wsPath?: string;
 	private _env: Record<string, string>;
 	private _callerOnEvent?: EventCallback;
 	private _callerOnConnected?: ConnectCallback;
@@ -277,19 +303,12 @@ export class RocketRideClient extends DAPClient {
 	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
 	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
-	// Persistence properties for automatic reconnection
+	// Desired state model — replaces old flag soup
+	private _desiredState: 'detached' | 'attached' | 'authenticated' = 'detached';
+	private _authenticated: boolean = false;
 	private _persist: boolean = false;
-	private _reconnectTimeout?: ReturnType<typeof setTimeout>;
-	private _manualDisconnect: boolean = false;
-	private _maxRetryTime?: number;
-	private _retryStartTime?: number;
-	private _currentReconnectDelay: number = 500;
-
-	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
-	private _didNotifyConnected: boolean = false;
-
-	/** Stored ConnectResult from the last successful connect(). */
-	private _connectResult?: ConnectResult;
+	private _reconnectTimer?: ReturnType<typeof setTimeout>;
+	private _currentReconnectDelay: number = 250;
 
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
@@ -299,6 +318,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created billing API namespace. */
 	private _billing?: BillingApi;
+
+	/** Lazily-created database API namespace. */
+	private _database?: DatabaseApi;
 
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
@@ -366,15 +388,16 @@ export class RocketRideClient extends DAPClient {
 			}
 		}
 
-		const { auth = config.auth, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, maxRetryTime, module } = config;
+		const { auth = config.auth, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, module } = config;
 
 		// Create unique client identifier
 		const clientName = module || `CLIENT-${clientId++}`;
 
-		// Initialize the DAPClient without a transport; transport is created in _internalConnect (CONNECTION_LOGIC.md §3)
+		// Initialize the DAPClient without a transport; transport is created in _internalAttach
 		super(clientName, undefined, config);
 
 		// Store connection details and environment
+		this._wsPath = config.wsPath;
 		this._setUri(uri);
 		this._setAuth(auth ?? '');
 		this._env = clientEnv;
@@ -388,7 +411,7 @@ export class RocketRideClient extends DAPClient {
 
 		// Set up persistence options
 		this._persist = persist ?? false;
-		this._maxRetryTime = maxRetryTime;
+		// maxRetryTime accepted for backward compat but ignored (linear backoff never gives up)
 	}
 
 	/**
@@ -430,18 +453,59 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Probe a server for its capabilities without authenticating.
+	 *
+	 * Creates a temporary public connection and sends an
+	 * ``rrext_public_probe`` command. The server responds with version,
+	 * capabilities, platform, and public apps without requiring credentials.
+	 *
+	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://cloud.rocketride.ai"``)
+	 * @param timeout - Optional timeout in ms for the entire operation
+	 * @returns Server info including version and capability tags
+	 * @throws Error if the server is unreachable or does not support probes
+	 *
+	 * @example
+	 * ```typescript
+	 * const info = await RocketRideClient.getServerInfo('localhost:5565');
+	 * if (info.capabilities.includes('saas')) {
+	 *   // Show cloud sign-in options
+	 * }
+	 * ```
+	 */
+	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
+		const client = new RocketRideClient({ uri, persist: false });
+		try {
+			// Open a public connection (no auth handshake)
+			await client.attach(uri, { timeout });
+
+			// Send rrext_public_probe — allowed on unauthenticated connections
+			const message = client.buildRequest('rrext_public_probe', {});
+			const response = await client.request(message, timeout);
+
+			if (response.success === false) {
+				throw new Error(response.message || 'Server info request failed');
+			}
+
+			return (response.body ?? {}) as unknown as ServerInfoResult;
+		} finally {
+			await client.disconnect();
+		}
+	}
+
+	/**
 	 * Normalize a user-provided URI into a fully-formed WebSocket address.
 	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
 	 */
 	private _getWebsocketUri(uri: string): string {
 		const httpUrl = RocketRideClient.normalizeUri(uri);
+		const path = this._wsPath ?? '/task/service';
 
 		try {
 			const url = new URL(httpUrl);
 			const wsScheme = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
-			return `${wsScheme}//${url.host}/task/service`;
+			return `${wsScheme}//${url.host}${path}`;
 		} catch {
-			return `${httpUrl}/task/service`;
+			return `${httpUrl}${path}`;
 		}
 	}
 
@@ -459,36 +523,78 @@ export class RocketRideClient extends DAPClient {
 		this._apikey = auth;
 	}
 
-	/**
-	 * Clear any pending reconnection timeout.
-	 */
-	private _clearReconnectTimeout(): void {
-		if (this._reconnectTimeout) {
-			clearTimeout(this._reconnectTimeout);
-			this._reconnectTimeout = undefined;
-		}
-	}
-
 	// ============================================================================
-	// CONNECTION METHODS
+	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
 	/**
-	 * Single place for physical connection. Creates transport if needed, then
-	 * calls DAPClient.connect (transport connect + auth handshake + onConnected).
-	 * Returns the auth response body (ConnectResult) on success.
+	 * Create transport if needed and open the WebSocket. No auth.
 	 */
-	private async _internalConnect(timeout?: number): Promise<Record<string, unknown>> {
+	private async _internalAttach(timeout?: number): Promise<void> {
 		if (!this._transport) {
-			const transport = new TransportWebSocket(this._uri, this._apikey!);
+			const transport = new TransportWebSocket(this._uri);
 			this._bindTransport(transport);
 		}
-		return super._dapConnect(timeout);
+		await super._dapConnect(timeout);
 	}
 
 	/**
-	 * Single place for physical disconnect. Closes the transport directly,
-	 * which triggers onDisconnected via the transport callback.
+	 * Send the ``auth`` DAP command over the open transport.
+	 * Sets ``_authenticated`` and ``_connectResult`` on success.
+	 * Throws ``AuthenticationException`` on failure (transport stays open).
+	 */
+	private async _internalLogin(timeout?: number): Promise<ConnectResult> {
+		// Build auth args with credential + client identification
+		const authArgs: Record<string, unknown> = { auth: this._apikey ?? '' };
+		if (this._clientDisplayName) authArgs.clientName = this._clientDisplayName;
+		if (this._clientDisplayVersion) authArgs.clientVersion = this._clientDisplayVersion;
+
+		const resp = await this.request(
+			{ type: 'request', command: 'auth', seq: 0, arguments: authArgs },
+			timeout,
+		);
+
+		const success = (resp as { success?: boolean }).success;
+		if (!success) {
+			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
+		}
+
+		this._connectResult = resp.body as unknown as ConnectResult;
+		this._authenticated = true;
+
+		// Store userToken for future reconnects
+		if (this._connectResult?.userToken) {
+			this._apikey = this._connectResult.userToken;
+		}
+
+		// Resubscribe monitors and notify
+		await this._resubscribeAllMonitors();
+		const connectionInfo = this._transport?.getConnectionInfo() ?? '';
+		if (this._callerOnConnected) {
+			try { await this._callerOnConnected(connectionInfo); }
+			catch (e) { this.debugMessage(`Error in user onConnected handler: ${e}`); }
+		}
+		await super.onConnected(connectionInfo);
+
+		return this._connectResult;
+	}
+
+	/**
+	 * Send the ``deauth`` DAP command to revert to unauthenticated.
+	 */
+	private async _internalLogout(): Promise<void> {
+		if (!this._authenticated || !this._transport?.isConnected()) return;
+		try {
+			await this.request({ type: 'request', command: 'deauth', seq: 0, arguments: {} });
+		} catch {
+			// Best-effort — server may have already disconnected
+		}
+		this._connectResult = undefined;
+		this._authenticated = false;
+	}
+
+	/**
+	 * Close the transport. Triggers onDisconnected via the transport callback.
 	 */
 	private async _internalDisconnect(): Promise<void> {
 		if (!this._transport) return;
@@ -496,135 +602,223 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Try to connect; on auth error notify and stop; on other error notify and
-	 * reschedule with exponential backoff. Used by persist-mode connect() and
-	 * by the reconnect timer.
-	 * Returns the ConnectResult on success, undefined on failure.
+	 * Clear the reconnect timer if active.
 	 */
-	private async _attemptConnection(timeout?: number): Promise<ConnectResult | undefined> {
-		try {
-			const body = await this._internalConnect(timeout);
-			this._connectResult = body as unknown as ConnectResult;
-			// In persist mode, keep userToken for automatic reconnect
-			if (this._connectResult?.userToken) {
-				this._apikey = this._connectResult.userToken;
-			}
-			this._reconnectTimeout = undefined;
-			this.debugMessage('Connection successful');
-			return this._connectResult;
-		} catch (error) {
-			const err = error instanceof Error ? error : new Error(String(error));
-			this.debugMessage(`Connection failed: ${err}`);
-			await this.onConnectError(err);
-
-			if (error instanceof AuthenticationException) {
-				return undefined;
-			}
-
-			if (this._retryStartTime === undefined) {
-				this._retryStartTime = Date.now();
-			}
-
-			if (this._maxRetryTime !== undefined) {
-				if (Date.now() - this._retryStartTime >= this._maxRetryTime) {
-					return undefined;
-				}
-			}
-
-			this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 500, 5000);
-			this._scheduleReconnect();
-			return undefined;
+	private _clearReconnectTimer(): void {
+		if (this._reconnectTimer) {
+			clearTimeout(this._reconnectTimer);
+			this._reconnectTimer = undefined;
 		}
 	}
 
 	/**
-	 * Schedule a reconnection attempt with exponential backoff.
+	 * Reconnect engine driven by ``_desiredState``.
+	 *
+	 * Schedules a timer that re-attaches (and re-logins if the user had
+	 * been authenticated). Checks ``_desiredState`` after every await so
+	 * user actions mid-reconnect are respected immediately.
+	 *
+	 * Linear backoff: 250ms → 500ms → ... → 15 000ms cap.
 	 */
 	private _scheduleReconnect(): void {
-		this._clearReconnectTimeout();
+		this.debugMessage(`Scheduling reconnect in ${this._currentReconnectDelay}ms`);
+		this._reconnectTimer = setTimeout(async () => {
+			try {
+				// Re-attach transport
+				await this._internalAttach();
+				if (this._desiredState === 'detached') { this._reconnectTimer = undefined; return; }
 
-		if (this._maxRetryTime !== undefined && this._retryStartTime !== undefined) {
-			if (Date.now() - this._retryStartTime >= this._maxRetryTime) {
-				this.onConnectError(new Error('Max retry time exceeded'));
-				return;
-			}
-		}
+				// Re-login if the user was authenticated
+				if (this._desiredState === 'authenticated') {
+					await this._internalLogin();
+					if ((this._desiredState as string) === 'detached') { this._reconnectTimer = undefined; return; }
+				}
 
-		this.debugMessage(`Scheduling reconnection in ${this._currentReconnectDelay}ms`);
+				// Success — reset backoff
+				this._reconnectTimer = undefined;
+				this._currentReconnectDelay = 250;
+				this.debugMessage('Reconnect successful');
+			} catch (err) {
+				// User changed intent — stop (desiredState may have been changed by detach() during await)
+				if ((this._desiredState as string) === 'detached') { this._reconnectTimer = undefined; return; }
 
-		this._reconnectTimeout = setTimeout(async () => {
-			if (this._persist && !this._manualDisconnect) {
-				this.debugMessage('Attempting to reconnect...');
-				await this._attemptConnection();
+				// Auth rejected — downgrade to attached, stop retrying auth
+				if (err instanceof AuthenticationException) {
+					this._desiredState = 'attached';
+					this._reconnectTimer = undefined;
+					await this.onConnectError(err as Error);
+					return;
+				}
+
+				// Transient failure — linear backoff, cap at 15s
+				this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15000);
+				const error = err instanceof Error ? err : new Error(String(err));
+				await this.onConnectError(error);
+				this._scheduleReconnect(); // replaces timer with new delay
 			}
 		}, this._currentReconnectDelay);
 	}
 
+	// ============================================================================
+	// PUBLIC API — TRANSPORT
+	// ============================================================================
+
+	/**
+	 * Attach to a RocketRide server (open WebSocket, no auth).
+	 *
+	 * If ``uri`` is provided and differs from the current URI, detaches
+	 * first. If already attached to the same URI, this is a no-op.
+	 *
+	 * After attach, public APIs (``rrext_public_*``) are available.
+	 *
+	 * @param uri - Server URI override. Updates the stored URI if provided.
+	 * @param options - Optional timeout for the WebSocket handshake.
+	 */
+	async attach(uri?: string, options?: { timeout?: number }): Promise<void> {
+		// URI change → detach first, then update
+		if (uri) {
+			const normalised = this._getWebsocketUri(uri);
+			if (normalised !== this._uri) {
+				if (this.isAttached()) await this.detach();
+				this._setUri(uri);
+			}
+		}
+		// Already attached → no-op
+		if (this.isAttached()) {
+			this._desiredState = this._desiredState === 'detached' ? 'attached' : this._desiredState;
+			return;
+		}
+		this._desiredState = 'attached';
+		await this._internalAttach(options?.timeout);
+	}
+
+	/**
+	 * Detach from the server (close WebSocket, cancel reconnection).
+	 *
+	 * Sets ``_desiredState`` to ``'detached'`` so the reconnect engine
+	 * stops and ``onDisconnected`` does not restart it.
+	 */
+	async detach(): Promise<void> {
+		this._desiredState = 'detached';
+		this._clearReconnectTimer();
+		this._authenticated = false;
+		this._connectResult = undefined;
+		if (this._transport?.isConnected()) {
+			await this._internalDisconnect();
+		}
+	}
+
+	/**
+	 * True when the WebSocket transport is connected (regardless of auth).
+	 */
+	isAttached(): boolean {
+		return this._transport?.isConnected() || false;
+	}
+
+	// ============================================================================
+	// PUBLIC API — AUTH
+	// ============================================================================
+
+	/**
+	 * Authenticate over an attached transport.
+	 *
+	 * If ``uri`` is provided and differs, detaches and re-attaches first.
+	 * If ``auth`` is provided and differs from the current credential,
+	 * logs out (best-effort) before logging in with the new credential.
+	 * If already authenticated with the same credential, this is a no-op.
+	 *
+	 * @param credential - API key, rr_ token, or PKCE code object.
+	 * @param options - Optional URI override and/or timeout.
+	 * @returns ConnectResult with user identity on success.
+	 * @throws AuthenticationException on auth failure (transport stays attached).
+	 */
+	async login(
+		credential?: string | { code: string; verifier: string; redirectUri: string },
+		options?: { uri?: string; timeout?: number },
+	): Promise<ConnectResult> {
+		// Resolve credential
+		let resolvedCredential: string;
+		if (credential && typeof credential === 'object') {
+			resolvedCredential = 'cd_' + btoa(JSON.stringify(credential));
+		} else {
+			const envKey = this._env['ROCKETRIDE_APIKEY'];
+			const envCredential = typeof envKey === 'string' && envKey.trim() !== '' ? envKey : undefined;
+			resolvedCredential = (credential as string | undefined) ?? envCredential ?? this._apikey ?? '';
+		}
+
+		// URI change → detach + re-attach
+		if (options?.uri) {
+			const normalised = this._getWebsocketUri(options.uri);
+			if (normalised !== this._uri) {
+				await this.detach();
+				this._setUri(options.uri);
+				await this._internalAttach(options.timeout);
+			}
+		}
+
+		// Ensure attached
+		if (!this.isAttached()) {
+			await this._internalAttach(options?.timeout);
+		}
+
+		// Auth change → logout first (best-effort)
+		if (resolvedCredential !== this._apikey && this._authenticated) {
+			try { await this._internalLogout(); } catch {}
+		}
+		this._setAuth(resolvedCredential);
+
+		// Already authenticated with same credential → no-op
+		if (this._authenticated) {
+			this._desiredState = 'authenticated';
+			return this._connectResult ?? ({} as ConnectResult);
+		}
+
+		this._desiredState = 'authenticated';
+		return this._internalLogin(options?.timeout);
+	}
+
+	/**
+	 * Deauthenticate: sends ``deauth`` to the server, clears client auth state.
+	 * The transport stays attached — public APIs continue to work.
+	 */
+	async logout(): Promise<void> {
+		await this._internalLogout();
+		this._desiredState = 'attached';
+	}
+
+	/**
+	 * True when the auth handshake has succeeded on the current connection.
+	 */
+	isAuthenticated(): boolean {
+		return this._authenticated;
+	}
+
+	// ============================================================================
+	// COMPAT API — connect() / disconnect()
+	// ============================================================================
+
 	/**
 	 * Check if the client is currently connected to the RocketRide server.
+	 * Equivalent to ``isAttached()`` — kept for backward compatibility.
 	 */
 	isConnected(): boolean {
-		return this._transport?.isConnected() || false;
+		return this.isAttached();
 	}
 
 	/**
 	 * Connect to the RocketRide server and authenticate in a single call.
 	 *
+	 * Backward-compatible wrapper around ``attach()`` + ``login()``.
 	 * Sends the credential as the first DAP message and returns the full
 	 * ConnectResult (user identity + organizations + teams) on success.
-	 *
-	 * If `credential` is omitted, falls back to the `ROCKETRIDE_APIKEY` env var.
-	 *
-	 * In persist mode, enables automatic reconnection on disconnect. After the
-	 * first successful connect the stored `userToken` is replayed automatically.
 	 *
 	 * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
 	 * @param options - Optional overrides: uri and/or timeout.
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
-		// Encode PKCE code exchange as cd_<base64(JSON)>
-		// Fallback chain for the credential:
-		//   1. explicit `credential` arg (string or PKCE object)
-		//   2. ROCKETRIDE_APIKEY from the client's env snapshot
-		//   3. previously-configured `this._apikey` (e.g. from the constructor)
-		// Keeping #3 in the chain is critical for `new Client({ auth }).connect()`:
-		// without it, calling connect() with no arguments wiped the auth back to ''.
-		let resolvedCredential: string;
-		if (credential && typeof credential === 'object') {
-			resolvedCredential = 'cd_' + btoa(JSON.stringify(credential));
-		} else {
-			resolvedCredential = (credential as string | undefined) ?? this._env['ROCKETRIDE_APIKEY'] ?? this._apikey ?? '';
-		}
-		this._setAuth(resolvedCredential);
-
-		if (options?.uri !== undefined) {
-			this._setUri(options.uri);
-		}
-
-		this._manualDisconnect = false;
-		this._currentReconnectDelay = 500;
-		this._retryStartTime = undefined;
-
-		// If already connected, disconnect first
-		if (this.isConnected()) {
-			await this._internalDisconnect();
-		}
-
-		let result: ConnectResult | undefined;
-		if (this._persist) {
-			this._clearReconnectTimeout();
-			result = await this._attemptConnection(options?.timeout);
-		} else {
-			const body = await this._internalConnect(options?.timeout);
-			result = body as unknown as ConnectResult;
-			this._connectResult = result;
-			// Store userToken for reconnect in persist mode
-			if (result?.userToken) {
-				this._apikey = result.userToken;
-			}
-		}
-
-		return result ?? ({} as ConnectResult);
+		this._currentReconnectDelay = 250;
+		await this.attach(options?.uri, { timeout: options?.timeout });
+		return this.login(credential, options);
 	}
 
 	/**
@@ -637,11 +831,6 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Returns the ID of the user's primary organization.
-	 *
-	 * Currently uses `organizations[0]` since multi-org is not yet implemented.
-	 * When multi-org ships, this will return the active org based on session context.
-	 *
-	 * @returns The org UUID, or undefined if not authenticated or no org exists.
 	 */
 	getOrgId(): string | undefined {
 		return this._connectResult?.organizations?.[0]?.id;
@@ -649,31 +838,17 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Disconnect from the RocketRide server and stop automatic reconnection.
-	 *
-	 * Should be called when finished with the client to clean up resources.
+	 * Backward-compatible wrapper around ``logout()`` + ``detach()``.
 	 */
 	async disconnect(): Promise<void> {
-		this._manualDisconnect = true;
-		this._connectResult = undefined;
-		this._clearReconnectTimeout();
-
-		if (this._transport && this.isConnected()) {
-			await this._internalDisconnect();
-		}
+		await this.logout();
+		await this.detach();
 	}
 
 	/**
 	 * Update the environment variables used for pipeline substitution.
 	 *
 	 * The env dictionary is used by {@link use} and {@link validate} to replace
-	 * `${ROCKETRIDE_*}` placeholders in pipeline configurations. Call this
-	 * whenever the user's `.env` settings change so subsequent pipeline
-	 * executions pick up the new values without reconnecting.
-	 */
-	setEnv(env: Record<string, string>): void {
-		this._env = { ...env };
-	}
-
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -696,46 +871,6 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 	// EXECUTION METHODS
 	// ============================================================================
-
-	/**
-	 * Substitute environment variables in a string.
-	 * Replaces ${ROCKETRIDE_*} patterns with values from client's env dictionary.
-	 * If variable is not found, leaves it unchanged.
-	 */
-	private substituteEnvVars(value: string): string {
-		// Match ${ROCKETRIDE_*} patterns
-		return value.replace(/\$\{(ROCKETRIDE_[^}]+)\}/g, (match, varName) => {
-			// Check if variable exists in client's env
-			if (varName in this._env) {
-				return String(this._env[varName]);
-			}
-			// If not found, leave as is
-			return match;
-		});
-	}
-
-	/**
-	 * Recursively process an object/array to substitute environment variables.
-	 * Only processes string values, leaving other types unchanged.
-	 */
-	private processEnvSubstitution(obj: unknown): unknown {
-		if (typeof obj === 'string') {
-			// If it's a string, perform substitution
-			return this.substituteEnvVars(obj);
-		} else if (Array.isArray(obj)) {
-			// If it's an array, process each element
-			return obj.map((item) => this.processEnvSubstitution(item));
-		} else if (obj !== null && typeof obj === 'object') {
-			// If it's an object, process each property
-			const result: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(obj)) {
-				result[key] = this.processEnvSubstitution(value);
-			}
-			return result;
-		}
-		// For other types (number, boolean, null), return as is
-		return obj;
-	}
 
 	/**
 	 * Load Node.js fs/promises at runtime without static imports.
@@ -880,9 +1015,13 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
+			/** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+			env?: Record<string, string>;
+			/** Team ID to run the task under. Defaults to the user's default team. */
+			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -909,10 +1048,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create a deep copy of the pipeline config to avoid modifying the original
-		let processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
-
-		// Perform environment variable substitution on the pipeline configuration
-		processedConfig = this.processEnvSubstitution(processedConfig);
+		const processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
 
 		// Override source if specified (after substitution)
 		if (source !== undefined) {
@@ -943,10 +1079,22 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
+		// Build ROCKETRIDE_* env from client's .env + caller overrides
+		const rocketEnv: Record<string, string> = {};
+		for (const [k, v] of Object.entries(this._env)) {
+			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
+		}
+		if (env) Object.assign(rocketEnv, env);
+		if (Object.keys(rocketEnv).length > 0) {
+			arguments_.env = rocketEnv;
+		}
 		// Derive display name from filepath if not explicitly provided
 		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
 		if (effectiveName !== undefined) {
 			arguments_.name = effectiveName;
+		}
+		if (teamId !== undefined) {
+			arguments_.teamId = teamId;
 		}
 
 		// Send execution request to server
@@ -1017,10 +1165,20 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Get the current status of a running pipeline.
+	 *
+	 * By default this call is bounded to 15s so callers/tests don't hang forever if the engine
+	 * stops responding mid-request (especially important in CI). Pass `{ timeout: false }` to
+	 * restore the previous behavior of using only the client-level request timeout (if any).
 	 */
-	async getTaskStatus(token: string): Promise<TASK_STATUS> {
+	async getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS> {
 		try {
-			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, { token });
+			const callOptions: { token: string; timeout?: number } = { token };
+			if (options?.timeout === false) {
+				// Intentionally omit per-call timeout override.
+			} else {
+				callOptions.timeout = options?.timeout ?? 15000;
+			}
+			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, callOptions);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
@@ -1043,6 +1201,20 @@ export class RocketRideClient extends DAPClient {
 			source: options.source,
 		});
 		return body?.token as string | undefined;
+	}
+
+	/**
+	 * Returns the unresolved pipeline for a running task.
+	 *
+	 * The pipeline is returned exactly as stored — ${ROCKETRIDE_*} placeholders are
+	 * NOT substituted, so no secrets are included in the response.
+	 *
+	 * @param token - Task token returned by {@link getTaskToken}.
+	 * @returns The unresolved pipeline dict, or undefined if the task is not found.
+	 */
+	async getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined> {
+		const body = await this.call('rrext_get_pipeline', undefined, { token });
+		return body?.pipeline as Record<string, unknown> | undefined;
 	}
 
 	// ============================================================================
@@ -1422,61 +1594,47 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Handle connected events from the RocketRide server.
+	 * Handle transport-level connected event.
+	 *
+	 * With the attach/login split, this fires when the WebSocket opens
+	 * (before auth). The ``_internalLogin`` method handles the auth
+	 * notification separately, so this is intentionally minimal.
 	 */
 	async onConnected(connectionInfo: string): Promise<void> {
-		this._manualDisconnect = false;
-		this._didNotifyConnected = true;
-		this._clearReconnectTimeout();
-		this._currentReconnectDelay = 500;
-		this._retryStartTime = undefined;
-
-		// Resubscribe all monitor subscriptions after reconnect
-		await this._resubscribeAllMonitors();
-
-		// Call user-provided event handler if available
-		if (this._callerOnConnected) {
-			try {
-				await this._callerOnConnected(connectionInfo);
-			} catch (error) {
-				// Log errors but don't let user code break the connection
-				this.debugMessage(`Error in user onConnected handler for ${connectionInfo}: ${error}`);
-			}
-		}
-
 		await super.onConnected(connectionInfo);
 	}
 
 	/**
-	 * Handle disconnected events from the RocketRide server.
-	 * Only invokes the user's onDisconnected if onConnected had previously been called
-	 * (so "disconnect without ever connecting" does not fire the user callback).
+	 * Handle transport disconnection.
+	 *
+	 * Clears transport and auth state, notifies the user callback,
+	 * then consults ``_desiredState`` to decide whether to reconnect.
 	 */
 	async onDisconnected(reason: string, hasError: boolean): Promise<void> {
-		// Transport is gone — clear it so the next _internalConnect always creates a fresh one
+		// Transport is gone — clear so next attach creates a fresh one
 		this._transport = undefined;
 		this._connectResult = undefined;
+		this._authenticated = false;
 
-		if (this._didNotifyConnected) {
-			this._didNotifyConnected = false;
-
-			if (this._callerOnDisconnected) {
-				try {
-					await this._callerOnDisconnected(reason, hasError);
-				} catch (error) {
-					// Log errors but don't let user code break the connection
-					this.debugMessage(`Error in user onDisconnected handler for ${reason}: ${error}`);
-				}
+		// Notify user callback
+		if (this._callerOnDisconnected) {
+			try {
+				await this._callerOnDisconnected(reason, hasError);
+			} catch (error) {
+				this.debugMessage(`Error in user onDisconnected handler for ${reason}: ${error}`);
 			}
-
-			// Chain to parent to clear pending requests
-			await super.onDisconnected(reason, hasError);
 		}
 
-		// Schedule reconnection if persist is enabled and not a manual disconnect
-		if (this._persist && !this._manualDisconnect) {
-			this._scheduleReconnect();
-		}
+		// Chain to parent to clear pending requests
+		await super.onDisconnected(reason, hasError);
+
+		// Reconnect engine: honour _desiredState
+		if (this._desiredState === 'detached') return;
+		if (!this._persist) { this._desiredState = 'detached'; return; }
+		if (this._reconnectTimer) return; // engine already active
+
+		this._currentReconnectDelay = 250;
+		this._scheduleReconnect();
 	}
 
 	/**
@@ -2118,6 +2276,61 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
+	// CPROFILE PROFILING
+	// ============================================================================
+
+	/**
+	 * Start a cProfile profiling session on the server process or a pipeline.
+	 *
+	 * @param target  - Task token to profile a pipeline subprocess, or
+	 *                  undefined/null to profile the server process itself.
+	 * @param session - Optional human-readable session name.
+	 * @returns Status object with session info and start time.
+	 */
+	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		if (session) args.session = session;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_start', args);
+	}
+
+	/**
+	 * Stop the active cProfile profiling session.
+	 *
+	 * @param target - Task token if profiling a pipeline, or undefined for server.
+	 * @returns Result with session name and runtime.
+	 */
+	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStopResponse>('rrext_cprofile_stop', args);
+	}
+
+	/**
+	 * Get the current cProfile profiling status.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Status indicating active/inactive, owner, runtime.
+	 */
+	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_status', args);
+	}
+
+	/**
+	 * Get the full cProfile report from the last completed session.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Object containing the full pstats text report.
+	 */
+	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileReportResponse>('rrext_cprofile_report', args);
+	}
+
+	// ============================================================================
 	// CONTEXT MANAGER SUPPORT - Python-style async context manager
 	// ============================================================================
 
@@ -2271,6 +2484,24 @@ export class RocketRideClient extends DAPClient {
 			this._billing = new BillingApi(this);
 		}
 		return this._billing;
+	}
+
+	/**
+	 * Lazily-initialised database API namespace.
+	 *
+	 * Provides direct SQL/Cypher execution against database pipelines, bypassing
+	 * the LLM translation layer that {@link RocketRideClient.chat} uses.
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.database.query({ token, sql: 'SELECT 1' });
+	 * ```
+	 */
+	get database(): DatabaseApi {
+		if (!this._database) {
+			this._database = new DatabaseApi(this);
+		}
+		return this._database;
 	}
 
 	// ============================================================================
