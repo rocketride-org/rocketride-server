@@ -147,7 +147,16 @@ class Store(DocumentStoreBase):
                 logger.info(f'Collection {self.collection_name} already exists')
 
         # Create regular indexes for metadata fields
-        index_fields = [('meta.nodeId', 1), ('meta.objectId', 1), ('meta.parent', 1), ('meta.permissionId', 1), ('meta.isDeleted', 1), ('meta.isTable', 1), ('meta.chunkId', 1), ('meta.tableId', 1)]
+        index_fields = [
+            ('meta.nodeId', 1),
+            ('meta.objectId', 1),
+            ('meta.parent', 1),
+            ('meta.permissionId', 1),
+            ('meta.isDeleted', 1),
+            ('meta.isTable', 1),
+            ('meta.chunkId', 1),
+            ('meta.tableId', 1),
+        ]
 
         for field_spec in index_fields:
             try:
@@ -171,14 +180,23 @@ class Store(DocumentStoreBase):
 
             if not vector_index_exists:
                 # Correct vector index definition format for Atlas
-                vector_index_definition = {'mappings': {'dynamic': True, 'fields': {'embedding': {'type': 'knnVector', 'dimensions': vectorSize, 'similarity': self.similarity}}}}
+                vector_index_definition = {
+                    'mappings': {
+                        'dynamic': True,
+                        'fields': {
+                            'embedding': {'type': 'knnVector', 'dimensions': vectorSize, 'similarity': self.similarity}
+                        },
+                    }
+                }
 
                 search_index = SearchIndexModel(definition=vector_index_definition, name=self.vector_index_name)
 
                 # Create the search index directly without SearchIndexModel
                 result = self.collection.create_search_index(search_index)
 
-                logger.info(f'Created vector search index: {self.vector_index_name} with {vectorSize} dimensions, result: {result}')
+                logger.info(
+                    f'Created vector search index: {self.vector_index_name} with {vectorSize} dimensions, result: {result}'
+                )
             else:
                 logger.info(f'Vector search index {self.vector_index_name} already exists')
 
@@ -204,7 +222,13 @@ class Store(DocumentStoreBase):
         filter_conditions['$text'] = {'$search': query.text}
 
         # Build aggregation pipeline
-        pipeline = [{'$match': filter_conditions}, {'$addFields': {'score': {'$meta': 'textScore'}}}, {'$sort': {'score': {'$meta': 'textScore'}}}, {'$skip': docFilter.offset or 0}, {'$limit': docFilter.limit or 25}]
+        pipeline = [
+            {'$match': filter_conditions},
+            {'$addFields': {'score': {'$meta': 'textScore'}}},
+            {'$sort': {'score': {'$meta': 'textScore'}}},
+            {'$skip': docFilter.offset or 0},
+            {'$limit': docFilter.limit or 25},
+        ]
 
         results = list(self.collection.aggregate(pipeline))
         return self._convertToDocs(results, include_score=True)
@@ -228,7 +252,15 @@ class Store(DocumentStoreBase):
         filter_conditions = self._convertFilter(docFilter)
 
         # Build vector search pipeline
-        vector_search_stage = {'$vectorSearch': {'index': self.vector_index_name, 'path': 'embedding', 'queryVector': query.embedding, 'numCandidates': (docFilter.limit or 25) * 10, 'limit': docFilter.limit or 25}}
+        vector_search_stage = {
+            '$vectorSearch': {
+                'index': self.vector_index_name,
+                'path': 'embedding',
+                'queryVector': query.embedding,
+                'numCandidates': (docFilter.limit or 25) * 10,
+                'limit': docFilter.limit or 25,
+            }
+        }
 
         if filter_conditions:
             vector_search_stage['$vectorSearch']['filter'] = filter_conditions
@@ -309,7 +341,12 @@ class Store(DocumentStoreBase):
             if chunk.embedding is None:
                 raise Exception('No embedding in document')
 
-            doc = {'_id': str(uuid4()), 'embedding': chunk.embedding, 'content': chunk.page_content, 'meta': chunk.metadata.__dict__}
+            doc = {
+                '_id': str(uuid4()),
+                'embedding': chunk.embedding,
+                'content': chunk.page_content,
+                'meta': chunk.metadata.__dict__,
+            }
 
             doc_size = sys.getsizeof(doc)
             sum_size += doc_size
@@ -359,7 +396,10 @@ class Store(DocumentStoreBase):
 
         offset = 0
         while True:
-            filter_conditions = {'meta.objectId': objectId, 'meta.chunkId': {'$gte': offset, '$lt': offset + self.renderChunkSize}}
+            filter_conditions = {
+                'meta.objectId': objectId,
+                'meta.chunkId': {'$gte': offset, '$lt': offset + self.renderChunkSize},
+            }
 
             cursor = self.collection.find(filter_conditions).limit(self.renderChunkSize)
             documents = list(cursor)
@@ -441,7 +481,13 @@ class Store(DocumentStoreBase):
 
     def _validateMetadata(self, meta_dict: Dict[str, Any]) -> Optional[DocMetadata]:
         """Validate and create DocMetadata with proper error handling."""
-        required_fields = {'nodeId': (str, ''), 'parent': (str, ''), 'permissionId': (int, 0), 'isTable': (bool, False), 'tableId': (int, 0)}
+        required_fields = {
+            'nodeId': (str, ''),
+            'parent': (str, ''),
+            'permissionId': (int, 0),
+            'isTable': (bool, False),
+            'tableId': (int, 0),
+        }
 
         cleaned_meta = {}
 

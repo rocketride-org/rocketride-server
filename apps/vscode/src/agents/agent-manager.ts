@@ -49,7 +49,7 @@ const DOCS_DIR = '.rocketride/docs';
 const GITIGNORE_ENTRY = '.rocketride/';
 
 /** Doc files shipped in the extension's docs/ directory. */
-const DOC_FILES = ['ROCKETRIDE_README.md', 'ROCKETRIDE_QUICKSTART.md', 'ROCKETRIDE_PIPELINE_RULES.md', 'ROCKETRIDE_COMPONENT_REFERENCE.md', 'ROCKETRIDE_COMMON_MISTAKES.md', 'ROCKETRIDE_python_API.md', 'ROCKETRIDE_typescript_API.md'];
+const DOC_FILES = ['ROCKETRIDE_README.md', 'ROCKETRIDE_QUICKSTART.md', 'ROCKETRIDE_PIPELINE_RULES.md', 'ROCKETRIDE_COMPONENT_REFERENCE.md', 'ROCKETRIDE_COMMON_MISTAKES.md', 'ROCKETRIDE_python_API.md', 'ROCKETRIDE_typescript_API.md', 'ROCKETRIDE_OBSERVABILITY.md'];
 
 /** Map from installer name to the VS Code config key under rocketride.integrations.* */
 const INTEGRATION_CONFIG_KEYS: Record<string, string> = {

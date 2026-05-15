@@ -222,38 +222,19 @@ check_linux_sudo() {
 }
 
 check_linux_cmake() {
-    if ! command_exists "wget"; then
-        COMMANDS+=("    # Installing wget")
-        COMMANDS+=("    sudo apt install -y wget")
-    fi
-
     if command_exists cmake; then
         CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
         CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
         CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
-        
+
         if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
             echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.19)"
-            COMMANDS+=("    # Updating CMake")
-            COMMANDS+=("    sudo rm -f /usr/local/bin/cmake* && sudo rm -rf /opt/cmake*")
-            COMMANDS+=("    (cd /tmp && wget https://github.com/Kitware/CMake/releases/download/v3.30.1/cmake-3.30.1-linux-x86_64.tar.gz)")
-            COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-linux-x86_64.tar.gz && sudo mv cmake-3.30.1-linux-x86_64 /opt/cmake)")
-            COMMANDS+=("    sudo ln -sf /opt/cmake/bin/* /usr/local/bin/")
-        fi
-        if [ "$CMAKE_MAJOR" -gt 3 ]; then
-            echo "CMake version $CMAKE_VERSION is too new (must be < version 4)"
-            COMMANDS+=("    # Downgrading CMake")
-            COMMANDS+=("    sudo rm -f /usr/local/bin/cmake* && sudo rm -rf /opt/cmake*")
-            COMMANDS+=("    (cd /tmp && wget https://github.com/Kitware/CMake/releases/download/v3.30.1/cmake-3.30.1-linux-x86_64.tar.gz)")
-            COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-linux-x86_64.tar.gz && sudo mv cmake-3.30.1-linux-x86_64 /opt/cmake)")
-            COMMANDS+=("    sudo ln -sf /opt/cmake/bin/* /usr/local/bin/")
+            COMMANDS+=("    # Upgrading CMake")
+            COMMANDS+=("    sudo apt install -y cmake")
         fi
     else
         COMMANDS+=("    # Installing CMake")
-        COMMANDS+=("    sudo rm -f /usr/local/bin/cmake* && sudo rm -rf /opt/cmake*")
-        COMMANDS+=("    (cd /tmp && wget https://github.com/Kitware/CMake/releases/download/v3.30.1/cmake-3.30.1-linux-x86_64.tar.gz)")
-        COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-linux-x86_64.tar.gz && sudo mv cmake-3.30.1-linux-x86_64 /opt/cmake)")
-        COMMANDS+=("    sudo ln -sf /opt/cmake/bin/* /usr/local/bin/")
+        COMMANDS+=("    sudo apt install -y cmake")
     fi
 }
 
@@ -472,42 +453,16 @@ check_mac_cmake() {
         CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
         CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
         CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
-        
+
         if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
             echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.19)"
-            COMMANDS+=("    # Upgrading CMake to 3.30.1")
-            COMMANDS+=("    (cd /tmp && curl -LO https://cmake.org/files/v3.30/cmake-3.30.1-macos-universal.tar.gz)")
-            COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-macos-universal.tar.gz)")
-            COMMANDS+=("    sudo mv /tmp/cmake-3.30.1-macos-universal /Applications/CMake-3.30.1")
-            COMMANDS+=("    sudo rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cmake /usr/local/bin/cmake")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/ctest /usr/local/bin/ctest")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cpack /usr/local/bin/cpack")
-            COMMANDS+=("    rm -f /tmp/cmake-3.30.1-macos-universal.tar.gz")
-        fi
-        if [ "$CMAKE_MAJOR" -gt 3 ]; then
-            echo "CMake version $CMAKE_VERSION is too new (must be < version 4)"
-            COMMANDS+=("    # Downgrading CMake to 3.30.1")
-            COMMANDS+=("    brew uninstall cmake --ignore-dependencies || true")
-            COMMANDS+=("    (cd /tmp && curl -LO https://cmake.org/files/v3.30/cmake-3.30.1-macos-universal.tar.gz)")
-            COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-macos-universal.tar.gz)")
-            COMMANDS+=("    sudo mv /tmp/cmake-3.30.1-macos-universal /Applications/CMake-3.30.1")
-            COMMANDS+=("    sudo rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cmake /usr/local/bin/cmake")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/ctest /usr/local/bin/ctest")
-            COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cpack /usr/local/bin/cpack")
-            COMMANDS+=("    rm -f /tmp/cmake-3.30.1-macos-universal.tar.gz")
+            COMMANDS+=("    # Upgrading CMake")
+            COMMANDS+=("    brew upgrade cmake")
         fi
     else
-        echo "CMake is not installed. Installing CMake 3.30.1..."
-        COMMANDS+=("    # Installing CMake 3.30.1")
-        COMMANDS+=("    (cd /tmp && curl -LO https://cmake.org/files/v3.30/cmake-3.30.1-macos-universal.tar.gz)")
-        COMMANDS+=("    (cd /tmp && tar -xzf cmake-3.30.1-macos-universal.tar.gz)")
-        COMMANDS+=("    sudo mv /tmp/cmake-3.30.1-macos-universal /Applications/CMake-3.30.1")
-        COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cmake /usr/local/bin/cmake")
-        COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/ctest /usr/local/bin/ctest")
-        COMMANDS+=("    sudo ln -sf /Applications/CMake-3.30.1/CMake.app/Contents/bin/cpack /usr/local/bin/cpack")
-        COMMANDS+=("    rm -f /tmp/cmake-3.30.1-macos-universal.tar.gz")
+        echo "CMake is not installed."
+        COMMANDS+=("    # Installing CMake")
+        COMMANDS+=("    brew install cmake")
     fi
 }
 

@@ -21,7 +21,7 @@ The release pipeline consists of two workflows:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `develop` |
+| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `stage` |
 | **Release** (`.github/workflows/release.yaml`) | Push to `main` | Build, publish to registries, and create stable GitHub Releases |
 
 Both workflows build the full project across three platforms (Linux, Windows, macOS), run tests, and package artifacts. The key difference is that nightly creates prereleases on GitHub only, while the release workflow publishes to external registries (npm, PyPI, VS Code Marketplace) and creates stable GitHub Releases.
@@ -69,15 +69,16 @@ Each package produces specific artifacts during the build:
 
 ```
 feature/* ──┐
-bugfix/*  ──┼──> develop ──────────────> main
-hotfix/*  ──┘        │                    │
-                     │                    │
-              Nightly builds        Stable releases
-              (prereleases)      (registry + GitHub)
+bugfix/*  ──┼──> develop ──> stage ──> main
+hotfix/*  ──┘                  │         │
+                               │         │
+                        Nightly builds   Stable releases
+                        (prereleases)  (registry + GitHub)
 ```
 
-- **`develop`** — Integration branch. All feature and bugfix branches merge here. Nightly prereleases are built from this branch.
-- **`main`** — Stable release branch. When `develop` is merged into `main`, the release workflow triggers automatically.
+- **`develop`** — Integration branch. All feature and bugfix branches merge here. No prereleases are built from this branch.
+- **`stage`** — Prerelease stabilization branch. Changes are promoted from `develop` to `stage` once they are ready to be validated. Nightly prereleases are built from this branch, so a broken commit on `develop` cannot leak into a prerelease.
+- **`main`** — Stable release branch. When `stage` is merged into `main`, the release workflow triggers automatically.
 - **`feature/*`**, **`bugfix/*`**, **`hotfix/*`** — Short-lived branches that merge into `develop` via pull request.
 
 ## Nightly Prereleases
@@ -114,13 +115,13 @@ hotfix/*  ──┘        │                    │
 
 ### Downloading nightly builds
 
-Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/releases) and look for releases tagged with `-prerelease`. These contain the latest development builds from the `develop` branch.
+Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/releases) and look for releases tagged with `-prerelease`. These contain the latest builds from the `stage` branch.
 
 ## Stable Releases
 
 **Workflow:** `.github/workflows/release.yaml`
 
-**Trigger:** Automatically runs when commits are pushed to the `main` branch (typically via a merge from `develop`).
+**Trigger:** Automatically runs when commits are pushed to the `main` branch (typically via a merge from `stage`).
 
 ### What happens
 
@@ -173,12 +174,18 @@ Each package is published independently:
 ### How to release a new version
 
 1. **Bump the version** in the appropriate file(s) on the `develop` branch.
-2. **Commit and push** to `develop`. The next nightly build will create a prerelease with the new version.
+2. **Commit and push** to `develop`, then **merge `develop` into `stage`** once the change is ready to be validated:
+   ```bash
+   git checkout stage
+   git merge develop
+   git push origin stage
+   ```
+   The next nightly build will create a prerelease with the new version from `stage`.
 3. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
-4. **Merge `develop` into `main`**:
+4. **Merge `stage` into `main`**:
    ```bash
    git checkout main
-   git merge develop
+   git merge stage
    git push origin main
    ```
 5. The release workflow triggers automatically and publishes all packages with new versions.

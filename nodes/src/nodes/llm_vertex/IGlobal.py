@@ -101,7 +101,15 @@ class IGlobal(IGlobalBase):
                     # Use a simple, non-refreshing bearer credential for validation speed
                     credentials = UserCredentials(token=token)
 
-            llm = ChatVertexAI(model=model_cfg, temperature=0, max_output_tokens=1, project=project, location=location, credentials=credentials, max_retries=0)
+            llm = ChatVertexAI(
+                model=model_cfg,
+                temperature=0,
+                max_output_tokens=1,
+                project=project,
+                location=location,
+                credentials=credentials,
+                max_retries=0,
+            )
 
             # Perform a minimal probe
             try:
@@ -139,7 +147,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag, self.glb.connConfig.get('parameters', {}))
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None
 
     def _read_key(self, key_formdata: str) -> str | None:
         """

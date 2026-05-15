@@ -41,7 +41,12 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from mistralai.client import Mistral
+from ai.common.validation import validate_prompt
+
+try:
+    from mistralai.client import Mistral  # 2.x layout
+except ImportError:
+    from mistralai import Mistral  # 1.x layout
 
 
 class Chat(ChatBase):
@@ -72,9 +77,13 @@ class Chat(ChatBase):
         if not api_key:
             raise ValueError('Missing Mistral AI API key. Please check your configuration.')
         if api_key.startswith('sk-'):
-            raise ValueError('Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.'
+            )
         if api_key.startswith('AI'):
-            raise ValueError('Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.')
+            raise ValueError(
+                'Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.'
+            )
 
         # Initialize the client with error handling
         try:
@@ -222,7 +231,20 @@ class Chat(ChatBase):
         """Determine if an error is retryable."""
         error_msg = str(error).lower()
 
-        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'bad gateway', 'rate limit']
+        retryable_errors = [
+            'timeout',
+            'timed out',
+            'connection',
+            'network',
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'service unavailable',
+            'bad gateway',
+            'rate limit',
+        ]
 
         return any(phrase in error_msg for phrase in retryable_errors)
 
@@ -237,14 +259,14 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Send a chat message to Mistral AI and get the response."""
-        # Get retry configuration for this model
+        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
 
         for attempt in range(max_retries + 1):
             try:
                 # Create the chat message
-                messages = [{'role': 'user', 'content': question.getPrompt()}]
+                messages = [{'role': 'user', 'content': prompt}]
 
                 # Make the API call
                 chat_response = self._client.chat.complete(

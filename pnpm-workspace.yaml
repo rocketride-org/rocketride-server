@@ -36,7 +36,12 @@ packages:
   # Applications
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
+  - 'apps/hello-ui'
+  - 'apps/monitor-ui'
+  - 'apps/profiler-ui'
+  - 'apps/shell-ui'
   - 'apps/vscode'
+  - 'apps/world-ui'
 
   # Examples
   - 'examples/*'

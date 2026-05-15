@@ -13,22 +13,16 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"target"
-	],
+	"classType": ["target"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [
-		"network",
-		"noremote",
-		"nosaas"
-	],
+	"capabilities": ["network", "noremote", "nosaas"],
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -47,23 +41,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A target component that writes data to the file system. It supports ",
-		"outputting structured or unstructured content to files in a variety ",
-		"of formats such as JSON, CSV, or plain text. Configurable with output ",
-		"paths and naming conventions, the component enables flexible persistence ",
-		"of processed data to networked storage."
-	],
+	"description": ["A target component that writes data to the file system. It supports ", "outputting structured or unstructured content to files in a variety ", "of formats such as JSON, CSV, or plain text. Configurable with output ", "paths and naming conventions, the component enables flexible persistence ", "of processed data to networked storage."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "text-output.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/3UTAIW7",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -74,16 +59,14 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
 	"fields": {
 		"text_output.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"anonymize"
-			]
+			"properties": ["anonymize"]
 		}
 	},
 	//
@@ -95,11 +78,7 @@
 		{
 			"section": "Transform",
 			"title": "Text Output",
-			"properties": [
-				"type",
-				"text_output.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "text_output.target.parameters", "target.mode"]
 		}
 	]
 }

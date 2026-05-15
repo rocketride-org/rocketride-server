@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,13 +24,19 @@
 
 /**
  * Type definitions for RocketRide client configuration and DAP communication.
- * 
+ *
  * This module defines the core types used for client-server communication
  * including DAP messages, callbacks, configuration options, and transport interfaces.
  */
 
+import { ConnectionException } from '../exceptions/index.js';
+
 /**
  * Stack trace information for errors.
+ *
+ * Carries source-location metadata returned by the server when a server-side
+ * error includes a traceback, enabling developers to pinpoint the failure
+ * inside pipeline node code.
  */
 export interface TraceInfo {
 	/** File path where the error occurred */
@@ -40,6 +46,16 @@ export interface TraceInfo {
 	lineno: number;
 }
 
+/**
+ * A single DAP (Debug Adapter Protocol) message exchanged between the client
+ * and the RocketRide server.
+ *
+ * All communication on the WebSocket uses this envelope. The `type` field
+ * discriminates between the three roles a message can play:
+ * - `request`  — client → server command invocation
+ * - `response` — server → client result for a prior request
+ * - `event`    — server → client unsolicited notification
+ */
 export interface DAPMessage {
 	/** Message type: request from client, response from server, or event notification */
 	type: 'request' | 'response' | 'event';
@@ -80,7 +96,7 @@ export interface DAPMessage {
 
 /**
  * Callback functions for transport layer events and debugging.
- * 
+ *
  * These callbacks provide hooks for monitoring transport activity,
  * debugging protocol messages, and handling connection lifecycle events.
  */
@@ -114,7 +130,7 @@ export interface ConnectionInfo {
 
 /**
  * Callback function for handling real-time events from the server.
- * 
+ *
  * Events include pipeline status updates, processing progress,
  * error notifications, and system alerts.
  */
@@ -122,23 +138,35 @@ export type EventCallback = (event: DAPMessage) => Promise<void>;
 
 /**
  * Callback function for connection establishment events.
+ *
+ * Invoked once the WebSocket is open AND the server has confirmed the
+ * authentication handshake. `connectionInfo` is an optional human-readable
+ * string describing the remote endpoint.
  */
 export type ConnectCallback = (connectionInfo?: string) => Promise<void>;
 
 /**
  * Callback function for disconnection events.
+ *
+ * Invoked whenever the connection closes, whether gracefully or due to an
+ * error. `reason` is a human-readable description and `hasError` is true
+ * when the closure was caused by an error rather than a clean shutdown.
  */
 export type DisconnectCallback = (reason?: string, hasError?: boolean) => Promise<void>;
 
 /**
  * Callback when a connection attempt fails (e.g. auth or pipeline not ready).
  * Used in persist mode to inform the UI while the client keeps retrying.
+ *
+ * The callback receives a `ConnectionException` (rather than a generic Error)
+ * so the caller can inspect structured error details such as status codes
+ * returned by the server.
  */
-export type ConnectErrorCallback = (message: string) => Promise<void>;
+export type ConnectErrorCallback = (error: ConnectionException) => void | Promise<void>;
 
 /**
  * Configuration options for creating an RocketRideClient instance.
- * 
+ *
  * Provides connection settings, authentication, and event handling
  * configuration for establishing and managing server connections.
  */
@@ -149,7 +177,7 @@ export interface RocketRideClientConfig {
 	/** Server URI (will be converted to WebSocket URI automatically) */
 	uri?: string;
 
-	/** 
+	/**
 	 * Environment variables dictionary for configuration and variable substitution.
 	 * If not provided, will load from .env file (Node.js only), then fall back to process.env
 	 */
@@ -173,6 +201,13 @@ export interface RocketRideClientConfig {
 	/** Optional function to output a debug message */
 	onDebugMessage?: (message: string) => void;
 
+	/**
+	 * Open a public (unauthenticated) connection.
+	 * Only ``rrext_public_*`` commands may be sent. The connection is
+	 * permanently public — call connect() on a separate client to authenticate.
+	 */
+	public?: boolean;
+
 	/** Maintain the connection */
 	persist?: boolean;
 
@@ -182,8 +217,280 @@ export interface RocketRideClientConfig {
 	/** Max total time in ms to keep retrying connections. Default: undefined (forever). */
 	maxRetryTime?: number;
 
+	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
+	wsPath?: string;
+
 	/** Client module name for debugging and identification */
 	module?: string;
+
+	/** Friendly client name sent during auth (e.g. "VS Code", "Cursor") */
+	clientName?: string;
+
+	/** Client version sent during auth (e.g. "0.9.4") */
+	clientVersion?: string;
+
+	/**
+	 * Optional trace callback invoked at the start and end of every `call()`.
+	 * Use for logging, debugging, or telemetry.
+	 *
+	 * @param traceType - 0 = request (before send), 1 = success (response), 2 = error
+	 * @param payload   - The trace data: command, args, and (for success/error) the result or error message.
+	 */
+	onTrace?: (traceType: TraceType, message: DAPMessage) => void;
 }
 
+// =============================================================================
+// TRACE TYPES
+// =============================================================================
 
+/** Discriminator for the three trace event types. */
+export enum TraceType {
+	/** Emitted before the DAP request is sent. */
+	Request = 0,
+	/** Emitted when the DAP request succeeds. */
+	Success = 1,
+	/** Emitted when the DAP request fails. */
+	Error = 2,
+}
+
+// =============================================================================
+// CONNECT RESULT TYPES
+// =============================================================================
+
+/**
+ * Describes a team within an organisation that the authenticated user belongs to.
+ *
+ * Teams are the finest-grained unit of access control. Each team carries a set
+ * of permission strings that govern which server operations are available to
+ * members of that team.
+ */
+export interface TeamInfo {
+	/** Unique identifier of the team (UUID or short slug) */
+	id: string;
+
+	/** Display name of the team shown in dashboards and logs */
+	name: string;
+
+	/**
+	 * Permission strings granted to this team.
+	 * Examples: `'task.execute'`, `'task.monitor'`, `'store.read'`.
+	 */
+	permissions: string[];
+}
+
+/**
+ * Describes an organisation the authenticated user is a member of.
+ *
+ * Organisations group users and teams for billing and access management.
+ * A user may belong to multiple organisations; each carries its own permission
+ * set at the organisation level plus a list of contained teams.
+ */
+export interface OrgInfo {
+	/** Unique identifier of the organisation (UUID or short slug) */
+	id: string;
+
+	/** Display name of the organisation */
+	name: string;
+
+	/**
+	 * Organisation-level permission strings granted to the authenticated user.
+	 * These apply across all teams within the organisation.
+	 */
+	permissions: string[];
+
+	/**
+	 * Teams within this organisation that the user is a member of.
+	 * Each entry includes team-scoped permissions.
+	 */
+	teams: TeamInfo[];
+}
+
+/**
+ * Full identity and authorisation payload returned by the server after a
+ * successful authentication handshake (`auth` command).
+ *
+ * The client caches this object and re-emits it whenever the server pushes
+ * an `apaext_account` event (e.g. after a plan change). The `userToken`
+ * field is used for subsequent reconnects in persist mode.
+ */
+
+
+export interface ConnectResult {
+	/**
+	 * Short-lived RocketRide session token (`rr_…`) that can be replayed on
+	 * reconnect without requiring the original API key or PKCE exchange again.
+	 */
+	userToken: string;
+
+	/** Unique identifier of the authenticated user (UUID) */
+	userId: string;
+
+	/** Full display name of the user (e.g. "Jane Smith") */
+	displayName: string;
+
+	/** User's given (first) name */
+	givenName: string;
+
+	/** User's family (last) name */
+	familyName: string;
+
+	/** Username / login handle (not necessarily unique across providers) */
+	preferredUsername: string;
+
+	/** Primary email address of the user */
+	email: string;
+
+	/** Whether the email address has been verified by the identity provider */
+	emailVerified: boolean;
+
+	/** Primary phone number of the user (E.164 format where available) */
+	phoneNumber: string;
+
+	/** Whether the phone number has been verified by the identity provider */
+	phoneNumberVerified: boolean;
+
+	/** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
+	locale: string;
+
+	/**
+	 * ID of the team that should be used by default for operations that do not
+	 * explicitly specify a team context.
+	 */
+	defaultTeam: string;
+
+	/**
+	 * List of organisations the authenticated user belongs to, each with
+	 * its own permission set and nested team memberships.
+	 */
+	organizations: OrgInfo[];
+
+	/**
+	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
+	 * OSS: all apps with ``appStatus: "free"``, ``onDesktop: true``.
+	 * SaaS: populated from the ``app_users`` table, enriched with billing info.
+	 */
+	apps: AppManifestEntry[];
+
+	/**
+	 * Server capability tags describing the account provider in use.
+	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
+	 */
+	capabilities: string[];
+}
+
+/**
+ * A single app entry in the server-provided manifest.
+ *
+ * Same shape as the build-time apps.json entries, extended with
+ * optional pricing and visibility metadata for SaaS deployments.
+ */
+export interface AppManifestEntry {
+	/** Unique app identifier (e.g. "rocketride.pipeBuilder"). */
+	id: string;
+
+	/** Module Federation remote name (e.g. "rocketride_pipeBuilder"). */
+	moduleId: string;
+
+	/** Human-readable app name. */
+	name: string;
+
+	/** Short description of the app. */
+	description?: string;
+
+	/** URL path to the app's icon (e.g. "/shell/apps/rocket-ui/icon.svg"). */
+	icon?: string;
+
+	/** Category tags for filtering (e.g. ["pipelines", "ai"]). */
+	categories?: string[];
+
+	/** App-specific setting definitions. */
+	settings?: unknown[];
+
+	/** URL to the app's Module Federation remote entry file. */
+	entry: string;
+
+	/** App version string (semver). */
+	version?: string;
+
+	/** Visibility scope: "public", "org", "team", or "user". */
+	ownerType?: string;
+
+	/** Whether the app UI requires authentication to render. Default true. */
+	authenticated?: boolean;
+
+	/** Whether to show the header bar when this app is active. Default true. */
+	showHeader?: boolean;
+
+	/** Whether to show the status bar when this app is active. Default true. */
+	showStatusBar?: boolean;
+
+	/** Whether the app is visible to unauthenticated users. Default true. */
+	public?: boolean;
+
+	/** Stripe product ID (SaaS paid apps only). */
+	stripeProductId?: string;
+
+	/** Available pricing tiers (SaaS paid apps only). */
+	stripePrices?: StripePriceEntry[];
+
+	/** App lifecycle status: 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled'. */
+	appStatus?: string;
+
+	/** Whether this app is on the user's desktop. */
+	onDesktop?: boolean;
+
+	/** Total seats on the subscription (only for subscribed paid apps). */
+	seats?: number;
+
+	/** Seats currently occupied in this org (only for subscribed paid apps). */
+	seatsUsed?: number;
+
+	/** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
+	features?: string[];
+}
+
+/**
+ * A Stripe pricing tier for a paid app.
+ */
+export interface StripePriceEntry {
+	/** Stripe price ID (price_*). */
+	priceId: string;
+
+	/** Human-readable label (e.g. "Monthly"). */
+	nickname: string;
+
+	/** Price in smallest currency unit (cents). */
+	amountCents: number;
+
+	/** ISO 4217 currency code (e.g. "usd"). */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
+	interval: string;
+}
+
+/**
+ * Server metadata returned by the pre-auth info probe.
+ *
+ * Obtained via {@link RocketRideClient.getServerInfo} which sends an
+ * `auth` request with `infoOnly: true`. The server responds without
+ * requiring credentials.
+ */
+export interface ServerInfoResult {
+	/** Server engine version string. */
+	version: string;
+
+	/** Capability tags: `['oss']` for open-source, `['saas']` for cloud. */
+	capabilities: string[];
+
+	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
+	platform?: string;
+
+	/**
+	 * Public apps visible without authentication.
+	 *
+	 * Returned by the pre-auth probe so the shell can render
+	 * public apps (e.g. landing page) before login.
+	 */
+	apps?: AppManifestEntry[];
+}

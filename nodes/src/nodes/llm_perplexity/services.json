@@ -1,183 +1,161 @@
 {
-    "title": "Perplexity",
-    "protocol": "llm_perplexity://",
-    "classType": [
-        "llm"
-    ],
-    "capabilities": [
-        "invoke"
-    ],
-    "register": "filter",
-    "node": "python",
-    "path": "nodes.llm_perplexity",
-    "prefix": "llm",
-    "description": [
-        "A component that connects to Perplexity AI's Sonar models for advanced natural language ",
-        "processing with real-time web search capabilities. It supports tasks such as research, ",
-        "question answering, and chat-based interactions with access to current web information. ",
-        "Configurable with API keys and multiple model options including reasoning and deep research ",
-        "models for comprehensive, fact-based responses."
-    ],
-    "documentation": "https://bit.ly/4qAgP50",
-    "icon": "perplexity.svg",
-    "tile": [
-        "Model: ${parameters.llm_perplexity.profile}"
-    ],
-    "lanes": {
-        "questions": [
-            "answers"
-        ]
-    },
-    "input": [
-        {
-            "lane": "questions",
-            "output": [
-                {
-                    "lane": "answers"
-                }
-            ]
-        }
-    ],
-    "preconfig": {
-        "default": "sonar",
-        "profiles": {
-            "sonar-pro": {
-                "model": "sonar-pro",
-                "title": "Sonar Pro",
-                "modelTotalTokens": 200000,
-                "apikey": ""
-            },
-            "sonar": {
-                "model": "sonar",
-                "title": "Sonar",
-                "modelTotalTokens": 128000,
-                "apikey": ""
-            },
-            "sonar-reasoning-pro": {
-                "model": "sonar-reasoning-pro",
-                "title": "Sonar Reasoning Pro",
-                "modelTotalTokens": 128000,
-                "apikey": ""
-            },
-            "sonar-reasoning": {
-                "model": "sonar-reasoning",
-                "title": "Sonar Reasoning",
-                "modelTotalTokens": 128000,
-                "apikey": ""
-            },
-            "sonar-deep-research": {
-                "model": "sonar-deep-research",
-                "title": "Sonar Deep Research",
-                "modelTotalTokens": 128000,
-                "apikey": ""
-            }
-        }
-    },
-    "fields": {
-        "model": {
-            "type": "string",
-            "title": "Model",
-            "description": "Perplexity AI model"
-        },
-        "modelTotalTokens": {
-            "type": "number",
-            "title": "Tokens",
-            "description": "Total Tokens"
-        },
-        "perplexity.sonar-pro": {
-            "object": "sonar-pro",
-            "properties": [
-                "llm.cloud.apikey"
-            ]
-        },
-        "perplexity.sonar": {
-            "object": "sonar",
-            "properties": [
-                "llm.cloud.apikey"
-            ]
-        },
-        "perplexity.sonar-reasoning-pro": {
-            "object": "sonar-reasoning-pro",
-            "properties": [
-                "llm.cloud.apikey"
-            ]
-        },
-        "perplexity.sonar-reasoning": {
-            "object": "sonar-reasoning",
-            "properties": [
-                "llm.cloud.apikey"
-            ]
-        },
-        "perplexity.sonar-deep-research": {
-            "object": "sonar-deep-research",
-            "properties": [
-                "llm.cloud.apikey"
-            ]
-        },
-        "perplexity.profile": {
-            "title": "Model",
-            "description": "Perplexity AI model",
-            "type": "string",
-            "default": "sonar-pro",
-            "enum": [
-                "*>preconfig.profiles.*.title"
-            ],
-            "conditional": [
-                {
-                    "value": "sonar-pro",
-                    "properties": [
-                        "perplexity.sonar-pro"
-                    ]
-                },
-                {
-                    "value": "sonar",
-                    "properties": [
-                        "perplexity.sonar"
-                    ]
-                },
-                {
-                    "value": "sonar-reasoning-pro",
-                    "properties": [
-                        "perplexity.sonar-reasoning-pro"
-                    ]
-                },
-                {
-                    "value": "sonar-reasoning",
-                    "properties": [
-                        "perplexity.sonar-reasoning"
-                    ]
-                },
-                {
-                    "value": "sonar-deep-research",
-                    "properties": [
-                        "perplexity.sonar-deep-research"
-                    ]
-                }
-            ]
-        }
-    },
-    "shape": [
-        {
-            "section": "Pipe",
-            "title": "Perplexity",
-            "properties": [
-                "perplexity.profile"
-            ]
-        }
-    ],
-    "test": {
-        "profiles": ["sonar"],
-        "outputs": ["answers"],
-        "cases": [
-            {
-                "name": "LLM returns mock response",
-                "text": "What is 2+2?",
-                "expect": {
-                    "answers": {
-                        "contains": "Mock LLM response"
-                    }
-                }
-            }
-        ]
-    }
-} 
+	"title": "Perplexity",
+	"protocol": "llm_perplexity://",
+	"classType": ["llm"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_perplexity",
+	"prefix": "llm",
+	"description": ["A component that connects to Perplexity AI's Sonar models for advanced natural language ", "processing with real-time web search capabilities. It supports tasks such as research, ", "question answering, and chat-based interactions with access to current web information. ", "Configurable with API keys and multiple model options including reasoning and deep research ", "models for comprehensive, fact-based responses."],
+	"icon": "perplexity.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.llm_perplexity.profile}"],
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"preconfig": {
+		"default": "sonar",
+		"profiles": {
+			"sonar-pro": {
+				"title": "Sonar Pro",
+				"model": "sonar-pro",
+				"modelSource": "manual",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 8000, // openrouter
+				"apikey": ""
+			},
+			"sonar": {
+				"title": "Sonar",
+				"model": "sonar",
+				"modelSource": "manual",
+				"modelTotalTokens": 127072, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"sonar-reasoning-pro": {
+				"title": "Sonar Reasoning Pro",
+				"model": "sonar-reasoning-pro",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"sonar-reasoning": {
+				"title": "Sonar Reasoning",
+				"model": "sonar-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"sonar-deep-research": {
+				"title": "Sonar Deep Research",
+				"model": "sonar-deep-research",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"sonar-pro-search": {
+				"title": "Perplexity: Sonar Pro Search",
+				"model": "sonar-pro-search",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 8000, // openrouter
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Perplexity AI model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"perplexity.sonar-pro": {
+			"object": "sonar-pro",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"perplexity.sonar": {
+			"object": "sonar",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"perplexity.sonar-reasoning-pro": {
+			"object": "sonar-reasoning-pro",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"perplexity.sonar-reasoning": {
+			"object": "sonar-reasoning",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"perplexity.sonar-deep-research": {
+			"object": "sonar-deep-research",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"perplexity.profile": {
+			"title": "Model",
+			"description": "Perplexity AI model",
+			"type": "string",
+			"default": "sonar-pro",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "sonar-pro",
+					"properties": ["perplexity.sonar-pro"]
+				},
+				{
+					"value": "sonar",
+					"properties": ["perplexity.sonar"]
+				},
+				{
+					"value": "sonar-reasoning-pro",
+					"properties": ["perplexity.sonar-reasoning-pro"]
+				},
+				{
+					"value": "sonar-reasoning",
+					"properties": ["perplexity.sonar-reasoning"]
+				},
+				{
+					"value": "sonar-deep-research",
+					"properties": ["perplexity.sonar-deep-research"]
+				},
+				{
+					"value": "sonar-pro-search",
+					"properties": ["perplexity.sonar-pro-search"]
+				}
+			]
+		},
+		"perplexity.sonar-pro-search": {
+			"object": "sonar-pro-search",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Perplexity",
+			"properties": ["perplexity.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["sonar"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

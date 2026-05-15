@@ -70,7 +70,9 @@ class IGlobal(IGlobalBase):
             try:
                 # Create client and make a 1-token probe
                 client = OpenAI(api_key=apikey, base_url=DEEPSEEK_BASE_URL)
-                client.chat.completions.create(model=model, messages=[{'role': 'user', 'content': VALIDATION_PROMPT}], max_tokens=1)
+                client.chat.completions.create(
+                    model=model, messages=[{'role': 'user', 'content': VALIDATION_PROMPT}], max_tokens=1
+                )
             except APIStatusError as e:
                 # HTTP error with structured body; pull code/type/message
                 status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
@@ -121,7 +123,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:
         """Compose a user-facing error string.

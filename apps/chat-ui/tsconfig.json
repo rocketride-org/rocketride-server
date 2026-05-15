@@ -56,9 +56,6 @@
     "allowJs": true,
     "checkJs": false,
     
-    /* Advanced */
-    "incremental": true,
-    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo"
   },
   
   "include": [

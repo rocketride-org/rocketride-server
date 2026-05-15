@@ -26,11 +26,11 @@
 namespace ap {
 
 // Path literals
-inline file::FilePath<char> operator"" _pth(const char *str,
+inline file::FilePath<char> operator""_pth(const char *str,
                                             std::size_t count) noexcept {
     return file::FilePath<char>(string::StrView<char>{str, count});
 }
-inline file::FilePath<Utf16Chr> operator"" _pth(const Utf16Chr * str,
+inline file::FilePath<Utf16Chr> operator""_pth(const Utf16Chr * str,
                                                 std::size_t count) noexcept {
     return file::FilePath<Utf16Chr>(string::StrView<Utf16Chr>{str, count});
 }

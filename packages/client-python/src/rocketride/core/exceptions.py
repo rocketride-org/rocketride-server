@@ -110,10 +110,11 @@ class RocketRideException(DAPException):
     RocketRide operations while still having access to detailed error context.
 
     Example:
+        client = RocketRideClient(uri)
         try:
-            async with RocketRideClient(uri, auth) as client:
-                result = await client.use(filepath="pipeline.json")
-                await client.send(result['token'], data)
+            await client.connect(auth)
+            result = await client.use(filepath="pipeline.json")
+            await client.send(result['token'], data)
         except RocketRideException as e:
             print(f"RocketRide operation failed: {e}")
             # This catches all RocketRide-specific errors
@@ -158,12 +159,17 @@ class AuthenticationException(ConnectionException):
     pass
 
 
-class PipeException(RocketRideException):
+class PipeException(RocketRideException, RuntimeError):
     """
     Exception raised for data pipe operations.
 
     Raised when there are problems with data pipes used for sending
     data to pipelines, uploading files, or streaming operations.
+
+    Note:
+        Also inherits from :class:`RuntimeError` for backward compatibility with
+        callers that previously caught ``RuntimeError`` from
+        ``client.send()`` / ``client.pipe()`` / pipe ``open()``/``write()``/``close()``.
 
     Common scenarios:
     - Failed to open data pipe

@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -53,11 +53,8 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "embedding-image.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/3WyHtO0",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -67,28 +64,6 @@
 		"documents": ["documents"],
 		"image": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "documents",
-			"description": "Documents container images to embed.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents containg embeddings."
-				}
-			]
-		},
-		{
-			"lane": "image",
-			"description": "Documents container images to embed.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents containg embeddings."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
@@ -119,7 +94,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -189,7 +164,7 @@
 	},
 	//
 	//	Full test configuration - tests all embedding_image model profiles.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

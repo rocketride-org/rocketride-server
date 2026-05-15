@@ -38,7 +38,20 @@ from uuid import uuid4
 import sys
 import numpy as np
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, Filter, FieldCondition, Record, MatchValue, Range, SearchParams, TextIndexParams, TokenizerType, PayloadSchemaType, TextIndexType, ScoredPoint
+from qdrant_client.models import (
+    PointStruct,
+    Filter,
+    FieldCondition,
+    Record,
+    MatchValue,
+    Range,
+    SearchParams,
+    TextIndexParams,
+    TokenizerType,
+    PayloadSchemaType,
+    TextIndexType,
+    ScoredPoint,
+)
 from qdrant_client.http import models
 from qdrant_client.conversions import common_types as types
 
@@ -160,25 +173,47 @@ class Store(DocumentStoreBase):
         # If we do not have a payload schema yet
         if not len(info.payload_schema):
             # Setup our payload index so we can query by nodeId
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.nodeId', field_type=PayloadSchemaType.KEYWORD)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.nodeId', field_type=PayloadSchemaType.KEYWORD
+            )
 
             # Setup our payload index so we can query by object id
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.objectId', field_type=PayloadSchemaType.KEYWORD)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.objectId', field_type=PayloadSchemaType.KEYWORD
+            )
 
             # Setup our payload index so we can query by parent path
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.parent', field_type=PayloadSchemaType.KEYWORD)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.parent', field_type=PayloadSchemaType.KEYWORD
+            )
 
             # Setup our payload index so we can query by permission id
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.permissionId', field_type=PayloadSchemaType.INTEGER)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.permissionId', field_type=PayloadSchemaType.INTEGER
+            )
 
             # Setup our payload index so we can query by isDeleted
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.isDeleted', field_type=PayloadSchemaType.BOOL)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.isDeleted', field_type=PayloadSchemaType.BOOL
+            )
 
             # Setup our payload index so we can query by isTable
-            self.client.create_payload_index(collection_name=self.collection, field_name='meta.isTable', field_type=PayloadSchemaType.BOOL)
+            self.client.create_payload_index(
+                collection_name=self.collection, field_name='meta.isTable', field_type=PayloadSchemaType.BOOL
+            )
 
             # Setup a full text keyword search on our content
-            self.client.create_payload_index(collection_name=self.collection, field_name='content', field_schema=TextIndexParams(type=TextIndexType.TEXT, tokenizer=TokenizerType.WORD, min_token_len=2, max_token_len=15, lowercase=True))
+            self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name='content',
+                field_schema=TextIndexParams(
+                    type=TextIndexType.TEXT,
+                    tokenizer=TokenizerType.WORD,
+                    min_token_len=2,
+                    max_token_len=15,
+                    lowercase=True,
+                ),
+            )
 
         return True
 
@@ -205,7 +240,9 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if docFilter.permissions is not None:
-            must.append(models.FieldCondition(key='meta.permissionId', match=models.MatchAny(any=docFilter.permissions)))
+            must.append(
+                models.FieldCondition(key='meta.permissionId', match=models.MatchAny(any=docFilter.permissions))
+            )
 
         # If a objectIds list was specified
         if docFilter.objectIds is not None:
@@ -310,7 +347,13 @@ class Store(DocumentStoreBase):
         filter.must.append(models.FieldCondition(key='content', match=models.MatchText(text=query.text)))
 
         # Perform the search
-        records, nextURL = self.client.scroll(collection_name=self.collection, scroll_filter=filter, offset=docFilter.offset, limit=docFilter.limit, with_vectors=False)
+        records, nextURL = self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=filter,
+            offset=docFilter.offset,
+            limit=docFilter.limit,
+            with_vectors=False,
+        )
 
         # Convert the points into groups
         docs = self._convertToDocs(records)
@@ -376,7 +419,13 @@ class Store(DocumentStoreBase):
         filter = self._convertFilter(docFilter=docFilter)
 
         # Perform the search
-        records, nextPoint = self.client.scroll(collection_name=self.collection, scroll_filter=filter, offset=docFilter.offset, limit=docFilter.limit, with_vectors=False)
+        records, nextPoint = self.client.scroll(
+            collection_name=self.collection,
+            scroll_filter=filter,
+            offset=docFilter.offset,
+            limit=docFilter.limit,
+            with_vectors=False,
+        )
 
         # Convert the points into documents
         docs = self._convertToDocs(records)
@@ -458,7 +507,19 @@ class Store(DocumentStoreBase):
 
             # Build the batch operation for deletion
             if len(objectIds):
-                ops.append(models.DeleteOperation(delete=models.FilterSelector(filter=Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=list(objectIds.keys())))]))))
+                ops.append(
+                    models.DeleteOperation(
+                        delete=models.FilterSelector(
+                            filter=Filter(
+                                must=[
+                                    FieldCondition(
+                                        key='meta.objectId', match=models.MatchAny(any=list(objectIds.keys()))
+                                    )
+                                ]
+                            )
+                        )
+                    )
+                )
 
             # Build the batch operation for insert
             if len(points):
@@ -494,7 +555,9 @@ class Store(DocumentStoreBase):
                 raise Exception('No embedding in document')
 
             # Append the points
-            tmp_struct = PointStruct(id=str(uuid4()), vector=embedding, payload={'content': chunk.page_content, 'meta': chunk.metadata})
+            tmp_struct = PointStruct(
+                id=str(uuid4()), vector=embedding, payload={'content': chunk.page_content, 'meta': chunk.metadata}
+            )
             cur_size = sys.getsizeof(tmp_struct)
             sum_size += cur_size
             points.append(tmp_struct)
@@ -538,7 +601,9 @@ class Store(DocumentStoreBase):
         filter_objectId = Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=objectIds))])
 
         # Set all the objects with the given objectId to true
-        self.client.set_payload(collection_name=self.collection, payload={'meta': {'isDeleted': True}}, points=filter_objectId)
+        self.client.set_payload(
+            collection_name=self.collection, payload={'meta': {'isDeleted': True}}, points=filter_objectId
+        )
         return
 
     def markActive(self, objectIds: List[str]) -> None:
@@ -556,7 +621,9 @@ class Store(DocumentStoreBase):
         filter_objectId = Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=objectIds))])
 
         # Set all the objects with the given objectId to false
-        self.client.set_payload(collection_name=self.collection, payload={'meta': {'isDeleted': False}}, points=filter_objectId)
+        self.client.set_payload(
+            collection_name=self.collection, payload={'meta': {'isDeleted': False}}, points=filter_objectId
+        )
         return
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
@@ -583,7 +650,12 @@ class Store(DocumentStoreBase):
             filter_objectId = FieldCondition(key='meta.objectId', match=MatchValue(value=objectId))
 
             # Perform the query
-            records, nextPoint = self.client.scroll(collection_name=self.collection, scroll_filter=Filter(must=[filter_objectId, filter_range]), limit=self.renderChunkSize, with_payload=True)
+            records, nextPoint = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=Filter(must=[filter_objectId, filter_range]),
+                limit=self.renderChunkSize,
+                with_payload=True,
+            )
 
             # Create a renderChunkSize array with empty
             # entries. This will allow us to join even when

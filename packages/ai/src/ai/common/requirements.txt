@@ -1,6 +1,7 @@
-# 
+#
 # Install Schema module
 #
 rank_bm25
 json5
 RestrictedPython
+SQLAlchemy>=2.0,<2.1

@@ -142,7 +142,7 @@ class IInstance(IInstanceBase):
         question = self._buildSummaryQuestion(text)
 
         # Trigger the question, returning IAnswer
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         # Return the json answer
         return result.getJson()
@@ -189,9 +189,11 @@ class IInstance(IInstanceBase):
             from langchain_text_splitters import RecursiveCharacterTextSplitter
 
             # Load the fixed stuff
-            self.maxTokens = self.instance.invoke('llm', IInvokeLLM(op='getContextLength'))
-            self.tokenCounter = self.instance.invoke('llm', IInvokeLLM(op='getTokenCounter'))
-            self.summarySplitter = RecursiveCharacterTextSplitter(chunk_size=self.maxTokens, length_function=self._getSummaryTokens)
+            self.maxTokens = self.instance.invoke(IInvokeLLM.GetContextLength())
+            self.tokenCounter = self.instance.invoke(IInvokeLLM.GetTokenCounter())
+            self.summarySplitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.maxTokens, length_function=self._getSummaryTokens
+            )
 
             # Get an empty prompt and obtain # of tokens in it
             summaryQuestion = self._buildSummaryQuestion()

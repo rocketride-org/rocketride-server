@@ -72,7 +72,11 @@ class Instance:
 
         # Skip transform if target file exists and
         # source and target files are matched and not changed
-        if not self.current_object.objectFailed and transform_key == prev_transform_key and not self.IEndpoint.settings_changed:
+        if (
+            not self.current_object.objectFailed
+            and transform_key == prev_transform_key
+            and not self.IEndpoint.settings_changed
+        ):
             self.skip_object('object transformed and not changed')
 
     def close(self):
@@ -113,7 +117,9 @@ class Instance:
 
     def get_transform_key(self) -> str:
         """Build transform key for current object."""
-        source_change_key = self.current_object.changeKey or f'{self.current_object.modifyTime};{self.current_object.size}'
+        source_change_key = (
+            self.current_object.changeKey or f'{self.current_object.modifyTime};{self.current_object.size}'
+        )
 
         target_change_key = None
         try:

@@ -26,8 +26,8 @@
 """
 Firecrawl tool node - global (shared) state.
 
-Reads the Firecrawl API key from config, creates a FirecrawlApp client,
-and builds a FirecrawlDriver that implements the ToolsBase interface.
+Reads the Firecrawl API key from config and creates a FirecrawlApp client.
+Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
@@ -37,28 +37,24 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from firecrawl import FirecrawlApp
 
-from .firecrawl_driver import FirecrawlDriver
-
 
 class IGlobal(IGlobalBase):
     """Global state for tool_firecrawl."""
 
-    driver: FirecrawlDriver | None = None
+    app: FirecrawlApp | None = None
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
         apikey = str((cfg.get('apikey') or '')).strip()
 
         if not apikey:
             raise Exception('tool_firecrawl: apikey is required')
 
         try:
-            app = FirecrawlApp(api_key=apikey)
-            self.driver = FirecrawlDriver(server_name='firecrawl', app=app)
+            self.app = FirecrawlApp(api_key=apikey)
         except Exception as e:
             warning(str(e))
             raise
@@ -73,4 +69,4 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.app = None

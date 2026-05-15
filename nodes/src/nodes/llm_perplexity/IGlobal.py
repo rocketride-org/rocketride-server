@@ -141,7 +141,7 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self):
         """Clean up the global chat instance."""
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:
         """

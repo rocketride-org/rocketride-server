@@ -11,10 +11,10 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/rocketride-mcp/"><img src="https://img.shields.io/pypi/v/rocketride-mcp?color=222223&label=pypi" alt="PyPI"></a>
+  <a href="https://pypi.org/project/rocketride-mcp/"><img src="https://img.shields.io/pypi/v/rocketride-mcp?color=222223&label=PyPI" alt="PyPI"></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
 ## Quick Start
@@ -142,6 +142,106 @@ Tool results include both human-readable text and structured data:
 
 - **Text content**: Confirmation message plus extracted text from the pipeline result
 - **Structured content**: Raw pipeline result in `structuredContent.result` for programmatic access
+
+## MCP Resources
+
+The server exposes three read-only **MCP Resources** that provide live information about the connected RocketRide engine. Resources use the `rocketride://` URI scheme and return JSON payloads.
+
+| URI                      | Name          | Description                                                                          |
+| ------------------------ | ------------- | ------------------------------------------------------------------------------------ |
+| `rocketride://pipelines` | Pipeline List | JSON array of all available pipelines (name and description) on the connected server |
+| `rocketride://status`    | Server Status | Connection status, pipeline count, and list of loaded pipeline names                 |
+| `rocketride://nodes`     | Node Registry | Available pipeline node types and their schemas (via `rrext_get_nodes`)              |
+
+### Reading resources
+
+In Claude Desktop or any MCP-compatible client, resources are listed automatically. You can also access them programmatically:
+
+```python
+# Example: read the pipeline list resource
+result = await session.read_resource("rocketride://pipelines")
+# Returns: {"pipelines": [{"name": "my-pipeline", "description": "..."}, ...]}
+
+# Example: check server status
+result = await session.read_resource("rocketride://status")
+# Returns: {"connected": true, "pipeline_count": 3, "pipelines": ["pipe-a", "pipe-b", "pipe-c"]}
+
+# Example: list available node types
+result = await session.read_resource("rocketride://nodes")
+# Returns: {"nodes": [{"name": "llm-openai", "type": "processor"}, ...]}
+```
+
+When the RocketRide client is not connected, resources return a JSON error payload (e.g. `{"pipelines": [], "error": "Client is not connected"}`) instead of raising an exception. Unknown URIs raise a `ValueError`.
+
+## MCP Prompt Templates
+
+The server provides three reusable **MCP Prompt Templates** for common RocketRide operations. These templates generate pre-formatted user messages that can be sent to an LLM.
+
+### analyze-document
+
+Analyze a document through a RocketRide pipeline.
+
+| Argument   | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `pipeline` | Yes      | Pipeline name to use for analysis |
+| `query`    | Yes      | Analysis question or instruction  |
+
+**Example usage in Claude Desktop:**
+
+Select the "analyze-document" prompt, then fill in:
+
+- **pipeline**: `invoice-parser`
+- **query**: `Extract all line items and totals`
+
+This generates the message: _"Please analyze the document using the RocketRide pipeline "invoice-parser". Focus on the following: Extract all line items and totals"_
+
+### chat-with-data
+
+Start a conversation about data processed by RocketRide.
+
+| Argument   | Required | Description                  |
+| ---------- | -------- | ---------------------------- |
+| `pipeline` | Yes      | Pipeline name                |
+| `question` | Yes      | Your question about the data |
+
+**Example usage:**
+
+- **pipeline**: `quarterly-reports`
+- **question**: `What was the revenue growth in Q3?`
+
+This generates the message: _"I would like to discuss data processed by the RocketRide pipeline "quarterly-reports". My question is: What was the revenue growth in Q3?"_
+
+### evaluate-pipeline
+
+Evaluate a pipeline's output quality using test data.
+
+| Argument          | Required | Description                    |
+| ----------------- | -------- | ------------------------------ |
+| `pipeline`        | Yes      | Pipeline to evaluate           |
+| `test_input`      | Yes      | Test input data                |
+| `expected_output` | No       | Expected output for comparison |
+
+**Example usage:**
+
+- **pipeline**: `sentiment-classifier`
+- **test_input**: `This product is fantastic!`
+- **expected_output**: `positive`
+
+This generates the message: _"Evaluate the output quality of the RocketRide pipeline "sentiment-classifier" using the following test input: This product is fantastic! Expected output: positive"_
+
+### Using prompts programmatically
+
+```python
+# List available prompts
+prompts = await session.list_prompts()
+
+# Get a rendered prompt
+result = await session.get_prompt("analyze-document", arguments={
+    "pipeline": "my-pipeline",
+    "query": "Summarize the key findings"
+})
+# result.messages[0].content.text contains the rendered message
+```
 
 ## SSE Mode
 

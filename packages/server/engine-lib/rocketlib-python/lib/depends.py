@@ -119,7 +119,6 @@ def _get_cache_dir() -> str:
     return os.path.join(_get_executable_dir(), 'cache')
 
 
-
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
     Run a subprocess command, keeping stdin open until process exits.
@@ -210,19 +209,15 @@ def _ensure_pip():
         raise
 
 
-def _uv_rel_path() -> str:
-    """Relative path to uv from the engine executable directory."""
-    if os.name == 'nt':
-        return '.\\Scripts\\uv.exe'
-    return './bin/uv'
+def _uv_abs_path() -> str:
+    """Get the absolute path to the uv executable based on platform."""
+    exe_dir = _get_executable_dir()
+    return os.path.join(exe_dir, 'Scripts', 'uv.exe') if os.name == 'nt' else os.path.join(exe_dir, 'bin', 'uv')
 
 
 def _uv_available() -> bool:
     """Check if uv executable exists."""
-    exe_dir = _get_executable_dir()
-    if os.name == 'nt':
-        return os.path.isfile(os.path.join(exe_dir, 'Scripts', 'uv.exe'))
-    return os.path.isfile(os.path.join(exe_dir, 'bin', 'uv'))
+    return os.path.isfile(_uv_abs_path())
 
 
 def _wheel_available() -> bool:
@@ -242,13 +237,55 @@ def _ensure_wheel():
         return
 
     monitorStatus('Installing wheel...')
-    result = _run([sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False)
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
+    )
 
     if result.returncode != 0:
         error(f'Failed to install wheel: {result.stderr}')
         raise RuntimeError('Failed to install wheel')
 
     debug('wheel installed successfully')
+
+
+def _setuptools_available() -> bool:
+    """Check if setuptools module is available."""
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec('setuptools') is not None
+    except Exception:
+        return False
+
+
+def _ensure_setuptools():
+    """Ensure setuptools is installed in the parent env.
+
+    Required because we compile/install with --no-build-isolation, which means uv
+    builds source-only wheels (e.g. docopt 0.6.2, transitively pulled by kokoro →
+    misaki → num2words) against the parent env. Several legacy sdists declare
+    setup.py-style builds without listing setuptools in build-system.requires,
+    so uv can't auto-bootstrap them. Mirroring _ensure_wheel so the parent env
+    has the standard PEP 517 backend available at compile/install time.
+    """
+    if _setuptools_available():
+        debug('setuptools is available')
+        return
+
+    monitorStatus('Installing setuptools...')
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
+    )
+
+    if result.returncode != 0:
+        error(f'Failed to install setuptools: {result.stderr}')
+        raise RuntimeError('Failed to install setuptools')
+
+    # Verify installation
+    if not _setuptools_available():
+        raise RuntimeError('setuptools installed but not found')
+
+    debug('setuptools installed successfully')
 
 
 def _ensure_uv():
@@ -358,10 +395,11 @@ def _ensure_site_packages():
 
 
 def bootstrap():
-    """Bootstrap the environment: ensure pip, uv, wheel."""
+    """Bootstrap the environment: ensure pip, uv, wheel, setuptools."""
     _ensure_site_packages()  # Must be first!
     _ensure_pip()
     _ensure_wheel()  # Needed for building packages with --no-build-isolation
+    _ensure_setuptools()  # Same reason — required by sdists with legacy setup.py builds
     _ensure_uv()
 
 
@@ -430,7 +468,7 @@ def _compile_constraints(constraints_path: str):
     monitorStatus('Compiling constraints...')
 
     args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'compile',
         './cache/combined.txt',
@@ -444,7 +482,16 @@ def _compile_constraints(constraints_path: str):
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
     debug(f'Compile: {args}')
-    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.PIPE,
+        encoding='utf-8',
+        errors='replace',
+        cwd=exe_dir,
+    )
 
     if result.returncode != 0:
         error(f'Failed to compile constraints: {result.stderr}')
@@ -640,7 +687,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     exe_dir = _get_executable_dir()
     args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'install',
         '--python',
@@ -722,7 +769,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     # Build uv command
     exe_dir = _get_executable_dir()
     uv_args = [
-        _uv_rel_path(),
+        _uv_abs_path(),
         'pip',
         'install',
         '-r',
@@ -856,7 +903,7 @@ def main():
             exe_dir = _get_executable_dir()
 
             # Build uv args
-            uv_args = [_uv_rel_path(), 'pip'] + sys.argv[1:] + ['--python', sys.executable]
+            uv_args = [_uv_abs_path(), 'pip'] + sys.argv[1:] + ['--python', sys.executable]
 
             # --index-strategy is only valid for install, compile, sync commands
             is_install_cmd = sys.argv[1] in ('install', 'compile', 'sync')

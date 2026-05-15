@@ -37,8 +37,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Direct module loading — bypass the heavy ``nodes`` and ``rocketlib``
-# package __init__.py chains that require the C++ engine runtime.
+# Direct module loading — bypass package init chains that require the C++
+# engine runtime.
 #
 # ``streaming_config.py`` has zero engine dependencies.
 # ``streaming.py`` uses a relative import from ``streaming_config`` and a
@@ -50,7 +50,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _REPO = Path(__file__).resolve().parent.parent.parent
-_LLM_BASE = _REPO / 'nodes' / 'src' / 'nodes' / 'llm_base'
+_AI_COMMON = _REPO / 'packages' / 'ai' / 'src' / 'ai' / 'common'
 
 # Keys injected into sys.modules by _setup_llm_modules; tracked for cleanup.
 _INJECTED_MODULE_KEYS: list[str] = []
@@ -67,28 +67,28 @@ def _load_module(name: str, path: Path):
 
 
 def _setup_llm_modules():
-    """Register synthetic ``nodes.llm_base`` packages and load the target modules."""
+    """Register synthetic ``ai.common`` packages and load the target modules."""
     # 1) streaming_config — no dependencies at all
     config_mod = _load_module(
-        'nodes.llm_base.streaming_config',
-        _LLM_BASE / 'streaming_config.py',
+        'ai.common.streaming_config',
+        _AI_COMMON / 'streaming_config.py',
     )
 
     # 2) streaming — has ``from .streaming_config import ...``.
     #    The relative import resolves correctly when we also register a
-    #    minimal ``nodes.llm_base`` package entry.
-    _pkg = type(sys)('nodes.llm_base')
-    _pkg.__path__ = [str(_LLM_BASE)]
-    _pkg.__package__ = 'nodes.llm_base'
-    if 'nodes' not in sys.modules:
-        sys.modules['nodes'] = type(sys)('nodes')
-        _INJECTED_MODULE_KEYS.append('nodes')
-    sys.modules['nodes.llm_base'] = _pkg
-    _INJECTED_MODULE_KEYS.append('nodes.llm_base')
+    #    minimal ``ai.common`` package entry.
+    if 'ai' not in sys.modules:
+        sys.modules['ai'] = type(sys)('ai')
+        _INJECTED_MODULE_KEYS.append('ai')
+    _pkg = type(sys)('ai.common')
+    _pkg.__path__ = [str(_AI_COMMON)]
+    _pkg.__package__ = 'ai.common'
+    sys.modules['ai.common'] = _pkg
+    _INJECTED_MODULE_KEYS.append('ai.common')
 
     stream_mod = _load_module(
-        'nodes.llm_base.streaming',
-        _LLM_BASE / 'streaming.py',
+        'ai.common.streaming',
+        _AI_COMMON / 'streaming.py',
     )
 
     return config_mod, stream_mod
