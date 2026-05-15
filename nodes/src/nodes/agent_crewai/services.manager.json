@@ -22,12 +22,6 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"input": [
-		{
-			"lane": "questions",
-			"output": [{ "lane": "answers" }]
-		}
-	],
 	"preconfig": {
 		"default": "default",
 		"profiles": {
