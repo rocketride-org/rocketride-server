@@ -109,9 +109,18 @@ class AnomalyDetector:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'insufficient data'}
 
         sorted_vals = sorted(window)
-        n = len(sorted_vals)
-        q1 = sorted_vals[n // 4]
-        q3 = sorted_vals[(3 * n) // 4]
+
+        # Linear interpolation for quartiles
+        def percentile(data: list, p: float) -> float:
+            k = (len(data) - 1) * p
+            f = math.floor(k)
+            c = math.ceil(k)
+            if f == c:
+                return data[f]
+            return data[f] * (c - k) + data[c] * (k - f)
+
+        q1 = percentile(sorted_vals, 0.25)
+        q3 = percentile(sorted_vals, 0.75)
         iqr = q3 - q1
 
         if iqr == 0:
@@ -153,7 +162,7 @@ class AnomalyDetector:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'insufficient data'}
 
         # Use a sliding sub-window for the local (moving) average
-        rolling_n = max(2, self.window_size // 2)
+        rolling_n = max(2, len(window) // 2)
         recent = window[-rolling_n:]
         local_mean = sum(recent) / len(recent)
 
@@ -180,15 +189,18 @@ class AnomalyDetector:
         """
         Run anomaly detection on a single numeric value.
 
-        The value is added to the sliding window, then evaluated against
-        the window's statistical properties using the configured method.
+        The value is evaluated against the current window, then added.
+        Both operations are performed under a single lock to prevent
+        another thread from inserting between the snapshot and the add.
 
         Returns a dict with keys: score, severity, is_anomalous, details.
         """
         if not math.isfinite(value):
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'non-finite input'}
 
-        window = self._get_window_snapshot()
+        with self._lock:
+            window = list(self._window)
+            self._window.append(value)
 
         if self.method == 'iqr':
             result = self._detect_iqr(value, window)
@@ -197,7 +209,6 @@ class AnomalyDetector:
         else:
             result = self._detect_z_score(value, window)
 
-        self._add_value(value)
         return result
 
     _NUMERIC_PATTERN = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
