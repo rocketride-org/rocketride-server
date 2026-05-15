@@ -59,28 +59,6 @@
 		"text": ["text"],
 		"documents": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "text",
-			"description": "Text containing numeric values to monitor for anomalies",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Original text with anomaly annotations"
-				}
-			]
-		},
-		{
-			"lane": "documents",
-			"description": "Documents with numeric fields to monitor",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Documents with anomaly metadata"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section for configuration options
