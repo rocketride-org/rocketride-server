@@ -141,15 +141,15 @@ def _derive_prefix(node_name: str) -> str:
     Derive a short UI prefix from the node name.
 
     Strategy (mirrors corpus):
-      - Strip the leading category segment if it matches a known prefix
-        (e.g. ``llm_anthropic`` → ``llm``, ``db_postgres`` → ``postgres``).
-      - For two-segment names drop the first segment; single-segment names
-        are used as-is.
+      - If the first segment is a known category (e.g. ``llm``, ``tool``),
+        drop it and return the second segment as the prefix
+        (e.g. ``llm_anthropic`` → ``anthropic``, ``db_postgres`` → ``postgres``).
+      - For single-segment names the whole name is used as-is.
 
     Examples
     --------
     >>> _derive_prefix("llm_anthropic")
-    'llm'
+    'anthropic'
     >>> _derive_prefix("db_postgres")
     'postgres'
     >>> _derive_prefix("tool_http_request")
@@ -429,13 +429,18 @@ def _render_iglobal(
 
     req_depends = ""
     if has_requirements:
-        req_depends = textwrap.dedent("""\
+        # textwrap.indent ensures the block sits at 8-space method-body
+        # indentation when injected directly into validateConfig.
+        req_depends = textwrap.indent(
+            textwrap.dedent("""\
 
                 from depends import depends  # type: ignore
 
                 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
                 depends(requirements)
-        """)
+            """),
+            "        ",
+        )
 
     return (
         _license_header()
