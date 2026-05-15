@@ -71,11 +71,7 @@ describe('RocketRideClient Integration Tests', () => {
 	afterEach(async () => {
 		if (client.isConnected()) {
 			// Use a bounded timeout so teardown never hangs the suite
-			try {
-				await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
-			} catch {
-				// Cleanup should not fail the test if the server already closed the connection.
-			}
+			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
 		}
 	});
 

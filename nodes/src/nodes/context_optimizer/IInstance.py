@@ -92,11 +92,18 @@ class IInstance(IInstanceBase):
         if question.questions:
             # Keep the first question's embedding info but update text
             question.questions[0].text = result['question'] or ''
-            # Remove any extra questions that were merged
+            # Remove any extra questions that were merged.  Surface a warning
+            # so pipeline authors notice when multi-question input is being
+            # collapsed into a single forwarded question (the merge happens in
+            # ``query_str`` above; everything after question[0] is discarded).
             if len(question.questions) > 1:
+                dropped = len(question.questions) - 1
+                warning(f'context_optimizer: dropped {dropped} additional question(s); only the first is forwarded')
                 question.questions = [question.questions[0]]
         elif result['question']:
-            debug(f'context_optimizer: optimized question text produced but question.questions is empty, discarding: {result["question"][:200]}')
+            debug(
+                f'context_optimizer: optimized question text produced but question.questions is empty, discarding: {result["question"][:200]}'
+            )
 
         # Update documents -- keep only the selected ones
         if question.documents is not None:

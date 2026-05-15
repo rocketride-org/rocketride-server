@@ -90,24 +90,46 @@ class ContextOptimizer:
             self.max_context_tokens = 0
 
         # Validate budget percentages (issue #4: non-numeric values, issue #5: negative values)
-        self.system_prompt_budget_pct: float = self._parse_pct(config.get('system_prompt_budget_pct', 10), 'system_prompt_budget_pct')
+        self.system_prompt_budget_pct: float = self._parse_pct(
+            config.get('system_prompt_budget_pct', 10), 'system_prompt_budget_pct'
+        )
         self.query_budget_pct: float = self._parse_pct(config.get('query_budget_pct', 15), 'query_budget_pct')
         self.document_budget_pct: float = self._parse_pct(config.get('document_budget_pct', 50), 'document_budget_pct')
         self.history_budget_pct: float = self._parse_pct(config.get('history_budget_pct', 25), 'history_budget_pct')
 
         # Warn if budget percentages sum to less than 90 (issue #5)
-        pct_sum = self.system_prompt_budget_pct + self.query_budget_pct + self.document_budget_pct + self.history_budget_pct
+        pct_sum = (
+            self.system_prompt_budget_pct + self.query_budget_pct + self.document_budget_pct + self.history_budget_pct
+        )
         if pct_sum < 90:
-            warning(f'context_optimizer: budget percentages sum to {pct_sum:.1f}% (< 90%), context window may be underutilized')
+            warning(
+                f'context_optimizer: budget percentages sum to {pct_sum:.1f}% (< 90%), context window may be underutilized'
+            )
 
-        # Resolve the effective token limit
+        # Resolve the effective token limit.  Warn when the model name is not
+        # in MODEL_LIMITS so users can tell the silent 128K fallback fired
+        # (e.g. they typed a real model id like ``claude-opus-4-6`` instead of
+        # the abbreviated ``claude-opus`` enumerated in MODEL_LIMITS).
         if self.max_context_tokens > 0:
             self._total_limit = self.max_context_tokens
         else:
+            if self.model_name not in self.MODEL_LIMITS:
+                warning(
+                    f"context_optimizer: model '{self.model_name}' not in MODEL_LIMITS, "
+                    f'falling back to 128000 tokens; use one of {sorted(self.MODEL_LIMITS.keys())} '
+                    f'or set max_context_tokens explicitly'
+                )
             self._total_limit = self.MODEL_LIMITS.get(self.model_name, 128000)
 
         # Cache the tiktoken encoding (lazily imported)
         self._encoding = None
+
+        # Track which model names we've already warned about (avoids repeating
+        # the same MODEL_LIMITS fallback warning on every optimize() call).
+        self._warned_unknown_models: set = set()
+        if self.max_context_tokens == 0:
+            # The constructor warning above already covered self.model_name.
+            self._warned_unknown_models.add(self.model_name)
 
     @staticmethod
     def _parse_pct(value: Any, name: str) -> float:
@@ -273,7 +295,9 @@ class ContextOptimizer:
     # History summarization
     # ------------------------------------------------------------------
 
-    def summarize_history(self, messages: List[Dict[str, str]], max_tokens: int, encoding: str = 'cl100k_base') -> List[Dict[str, str]]:
+    def summarize_history(
+        self, messages: List[Dict[str, str]], max_tokens: int, encoding: str = 'cl100k_base'
+    ) -> List[Dict[str, str]]:
         """Compress conversation history to fit within *max_tokens*.
 
         Strategy:
@@ -306,8 +330,10 @@ class ContextOptimizer:
         first_msg = messages[0]
         first_cost = self._message_tokens(first_msg, encoding)
 
-        # Summary placeholder
-        summary_placeholder = {'role': 'system', 'content': '[Earlier conversation summarized]'}
+        # Summary placeholder.  LLM providers (Claude, OpenAI) only accept
+        # ``role: system`` at position 0, so use ``role: user`` for a synthetic
+        # mid-conversation summary marker that providers will route correctly.
+        summary_placeholder = {'role': 'user', 'content': '[Earlier conversation summarized]'}
         summary_cost = self._message_tokens(summary_placeholder, encoding)
 
         budget_for_recent = max_tokens - first_cost - summary_cost
@@ -342,7 +368,9 @@ class ContextOptimizer:
     # Document ranking
     # ------------------------------------------------------------------
 
-    def rank_documents(self, documents: List[Dict[str, Any]], query: str, max_tokens: int, encoding: str = 'cl100k_base') -> List[Dict[str, Any]]:
+    def rank_documents(
+        self, documents: List[Dict[str, Any]], query: str, max_tokens: int, encoding: str = 'cl100k_base'
+    ) -> List[Dict[str, Any]]:
         """Select documents that fit within *max_tokens*, preserving original order.
 
         Documents arriving from a vector DB are already ranked by embedding
@@ -456,6 +484,11 @@ class ContextOptimizer:
         if self.max_context_tokens > 0:
             total_limit = self.max_context_tokens
         else:
+            if effective_model not in self.MODEL_LIMITS and effective_model not in self._warned_unknown_models:
+                warning(
+                    f"context_optimizer: model '{effective_model}' not in MODEL_LIMITS, falling back to 128000 tokens"
+                )
+                self._warned_unknown_models.add(effective_model)
             total_limit = self.MODEL_LIMITS.get(effective_model, 128000)
 
         # Compute original token counts
@@ -501,7 +534,9 @@ class ContextOptimizer:
             components_truncated.append('question')
 
         opt_documents = self.rank_documents(documents, question, budget['documents'])
-        opt_docs_tokens = sum(self.count_tokens(str(d.get('content', d.get('page_content', '')))) for d in opt_documents)
+        opt_docs_tokens = sum(
+            self.count_tokens(str(d.get('content', d.get('page_content', '')))) for d in opt_documents
+        )
         if opt_docs_tokens < original_docs:
             components_truncated.append('documents')
 
@@ -510,7 +545,9 @@ class ContextOptimizer:
         if opt_history_tokens < original_history:
             components_truncated.append('history')
 
-        tokens_used = self.count_tokens(opt_system) + self.count_tokens(opt_question) + opt_docs_tokens + opt_history_tokens
+        tokens_used = (
+            self.count_tokens(opt_system) + self.count_tokens(opt_question) + opt_docs_tokens + opt_history_tokens
+        )
         tokens_saved = max(0, original_total - tokens_used)
 
         return {
