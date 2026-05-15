@@ -27,26 +27,28 @@ All tests use mocks — no real Cobalt AI or external API calls are made.
 """
 
 import copy
+import importlib
 import pathlib
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+_MISSING = object()
+
 
 # ---------------------------------------------------------------------------
 # Mock infrastructure — rocketlib, ai.common, depends, cobalt
 #
-# Mocks are installed via patch.dict(sys.modules, ...) so that the injected
-# entries are automatically removed when the context manager exits at session
-# teardown.  This prevents leaking fake modules into subsequent test files
-# that may need the real packages.
+# Mocks are installed only while importing the node modules. Runtime-only
+# lazy imports use the autouse fixture below, so fake engine modules never
+# remain in sys.modules during full-suite collection.
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _NODES_DIR = str(_REPO_ROOT / 'nodes' / 'src' / 'nodes')
 
-# Build the mock module map once — entries are shared across the session
-# but only installed in sys.modules while the patch is active.
+# Build the mock module map once — entries are shared across tests but scoped
+# to import/runtime windows.
 _rocketlib = ModuleType('rocketlib')
 _rocketlib.IGlobalBase = type('IGlobalBase', (), {})
 _rocketlib.IInstanceBase = type('IInstanceBase', (), {})
@@ -161,35 +163,33 @@ _MOCK_MODULES = {
     'rocketride': _rocketride_pkg,
 }
 
-# Install mocks via patch.dict so they are scoped and restorable.
-# The context manager stays open for the lifetime of this module; pytest
-# tears it down when the module is collected (or we can clean up explicitly
-# via a session-scoped fixture below).
-_modules_patch = patch.dict(sys.modules, _MOCK_MODULES)
-_modules_patch.start()
+_ORIGINAL_MODULES = {name: sys.modules.get(name, _MISSING) for name in _MOCK_MODULES}
+sys.modules.update(_MOCK_MODULES)
 
-# Also scope the sys.path addition so we can clean it up.
 if _NODES_DIR not in sys.path:
     sys.path.insert(0, _NODES_DIR)
 
-# Now import the module under test
 from eval_cobalt.cobalt_evaluator import CobaltEvaluator
+importlib.import_module('eval_cobalt.IGlobal')
+importlib.import_module('eval_cobalt.IInstance')
+
+for _name, _original in _ORIGINAL_MODULES.items():
+    if _original is _MISSING:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _original
+if _NODES_DIR in sys.path:
+    sys.path.remove(_NODES_DIR)
 
 
 import pytest
 
 
-@pytest.fixture(autouse=True, scope='session')
-def _teardown_mock_modules():
-    """Ensure mock modules are removed from sys.modules after all tests."""
-    yield
-    _modules_patch.stop()
-    if _NODES_DIR in sys.path:
-        sys.path.remove(_NODES_DIR)
-    # Remove cached eval_cobalt imports so they don't leak
-    for key in list(sys.modules):
-        if key.startswith('eval_cobalt'):
-            del sys.modules[key]
+@pytest.fixture(autouse=True)
+def _runtime_mock_modules():
+    """Install runtime-only mocks for lazy imports without leaking at collection."""
+    with patch.dict(sys.modules, {'depends': _depends_mod}):
+        yield
 
 
 # ===========================================================================

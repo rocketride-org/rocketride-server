@@ -40,7 +40,7 @@ import os
 import pathlib
 import sys
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -150,13 +150,16 @@ _STUB_MODULES = {
     'ai.common.schema': _ai_common_schema,
 }
 
-for _name, _mod in _STUB_MODULES.items():
-    sys.modules.setdefault(_name, _mod)
-
+_modules_patch = patch.dict(sys.modules, _STUB_MODULES)
+_modules_patch.start()
 if _NODES_DIR not in sys.path:
     sys.path.insert(0, _NODES_DIR)
 
 from eval_cobalt.cobalt_evaluator import CobaltEvaluator  # noqa: E402
+
+_modules_patch.stop()
+if _NODES_DIR in sys.path:
+    sys.path.remove(_NODES_DIR)
 
 
 # ---------------------------------------------------------------------------

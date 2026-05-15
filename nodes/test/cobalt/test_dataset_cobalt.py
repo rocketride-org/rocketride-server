@@ -213,6 +213,7 @@ def _install_mocks():
 
 _original_modules: dict = {}
 _original_path: list = []
+_MISSING = object()
 
 
 def _snapshot_modules():
@@ -222,27 +223,13 @@ def _snapshot_modules():
 
 
 def _restore_modules_impl():
-    """Restore sys.modules to pre-mock state.
-
-    Note: mocks must stay installed for the full pytest session because
-    ``dataset_loader.py`` performs lazy ``from cobalt import Dataset`` inside
-    its methods (re-reads ``sys.modules`` at call time). Restoring earlier
-    would break tests. The session fixture is the narrowest scope that's
-    compatible with those runtime imports.
-    """
+    """Restore sys.modules to pre-mock state after importing node modules."""
     sys.path[:] = _original_path
     for name, orig in _original_modules.items():
         if orig is None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = orig
-    # Drop any cached imports that were resolved through _NODES_DIR so they
-    # don't leak into other test modules that may want the real packages.
-    # Covers both `dataset_cobalt.*` (via _NODES_DIR) and `nodes.dataset_cobalt.*`
-    # (via the top-level `nodes` package) just in case.
-    for key in list(sys.modules):
-        if key.startswith('dataset_cobalt') or key.startswith('nodes.dataset_cobalt'):
-            del sys.modules[key]
 
 
 # Snapshot before mocks are installed, then install mocks so node imports succeed.
@@ -250,13 +237,17 @@ _snapshot_modules()
 if _NODES_DIR not in sys.path:
     sys.path.insert(0, _NODES_DIR)
 _install_mocks()
-
-
-@pytest.fixture(autouse=True, scope='session')
-def _restore_modules():
-    """Restore sys.modules after the entire test session completes."""
-    yield
-    _restore_modules_impl()
+_RUNTIME_MOCK_MODULES = {
+    name: sys.modules[name]
+    for name in (
+        'depends',
+        'ai',
+        'ai.common',
+        'ai.common.config',
+        'ai.common.schema',
+        'rocketride',
+    )
+}
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +311,6 @@ class MockDataset:
 mock_cobalt = ModuleType('cobalt')
 mock_cobalt.__spec__ = importlib.machinery.ModuleSpec('cobalt', loader=None)
 mock_cobalt.Dataset = MockDataset
-sys.modules['cobalt'] = mock_cobalt
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +320,24 @@ from dataset_cobalt.dataset_loader import DatasetLoader
 from dataset_cobalt.IEndpoint import IEndpoint
 from dataset_cobalt.IGlobal import IGlobal
 from dataset_cobalt.IInstance import IInstance
+
+_restore_modules_impl()
+
+
+@pytest.fixture(autouse=True)
+def _runtime_mock_modules():
+    """Install runtime-only mocks for lazy imports without leaking at collection."""
+    overrides = {**_RUNTIME_MOCK_MODULES, 'cobalt': mock_cobalt}
+    originals = {name: sys.modules.get(name, _MISSING) for name in overrides}
+    sys.modules.update(overrides)
+    try:
+        yield
+    finally:
+        for name, original in originals.items():
+            if original is _MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
 
 
 # ---------------------------------------------------------------------------
