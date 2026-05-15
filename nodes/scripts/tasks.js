@@ -30,6 +30,7 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
+const os = require('os');
 const {
     exists,
     syncDir,
@@ -40,7 +41,8 @@ const {
     stopServer,
     execCommand,
     parallel,
-    bracket
+    bracket,
+    parseServerAddress
 } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -78,10 +80,12 @@ function makeSyncNodesAction(options = {}) {
 function makeStartTestServerAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            if (options.testport) {
-                ctx.port = options.testport;
-                task.output = `Using existing server on port ${ctx.port}`;
-                return { port: ctx.port, server: null };
+            const taskserver = options.taskserver || ctx.options?.taskserver;
+            if (taskserver) {
+                const parsed = parseServerAddress(taskserver);
+                ctx.port = parsed.port;
+                task.output = `Using existing server at ${parsed.uri}`;
+                return { port: parsed.port, server: null, serverUri: parsed.uri };
             }
 
             task.output = 'Starting server...';
@@ -135,11 +139,13 @@ function makeRunPytestAction(options = {}) {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-            const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            const bracket = ctx.brackets?.['node-test-server'];
+            const port = bracket?.port || ctx.port;
+            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_URI: serverUri,
                 ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 
@@ -191,6 +197,16 @@ function makeRunPytestAction(options = {}) {
                 pytestArgs.push('-k', pattern);
             }
 
+            // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
+            // flag is not set: empirically, cloud-LLM rate limits + node-subprocess
+            // fan-out make >8 workers counterproductive on this test shape. Explicit
+            // values (numeric or 'auto') pass through; 'off'/'0' disables xdist.
+            const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
+            const parallelVal = String(parallelRaw).trim().toLowerCase();
+            if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
+                pytestArgs.push('-n', parallelVal);
+            }
+
             await execCommand(ENGINE, pytestArgs, {
                 task,
                 cwd: PACKAGE_DIR,
@@ -220,7 +236,7 @@ function makeRunContractTestsAction() {
 
 function makeTestAction(options = {}) {
     return {
-        description: 'Test pipeline nodes (full integration)',
+        description: 'Testing nodes',
         steps: [
             'server:build',
             parallel([
@@ -262,17 +278,17 @@ module.exports = {
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
-            description: 'Build pipeline nodes',
+            description: 'Build nodes',
             steps: ['server:build', 'nodes:sync']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
         { name: 'nodes:test-contracts', action: () => ({
-            description: 'Test node contracts',
+            description: 'Testing nodes (contracts)',
             steps: ['server:build', 'nodes:run-contracts']
         })},
         { name: 'nodes:clean', action: () => ({
-            description: 'Clean pipeline nodes',
+            description: 'Cleaning nodes',
             run: async (ctx, task) => {
                 await removeDir(DIST_DIR);
                 task.output = 'Cleaned nodes';

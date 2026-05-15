@@ -24,37 +24,48 @@
 const esbuild = require('esbuild');
 const path = require('path');
 
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+
 const production = process.argv.includes('--production');
 const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
-esbuild.build({
-	entryPoints: ['src/extension.ts'],
-	bundle: true,
-	format: 'cjs',
-	minify: production,
-	sourcemap: true,
-	platform: 'node',
-	target: 'node16',
-	outfile,
-	external: ['vscode'],
-	alias: {
-		// docker-modem requires ssh2 at load time, but we only use local socket.
-		// Stub it out so no native .node binaries are needed.
-		'ssh2': path.resolve(__dirname, 'src/stubs/ssh2.js'),
-	},
-	mainFields: ['main'],
-	resolveExtensions: ['.ts', '.js', '.json'],
-	logLevel: 'info',
-	packages: 'bundle',
-	// Disable AMD detection properly
-	define: {
-		'define': 'undefined'
-	},
-	loader: {
-		'.json': 'json'
-	}
-}).catch((error) => {
-	console.error('esbuild failed:', error);
-	process.exit(1);
-});
+const env = getenv();
+requireKeys(env, ['ROCKETRIDE_URI', 'RR_ZITADEL_URL', 'RR_ZITADEL_VSCODE_CLIENT_ID'], 'vscode');
 
+esbuild
+	.build({
+		entryPoints: ['src/extension.ts'],
+		bundle: true,
+		format: 'cjs',
+		minify: production,
+		sourcemap: true,
+		platform: 'node',
+		target: 'node16',
+		outfile,
+		external: ['vscode'],
+		alias: {
+			// docker-modem requires ssh2 at load time, but we only use local socket.
+			// Stub it out so no native .node binaries are needed.
+			ssh2: path.resolve(__dirname, 'src/stubs/ssh2.js'),
+		},
+		mainFields: ['main'],
+		resolveExtensions: ['.ts', '.js', '.json'],
+		logLevel: 'info',
+		packages: 'bundle',
+		define: {
+			// Disable AMD detection
+			define: 'undefined',
+			// Server URI default (workspace .env overrides at runtime)
+			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || ''),
+			// Zitadel OIDC config (.config defaults, .env overrides)
+			'process.env.RR_ZITADEL_URL': JSON.stringify(env.RR_ZITADEL_URL || ''),
+			'process.env.RR_ZITADEL_VSCODE_CLIENT_ID': JSON.stringify(env.RR_ZITADEL_VSCODE_CLIENT_ID || ''),
+		},
+		loader: {
+			'.json': 'json',
+		},
+	})
+	.catch((error) => {
+		console.error('esbuild failed:', error);
+		process.exit(1);
+	});

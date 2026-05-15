@@ -34,7 +34,16 @@ from requests.status_codes import codes as status_codes
 import aiohttp
 from fastapi.responses import JSONResponse
 
-from rocketlib import IEndpointBase, monitorOther, monitorStatus, monitorCompleted, monitorFailed, debug, getObject, AVI_ACTION
+from rocketlib import (
+    IEndpointBase,
+    monitorOther,
+    monitorStatus,
+    monitorCompleted,
+    monitorFailed,
+    debug,
+    getObject,
+    AVI_ACTION,
+)
 from ai.web import WebServer
 
 from depends import depends  # type: ignore
@@ -172,7 +181,9 @@ class IEndpoint(IEndpointBase):
             return False
         await self._delete_webhook()
         url = f'https://api.telegram.org/bot{self._bot_token}/setWebhook'
-        async with self._http_session.post(url, json={'url': self._webhook_url, 'secret_token': self._webhook_secret}) as resp:
+        async with self._http_session.post(
+            url, json={'url': self._webhook_url, 'secret_token': self._webhook_secret}
+        ) as resp:
             data = await resp.json()
             if not data.get('ok'):
                 debug(f'Telegram: setWebhook failed: {data}')
@@ -615,7 +626,6 @@ class IEndpoint(IEndpointBase):
             webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
             self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
 
-        self._server.use('profiler')
         self._server.run()
 
     def scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None]):

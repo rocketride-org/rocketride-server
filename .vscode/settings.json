@@ -7,5 +7,9 @@
     "**/__pycache__": true,
     "**/node_modules": true,
   },
-  "cmake.sourceDirectory": "${workspaceFolder}/packages/server"
+  "cmake.sourceDirectory": "${workspaceFolder}/packages/server",
+  "python.analysis.extraPaths": [
+    "packages/server/engine-lib/rocketlib-python/lib",
+    "packages/ai/src"
+  ]
 }

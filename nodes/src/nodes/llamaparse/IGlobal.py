@@ -60,7 +60,14 @@ class IGlobal(IGlobalBase):
                         advanced_config = json.loads(advanced_config_str)
 
                         # Additional validation: check for known LlamaParse parameters
-                        valid_params = {'parse_mode', 'vendor_multimodal_model_name', 'system_prompt_append', 'page_error_tolerance', 'spreadsheet_extract_sub_tables', 'verbose'}
+                        valid_params = {
+                            'parse_mode',
+                            'vendor_multimodal_model_name',
+                            'system_prompt_append',
+                            'page_error_tolerance',
+                            'spreadsheet_extract_sub_tables',
+                            'verbose',
+                        }
 
                         invalid_params = [key for key in advanced_config.keys() if key not in valid_params]
                         if invalid_params:
@@ -143,7 +150,9 @@ class IGlobal(IGlobalBase):
             if not advanced_config_str or not advanced_config_str.strip():
                 error_msg = 'LlamaParse Global: Critical configuration error - advanced config enabled but no configuration provided'
                 warning(error_msg)
-                warning('LlamaParse Global: Aborting execution. Please provide advanced configuration or disable advanced config mode.')
+                warning(
+                    'LlamaParse Global: Aborting execution. Please provide advanced configuration or disable advanced config mode.'
+                )
                 raise RuntimeError(error_msg)
 
             try:
@@ -158,9 +167,13 @@ class IGlobal(IGlobalBase):
                         parser_args[key] = value
 
             except json.JSONDecodeError as e:
-                error_msg = f'LlamaParse Global: Critical configuration error - advanced config JSON parsing failed: {str(e)}'
+                error_msg = (
+                    f'LlamaParse Global: Critical configuration error - advanced config JSON parsing failed: {str(e)}'
+                )
                 warning(error_msg)
-                warning('LlamaParse Global: Aborting execution to prevent unintended token usage. Please fix configuration and retry.')
+                warning(
+                    'LlamaParse Global: Aborting execution to prevent unintended token usage. Please fix configuration and retry.'
+                )
                 raise RuntimeError(error_msg)  # Abort execution to prevent token waste
         else:
             # Handle simple configuration (existing logic)

@@ -28,7 +28,10 @@
  * Re-exports all type definitions from individual modules for convenient imports.
  */
 
+export * from './account.js';
+export * from './billing.js';
 export * from './client.js';
+export * from './cprofile.js';
 export * from './dashboard.js';
 export * from './data.js';
 export * from './events.js';

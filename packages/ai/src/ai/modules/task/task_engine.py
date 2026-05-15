@@ -53,7 +53,6 @@ from ai.constants import (
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
 )
 from ai import CONST_AI_NODE_SCRIPT
-from ai.web.metrics import metrics
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
@@ -190,11 +189,12 @@ class Task(DAPBase):
         token: str,
         public_auth: str,
         pipeline: Dict[str, Any],
-        launch_args: Dict[str, Any] = {},
+        launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
         client_id: str = '',
+        env: Dict[str, str] = None,
         **kwargs,
     ) -> None:
         """
@@ -225,6 +225,9 @@ class Task(DAPBase):
         # Have the final events been sent yet
         self._final_events_sent = False
 
+        # Guard against _terminated() being called more than once
+        self._terminated_called = False
+
         # Server reference
         self._server = server
 
@@ -239,9 +242,10 @@ class Task(DAPBase):
         self._service_down_notes = []
 
         # Execution configuration
-        self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
-        self._task_name: Optional[str] = launch_args.get('name', None)
+        _args = launch_args or {}
+        self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
+        self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = _args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -299,6 +303,7 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
+        self._env: Dict[str, str] = env or {}
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -309,27 +314,30 @@ class Task(DAPBase):
 
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
+        Replace ${KEY} placeholders in a pipeline dictionary with environment values.
 
-        Only environment variables whose names start with ALLOWED_ENV_PREFIX
-        are resolved. All other references are replaced with a redacted
-        placeholder to prevent secret exfiltration.
+        Uses the merged environment dict (self._env) which was built by the
+        command handler from: .env → org secrets → team secrets → user secrets
+        → caller-supplied env overrides.
+
+        Only variables whose names start with ALLOWED_ENV_PREFIX are resolved.
+        All other references are replaced with a redacted placeholder to prevent
+        secret exfiltration.
 
         Args:
-            pipeline: Dictionary containing the pipeline configuration
+            pipeline: Dictionary containing the pipeline configuration.
 
         Returns:
-            New dictionary with resolved environment variables
+            New dictionary with resolved environment variables.
         """
         # Convert dict to JSON string
         pipeline_str = json.dumps(pipeline)
 
-        # Replace ${VAR_NAME} with environment variable value (if allowed)
+        # Replace ${VAR_NAME} with value from the merged env dict
         def replacer(match):
             env_var = match.group(1)
             if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
+                value = self._env.get(env_var, match.group(0))
                 if value == match.group(0):
                     return value  # placeholder not found
                 return json.dumps(value)[1:-1]  # escape but strip outer quotes
@@ -376,9 +384,13 @@ class Task(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
+
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). Must
+                      not be stored — caller discards it after the temp file is written.
 
         Returns:
             Complete subprocess task configuration
@@ -392,12 +404,12 @@ class Task(DAPBase):
         config = {
             'keystore': 'kvsfile://data/keystore.json',
             'pipeline': {
-                'version': self._pipeline.get('version', 1),
-                'source': self._pipeline.get('source'),
-                'project_id': self._pipeline.get('project_id'),
-                'name': self._pipeline.get('name'),
-                'description': self._pipeline.get('description'),
-                'components': self._pipeline.get('components', []),
+                'version': pipeline.get('version', 1),
+                'source': pipeline.get('source'),
+                'project_id': pipeline.get('project_id'),
+                'name': pipeline.get('name'),
+                'description': pipeline.get('description'),
+                'components': pipeline.get('components', []),
             },
             'threadCount': self._threads,
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -411,7 +423,7 @@ class Task(DAPBase):
             'type': 'pipeline',
         }
 
-    async def _write_task_file(self) -> str:
+    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
         """
         Write task configuration to temporary file.
 
@@ -420,13 +432,17 @@ class Task(DAPBase):
         - Unpredictable filename to prevent symlink attacks
         - O_EXCL flag to prevent TOCTOU race conditions
 
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). The
+                      caller must not retain a reference after this returns.
+
         Returns:
             Path to temporary task configuration file
 
         Raises:
             OSError: If file cannot be created or written
         """
-        pipeline_task = self._build_task()
+        pipeline_task = self._build_task(pipeline)
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
 
         fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
@@ -526,7 +542,9 @@ class Task(DAPBase):
                     stop=stop_after_attempt(10),
                     wait=wait_fixed(0.15),
                     reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'),
+                    before_sleep=lambda retry_state: self.debug_message(
+                        f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
+                    ),
                 )
                 async def _connect_data_client():
                     # Don't retry if subprocess has died
@@ -564,7 +582,7 @@ class Task(DAPBase):
         response = await self._data_client.dap_request(
             command=data['command'],
             arguments=args,
-            token=data.get('token'),
+            token=args.get('token'),
         )
         return response
 
@@ -574,7 +592,17 @@ class Task(DAPBase):
 
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
+
+        Idempotent: safe to call multiple times (only the first call performs
+        cleanup; subsequent calls return immediately).
         """
+        # Guard: only run cleanup once.  Multiple callers can reach here --
+        # e.g. the stdio on_disconnected callback AND the start_task exception
+        # handler -- so we must be idempotent.
+        if self._terminated_called:
+            return
+        self._terminated_called = True
+
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
@@ -811,9 +839,9 @@ class Task(DAPBase):
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
                     try:
-                        task_apikey = self._server.get_task_control(self.token).apikey if self.token else None
+                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
                     except Exception:
-                        task_apikey = None
+                        task_user_id = None
                     await self._server.broadcast_server_event(
                         EVENT_TYPE.DASHBOARD,
                         {
@@ -826,7 +854,7 @@ class Task(DAPBase):
                                 'exitMessage': self._status.exitMessage or None,
                             },
                         },
-                        apikey=task_apikey,
+                        user_id=task_user_id,
                     )
 
         self.debug_message('Resource cleanup completed successfully')
@@ -976,10 +1004,11 @@ class Task(DAPBase):
             download_name = download_info.get('name', 'unknown')
             self._status.status = f'Downloading "{download_name}"'
 
-        # Handle performance metrics with merging
+        # Handle subprocess billing metrics (from >MET* protocol)
         elif event_type == 'apaevt_status_metrics':
             new_metrics = body.get('metrics', {})
-            self._status.metrics = metrics.merge(self._status.metrics, new_metrics)
+            if self._task_metrics:
+                self._task_metrics.merge_subprocess_metrics(new_metrics)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':
@@ -1218,7 +1247,9 @@ class Task(DAPBase):
 
             # Check sliding timeout (resets on events)
             if time_since_last_event >= CONST_MAX_READY_TIME:
-                raise TimeoutError(f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)')
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)'
+                )
 
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
@@ -1416,7 +1447,9 @@ class Task(DAPBase):
             # Start fresh (full initialization)
             await self.start_task()
 
-            self._server.debug_message(f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})')
+            self._server.debug_message(
+                f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
+            )
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
@@ -1448,6 +1481,7 @@ class Task(DAPBase):
             # Make sure some of our start is initialized in case we are restarting
             self._status.completed = False
             self._final_events_sent = False
+            self._terminated_called = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
@@ -1456,18 +1490,20 @@ class Task(DAPBase):
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
 
-            # Resolve any ${...} in the pipeline
-            self._pipeline = self._resolve_pipeline(self._pipeline)
+            # Resolve ${...} placeholders into a local variable — never stored on self
+            # so secrets are not retained in memory beyond the temp file write.
+            resolved = self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
-            self._check_pipeline(self._pipeline)
+            self._check_pipeline(resolved)
 
             # Mark the start time
             if not self._is_restarting:
                 self._status.startTime = time.time()
 
-            # Write it out
-            self._tmpfile = await self._write_task_file()
+            # Write it out, then let `resolved` go out of scope
+            self._tmpfile = await self._write_task_file(resolved)
+            del resolved
 
             # Setup the first part of the command line args
             # --autoterm: exit when parent dies (stdin closes)
@@ -1587,9 +1623,16 @@ class Task(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
+                # Resolve billing identity from task control
+                _control = self._server.get_task_control(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
+                    task_id=self.id,
+                    client_id=self.client_id,
+                    user_id=getattr(_control, 'userId', '') if _control else '',
+                    team_id=getattr(_control, 'teamId', '') if _control else '',
+                    org_id=getattr(_control, 'orgId', '') if _control else '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

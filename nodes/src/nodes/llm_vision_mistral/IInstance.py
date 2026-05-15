@@ -22,12 +22,12 @@
 # =============================================================================
 
 from .IGlobal import IGlobal
-from nodes.llm_base import IInstanceGenericLLM
+from ai.common.llm_base import LLMBase
 from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
 
 
-class IInstance(IInstanceGenericLLM):
+class IInstance(LLMBase):
     """Instance handler for the Mistral Vision AI node."""
 
     IGlobal: IGlobal

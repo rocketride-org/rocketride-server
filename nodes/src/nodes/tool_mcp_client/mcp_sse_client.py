@@ -313,7 +313,9 @@ class McpSseClient:
             # Validate the resolved URL stays on the same origin to prevent
             # auth-token theft via malicious absolute-URL redirects.
             if self._origin(resolved) != base:
-                raise McpProtocolError(f'MCP endpoint redirect rejected: resolved origin {self._origin(resolved)!r} does not match SSE origin {base!r}')
+                raise McpProtocolError(
+                    f'MCP endpoint redirect rejected: resolved origin {self._origin(resolved)!r} does not match SSE origin {base!r}'
+                )
             self._endpoint_url = resolved
             return
 

@@ -65,24 +65,6 @@
 		"audio": ["text"],
 		"video": ["text"]
 	},
-	"input": [
-		{
-			"lane": "audio",
-			"output": [
-				{
-					"lane": "text"
-				}
-			]
-		},
-		{
-			"lane": "video",
-			"output": [
-				{
-					"lane": "text"
-				}
-			]
-		}
-	],
 	//
 	//
 	//	Optional:
@@ -166,7 +148,7 @@
 	},
 	//
 	//	Full test configuration - tests all Whisper model sizes.
-	//	Run via: builder model_server:fulltest
+	//	Run via: builder nodes:test-full
 	//
 	"fulltest": [
 		{

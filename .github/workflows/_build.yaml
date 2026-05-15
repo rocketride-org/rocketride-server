@@ -1,5 +1,11 @@
 name: Build
 
+# Default least-privilege permissions for the workflow. Individual jobs
+# below raise to write where they actually need it (Docker push, SARIF
+# upload, etc.). Closes Scorecard TokenPermissionsID #513.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -36,10 +42,14 @@ on:
         type: boolean
         default: false
       retention_days:
+        # 1 day is enough to chain build → release → docker within the same
+        # workflow run; downloads inside a run work even after "expiry".
+        # Higher retention multiplies the 3-platform artifact set (~2 GB)
+        # against the 0.5 GB org storage cap and overflows it within a day.
         description: Artifact retention in days
         required: false
         type: number
-        default: 3
+        default: 1
 
 jobs:
   build:
@@ -80,7 +90,7 @@ jobs:
           ref: ${{ inputs.ref }}
           submodules: recursive
       - name: Set up pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
           version: 10.33.0
       - name: Set up vcpkg
@@ -113,7 +123,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        uses: github/codeql-action/init@7fd177fa680c9881b53cdab4d346d32574c9f7f4 # v3
         with:
           languages: cpp
           build-mode: manual
@@ -124,11 +134,32 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false
-        run: ${{ matrix.builder_cmd }} test --verbose
+        # Integration tests boot a local server on :5565 and connect a test
+        # client. Both sides need the same shared secret to authenticate;
+        # without ROCKETRIDE_APIKEY the server raises AuthenticationException
+        # and the client tests fail with "No authentication configured".
+        #
+        # Use a literal CI-only value rather than ${{ secrets.ROCKETRIDE_APIKEY }}.
+        # The original PR #712 wired this through a secret, but as its own
+        # inline comment noted, "the secret value itself doesn't matter — it
+        # just has to match between server and client in this single CI run."
+        # Sourcing it from a secret introduced an empty-string failure mode:
+        # when the secret is unset / cleared / rotated, the workflow silently
+        # passes ROCKETRIDE_APIKEY="" into the test step. The test client
+        # then picks that empty value up via os.getenv (which returns "" —
+        # not the MYAPIKEY default — when the variable is set-but-empty),
+        # and all 48 client-python integration tests fail uniformly with
+        # AuthenticationException. The literal below has no production
+        # significance — it never leaves the runner — and matches the
+        # documented "MYAPIKEY" placeholder used elsewhere in the codebase
+        # (.env.template, the engine's built-in dev key).
+        env:
+          ROCKETRIDE_APIKEY: MYAPIKEY
+        run: ${{ matrix.builder_cmd }} test --verbose -s
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        uses: github/codeql-action/analyze@7fd177fa680c9881b53cdab4d346d32574c9f7f4 # v3
         with:
           category: /language:cpp
 

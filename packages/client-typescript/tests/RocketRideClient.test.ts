@@ -122,7 +122,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Pipeline Operations', () => {
-		const PIPELINE_TOKEN = 'TS-PIPELINE-OPS';
+		const PIPELINE_TOKEN = 'TS-PL';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -157,8 +157,8 @@ describe('RocketRideClient Integration Tests', () => {
 			});
 
 			// Retry a few times in case server is busy (tests may run in parallel)
-			const maxAttempts = 5;
-			const delayMs = 2000;
+			const maxAttempts = 10;
+			const delayMs = 1000;
 			let status: Awaited<ReturnType<typeof client.getTaskStatus>> | null = null;
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				try {
@@ -174,7 +174,7 @@ describe('RocketRideClient Integration Tests', () => {
 			expect(Object.values(TASK_STATE)).toContain(status!.state);
 
 			await client.terminate(result.token);
-		}, 90000);
+		}, TEST_CONFIG.timeout);
 
 		it(
 			'should terminate a pipeline',
@@ -191,7 +191,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Data Operations', () => {
-		const DATA_TOKEN = 'TS-DATA-OPS';
+		const DATA_TOKEN = 'TS-DA';
 		let pipelineToken: string;
 
 		beforeEach(async () => {
@@ -472,7 +472,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describeIfLLM('Chat Operations', () => {
-		const CHAT_TOKEN = 'TS-CHAT-OPS';
+		const CHAT_TOKEN = 'TS-CH';
 		let chatToken: string;
 
 		beforeEach(async () => {
@@ -744,7 +744,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Event Handling', () => {
-		const EVENT_TOKEN = 'TS-EVENT-OPS';
+		const EVENT_TOKEN = 'TS-EV';
 		let eventToken: string;
 		let receivedEvents: any[] = [];
 
@@ -1156,7 +1156,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Error Handling', () => {
-		const ERROR_TOKEN = 'TS-ERROR-OPS';
+		const ERROR_TOKEN = 'TS-ER';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -1214,7 +1214,7 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('End-to-End Workflow', () => {
-		const E2E_TOKEN = 'TS-E2E-WORKFLOW';
+		const E2E_TOKEN = 'TS-E2';
 
 		beforeEach(async () => {
 			await client.connect();
@@ -1645,7 +1645,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	});
 
 	describe('Concurrent Pipeline Operations', () => {
-		const CONCURRENT_TOKEN = 'TS-CONCURRENT-OPS';
+		const CONCURRENT_TOKEN = 'TS-CC';
 		const PIPELINE_COUNT = 16;
 		let pipelineTokens: string[] = [];
 
@@ -1763,7 +1763,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			// Create a single pipeline
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: `${CONCURRENT_TOKEN}-single`,
+				token: `${CONCURRENT_TOKEN}-1p`,
 			});
 			pipelineTokens = [result.token];
 
@@ -1824,12 +1824,24 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				const PIPELINE_COUNT = 4;
 				const SENDS_PER_PIPELINE = 3;
 
-				// Create all pipelines concurrently
+				// Clean up any leftover pipelines from previous runs
+				for (let i = 0; i < PIPELINE_COUNT; i++) {
+					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-m${i}`);
+				}
+
+				// Create all pipelines concurrently — each needs a unique project_id
+				// to avoid server-side contention during concurrent startup.
+				const MIXED_PROJECT_IDS = [
+					'a1b2c3d4-1111-4000-a000-000000000001',
+					'a1b2c3d4-1111-4000-a000-000000000002',
+					'a1b2c3d4-1111-4000-a000-000000000003',
+					'a1b2c3d4-1111-4000-a000-000000000004',
+				];
 				const pipelines = await Promise.all(
 					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
 						const result = await client.use({
-							pipeline: getEchoPipeline(),
-							token: `${CONCURRENT_TOKEN}-mixed-${index}`,
+							pipeline: getEchoPipeline(MIXED_PROJECT_IDS[index]),
+							token: `${CONCURRENT_TOKEN}-m${index}`,
 						});
 						return { index, token: result.token };
 					})
@@ -1905,27 +1917,31 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				const SUBPROCESS_COUNT = 4;
 				const CYCLES_PER_PIPELINE = 32;
 
-				// Create 4 independent subprocesses concurrently
-				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-stress-${i}`);
-				await Promise.all(tokens.map((token) => client.use({ pipeline: getEchoPipeline(), token })));
+				// Clean up any leftover pipelines from previous runs
+				for (let i = 0; i < SUBPROCESS_COUNT; i++) {
+					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-s${i}`);
+				}
+
+				// Create 4 independent subprocesses concurrently — each needs a
+				// unique project_id to avoid server-side contention during startup.
+				const CYCLE_PROJECT_IDS = [
+					'b2c3d4e5-2222-4000-b000-000000000001',
+					'b2c3d4e5-2222-4000-b000-000000000002',
+					'b2c3d4e5-2222-4000-b000-000000000003',
+					'b2c3d4e5-2222-4000-b000-000000000004',
+				];
+				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-s${i}`);
+				await Promise.all(tokens.map((token, i) =>
+					client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })
+				));
 				pipelineTokens.push(...tokens);
 
-				// Each pipeline independently cycles send/recv — all 4 run in parallel.
-				// Individual send failures are retried once to tolerate transient
-				// "Connection closed" errors under heavy concurrent load.
+				// Each pipeline independently cycles send/recv — all 4 run in parallel
 				async function runPipeline(token: string, pipelineIndex: number) {
 					const results = [];
 					for (let cycle = 0; cycle < CYCLES_PER_PIPELINE; cycle++) {
 						const text = `pipe-${pipelineIndex}-cycle-${cycle}-${Math.random().toString(36).slice(2)}`;
-						let result: PIPELINE_RESULT | undefined;
-						try {
-							result = await client.send(token, text, {}, 'text/plain');
-						} catch {
-							// Retry once — the server may have briefly dropped the
-							// WebSocket frame under heavy concurrent load.
-							await new Promise((resolve) => setTimeout(resolve, 250));
-							result = await client.send(token, text, {}, 'text/plain');
-						}
+						const result = await client.send(token, text, {}, 'text/plain');
 						expect(result).toBeDefined();
 						expect(result!.text[0]).toContain(text);
 						results.push({ text, response: result!.text[0] });
@@ -1967,7 +1983,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				// path because one client has one monotonic seq counter — it never
 				// collides with itself.  Two independent clients fanning into one task
 				// are the necessary precondition.
-				const SHARED_TOKEN = `${CONCURRENT_TOKEN}-cross-client-shared`;
+				const SHARED_TOKEN = `${CONCURRENT_TOKEN}-cs`;
 				const SENDS_PER_CLIENT = 12;
 
 				// Spin up a SECOND independent client.  The first client is the outer
@@ -1985,12 +2001,12 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					// fresh one.  This is what makes both clients fan into ONE shared
 					// eaas->subprocess _data_client.
 					const resA = await client.use({
-						pipeline: getEchoPipeline(),
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
 						token: SHARED_TOKEN,
 						useExisting: true,
 					});
 					const resB = await clientB.use({
-						pipeline: getEchoPipeline(),
+						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
 						token: SHARED_TOKEN,
 						useExisting: true,
 					});

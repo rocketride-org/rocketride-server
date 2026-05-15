@@ -69,12 +69,13 @@ const IGNORE = ['**/target/**', '**/node_modules/**', '**/.git/**', '**/scripts/
 // ============================================================================
 
 async function execMaven(args, options = {}) {
-    return execCommand(MAVEN, args, {
+    return execCommand(MAVEN, ['-B', ...args], {
         ...options,
         env: {
             ...process.env,
             JAVA_HOME: JDK_DIR,
-            PATH: `${path.join(JDK_DIR, 'bin')}${path.delimiter}${process.env.PATH}`
+            PATH: `${path.join(JDK_DIR, 'bin')}${path.delimiter}${process.env.PATH}`,
+            MAVEN_OPTS: `${process.env.MAVEN_OPTS || ''} -Xmx1024m`.trim()
         }
     });
 }

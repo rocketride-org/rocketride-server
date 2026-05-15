@@ -52,11 +52,14 @@ def task():
 class TestAllowedEnvVars:
     """Env vars with the ROCKETRIDE_ prefix should be resolved normally."""
 
-    @pytest.mark.parametrize('var_name,value', [
-        ('ROCKETRIDE_API_KEY', 'rr-key-123'),
-        ('ROCKETRIDE_HOST', 'localhost'),
-        ('ROCKETRIDE_DEBUG', 'true'),
-    ])
+    @pytest.mark.parametrize(
+        'var_name,value',
+        [
+            ('ROCKETRIDE_API_KEY', 'rr-key-123'),
+            ('ROCKETRIDE_HOST', 'localhost'),
+            ('ROCKETRIDE_DEBUG', 'true'),
+        ],
+    )
     def test_allowed_prefix_resolves(self, task, var_name, value):
         with patch.dict(os.environ, {var_name: value}):
             pipeline = {'config': f'${{{var_name}}}'}
@@ -88,21 +91,24 @@ class TestAllowedEnvVars:
 class TestBlockedEnvVars:
     """Env vars outside the allowlist must be redacted."""
 
-    @pytest.mark.parametrize('var_name', [
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_ACCESS_KEY_ID',
-        'DATABASE_URL',
-        'PYPI_TOKEN',
-        'GITHUB_TOKEN',
-        'HOME',
-        'PATH',
-        'SSH_PRIVATE_KEY',
-        'OPENAI_API_KEY',
-        'STRIPE_SECRET_KEY',
-        'PIPELINE_MODE',
-        'NODE_ENV',
-        'ROCKET_DEBUG',
-    ])
+    @pytest.mark.parametrize(
+        'var_name',
+        [
+            'AWS_SECRET_ACCESS_KEY',
+            'AWS_ACCESS_KEY_ID',
+            'DATABASE_URL',
+            'PYPI_TOKEN',
+            'GITHUB_TOKEN',
+            'HOME',
+            'PATH',
+            'SSH_PRIVATE_KEY',
+            'OPENAI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'PIPELINE_MODE',
+            'NODE_ENV',
+            'ROCKET_DEBUG',
+        ],
+    )
     def test_sensitive_var_redacted(self, task, var_name):
         with patch.dict(os.environ, {var_name: 'super-secret-value'}):
             pipeline = {'leak': f'${{{var_name}}}'}
@@ -146,10 +152,13 @@ class TestBlockedEnvVars:
 
     def test_inline_mixed_text(self, task):
         """Blocked var embedded in a larger string is still redacted."""
-        with patch.dict(os.environ, {
-            'ROCKETRIDE_HOST': 'myhost',
-            'AWS_SECRET_ACCESS_KEY': 'secret123',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'ROCKETRIDE_HOST': 'myhost',
+                'AWS_SECRET_ACCESS_KEY': 'secret123',
+            },
+        ):
             pipeline = {'cmd': 'connect ${ROCKETRIDE_HOST} using ${AWS_SECRET_ACCESS_KEY}'}
             result = task._resolve_pipeline(pipeline)
             assert 'myhost' in result['cmd']

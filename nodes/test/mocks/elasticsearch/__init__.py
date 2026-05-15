@@ -9,6 +9,7 @@ When ROCKETRIDE_MOCK is set, this module shadows the real elasticsearch package
 so the Elasticsearch store uses in-memory storage. Supports indices.exists/create/
 delete, index(), search(), bulk(), scan(), cluster.health(), and close().
 """
+
 from typing import Any, Dict, List, Optional
 
 from . import _store_data
@@ -37,11 +38,15 @@ class ClusterMock:
 
 
 class Elasticsearch:
-    def __init__(self, hosts: Optional[List[str]] = None, api_key: Optional[str] = None, request_timeout: int = 60, **kwargs: Any) -> None:
+    def __init__(
+        self, hosts: Optional[List[str]] = None, api_key: Optional[str] = None, request_timeout: int = 60, **kwargs: Any
+    ) -> None:
         self.indices = IndicesMock()
         self.cluster = ClusterMock()
 
-    def index(self, index: str, id: Optional[str] = None, body: Optional[Dict] = None, refresh: bool = False, **kwargs: Any) -> Dict[str, Any]:
+    def index(
+        self, index: str, id: Optional[str] = None, body: Optional[Dict] = None, refresh: bool = False, **kwargs: Any
+    ) -> Dict[str, Any]:
         if index not in _store:
             _store[index] = []
         doc_id = id or str(len(_store[index]) + 1)
@@ -56,26 +61,34 @@ class Elasticsearch:
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
-            hits.append({
-                '_index': index,
-                '_id': d.get('_id', str(i)),
-                '_score': 0.9,
-                '_source': src,
-            })
+            hits.append(
+                {
+                    '_index': index,
+                    '_id': d.get('_id', str(i)),
+                    '_score': 0.9,
+                    '_source': src,
+                }
+            )
         return {'hits': {'total': {'value': len(hits)}, 'hits': hits}}
 
-    def delete_by_query(self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any) -> Dict[str, Any]:
+    def delete_by_query(
+        self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any
+    ) -> Dict[str, Any]:
         if index not in _store:
             return {'deleted': 0}
         terms = (body or {}).get('query', {}).get('terms', {})
         if 'meta.objectId' in terms:
             ids = set(terms['meta.objectId'])
             before = len(_store[index])
-            _store[index] = [d for d in _store[index] if d.get('_source', {}).get('meta', {}).get('objectId') not in ids]
+            _store[index] = [
+                d for d in _store[index] if d.get('_source', {}).get('meta', {}).get('objectId') not in ids
+            ]
             return {'deleted': before - len(_store[index])}
         return {'deleted': 0}
 
-    def update_by_query(self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any) -> Dict[str, Any]:
+    def update_by_query(
+        self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any
+    ) -> Dict[str, Any]:
         return {'updated': 0}
 
     def close(self) -> None:

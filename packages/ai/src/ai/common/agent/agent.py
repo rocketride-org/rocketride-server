@@ -212,11 +212,19 @@ class AgentBase(ABC):
                 'stack': [],
             }
             stack = []
-            stack.append({'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}})
+            stack.append(
+                {
+                    'kind': 'RocketRide.agent.error.v1',
+                    'name': 'exception',
+                    'payload': {'type': error_type, 'message': error_message},
+                }
+            )
             answer_payload['stack'] = stack
 
         if emit_answers_lane:
-            debug(f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}')
+            debug(
+                f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
+            )
             answer = Answer(expectJson=False)
             answer.setAnswer(answer_payload.get('content', ''))
             iInstance.instance.writeAnswers(answer)

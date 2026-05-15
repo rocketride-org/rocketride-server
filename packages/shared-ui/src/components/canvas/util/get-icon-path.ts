@@ -27,7 +27,7 @@ const isUrl = (path: string) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(pat
 // Import all connector icons
 import amazonS3Icon from '../../../assets/nodes/amazon-s3.svg';
 import anthropicIcon from '../../../assets/nodes/anthropic.svg';
-import rocketrideIcon from '../../../assets/nodes/rocketride.svg';
+import rocketrideIcon from '../../../assets/rocketride/rocketride-light.svg';
 import astradbIcon from '../../../assets/nodes/astra_db.svg';
 import audioPlayerIcon from '../../../assets/nodes/audio-player.svg';
 import audioTranscribeIcon from '../../../assets/nodes/audio-transcribe.svg';
@@ -110,6 +110,8 @@ import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 import githubIcon from '../../../assets/nodes/github.svg';
 import telegramIcon from '../../../assets/nodes/telegram.svg';
+import gitIcon from '../../../assets/nodes/git.svg';
+import pipetoolIcon from '../../../assets/nodes/pipetool.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -201,7 +203,9 @@ const iconMap: Record<string, string> = {
 	twelvelabs: twelvelabsIcon,
 	'bland-ai': blandAiIcon,
 	github: githubIcon,
+	git: gitIcon,
 	telegram: telegramIcon,
+	pipetool: pipetoolIcon,
 };
 
 /**

@@ -41,6 +41,8 @@ from ai.common.config import Config
 
 from .utils import _is_cypher_safe
 
+DEFAULT_MAX_EXECUTE_ROWS = 25000
+
 
 class IGlobal(IGlobalBase):
     """Neo4J-specific global connection state."""
@@ -60,6 +62,8 @@ class IGlobal(IGlobalBase):
     # label: str = 'Row'
     db_description: str = ''
     max_validation_attempts: int = 5
+    allow_execute: bool = False
+    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -79,6 +83,21 @@ class IGlobal(IGlobalBase):
             self.max_validation_attempts = int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             self.max_validation_attempts = 5
+
+        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
+        # the LLM translation + _is_cypher_safe gate, so the node owner must
+        # explicitly enable the capability. Strings like 'false' / '0' must
+        # not be truthy here, so don't use bool() directly.
+        allow_execute = config.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
+
+        try:
+            self.max_execute_rows = max(1, int(config.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
 
         auth = self._build_auth(config)
 
@@ -136,6 +155,34 @@ class IGlobal(IGlobalBase):
         with self.driver.session(database=self.database) as session:
             result = session.run(neo4j.Query(cypher, timeout=timeout), params)
             return [_record_to_dict(record) for record in result]
+
+    def _run_query_raw(self, cypher: str, *, timeout: float = QUERY_TIMEOUT) -> Dict[str, Any]:
+        """Execute a raw Cypher statement without the ``_is_cypher_safe`` gate.
+
+        Used by the EXECUTE path where the caller has accepted the risk of running
+        write/admin Cypher directly. Returns ``{'rows': [...], 'affected_rows': N}``
+        to mirror the SQL ``_executeRawQuery`` shape — ``affected_rows`` is derived
+        from the result summary counters when no rows are returned (e.g. CREATE
+        without RETURN, DELETE).
+
+        Raises:
+            neo4j.exceptions.Neo4jError: Caught at the IInstance handler per precedent.
+        """
+        max_rows = self.max_execute_rows
+        with self.driver.session(database=self.database) as session:
+            result = session.run(neo4j.Query(cypher, timeout=timeout))
+            rows = [_record_to_dict(record) for _, record in zip(range(max_rows + 1), result)]
+            if len(rows) > max_rows:
+                raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+            counters = result.consume().counters
+            affected = (
+                counters.nodes_created
+                + counters.nodes_deleted
+                + counters.relationships_created
+                + counters.relationships_deleted
+                + counters.properties_set
+            )
+            return {'rows': rows, 'affected_rows': 0 if rows else affected}
 
     def _validate_query(self, cypher: str) -> Tuple[bool, str]:
         """Run EXPLAIN on a Cypher statement to check syntax without executing it.
@@ -251,7 +298,11 @@ class IGlobal(IGlobalBase):
                     # Fall back to listing relationship types without endpoints.
                     try:
                         result = session.run('CALL db.relationshipTypes()')
-                        schema['relationships'] = [{'type': r.get('relationshipType', ''), 'start': '', 'end': ''} for r in result if r.get('relationshipType')]
+                        schema['relationships'] = [
+                            {'type': r.get('relationshipType', ''), 'start': '', 'end': ''}
+                            for r in result
+                            if r.get('relationshipType')
+                        ]
                     except Neo4jError:
                         pass
 

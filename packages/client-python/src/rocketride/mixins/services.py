@@ -74,14 +74,7 @@ class ServicesMixin(DAPClient):
         Raises:
             RuntimeError: If the server returns an error.
         """
-        request = self.build_request(command='rrext_services', arguments={})
-        response = await self.request(request)
-
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Failed to retrieve services')
-            raise RuntimeError(f'Failed to retrieve services: {error_msg}')
-
-        return response.get('body') or {}
+        return await self.call('rrext_services')
 
     async def get_service(self, service: str) -> Optional[SERVICE_DEFINITION]:
         """
@@ -100,17 +93,7 @@ class ServicesMixin(DAPClient):
         if not service:
             raise ValueError('Service name is required')
 
-        request = self.build_request(
-            command='rrext_services',
-            arguments={'service': service},
-        )
-        response = await self.request(request)
-
-        if self.did_fail(response):
-            error_msg = response.get('message', f"Service '{service}' not found")
-            raise RuntimeError(f"Failed to retrieve service '{service}': {error_msg}")
-
-        return response.get('body')
+        return await self.call('rrext_services', service=service)
 
     async def validate(
         self,
@@ -146,18 +129,11 @@ class ServicesMixin(DAPClient):
                 source='webhook_1',
             )
         """
-        arguments: Dict[str, Any] = {'pipeline': pipeline}
-        if source is not None:
-            arguments['source'] = source
+        try:
+            kwargs: Dict[str, Any] = {'pipeline': pipeline}
+            if source is not None:
+                kwargs['source'] = source
 
-        request = self.build_request(
-            command='rrext_validate',
-            arguments=arguments,
-        )
-        response = await self.request(request)
-
-        if self.did_fail(response):
-            error_msg = response.get('message', 'Validation failed')
-            raise RuntimeError(f'Pipeline validation failed: {error_msg}')
-
-        return response.get('body') or {}
+            return await self.call('rrext_validate', **kwargs)
+        except Exception as err:
+            raise RuntimeError(f'Pipeline validation failed: {err}') from err

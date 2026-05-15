@@ -81,10 +81,13 @@ export interface IFlowPreferencesContext {
 
 	// --- Canvas lock -------------------------------------------------------
 
-	/** When true, nodes and edges cannot be moved, connected, or deleted. */
+	/** When true, the canvas was opened in externally-readonly mode (e.g. "Other" task viewer). */
+	isReadonly: boolean;
+
+	/** Effective lock: true when either externally readonly OR the user toggled the toolbar lock. */
 	isLocked: boolean;
 
-	/** Toggles the canvas lock on/off and persists the change. */
+	/** Toggles the user-facing canvas lock on/off. No-op when isReadonly=true. */
 	toggleLock: () => void;
 
 	// --- Per-project layout ------------------------------------------------
@@ -124,6 +127,9 @@ export interface IFlowPreferencesProviderProps {
 
 	/** Host-provided preference writer. When absent, preferences are not persisted. */
 	setPreference?: (key: string, value: unknown) => void;
+
+	/** When true, the canvas was opened in externally-readonly mode. The toolbar lock button is hidden. */
+	isReadonly?: boolean;
 }
 
 // =============================================================================
@@ -137,7 +143,7 @@ export interface IFlowPreferencesProviderProps {
  * All mutations are immediately reflected in local state and
  * asynchronously persisted via the host callbacks.
  */
-export function FlowPreferencesProvider({ children, projectId, getPreference: hostGetPreference, setPreference: hostSetPreference }: IFlowPreferencesProviderProps): ReactElement {
+export function FlowPreferencesProvider({ children, projectId, getPreference: hostGetPreference, setPreference: hostSetPreference, isReadonly = false }: IFlowPreferencesProviderProps): ReactElement {
 	// --- Preference helpers (safe even when host callbacks are absent) ------
 
 	const getPreference = useCallback((key: string): unknown => hostGetPreference?.(key), [hostGetPreference]);
@@ -197,17 +203,20 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 
 	// --- Canvas lock -------------------------------------------------------
 
-	const isLocked = projectLayout.isLocked ?? false;
+	const internalIsLocked = projectLayout.isLocked ?? false;
+	const isLocked = isReadonly || internalIsLocked;
 
 	const toggleLock = useCallback(() => {
-		updateProjectLayout({ isLocked: !isLocked });
-	}, [updateProjectLayout, isLocked]);
+		if (isReadonly) return; // can't unlock when externally readonly
+		updateProjectLayout({ isLocked: !internalIsLocked });
+	}, [isReadonly, updateProjectLayout, internalIsLocked]);
 
 	// --- Context value (stable references via useCallback) -----------------
 
 	const value: IFlowPreferencesContext = {
 		navigationMode,
 		setNavigationMode,
+		isReadonly,
 		isLocked,
 		toggleLock,
 		projectLayout,

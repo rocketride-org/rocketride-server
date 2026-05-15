@@ -7,17 +7,15 @@
  * ProjectView — Unified project frame composing the canvas editor and all
  * runtime views (status, tokens, flow, trace, errors) behind a shared tab bar.
  *
- * All incoming data flows via ref.handleMessage(). Outgoing messages flow
- * via the onMessage callback prop. The host bridge is stateless.
+ * All data flows in via props; all user actions flow out via callbacks.
+ * The host is responsible for managing state, fetching data, and parsing
+ * server events (use `parseServerEvent` utility).
  *
  * Supports multiple source nodes — the Status tab renders a self-contained
  * pane per source (sorted A→Z by name).
  */
 
-import React, { useState, useCallback, useRef, useMemo, useImperativeHandle, forwardRef, CSSProperties } from 'react';
-
-// Theme CSS — defines --rr-* tokens in the iframe/webview context
-import '../../themes/rocketride-default.css';
+import React, { useState, useCallback, useRef, useMemo, CSSProperties } from 'react';
 
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { useTraceState } from './hooks/useTraceState';
@@ -32,7 +30,65 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
-import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent, TraceRow } from './types';
+import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
+
+// =============================================================================
+// PROPS
+// =============================================================================
+
+/**
+ * ProjectView props — pure props-based API for direct mounting.
+ *
+ * All data flows in as props; all user actions flow out as callbacks.
+ * The host is responsible for managing state, fetching data, and
+ * parsing server events (use `parseServerEvent` utility).
+ */
+export interface IProjectViewProps {
+	/** The pipeline project object. */
+	project: any | null;
+	/** Available node service definitions (keyed by provider). */
+	servicesJson: Record<string, any>;
+	/** Whether the host is connected to the RocketRide server. */
+	isConnected: boolean;
+	/** Per-source task status map (source ID → status). */
+	statusMap: Record<string, TaskStatus>;
+	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
+	serverHost?: string;
+	/** Whether the document has unsaved changes. */
+	isDirty?: boolean;
+	/** Whether the document is a new (never-saved) file. */
+	isNew?: boolean;
+	/** Initial view state (mode, flowViewMode, viewport). Used as starting values; ProjectView manages its own local view state after mount. */
+	initialViewState?: ViewState;
+	/** Initial user preferences. Used as starting values; ProjectView manages its own local prefs after mount. */
+	initialPrefs?: Record<string, unknown>;
+	/** Accumulated trace events — host appends new events, ProjectView renders them. */
+	traceEvents?: TraceEvent[];
+	/** Called when the user edits the pipeline in the canvas. */
+	onContentChanged?: (project: any) => void;
+	/** Called to validate a pipeline. Host returns validation result as a Promise. */
+	onValidate?: (pipeline: any) => Promise<any>;
+	/** Called for pipeline run/stop/restart actions. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Called when view state changes (mode, flowViewMode, viewport). */
+	onViewStateChange?: (viewState: ViewState) => void;
+	/** Called when user preferences change (e.g. panel widths, toggles). */
+	onPrefsChange?: (prefs: Record<string, unknown>) => void;
+	/** Called when the user clicks an external link in the canvas. */
+	onOpenLink?: (url: string, displayName?: string) => void;
+	/** Called when the user requests a save (Ctrl+S or menu). */
+	onSave?: () => void;
+	/** Called when the user clears the trace log. */
+	onTraceClear?: () => void;
+	/** When true, the canvas is fully read-only: editing, saving, and run/stop are disabled. */
+	isReadonly?: boolean;
+	/**
+	 * Whether the user has an active subscription for pipeline execution.
+	 * When false, play buttons show a lock overlay and the run button shows "Subscribe".
+	 * Defaults to true (ungated) when not provided.
+	 */
+	isSubscribed?: boolean;
+}
 
 // =============================================================================
 // STYLES
@@ -49,12 +105,7 @@ const styles = {
 		backgroundColor: 'var(--rr-bg-default)',
 	} as CSSProperties,
 	disconnectOverlay: {
-		position: 'absolute',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		...commonStyles.modalOverlay,
 		backdropFilter: 'blur(8px)',
 		WebkitBackdropFilter: 'blur(8px)',
 		zIndex: 1000,
@@ -80,11 +131,6 @@ const styles = {
 		flexDirection: 'column',
 		position: 'relative',
 	} as CSSProperties,
-	empty: {
-		color: 'var(--rr-text-disabled)',
-		textAlign: 'center',
-		padding: 32,
-	} as CSSProperties,
 	sourcePane: {
 		...commonStyles.card,
 		borderRadius: 6,
@@ -97,20 +143,14 @@ const styles = {
 	} as CSSProperties,
 	sourceBody: commonStyles.cardBody,
 	errorBadge: {
-		fontSize: 11,
-		fontWeight: 600,
-		padding: '2px 8px',
-		borderRadius: 10,
+		...commonStyles.badge,
 		backgroundColor: 'var(--rr-color-error)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
 	warningBadge: {
-		fontSize: 11,
-		fontWeight: 600,
-		padding: '2px 8px',
-		borderRadius: 10,
+		...commonStyles.badge,
 		backgroundColor: 'var(--rr-color-warning)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
 };
 
@@ -124,102 +164,26 @@ interface SourceInfo {
 }
 
 // =============================================================================
-// HELPERS
-// =============================================================================
-
-// =============================================================================
 // COMPONENT
 // =============================================================================
 
-const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }, ref) => {
-	// --- Internal state (all populated via handleMessage) ---------------------
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear, isReadonly = false }) => {
+	// --- Local view state (initialized from props, managed locally) -----------
 
-	const [project, setProject] = useState<any>(null);
-	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
-	const [isConnected, setIsConnected] = useState(false);
-	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
-	const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
-	const [viewState, setViewState] = useState<ViewState | null>(null);
-	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
-	const [serverHost, setServerHost] = useState<string>('');
-
-	// Pending validate requests
-	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
-
-	// --- Imperative message handler ------------------------------------------
-
-	useImperativeHandle(ref, () => ({
-		handleMessage(msg: ProjectViewIncoming) {
-			switch (msg.type) {
-				case 'project:load':
-					// Atomic load — sets all state in one React batch
-					setProject(msg.project);
-					setServicesJson(msg.services);
-					setIsConnected(msg.isConnected);
-					setStatusMap(msg.statuses ?? {});
-					setViewState({
-						mode: msg.viewState?.mode ?? 'design',
-						flowViewMode: msg.viewState?.flowViewMode ?? 'pipeline',
-						viewport: msg.viewState?.viewport,
-					});
-					setPrefs(msg.prefs ?? {});
-					setTraceEvents([]);
-					if (msg.serverHost) setServerHost(msg.serverHost);
-					break;
-				case 'canvas:update':
-					setProject(msg.project);
-					break;
-				case 'canvas:services':
-					setServicesJson(msg.services);
-					break;
-				case 'canvas:validateResponse': {
-					const pending = pendingValidates.current.get(msg.requestId);
-					if (pending) {
-						pendingValidates.current.delete(msg.requestId);
-						if (msg.error) pending.reject(new Error(msg.error));
-						else pending.resolve(msg.result);
-					}
-					break;
-				}
-				case 'status:update':
-					setStatusMap((prev) => ({ ...prev, [msg.taskStatus.source]: msg.taskStatus }));
-					break;
-				case 'trace:event':
-					setTraceEvents((prev) => [...prev, msg.event]);
-					break;
-				case 'project:connectionState':
-					// On reconnect, clear stale data so only fresh server
-					// events repopulate the panels.
-					if (msg.isConnected) {
-						setStatusMap({});
-						setTraceEvents([]);
-					}
-					setIsConnected(msg.isConnected);
-					break;
-				case 'project:initialState':
-					setViewState({
-						mode: msg.state?.mode ?? 'design',
-						flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
-						viewport: msg.state?.viewport,
-					});
-					break;
-				case 'project:initialPrefs':
-					setPrefs(msg.prefs ?? {});
-					break;
-				case 'project:themeChange':
-					break;
-			}
-		},
+	const [viewState, setViewState] = useState<ViewState>(() => ({
+		mode: initialViewState?.mode ?? 'design',
+		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
+		viewport: initialViewState?.viewport,
 	}));
 
-	// --- Outgoing message helper ---------------------------------------------
+	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});
 
-	const send = useCallback(
-		(msg: ProjectViewOutgoing) => {
-			onMessage?.(msg);
-		},
-		[onMessage]
-	);
+	// --- Stable callback refs ------------------------------------------------
+
+	const onViewStateChangeRef = useRef(onViewStateChange);
+	onViewStateChangeRef.current = onViewStateChange;
+	const onPrefsChangeRef = useRef(onPrefsChange);
+	onPrefsChangeRef.current = onPrefsChange;
 
 	// --- Extract source components from project ------------------------------
 
@@ -246,14 +210,10 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- View state + preferences (separate concerns) -----------------------
 
-	const onMessageRef = useRef(onMessage);
-	onMessageRef.current = onMessage;
-
 	const updateViewState = useCallback((patch: Partial<ViewState>) => {
 		setViewState((prev) => {
-			if (!prev) return prev;
 			const next = { ...prev, ...patch };
-			onMessageRef.current?.({ type: 'project:viewStateChange', viewState: next });
+			onViewStateChangeRef.current?.(next);
 			return next;
 		});
 	}, []);
@@ -262,7 +222,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const setPreference = useCallback((key: string, value: unknown) => {
 		setPrefs((prev) => {
 			const next = { ...prev, [key]: value };
-			onMessageRef.current?.({ type: 'project:prefsChange', prefs: next });
+			onPrefsChangeRef.current?.(next);
 			return next;
 		});
 	}, []);
@@ -271,23 +231,17 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Validate callback for Canvas ----------------------------------------
 
-	const validateCounter = useRef(0);
-	const handleValidate = useCallback(
-		async (pipeline: any): Promise<any> => {
-			return new Promise((resolve, reject) => {
-				const requestId = ++validateCounter.current;
-				pendingValidates.current.set(requestId, { resolve, reject });
-				send({ type: 'canvas:validate', requestId, pipeline });
-				setTimeout(() => {
-					if (pendingValidates.current.has(requestId)) {
-						pendingValidates.current.get(requestId)!.resolve({ errors: [], warnings: [] });
-						pendingValidates.current.delete(requestId);
-					}
-				}, 15000);
-			});
-		},
-		[send]
-	);
+	const onValidateRef = useRef(onValidate);
+	onValidateRef.current = onValidate;
+
+	const handleValidate = useCallback(async (pipeline: any): Promise<any> => {
+		if (!onValidateRef.current) return { errors: [], warnings: [] };
+		try {
+			return await onValidateRef.current(pipeline);
+		} catch {
+			return { errors: [], warnings: [] };
+		}
+	}, []);
 
 	// --- Mode switch ---------------------------------------------------------
 
@@ -302,41 +256,46 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const handleContentChanged = useCallback(
 		(updatedProject: any) => {
-			setProject(updatedProject);
-			send({ type: 'canvas:contentChanged', project: updatedProject });
+			onContentChanged?.(updatedProject);
 		},
-		[send]
+		[onContentChanged]
 	);
 
 	const handleRunPipeline = useCallback(
 		(source: string, _project: any) => {
-			send({ type: 'status:pipelineAction', action: 'run', source });
+			onPipelineAction?.('run', source);
 		},
-		[send]
+		[onPipelineAction]
 	);
 
 	const handleStopPipeline = useCallback(
 		(source: string) => {
-			send({ type: 'status:pipelineAction', action: 'stop', source });
+			onPipelineAction?.('stop', source);
 		},
-		[send]
+		[onPipelineAction]
 	);
+
+	// --- Save ----------------------------------------------------------------
+
+	const handleSave = useCallback(() => {
+		onSave?.();
+	}, [onSave]);
 
 	// --- Open link -----------------------------------------------------------
 
 	const handleOpenLink = useCallback(
 		(url: string, displayName?: string) => {
-			send({ type: 'project:openLink', url, displayName });
+			onOpenLink?.(url, displayName);
 		},
-		[send]
+		[onOpenLink]
 	);
 
 	// --- Trace clear ---------------------------------------------------------
 
 	const handleTraceClear = useCallback(() => {
 		clearTrace();
-		send({ type: 'trace:clear' });
-	}, [clearTrace, send]);
+		onTraceClear?.();
+	}, [clearTrace, onTraceClear]);
 
 	// --- Aggregated error/warning counts -------------------------------------
 
@@ -345,8 +304,8 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Tab definitions -----------------------------------------------------
 
-	const tabs = [
-		{ id: 'design', label: 'Design' },
+	const allTabs = [
+		{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
@@ -357,19 +316,18 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			badge: totalErrors + totalWarnings > 0 ? String(totalErrors + totalWarnings) : undefined,
 		},
 	];
+	const tabs = allTabs;
 
 	// --- Panels (only the active panel is mounted) ----------------------------
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			send({ type: 'status:pipelineAction', action, source });
+			onPipelineAction?.(action, source);
 		},
-		[send]
+		[onPipelineAction]
 	);
 
-	// --- Wait for viewState before building any UI --------------------------
-
-	if (!viewState || !prefs) return null;
+	// --- Viewport change -----------------------------------------------------
 
 	const handleViewportChange = (viewport: { x: number; y: number; zoom: number }) => {
 		updateViewState({ viewport });
@@ -377,19 +335,19 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} isReadonly={isReadonly} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		flow: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		trace: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		errors: {
 			content: (
@@ -423,7 +381,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 							</div>
 						);
 					})}
-					{totalErrors === 0 && totalWarnings === 0 && <div style={styles.empty}>No errors or warnings</div>}
+					{totalErrors === 0 && totalWarnings === 0 && <div style={commonStyles.empty}>No errors or warnings</div>}
 				</div>
 			),
 		},
@@ -443,7 +401,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			)}
 		</div>
 	);
-});
+};
 
 ProjectView.displayName = 'ProjectView';
 
@@ -455,15 +413,16 @@ const SourceStatusPane: React.FC<{
 	source: SourceInfo;
 	taskStatus: TaskStatus | undefined;
 	isConnected: boolean;
-	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	isSubscribed?: boolean;
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	onOpenLink?: (url: string, displayName?: string) => void;
 	serverHost?: string;
-}> = ({ source, taskStatus, isConnected, onPipelineAction, onOpenLink, serverHost }) => {
+}> = ({ source, taskStatus, isConnected, isSubscribed, onPipelineAction, onOpenLink, serverHost }) => {
 	const currentElapsed = useElapsedTimer(taskStatus ?? null);
 
 	return (
 		<div style={styles.sourcePane}>
-			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} />
+			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={onPipelineAction ? (action, src) => onPipelineAction(action, src ?? source.id) : undefined} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} isSubscribed={isSubscribed} />
 			<div style={styles.sourceBody}>
 				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} isConnected={isConnected} />
 			</div>

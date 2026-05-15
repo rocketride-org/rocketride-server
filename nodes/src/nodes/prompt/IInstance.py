@@ -76,7 +76,9 @@ class IInstance(IInstanceBase):
         try:
             # Get the instructions from configuration via IGlobal
             config = self.IGlobal.config
-            instructions = config.get('instructions', ['Please provide a detailed and helpful response to the following question:'])
+            instructions = config.get(
+                'instructions', ['Please provide a detailed and helpful response to the following question:']
+            )
 
             # Ensure instructions is a list
             if isinstance(instructions, str):

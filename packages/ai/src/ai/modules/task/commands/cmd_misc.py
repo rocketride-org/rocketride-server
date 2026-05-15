@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 MiscCommands: DAP Command Handler for Miscellaneous Operations.
 
@@ -24,6 +46,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source
 
 # Only import for type checking to avoid circular import errors
@@ -196,11 +219,18 @@ class MiscCommands(DAPConn):
 
             server = self._server
             current_time = time.time()
-            caller_apikey = self._account_info.apikey
+            caller_user_id = self._account_info.userId
 
-            # Snapshot and filter to caller's own data
-            task_controls = [c for c in server._task_control.values() if c.apikey == caller_apikey]
-            conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.apikey == caller_apikey]
+            # Snapshot tasks the caller has access to (own, teammate, org admin)
+            task_controls = [
+                c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
+            ]
+            # Connections are user-scoped (not task-scoped), so filter by userId
+            conn_items = [
+                (cid, conn)
+                for cid, conn in server._connections.items()
+                if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
+            ]
 
             # Task-scoped tokens (tk_) can only see their own task
             caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
@@ -220,7 +250,12 @@ class MiscCommands(DAPConn):
                     project_key = f'p.{control.project_id}.{control.source}'
                     project_wildcard_key = f'p.{control.project_id}.*'
                     pipe_prefix = f'{project_key}.'
-                    if project_key in conn._monitors or project_wildcard_key in conn._monitors or '*' in conn._monitors or any(k.startswith(pipe_prefix) for k in conn._monitors):
+                    if (
+                        project_key in conn._monitors
+                        or project_wildcard_key in conn._monitors
+                        or '*' in conn._monitors
+                        or any(k.startswith(pipe_prefix) for k in conn._monitors)
+                    ):
                         conn_tasks.setdefault(cid, []).append(task_name)
 
             # Build project ID → friendly name map from task controls
@@ -235,7 +270,9 @@ class MiscCommands(DAPConn):
                 # Use the task_name prefix (before the dot) as project label
                 name_parts = task_name.split('.', 1)
                 project_names.setdefault(control.project_id, name_parts[0])
-                source_names.setdefault(f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source)
+                source_names.setdefault(
+                    f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source
+                )
 
             # Build connections list
             connections = []
@@ -248,14 +285,14 @@ class MiscCommands(DAPConn):
                     'messagesOut': getattr(conn, '_messages_out', 0),
                     'authenticated': getattr(conn, '_authenticated', False),
                     'clientId': None,
-                    'apikey': '****',
                     'clientInfo': getattr(conn, '_client_info', {}),
-                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names) if hasattr(conn, '_monitors') else [],
+                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
+                    if hasattr(conn, '_monitors')
+                    else [],
                     'attachedTasks': conn_tasks.get(conn_id, []),
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:
-                    conn_info['clientId'] = conn._account_info.clientid
-                    conn_info['apikey'] = self._mask_apikey(conn._account_info.apikey)
+                    conn_info['clientId'] = conn._account_info.userId
                 connections.append(conn_info)
 
             # Build tasks list

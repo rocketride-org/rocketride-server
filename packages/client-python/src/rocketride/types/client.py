@@ -59,7 +59,13 @@ from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
 
 
 class TraceInfo(TypedDict):
-    """Stack trace information for errors."""
+    """
+    Stack trace information attached to error responses.
+
+    Attributes:
+        file (str): The source file path where the error originated.
+        lineno (int): The line number within that source file.
+    """
 
     file: str
     lineno: int
@@ -106,7 +112,9 @@ class TransportCallbacks(TypedDict, total=False):
     onDebugProtocol: Callable[[str], None]  # Called when protocol messages are sent/received for debugging
     onReceive: Callable[[DAPMessage], Awaitable[None]]  # Called when a message is received from the server
     onConnected: Callable[[Optional[str]], Awaitable[None]]  # Called when connection is established
-    onDisconnected: Callable[[Optional[str], Optional[bool]], Awaitable[None]]  # Called when connection is lost or closed
+    onDisconnected: Callable[
+        [Optional[str], Optional[bool]], Awaitable[None]
+    ]  # Called when connection is lost or closed
 
 
 class ConnectionInfo(TypedDict):
@@ -119,6 +127,12 @@ class ConnectionInfo(TypedDict):
     uri: str  # Server URI (WebSocket endpoint) - REQUIRED
     auth: Optional[str]  # Authentication token or API key - OPTIONAL
 
+
+# =============================================================================
+# CALLBACK TYPE ALIASES
+# These Callable type aliases are not TypedDicts; they are simple type aliases
+# used to annotate callback parameters and attributes across the SDK.
+# =============================================================================
 
 # Type aliases for callback functions
 """
@@ -172,3 +186,154 @@ class RocketRideClientConfig(TypedDict, total=False):
     persist: bool  # Enable automatic reconnection with exponential backoff (default: False)
     request_timeout: float  # Default timeout in ms for individual requests (default: None/no timeout)
     max_retry_time: float  # Max total time in ms to keep retrying connections (default: None/forever)
+
+
+# =============================================================================
+# CONNECT RESULT — returned by connect() after successful authentication
+# =============================================================================
+
+
+class TeamInfo(TypedDict):
+    """
+    Information about a single team within an organisation.
+
+    Attributes:
+        id (str): Unique identifier for the team.
+        name (str): Human-readable display name.
+        permissions (list[str]): Permission strings granted to this team.
+    """
+
+    id: str
+    name: str
+    permissions: list[str]
+
+
+class OrgInfo(TypedDict):
+    """
+    Information about a single organisation the authenticated user belongs to.
+
+    Attributes:
+        id (str): Unique identifier for the organisation.
+        name (str): Human-readable display name.
+        permissions (list[str]): Permission strings granted at the org level.
+        teams (list[TeamInfo]): Teams within this organisation that the user is a member of.
+    """
+
+    id: str
+    name: str
+    permissions: list[str]
+    teams: list[TeamInfo]
+
+
+class AppManifestEntry(TypedDict, total=False):
+    """
+    A single app entry in the server-provided manifest.
+
+    Same shape as the build-time apps.json entries, extended with
+    optional pricing and visibility metadata for SaaS deployments.
+    When returned as a desktop app in ConnectResult.apps, also includes
+    subscription status fields.
+
+    Attributes:
+        id (str): Unique app identifier (e.g. "rocketride.pipeBuilder").
+        moduleId (str): Module Federation remote name.
+        name (str): Human-readable app name.
+        description (str): Short description.
+        icon (str): URL path to the app's icon.
+        categories (list[str]): Category tags for filtering.
+        settings (list): App-specific setting definitions.
+        entry (str): URL to the app's MF remote entry file.
+        version (str): Semver version string.
+        ownerType (str): Visibility scope — "public", "org", "team", or "user".
+        authenticated (bool): Whether the app UI requires auth to render.
+        public (bool): Whether the app is visible to unauthenticated users.
+        stripeProductId (str): Stripe product ID (SaaS paid apps only).
+        stripePrices (list): Available pricing tiers (SaaS paid apps only).
+        appStatus (str): App lifecycle status (auth|free|unsubscribed|subscribed|trialing|past_due|canceled).
+        onDesktop (bool): Whether this app is on the user's desktop.
+        seats (int): Total seats on the subscription.
+        seatsUsed (int): Seats currently occupied in this org.
+        features (list[str]): Feature flags enabled by the subscribed plan.
+    """
+
+    id: str
+    moduleId: str
+    name: str
+    description: str
+    icon: str
+    categories: list[str]
+    settings: list
+    entry: str
+    version: str
+    ownerType: str
+    authenticated: bool
+    public: bool
+    stripeProductId: str
+    stripePrices: list[dict]
+    appStatus: str
+    onDesktop: bool
+    seats: int
+    seatsUsed: int
+    features: list[str]
+
+
+class ConnectResult(TypedDict, total=False):
+    """
+    Full identity payload returned by the server after a successful authentication handshake.
+
+    All fields are optional (total=False) because older server versions may omit some.
+
+    Attributes:
+        userToken (str): A durable ``rr_`` prefixed token the SDK persists for reconnection.
+        userId (str): Unique identifier of the authenticated user.
+        displayName (str): Full display name (e.g. "Jane Smith").
+        givenName (str): First / given name.
+        familyName (str): Last / family name.
+        preferredUsername (str): Preferred short username or handle.
+        email (str): Primary email address.
+        emailVerified (bool): True when the email address has been verified.
+        phoneNumber (str): Primary phone number in E.164 format.
+        phoneNumberVerified (bool): True when the phone number has been verified.
+        locale (str): BCP-47 locale tag (e.g. "en-US").
+        defaultTeam (str): ID of the team selected as the default context.
+        organizations (list[OrgInfo]): All organisations the user belongs to.
+        apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
+    """
+
+    userToken: str
+    userId: str
+    displayName: str
+    givenName: str
+    familyName: str
+    preferredUsername: str
+    email: str
+    emailVerified: bool
+    phoneNumber: str
+    phoneNumberVerified: bool
+    locale: str
+    defaultTeam: str
+    organizations: list[OrgInfo]
+    capabilities: list[str]
+    apps: list[AppManifestEntry]
+
+
+class ServerInfoResult(TypedDict, total=False):
+    """
+    Server metadata returned by the pre-auth info probe.
+
+    Obtained via :meth:`RocketRideClient.get_server_info` which sends an
+    ``rrext_public_probe`` command on a public connection. The server
+    responds without requiring credentials.
+
+    Attributes:
+        version (str): Server engine version string.
+        capabilities (list[str]): Capability tags — ``['oss']`` for open-source,
+            ``['saas']`` for cloud.
+        platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
+        apps (list[AppManifestEntry]): Public apps visible without authentication.
+    """
+
+    version: str
+    capabilities: list[str]
+    platform: str
+    apps: list[AppManifestEntry]

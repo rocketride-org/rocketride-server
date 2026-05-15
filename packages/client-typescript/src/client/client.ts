@@ -24,11 +24,14 @@
 
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult } from './types/index.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
-import { AuthenticationException, ConnectionException } from './exceptions/index.js';
+import { AccountApi } from './account.js';
+import { BillingApi } from './billing.js';
+import { DatabaseApi } from './database.js';
+import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -114,7 +117,8 @@ export class DataPipe {
 	 * unique pipe ID that is used for subsequent operations.
 	 *
 	 * @returns This DataPipe instance (for method chaining)
-	 * @throws Error if the pipe is already opened or if the pipeline is not running
+	 * @throws Error if the pipe is already opened
+	 * @throws PipeException if the server rejects the open request
 	 */
 	async open(): Promise<DataPipe> {
 		if (this._opened) {
@@ -134,17 +138,34 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			throw new Error(response.message || 'Your pipeline is not currently running.');
+			const base = response.message || 'Failed to open a data pipe.';
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			throw new PipeException({ ...response, message: msg });
 		}
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
-		this._opened = true;
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
-			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			try {
+				await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			} catch (err) {
+				// Roll back: don't leave the pipe half-open on the server.
+				try {
+					await this.close();
+				} catch {
+					// Best-effort cleanup
+				}
+				const errMsg = err instanceof Error ? err.message : String(err);
+				const msg = `Failed to subscribe to SSE events for this data pipe.\n\n${errMsg}`;
+				throw new PipeException({ message: msg });
+			}
+
 			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
 		}
+
+		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
+		this._opened = true;
 
 		return this;
 	}
@@ -156,7 +177,8 @@ export class DataPipe {
 	 * multiple times to stream large datasets. The pipe must be opened first.
 	 *
 	 * @param buffer - Data to write, must be a Uint8Array
-	 * @throws Error if the pipe is not opened, buffer is invalid, or write fails
+	 * @throws Error if the pipe is not opened or buffer is invalid
+	 * @throws PipeException if the server reports a write failure
 	 */
 	async write(buffer: Uint8Array): Promise<void> {
 		if (!this._opened) {
@@ -179,7 +201,8 @@ export class DataPipe {
 		const response = await this._client.request(request);
 
 		if (this._client.didFail(response)) {
-			throw new Error(response.message || 'Failed to write to pipe');
+			const msg = response.message || 'Failed to write to a data pipe.';
+			throw new PipeException({ ...response, message: msg });
 		}
 	}
 
@@ -191,10 +214,12 @@ export class DataPipe {
 	 * the pipe cannot be reopened or written to again.
 	 *
 	 * @returns The processing result from the server, or undefined if already closed
-	 * @throws Error if closing the pipe fails
+	 * @throws PipeException if the server reports a failure while finalizing the pipe
 	 */
 	async close(): Promise<PIPELINE_RESULT | undefined> {
-		if (!this._opened || this._closed) {
+		// Allow closing after a failed open() path where the server assigned a pipe_id
+		// but we never flipped _opened=true (e.g., SSE subscription failure).
+		if (this._closed || (this._pipeId === undefined && !this._opened)) {
 			return;
 		}
 
@@ -210,12 +235,14 @@ export class DataPipe {
 			const response = await this._client.request(request);
 
 			if (this._client.didFail(response)) {
-				throw new Error(response.message || 'Failed to close pipe');
+				const msg = response.message || 'Failed to close a data pipe.';
+				throw new PipeException({ ...response, message: msg });
 			}
 
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+			this._opened = false;
 
 			// Unregister SSE callback and scoped monitor subscription
 			if (this._onSSE !== undefined && this._pipeId !== undefined) {
@@ -264,6 +291,7 @@ export type MonitorKey = { token: string } | { projectId: string; source: string
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
 	private _apikey?: string;
+	private _wsPath?: string;
 	private _env: Record<string, string>;
 	private _callerOnEvent?: EventCallback;
 	private _callerOnConnected?: ConnectCallback;
@@ -275,19 +303,27 @@ export class RocketRideClient extends DAPClient {
 	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
 	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
-	// Persistence properties for automatic reconnection
+	// Desired state model — replaces old flag soup
+	private _desiredState: 'detached' | 'attached' | 'authenticated' = 'detached';
+	private _authenticated: boolean = false;
 	private _persist: boolean = false;
-	private _reconnectTimeout?: ReturnType<typeof setTimeout>;
-	private _manualDisconnect: boolean = false;
-	private _maxRetryTime?: number;
-	private _retryStartTime?: number;
+	private _reconnectTimer?: ReturnType<typeof setTimeout>;
 	private _currentReconnectDelay: number = 250;
-
-	/** True after onConnected has been invoked; used to only invoke onDisconnected when we had a connection. */
-	private _didNotifyConnected: boolean = false;
 
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
+
+	/** Lazily-created account API namespace. */
+	private _account?: AccountApi;
+
+	/** Lazily-created billing API namespace. */
+	private _billing?: BillingApi;
+
+	/** Lazily-created database API namespace. */
+	private _database?: DatabaseApi;
+
+	/** Optional trace callback for observing all call() traffic. */
+	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
 
 	/**
 	 * Creates a new RocketRideClient instance.
@@ -352,17 +388,18 @@ export class RocketRideClient extends DAPClient {
 			}
 		}
 
-		const { auth = config.auth || clientEnv.ROCKETRIDE_APIKEY, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, maxRetryTime, module } = config;
+		const { auth = config.auth, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, module } = config;
 
 		// Create unique client identifier
 		const clientName = module || `CLIENT-${clientId++}`;
 
-		// Initialize the DAPClient without a transport; transport is created in _internalConnect (CONNECTION_LOGIC.md §3)
+		// Initialize the DAPClient without a transport; transport is created in _internalAttach
 		super(clientName, undefined, config);
 
 		// Store connection details and environment
+		this._wsPath = config.wsPath;
 		this._setUri(uri);
-		this._setAuth(auth);
+		this._setAuth(auth ?? '');
 		this._env = clientEnv;
 
 		// Set up callbacks if provided
@@ -370,10 +407,11 @@ export class RocketRideClient extends DAPClient {
 		if (onConnected) this._callerOnConnected = onConnected;
 		if (onDisconnected) this._callerOnDisconnected = onDisconnected;
 		if (onConnectError) this._callerOnConnectError = onConnectError;
+		if (config.onTrace) this._onTrace = config.onTrace;
 
 		// Set up persistence options
 		this._persist = persist ?? false;
-		this._maxRetryTime = maxRetryTime;
+		// maxRetryTime accepted for backward compat but ignored (linear backoff never gives up)
 	}
 
 	/**
@@ -415,18 +453,59 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Probe a server for its capabilities without authenticating.
+	 *
+	 * Creates a temporary public connection and sends an
+	 * ``rrext_public_probe`` command. The server responds with version,
+	 * capabilities, platform, and public apps without requiring credentials.
+	 *
+	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://cloud.rocketride.ai"``)
+	 * @param timeout - Optional timeout in ms for the entire operation
+	 * @returns Server info including version and capability tags
+	 * @throws Error if the server is unreachable or does not support probes
+	 *
+	 * @example
+	 * ```typescript
+	 * const info = await RocketRideClient.getServerInfo('localhost:5565');
+	 * if (info.capabilities.includes('saas')) {
+	 *   // Show cloud sign-in options
+	 * }
+	 * ```
+	 */
+	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
+		const client = new RocketRideClient({ uri, persist: false });
+		try {
+			// Open a public connection (no auth handshake)
+			await client.attach(uri, { timeout });
+
+			// Send rrext_public_probe — allowed on unauthenticated connections
+			const message = client.buildRequest('rrext_public_probe', {});
+			const response = await client.request(message, timeout);
+
+			if (response.success === false) {
+				throw new Error(response.message || 'Server info request failed');
+			}
+
+			return (response.body ?? {}) as unknown as ServerInfoResult;
+		} finally {
+			await client.disconnect();
+		}
+	}
+
+	/**
 	 * Normalize a user-provided URI into a fully-formed WebSocket address.
 	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
 	 */
 	private _getWebsocketUri(uri: string): string {
 		const httpUrl = RocketRideClient.normalizeUri(uri);
+		const path = this._wsPath ?? '/task/service';
 
 		try {
 			const url = new URL(httpUrl);
 			const wsScheme = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
-			return `${wsScheme}//${url.host}/task/service`;
+			return `${wsScheme}//${url.host}${path}`;
 		} catch {
-			return `${httpUrl}/task/service`;
+			return `${httpUrl}${path}`;
 		}
 	}
 
@@ -444,213 +523,332 @@ export class RocketRideClient extends DAPClient {
 		this._apikey = auth;
 	}
 
-	/**
-	 * Clear any pending reconnection timeout.
-	 */
-	private _clearReconnectTimeout(): void {
-		if (this._reconnectTimeout) {
-			clearTimeout(this._reconnectTimeout);
-			this._reconnectTimeout = undefined;
-		}
-	}
-
 	// ============================================================================
-	// CONNECTION METHODS
+	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
 	/**
-	 * Single place for physical connection. Creates transport if needed, then
-	 * calls DAPClient.connect (transport connect + auth handshake + onConnected).
+	 * Create transport if needed and open the WebSocket. No auth.
 	 */
-	private async _internalConnect(timeout?: number): Promise<void> {
+	private async _internalAttach(timeout?: number): Promise<void> {
 		if (!this._transport) {
-			const transport = new TransportWebSocket(this._uri, this._apikey!);
+			const transport = new TransportWebSocket(this._uri);
 			this._bindTransport(transport);
 		}
-		await super.connect(timeout);
+		await super._dapConnect(timeout);
 	}
 
 	/**
-	 * Single place for physical disconnect. Closes the transport directly,
-	 * which triggers onDisconnected via the transport callback.
+	 * Send the ``auth`` DAP command over the open transport.
+	 * Sets ``_authenticated`` and ``_connectResult`` on success.
+	 * Throws ``AuthenticationException`` on failure (transport stays open).
 	 */
-	private async _internalDisconnect(reason?: string, hasError?: boolean): Promise<void> {
-		if (!this._transport) return;
-		await this._transport.disconnect(reason, hasError);
+	private async _internalLogin(timeout?: number): Promise<ConnectResult> {
+		// Build auth args with credential + client identification
+		const authArgs: Record<string, unknown> = { auth: this._apikey ?? '' };
+		if (this._clientDisplayName) authArgs.clientName = this._clientDisplayName;
+		if (this._clientDisplayVersion) authArgs.clientVersion = this._clientDisplayVersion;
+
+		const resp = await this.request(
+			{ type: 'request', command: 'auth', seq: 0, arguments: authArgs },
+			timeout,
+		);
+
+		const success = (resp as { success?: boolean }).success;
+		if (!success) {
+			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
+		}
+
+		this._connectResult = resp.body as unknown as ConnectResult;
+		this._authenticated = true;
+
+		// Store userToken for future reconnects
+		if (this._connectResult?.userToken) {
+			this._apikey = this._connectResult.userToken;
+		}
+
+		// Resubscribe monitors and notify
+		await this._resubscribeAllMonitors();
+		const connectionInfo = this._transport?.getConnectionInfo() ?? '';
+		if (this._callerOnConnected) {
+			try { await this._callerOnConnected(connectionInfo); }
+			catch (e) { this.debugMessage(`Error in user onConnected handler: ${e}`); }
+		}
+		await super.onConnected(connectionInfo);
+
+		return this._connectResult;
 	}
 
 	/**
-	 * Try to connect; on auth error notify and stop; on other error notify and
-	 * reschedule with exponential backoff. Used by persist-mode connect() and
-	 * by the reconnect timer.
+	 * Send the ``deauth`` DAP command to revert to unauthenticated.
 	 */
-	private async _attemptConnection(timeout?: number): Promise<void> {
+	private async _internalLogout(): Promise<void> {
+		if (!this._authenticated || !this._transport?.isConnected()) return;
 		try {
-			await this._internalConnect(timeout);
-			this._reconnectTimeout = undefined;
-			this.debugMessage('Connection successful');
-		} catch (error) {
-			const err = error instanceof Error ? error : new Error(String(error));
-			this.debugMessage(`Connection failed: ${err}`);
-			await this.onConnectError(err);
+			await this.request({ type: 'request', command: 'deauth', seq: 0, arguments: {} });
+		} catch {
+			// Best-effort — server may have already disconnected
+		}
+		this._connectResult = undefined;
+		this._authenticated = false;
+	}
 
-			if (error instanceof AuthenticationException) {
-				return;
-			}
+	/**
+	 * Close the transport. Triggers onDisconnected via the transport callback.
+	 */
+	private async _internalDisconnect(): Promise<void> {
+		if (!this._transport) return;
+		await this._transport.disconnect();
+	}
 
-			if (this._retryStartTime === undefined) {
-				this._retryStartTime = Date.now();
-			}
-
-			if (this._maxRetryTime !== undefined) {
-				if (Date.now() - this._retryStartTime >= this._maxRetryTime) {
-					return;
-				}
-			}
-
-			this._currentReconnectDelay = Math.min(this._currentReconnectDelay * 2, 2500);
-			this._scheduleReconnect();
+	/**
+	 * Clear the reconnect timer if active.
+	 */
+	private _clearReconnectTimer(): void {
+		if (this._reconnectTimer) {
+			clearTimeout(this._reconnectTimer);
+			this._reconnectTimer = undefined;
 		}
 	}
 
 	/**
-	 * Schedule a reconnection attempt with exponential backoff.
+	 * Reconnect engine driven by ``_desiredState``.
+	 *
+	 * Schedules a timer that re-attaches (and re-logins if the user had
+	 * been authenticated). Checks ``_desiredState`` after every await so
+	 * user actions mid-reconnect are respected immediately.
+	 *
+	 * Linear backoff: 250ms → 500ms → ... → 15 000ms cap.
 	 */
 	private _scheduleReconnect(): void {
-		this._clearReconnectTimeout();
+		this.debugMessage(`Scheduling reconnect in ${this._currentReconnectDelay}ms`);
+		this._reconnectTimer = setTimeout(async () => {
+			try {
+				// Re-attach transport
+				await this._internalAttach();
+				if (this._desiredState === 'detached') { this._reconnectTimer = undefined; return; }
 
-		if (this._maxRetryTime !== undefined && this._retryStartTime !== undefined) {
-			if (Date.now() - this._retryStartTime >= this._maxRetryTime) {
-				this.onConnectError(new Error('Max retry time exceeded'));
-				return;
-			}
-		}
+				// Re-login if the user was authenticated
+				if (this._desiredState === 'authenticated') {
+					await this._internalLogin();
+					if ((this._desiredState as string) === 'detached') { this._reconnectTimer = undefined; return; }
+				}
 
-		this.debugMessage(`Scheduling reconnection in ${this._currentReconnectDelay}ms`);
+				// Success — reset backoff
+				this._reconnectTimer = undefined;
+				this._currentReconnectDelay = 250;
+				this.debugMessage('Reconnect successful');
+			} catch (err) {
+				// User changed intent — stop (desiredState may have been changed by detach() during await)
+				if ((this._desiredState as string) === 'detached') { this._reconnectTimer = undefined; return; }
 
-		this._reconnectTimeout = setTimeout(async () => {
-			if (this._persist && !this._manualDisconnect) {
-				this.debugMessage('Attempting to reconnect...');
-				await this._attemptConnection();
+				// Auth rejected — downgrade to attached, stop retrying auth
+				if (err instanceof AuthenticationException) {
+					this._desiredState = 'attached';
+					this._reconnectTimer = undefined;
+					await this.onConnectError(err as Error);
+					return;
+				}
+
+				// Transient failure — linear backoff, cap at 15s
+				this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15000);
+				const error = err instanceof Error ? err : new Error(String(err));
+				await this.onConnectError(error);
+				this._scheduleReconnect(); // replaces timer with new delay
 			}
 		}, this._currentReconnectDelay);
 	}
 
+	// ============================================================================
+	// PUBLIC API — TRANSPORT
+	// ============================================================================
+
 	/**
-	 * Check if the client is currently connected to the RocketRide server.
+	 * Attach to a RocketRide server (open WebSocket, no auth).
+	 *
+	 * If ``uri`` is provided and differs from the current URI, detaches
+	 * first. If already attached to the same URI, this is a no-op.
+	 *
+	 * After attach, public APIs (``rrext_public_*``) are available.
+	 *
+	 * @param uri - Server URI override. Updates the stored URI if provided.
+	 * @param options - Optional timeout for the WebSocket handshake.
 	 */
-	isConnected(): boolean {
-		return this._transport?.isConnected() || false;
+	async attach(uri?: string, options?: { timeout?: number }): Promise<void> {
+		// URI change → detach first, then update
+		if (uri) {
+			const normalised = this._getWebsocketUri(uri);
+			if (normalised !== this._uri) {
+				if (this.isAttached()) await this.detach();
+				this._setUri(uri);
+			}
+		}
+		// Already attached → no-op
+		if (this.isAttached()) {
+			this._desiredState = this._desiredState === 'detached' ? 'attached' : this._desiredState;
+			return;
+		}
+		this._desiredState = 'attached';
+		await this._internalAttach(options?.timeout);
 	}
 
 	/**
-	 * Connect to the RocketRide server.
+	 * Detach from the server (close WebSocket, cancel reconnection).
 	 *
-	 * Must be called before executing pipelines or other operations.
-	 * In persist mode, enables automatic reconnection on disconnect and on initial failure
-	 * (calls onConnectError on each failed attempt and keeps retrying).
-	 * @param options - Optional timeout (number) or connection parameters object with uri, auth, and timeout.
+	 * Sets ``_desiredState`` to ``'detached'`` so the reconnect engine
+	 * stops and ``onDisconnected`` does not restart it.
 	 */
-	async connect(options?: number | { uri?: string; auth?: string; timeout?: number }): Promise<void> {
-		let uri: string | undefined;
-		let auth: string | undefined;
-		let timeout: number | undefined;
-
-		if (typeof options === 'number') {
-			timeout = options;
-		} else if (options) {
-			({ uri, auth, timeout } = options);
-		}
-
-		// Apply optional overrides so they're used for this connect
-		if (uri !== undefined) {
-			this._setUri(uri);
-		}
-		if (auth !== undefined) {
-			this._setAuth(auth);
-		}
-
-		this._manualDisconnect = false;
-		this._currentReconnectDelay = 250;
-		this._retryStartTime = undefined;
-
-		// If already connected, disconnect first without setting _manualDisconnect
-		if (this.isConnected()) {
+	async detach(): Promise<void> {
+		this._desiredState = 'detached';
+		this._clearReconnectTimer();
+		this._authenticated = false;
+		this._connectResult = undefined;
+		if (this._transport?.isConnected()) {
 			await this._internalDisconnect();
 		}
+	}
 
-		if (this._persist) {
-			this._clearReconnectTimeout();
-			await this._attemptConnection(timeout);
+	/**
+	 * True when the WebSocket transport is connected (regardless of auth).
+	 */
+	isAttached(): boolean {
+		return this._transport?.isConnected() || false;
+	}
+
+	// ============================================================================
+	// PUBLIC API — AUTH
+	// ============================================================================
+
+	/**
+	 * Authenticate over an attached transport.
+	 *
+	 * If ``uri`` is provided and differs, detaches and re-attaches first.
+	 * If ``auth`` is provided and differs from the current credential,
+	 * logs out (best-effort) before logging in with the new credential.
+	 * If already authenticated with the same credential, this is a no-op.
+	 *
+	 * @param credential - API key, rr_ token, or PKCE code object.
+	 * @param options - Optional URI override and/or timeout.
+	 * @returns ConnectResult with user identity on success.
+	 * @throws AuthenticationException on auth failure (transport stays attached).
+	 */
+	async login(
+		credential?: string | { code: string; verifier: string; redirectUri: string },
+		options?: { uri?: string; timeout?: number },
+	): Promise<ConnectResult> {
+		// Resolve credential
+		let resolvedCredential: string;
+		if (credential && typeof credential === 'object') {
+			resolvedCredential = 'cd_' + btoa(JSON.stringify(credential));
 		} else {
-			await this._internalConnect(timeout);
+			const envKey = this._env['ROCKETRIDE_APIKEY'];
+			const envCredential = typeof envKey === 'string' && envKey.trim() !== '' ? envKey : undefined;
+			resolvedCredential = (credential as string | undefined) ?? envCredential ?? this._apikey ?? '';
 		}
+
+		// URI change → detach + re-attach
+		if (options?.uri) {
+			const normalised = this._getWebsocketUri(options.uri);
+			if (normalised !== this._uri) {
+				await this.detach();
+				this._setUri(options.uri);
+				await this._internalAttach(options.timeout);
+			}
+		}
+
+		// Ensure attached
+		if (!this.isAttached()) {
+			await this._internalAttach(options?.timeout);
+		}
+
+		// Auth change → logout first (best-effort)
+		if (resolvedCredential !== this._apikey && this._authenticated) {
+			try { await this._internalLogout(); } catch {}
+		}
+		this._setAuth(resolvedCredential);
+
+		// Already authenticated with same credential → no-op
+		if (this._authenticated) {
+			this._desiredState = 'authenticated';
+			return this._connectResult ?? ({} as ConnectResult);
+		}
+
+		this._desiredState = 'authenticated';
+		return this._internalLogin(options?.timeout);
+	}
+
+	/**
+	 * Deauthenticate: sends ``deauth`` to the server, clears client auth state.
+	 * The transport stays attached — public APIs continue to work.
+	 */
+	async logout(): Promise<void> {
+		await this._internalLogout();
+		this._desiredState = 'attached';
+	}
+
+	/**
+	 * True when the auth handshake has succeeded on the current connection.
+	 */
+	isAuthenticated(): boolean {
+		return this._authenticated;
+	}
+
+	// ============================================================================
+	// COMPAT API — connect() / disconnect()
+	// ============================================================================
+
+	/**
+	 * Check if the client is currently connected to the RocketRide server.
+	 * Equivalent to ``isAttached()`` — kept for backward compatibility.
+	 */
+	isConnected(): boolean {
+		return this.isAttached();
+	}
+
+	/**
+	 * Connect to the RocketRide server and authenticate in a single call.
+	 *
+	 * Backward-compatible wrapper around ``attach()`` + ``login()``.
+	 * Sends the credential as the first DAP message and returns the full
+	 * ConnectResult (user identity + organizations + teams) on success.
+	 *
+	 * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
+	 * @param options - Optional overrides: uri and/or timeout.
+	 */
+	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+		this._currentReconnectDelay = 250;
+		await this.attach(options?.uri, { timeout: options?.timeout });
+		return this.login(credential, options);
+	}
+
+	/**
+	 * Get the ConnectResult from the last successful connect().
+	 * Returns undefined if not connected or not yet authenticated.
+	 */
+	getAccountInfo(): ConnectResult | undefined {
+		return this._connectResult;
+	}
+
+	/**
+	 * Returns the ID of the user's primary organization.
+	 */
+	getOrgId(): string | undefined {
+		return this._connectResult?.organizations?.[0]?.id;
 	}
 
 	/**
 	 * Disconnect from the RocketRide server and stop automatic reconnection.
-	 *
-	 * Should be called when finished with the client to clean up resources.
+	 * Backward-compatible wrapper around ``logout()`` + ``detach()``.
 	 */
 	async disconnect(): Promise<void> {
-		this._manualDisconnect = true;
-		this._clearReconnectTimeout();
-
-		if (this._transport && this.isConnected()) {
-			await this._internalDisconnect();
-		}
-	}
-
-	/**
-	 * Update server URI and/or auth at runtime. If currently connected,
-	 * disconnects and reconnects with the new params. In persist mode,
-	 * reconnection is scheduled only if we were connected.
-	 */
-	async setConnectionParams(options: { uri?: string; auth?: string }): Promise<void> {
-		if (options.uri !== undefined) {
-			this._setUri(options.uri);
-		}
-		if (options.auth !== undefined) {
-			this._setAuth(options.auth);
-		}
-
-		const wasAlreadyConnected = this.isConnected();
-
-		this._manualDisconnect = true;
-		this._clearReconnectTimeout();
-
-		if (wasAlreadyConnected) {
-			await this._internalDisconnect();
-		}
-
-		// Destroy transport so next connect() creates a new one with updated uri/auth (CONNECTION_LOGIC.md §2c)
-		if (options.uri !== undefined || options.auth !== undefined) {
-			this._transport = undefined;
-		}
-
-		if (this._persist && wasAlreadyConnected) {
-			this._manualDisconnect = false;
-			this._scheduleReconnect();
-		} else if (wasAlreadyConnected) {
-			this._manualDisconnect = false;
-			await this._internalConnect();
-		} else {
-			this._manualDisconnect = false;
-		}
+		await this.logout();
+		await this.detach();
 	}
 
 	/**
 	 * Update the environment variables used for pipeline substitution.
 	 *
 	 * The env dictionary is used by {@link use} and {@link validate} to replace
-	 * `${ROCKETRIDE_*}` placeholders in pipeline configurations. Call this
-	 * whenever the user's `.env` settings change so subsequent pipeline
-	 * executions pick up the new values without reconnecting.
-	 */
-	setEnv(env: Record<string, string>): void {
-		this._env = { ...env };
-	}
-
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -663,62 +861,16 @@ export class RocketRideClient extends DAPClient {
 	 * and measuring response times.
 	 */
 	async ping(token?: string): Promise<void> {
-		// Build ping request
-		const request = this.buildRequest('rrext_ping', { token });
-
-		// Send to server and wait for response
-		const response = await this.request(request);
-
-		// Check if ping failed
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Ping failed';
-			throw new Error(`Ping failed: ${errorMsg}`);
+		try {
+			await this.call('rrext_ping', undefined, { token });
+		} catch (err) {
+			throw new Error(`Ping failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
 	// ============================================================================
 	// EXECUTION METHODS
 	// ============================================================================
-
-	/**
-	 * Substitute environment variables in a string.
-	 * Replaces ${ROCKETRIDE_*} patterns with values from client's env dictionary.
-	 * If variable is not found, leaves it unchanged.
-	 */
-	private substituteEnvVars(value: string): string {
-		// Match ${ROCKETRIDE_*} patterns
-		return value.replace(/\$\{(ROCKETRIDE_[^}]+)\}/g, (match, varName) => {
-			// Check if variable exists in client's env
-			if (varName in this._env) {
-				return String(this._env[varName]);
-			}
-			// If not found, leave as is
-			return match;
-		});
-	}
-
-	/**
-	 * Recursively process an object/array to substitute environment variables.
-	 * Only processes string values, leaving other types unchanged.
-	 */
-	private processEnvSubstitution(obj: unknown): unknown {
-		if (typeof obj === 'string') {
-			// If it's a string, perform substitution
-			return this.substituteEnvVars(obj);
-		} else if (Array.isArray(obj)) {
-			// If it's an array, process each element
-			return obj.map((item) => this.processEnvSubstitution(item));
-		} else if (obj !== null && typeof obj === 'object') {
-			// If it's an object, process each property
-			const result: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(obj)) {
-				result[key] = this.processEnvSubstitution(value);
-			}
-			return result;
-		}
-		// For other types (number, boolean, null), return as is
-		return obj;
-	}
 
 	/**
 	 * Load Node.js fs/promises at runtime without static imports.
@@ -791,19 +943,15 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult> {
 		const { pipeline, source } = options;
-		const arguments_: Record<string, unknown> = { pipeline };
+		const args: Record<string, unknown> = { pipeline };
 		if (source !== undefined) {
-			arguments_.source = source;
+			args.source = source;
 		}
-		const request = this.buildRequest('rrext_validate', {
-			arguments: arguments_,
-		});
-		const response = await this.request(request);
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Validation failed';
-			throw new Error(`Pipeline validation failed: ${errorMsg}`);
+		try {
+			return await this.call<ValidationResult>('rrext_validate', args);
+		} catch (err) {
+			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
-		return (response.body || {}) as unknown as ValidationResult;
 	}
 
 	// ============================================================================
@@ -867,9 +1015,13 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
+			/** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+			env?: Record<string, string>;
+			/** Team ID to run the task under. Defaults to the user's default team. */
+			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -896,10 +1048,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create a deep copy of the pipeline config to avoid modifying the original
-		let processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
-
-		// Perform environment variable substitution on the pipeline configuration
-		processedConfig = this.processEnvSubstitution(processedConfig);
+		const processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
 
 		// Override source if specified (after substitution)
 		if (source !== undefined) {
@@ -930,46 +1079,55 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
-		if (name !== undefined) {
-			arguments_.name = name;
+		// Build ROCKETRIDE_* env from client's .env + caller overrides
+		const rocketEnv: Record<string, string> = {};
+		for (const [k, v] of Object.entries(this._env)) {
+			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
+		}
+		if (env) Object.assign(rocketEnv, env);
+		if (Object.keys(rocketEnv).length > 0) {
+			arguments_.env = rocketEnv;
+		}
+		// Derive display name from filepath if not explicitly provided
+		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
+		if (effectiveName !== undefined) {
+			arguments_.name = effectiveName;
+		}
+		if (teamId !== undefined) {
+			arguments_.teamId = teamId;
 		}
 
 		// Send execution request to server
-		const request = this.buildRequest('execute', { arguments: arguments_ });
-		const response = await this.request(request);
+		try {
+			const body = await this.call('execute', arguments_);
 
-		// Check for execution errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown execution error';
+			// Extract and validate response
+			const responseBody = body || {};
+			const taskToken = responseBody.token as string;
+
+			if (!taskToken) {
+				throw new Error('Server did not return a task token in successful response');
+			}
+
+			this.debugMessage(`Pipeline execution started successfully, task token: ${taskToken}`);
+
+			// Type assertion to ensure token is present
+			return responseBody as Record<string, unknown> & { token: string };
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline execution failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw err;
 		}
-
-		// Extract and validate response
-		const responseBody = response.body || {};
-		const taskToken = responseBody.token as string;
-
-		if (!taskToken) {
-			throw new Error('Server did not return a task token in successful response');
-		}
-
-		this.debugMessage(`Pipeline execution started successfully, task token: ${taskToken}`);
-
-		// Type assertion to ensure token is present
-		return responseBody as Record<string, unknown> & { token: string };
 	}
 
 	/**
 	 * Terminate a running pipeline.
 	 */
 	async terminate(token: string): Promise<void> {
-		// Send termination request
-		const request = this.buildRequest('terminate', { token });
-		const response = await this.request(request);
-
-		// Check for termination errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown termination error';
+		try {
+			await this.call('terminate', undefined, { token });
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
 			throw new Error(errorMsg);
 		}
@@ -987,19 +1145,19 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 */
 	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
-		const response = await this.dapRequest(
-			'restart',
-			{
-				token: options.token,
-				projectId: options.projectId,
-				source: options.source,
-				pipeline: options.pipeline,
-			},
-			'*'
-		);
-
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown restart error';
+		try {
+			await this.call(
+				'restart',
+				{
+					token: options.token,
+					projectId: options.projectId,
+					source: options.source,
+					pipeline: options.pipeline,
+				},
+				{ token: '*' }
+			);
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
 			throw new Error(errorMsg);
 		}
@@ -1007,21 +1165,25 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Get the current status of a running pipeline.
+	 *
+	 * By default this call is bounded to 15s so callers/tests don't hang forever if the engine
+	 * stops responding mid-request (especially important in CI). Pass `{ timeout: false }` to
+	 * restore the previous behavior of using only the client-level request timeout (if any).
 	 */
-	async getTaskStatus(token: string): Promise<TASK_STATUS> {
-		// Send status request
-		const request = this.buildRequest('rrext_get_task_status', { token });
-		const response = await this.request(request);
-
-		// Check for status retrieval errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown status retrieval error';
+	async getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS> {
+		try {
+			const callOptions: { token: string; timeout?: number } = { token };
+			if (options?.timeout === false) {
+				// Intentionally omit per-call timeout override.
+			} else {
+				callOptions.timeout = options?.timeout ?? 15000;
+			}
+			return await this.call<TASK_STATUS>('rrext_get_task_status', undefined, callOptions);
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
 			throw new Error(errorMsg);
 		}
-
-		// Return status information
-		return (response.body as unknown as TASK_STATUS) || {};
 	}
 
 	/**
@@ -1034,11 +1196,25 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.source - The source component identifier.
 	 */
 	async getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined> {
-		const response = await this.dapRequest('rrext_get_token', {
+		const body = await this.call('rrext_get_token', {
 			projectId: options.projectId,
 			source: options.source,
 		});
-		return response?.body?.token as string | undefined;
+		return body?.token as string | undefined;
+	}
+
+	/**
+	 * Returns the unresolved pipeline for a running task.
+	 *
+	 * The pipeline is returned exactly as stored — ${ROCKETRIDE_*} placeholders are
+	 * NOT substituted, so no secrets are included in the response.
+	 *
+	 * @param token - Task token returned by {@link getTaskToken}.
+	 * @returns The unresolved pipeline dict, or undefined if the task is not found.
+	 */
+	async getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined> {
+		const body = await this.call('rrext_get_pipeline', undefined, { token });
+		return body?.pipeline as Record<string, unknown> | undefined;
 	}
 
 	// ============================================================================
@@ -1364,6 +1540,14 @@ export class RocketRideClient extends DAPClient {
 		// Forward to debugging interface if available
 		this._sendVSCodeEvent(eventType, eventBody);
 
+		// Update cached ConnectResult when the server pushes a full account refresh
+		if (eventType === 'apaext_account') {
+			this._connectResult = eventBody as unknown as ConnectResult;
+			if (this._connectResult?.userToken) {
+				this._apikey = this._connectResult.userToken;
+			}
+		}
+
 		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
 		if (eventType === 'apaevt_sse') {
 			const pipeId = (eventBody as Record<string, unknown>)?.pipe_id as number | undefined;
@@ -1410,60 +1594,47 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Handle connected events from the RocketRide server.
+	 * Handle transport-level connected event.
+	 *
+	 * With the attach/login split, this fires when the WebSocket opens
+	 * (before auth). The ``_internalLogin`` method handles the auth
+	 * notification separately, so this is intentionally minimal.
 	 */
 	async onConnected(connectionInfo: string): Promise<void> {
-		this._manualDisconnect = false;
-		this._didNotifyConnected = true;
-		this._clearReconnectTimeout();
-		this._currentReconnectDelay = 250;
-		this._retryStartTime = undefined;
-
-		// Resubscribe all monitor subscriptions after reconnect
-		await this._resubscribeAllMonitors();
-
-		// Call user-provided event handler if available
-		if (this._callerOnConnected) {
-			try {
-				await this._callerOnConnected(connectionInfo);
-			} catch (error) {
-				// Log errors but don't let user code break the connection
-				this.debugMessage(`Error in user onConnected handler for ${connectionInfo}: ${error}`);
-			}
-		}
-
 		await super.onConnected(connectionInfo);
 	}
 
 	/**
-	 * Handle disconnected events from the RocketRide server.
-	 * Only invokes the user's onDisconnected if onConnected had previously been called
-	 * (so "disconnect without ever connecting" does not fire the user callback).
+	 * Handle transport disconnection.
+	 *
+	 * Clears transport and auth state, notifies the user callback,
+	 * then consults ``_desiredState`` to decide whether to reconnect.
 	 */
 	async onDisconnected(reason: string, hasError: boolean): Promise<void> {
-		// Transport is gone — clear it so the next _internalConnect always creates a fresh one
+		// Transport is gone — clear so next attach creates a fresh one
 		this._transport = undefined;
+		this._connectResult = undefined;
+		this._authenticated = false;
 
-		if (this._didNotifyConnected) {
-			this._didNotifyConnected = false;
-
-			if (this._callerOnDisconnected) {
-				try {
-					await this._callerOnDisconnected(reason, hasError);
-				} catch (error) {
-					// Log errors but don't let user code break the connection
-					this.debugMessage(`Error in user onDisconnected handler for ${reason}: ${error}`);
-				}
+		// Notify user callback
+		if (this._callerOnDisconnected) {
+			try {
+				await this._callerOnDisconnected(reason, hasError);
+			} catch (error) {
+				this.debugMessage(`Error in user onDisconnected handler for ${reason}: ${error}`);
 			}
-
-			// Chain to parent to clear pending requests
-			await super.onDisconnected(reason, hasError);
 		}
 
-		// Schedule reconnection if persist is enabled and not a manual disconnect
-		if (this._persist && !this._manualDisconnect) {
-			this._scheduleReconnect();
-		}
+		// Chain to parent to clear pending requests
+		await super.onDisconnected(reason, hasError);
+
+		// Reconnect engine: honour _desiredState
+		if (this._desiredState === 'detached') return;
+		if (!this._persist) { this._desiredState = 'detached'; return; }
+		if (this._reconnectTimer) return; // engine already active
+
+		this._currentReconnectDelay = 250;
+		this._scheduleReconnect();
 	}
 
 	/**
@@ -1471,22 +1642,14 @@ export class RocketRideClient extends DAPClient {
 	 * @deprecated Use {@link addMonitor} / {@link removeMonitor} instead.
 	 */
 	async setEvents(token: string, eventTypes: string[], pipeId?: number): Promise<void> {
-		// Build event subscription request
+		// Build event subscription args
 		const args: Record<string, unknown> = { types: eventTypes };
 		if (pipeId !== undefined) args.pipeId = pipeId;
 
-		const request = this.buildRequest('rrext_monitor', {
-			arguments: args,
-			token,
-		});
-
-		// Send to server
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Event subscription failed';
-			throw new Error(errorMsg);
+		try {
+			await this.call('rrext_monitor', args, { token });
+		} catch (err) {
+			throw new Error(`Event subscription failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -1573,7 +1736,7 @@ export class RocketRideClient extends DAPClient {
 		const mergedTypes = Array.from(refCounts.keys());
 
 		if ('token' in key) {
-			await this.dapRequest('rrext_monitor', { types: mergedTypes }, key.token);
+			await this.call('rrext_monitor', { types: mergedTypes }, { token: key.token });
 		} else {
 			const args: Record<string, unknown> = {
 				projectId: key.projectId,
@@ -1583,7 +1746,7 @@ export class RocketRideClient extends DAPClient {
 			if (key.pipeId !== undefined) {
 				args.pipeId = key.pipeId;
 			}
-			await this.dapRequest('rrext_monitor', args);
+			await this.call('rrext_monitor', args);
 		}
 	}
 
@@ -1642,86 +1805,88 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
-	// PROJECT STORAGE MANAGEMENT
-	// ============================================================================
-
-	/** Save or update a project pipeline configuration. */
-	async saveProject(name: string, pipeline: PipelineConfig): Promise<void> {
-		this.validateId(name, 'name');
-		if (!pipeline || typeof pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
-
-		await this.fsWriteJson(`.projects/${name}.json`, pipeline);
-	}
-
-	/** Get a project by file name from .projects/<name>.json. */
-	async getProject(name: string): Promise<PipelineConfig> {
-		this.validateId(name, 'name');
-
-		return this.fsReadJson(`.projects/${name}.json`) as Promise<PipelineConfig>;
-	}
-
-	/** Delete a project by file name. */
-	async deleteProject(name: string): Promise<void> {
-		this.validateId(name, 'name');
-
-		await this.fsDelete(`.projects/${name}.json`);
-	}
-
-	async getAllProjects(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
-		const dir = await this.fsListDir('.projects');
-		const projects: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
-
-		for (const entry of dir.entries) {
-			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
-			try {
-				const id = entry.name.slice(0, -5);
-				const pipeline = await this.fsReadJson(`.projects/${entry.name}`);
-				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				projects.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch (err) {
-				console.debug(`[RocketRideClient] Failed to read .projects/${entry.name}:`, err);
-				continue;
-			}
-		}
-
-		return projects;
-	}
-
-	// ============================================================================
 	// TEMPLATE STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
 	// ============================================================================
 
+	/**
+	 * Persist a pipeline configuration as a named template in the account store.
+	 *
+	 * Templates are stored as JSON files under `.templates/<templateId>.json`.
+	 * Saving a template with an existing ID overwrites the previous version.
+	 *
+	 * @param options.templateId - Unique identifier for the template (no path separators)
+	 * @param options.pipeline - Pipeline configuration object to save
+	 * @throws Error if templateId is invalid or pipeline is not a non-empty object
+	 */
 	async saveTemplate(options: { templateId: string; pipeline: Record<string, any> }): Promise<void> {
+		// Validate the template ID to prevent path traversal or invalid filenames
 		this.validateId(options.templateId, 'templateId');
+		// Ensure the pipeline payload is a non-null object before writing
 		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
 
+		// Serialise and write the pipeline under the .templates virtual directory
 		await this.fsWriteJson(`.templates/${options.templateId}.json`, options.pipeline);
 	}
 
+	/**
+	 * Retrieve a previously saved pipeline template from the account store.
+	 *
+	 * @param options.templateId - Unique identifier of the template to retrieve
+	 * @returns The pipeline configuration object that was saved
+	 * @throws Error if the template does not exist or templateId is invalid
+	 */
 	async getTemplate(options: { templateId: string }): Promise<Record<string, any>> {
+		// Validate the ID before constructing the storage path
 		this.validateId(options.templateId, 'templateId');
 
+		// Read and parse the JSON file from the .templates virtual directory
 		return this.fsReadJson(`.templates/${options.templateId}.json`);
 	}
 
+	/**
+	 * Delete a pipeline template from the account store.
+	 *
+	 * @param options.templateId - Unique identifier of the template to delete
+	 * @throws Error if the template does not exist or templateId is invalid
+	 */
 	async deleteTemplate(options: { templateId: string }): Promise<void> {
+		// Validate the ID before constructing the storage path
 		this.validateId(options.templateId, 'templateId');
 
+		// Delete the JSON file from the .templates virtual directory
 		await this.fsDelete(`.templates/${options.templateId}.json`);
 	}
 
+	/**
+	 * List all pipeline templates stored in the account store.
+	 *
+	 * Reads the `.templates` directory, parses each `.json` file, and extracts
+	 * a summary for each template. Files that cannot be parsed are silently
+	 * skipped so a single corrupt template does not break the entire listing.
+	 *
+	 * @returns Array of template summaries sorted in directory-listing order.
+	 *          Each entry contains the template ID, display name, source components,
+	 *          and total component count.
+	 */
 	async getAllTemplates(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
+		// Fetch the list of entries under the .templates virtual directory
 		const dir = await this.fsListDir('.templates');
 		const templates: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
 
 		for (const entry of dir.entries) {
+			// Skip directories and any non-JSON files (e.g. temp files)
 			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
 			try {
+				// Derive the template ID by stripping the .json extension
 				const id = entry.name.slice(0, -5);
+				// Load and parse the template JSON
 				const pipeline = await this.fsReadJson(`.templates/${entry.name}`);
+				// Extract Source-mode components to populate the sources summary list
 				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				templates.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
+				// Push the summary (use template ID as display name)
+				templates.push({ id, name: id, sources, totalComponents: (pipeline.components || []).length });
 			} catch (err) {
+				// Log the failure but continue so one bad file doesn't block others
 				console.debug(`[RocketRideClient] Failed to read .templates/${entry.name}:`, err);
 				continue;
 			}
@@ -1734,44 +1899,107 @@ export class RocketRideClient extends DAPClient {
 	// LOG STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
 	// ============================================================================
 
+	/**
+	 * Persist a pipeline execution log to the account store.
+	 *
+	 * Logs are stored under `.logs/<projectId>/<source>-<startTime>.log`.
+	 * The filename is derived from `contents.body.startTime` so logs are
+	 * naturally sortable by execution start time.
+	 *
+	 * @param options.projectId - Project identifier that owns this log
+	 * @param options.source - Source component identifier the log is associated with
+	 * @param options.contents - Log payload; must contain `body.startTime`
+	 * @returns The generated filename (e.g. `"ingest-1714000000000.log"`)
+	 * @throws Error if any ID is invalid, contents is not an object, or startTime is missing
+	 */
 	async saveLog(options: { projectId: string; source: string; contents: Record<string, any> }): Promise<string> {
+		// Validate identifiers to prevent path traversal
 		this.validateId(options.projectId, 'projectId');
 		this.validateId(options.source, 'source');
+		// Ensure the contents payload is a non-null object
 		if (!options.contents || typeof options.contents !== 'object') throw new Error('contents must be a non-empty object');
 
+		// startTime is required; it forms part of the filename for chronological ordering.
+		// Reject anything other than a non-empty number or numeric-looking string to
+		// prevent path-separator chars from slipping into the generated filename.
 		const startTime = options.contents?.body?.startTime;
-		if (startTime === undefined) throw new Error('contents must contain body.startTime');
+		if (startTime === undefined || startTime === null) throw new Error('contents must contain body.startTime');
+		if (typeof startTime !== 'number' && typeof startTime !== 'string') {
+			throw new Error('contents.body.startTime must be a number or string');
+		}
+		const startTimeStr = String(startTime);
+		if (!startTimeStr || /[\\/]/.test(startTimeStr)) {
+			throw new Error('contents.body.startTime must not be empty or contain path separators');
+		}
 
-		const filename = `${options.source}-${startTime}.log`;
+		// Construct a deterministic filename from source and start time
+		const filename = `${options.source}-${startTimeStr}.log`;
+		// Write the log JSON to the per-project logs directory
 		await this.fsWriteJson(`.logs/${options.projectId}/${filename}`, options.contents);
 		return filename;
 	}
 
+	/**
+	 * Retrieve a previously saved pipeline execution log from the account store.
+	 *
+	 * @param options.projectId - Project identifier that owns the log
+	 * @param options.name - Filename of the log (as returned by saveLog)
+	 * @returns The log payload that was saved
+	 * @throws Error if the log does not exist or projectId is invalid
+	 */
 	async getLog(options: { projectId: string; name: string }): Promise<Record<string, any>> {
+		// Validate the project ID before constructing the storage path
 		this.validateId(options.projectId, 'projectId');
 		if (!options.name) throw new Error('name is required');
 
+		// Read and parse the log JSON from the per-project logs directory
 		return this.fsReadJson(`.logs/${options.projectId}/${options.name}`);
 	}
 
+	/**
+	 * Delete a pipeline execution log from the account store.
+	 *
+	 * @param options.projectId - Project identifier that owns the log
+	 * @param options.name - Filename of the log to delete
+	 * @throws Error if the log does not exist or projectId is invalid
+	 */
 	async deleteLog(options: { projectId: string; name: string }): Promise<void> {
+		// Validate the project ID before constructing the storage path
 		this.validateId(options.projectId, 'projectId');
 		if (!options.name) throw new Error('name is required');
 
+		// Delete the log file from the per-project logs directory
 		await this.fsDelete(`.logs/${options.projectId}/${options.name}`);
 	}
 
+	/**
+	 * List pipeline execution logs stored for a project, optionally filtered by source.
+	 *
+	 * Results are sorted ascending by `modified` timestamp so the oldest log
+	 * appears first. The caller can page through or slice the array as needed.
+	 *
+	 * @param options.projectId - Project identifier whose logs to list
+	 * @param options.source - Optional source component filter; when set, only logs
+	 *                         whose filename starts with `<source>-` are returned
+	 * @returns Array of log name and optional modified timestamp, sorted oldest-first
+	 * @throws Error if projectId (or source when provided) is invalid
+	 */
 	async listLogs(options: { projectId: string; source?: string }): Promise<Array<{ name: string; modified?: number }>> {
+		// Validate identifiers before constructing the storage path
 		this.validateId(options.projectId, 'projectId');
 		if (options.source) this.validateId(options.source, 'source');
 
+		// List all entries in the per-project logs directory
 		const dir = await this.fsListDir(`.logs/${options.projectId}`);
+		// Keep only .log files and map to the public shape (name + modified)
 		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => ({ name: e.name, modified: e.modified }));
 
+		// Apply optional source prefix filter when a source was specified
 		if (options.source) {
 			logs = logs.filter((l) => l.name.startsWith(`${options.source}-`));
 		}
 
+		// Sort ascending by modified timestamp; treat missing timestamps as epoch 0
 		logs.sort((a, b) => (a.modified || 0) - (b.modified || 0));
 		return logs;
 	}
@@ -1790,11 +2018,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async fsOpen(path: string, mode: 'r' | 'w' = 'r'): Promise<{ handle: string; size?: number }> {
 		this.validateStorePath(path);
-		const args: Record<string, unknown> = { subcommand: 'fs_open', path, mode };
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to open file');
-		return response.body as { handle: string; size?: number };
+		return this.call('rrext_store', { subcommand: 'fs_open', path, mode });
 	}
 
 	/**
@@ -1806,10 +2030,19 @@ export class RocketRideClient extends DAPClient {
 	 * @returns The bytes read
 	 */
 	async fsRead(handle: string, offset: number = 0, length: number = 4_194_304): Promise<Uint8Array> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_read', handle, offset, length } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to read from handle');
-		return ((response.arguments as any)?.data as Uint8Array) || new Uint8Array(0);
+		// Bypass call() which unwraps response.body, losing response.arguments
+		// where the server places the binary data payload.
+		const message = this.buildRequest('rrext_store', {
+			arguments: { subcommand: 'fs_read', handle, offset, length },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'fs_read failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+		return ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 	}
 
 	/**
@@ -1820,10 +2053,8 @@ export class RocketRideClient extends DAPClient {
 	 * @returns Number of bytes written
 	 */
 	async fsWrite(handle: string, data: Uint8Array): Promise<number> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_write', handle, data } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to write to handle');
-		return (response.body as any)?.bytesWritten ?? 0;
+		const body = await this.call('rrext_store', { subcommand: 'fs_write', handle, data });
+		return (body as any)?.bytesWritten ?? 0;
 	}
 
 	/**
@@ -1833,9 +2064,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param mode - 'r' or 'w' (must match the mode used in fsOpen)
 	 */
 	async fsClose(handle: string, mode: 'r' | 'w'): Promise<void> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_close', handle, mode } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to close handle');
+		await this.call('rrext_store', { subcommand: 'fs_close', handle, mode });
 	}
 
 	/**
@@ -1846,9 +2075,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async fsDelete(path: string): Promise<void> {
 		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_delete', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to delete file');
+		await this.call('rrext_store', { subcommand: 'fs_delete', path });
 	}
 
 	/**
@@ -1859,10 +2086,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async fsListDir(path: string = ''): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }> {
 		if (path) this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_list_dir', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to list directory');
-		return response.body as any;
+		return this.call('rrext_store', { subcommand: 'fs_list_dir', path });
 	}
 
 	/**
@@ -1872,9 +2096,19 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async fsMkdir(path: string): Promise<void> {
 		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_mkdir', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to create directory');
+		await this.call('rrext_store', { subcommand: 'fs_mkdir', path });
+	}
+
+	/**
+	 * Remove a directory.
+	 *
+	 * @param path - Relative directory path
+	 * @param recursive - If true, delete contents recursively (default: false)
+	 * @throws Error if directory is not empty (when recursive is false) or delete fails
+	 */
+	async fsRmdir(path: string, recursive: boolean = false): Promise<void> {
+		this.validateStorePath(path);
+		await this.call('rrext_store', { subcommand: 'fs_rmdir', path, recursive });
 	}
 
 	/**
@@ -1885,10 +2119,23 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async fsStat(path: string): Promise<{ exists: boolean; type?: 'file' | 'dir'; size?: number; modified?: number }> {
 		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_stat', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to stat path');
-		return response.body as any;
+		return this.call('rrext_store', { subcommand: 'fs_stat', path });
+	}
+
+	/**
+	 * Rename a file or directory.
+	 *
+	 * On object stores this is implemented as copy + delete. For directories,
+	 * all contents are moved recursively.
+	 *
+	 * @param oldPath - Current relative path within the account store
+	 * @param newPath - New relative path within the account store
+	 * @throws Error if oldPath does not exist or rename fails
+	 */
+	async fsRename(oldPath: string, newPath: string): Promise<void> {
+		this.validateStorePath(oldPath);
+		this.validateStorePath(newPath);
+		await this.call('rrext_store', { subcommand: 'fs_rename', old_path: oldPath, new_path: newPath });
 	}
 
 	// ============================================================================
@@ -1950,13 +2197,35 @@ export class RocketRideClient extends DAPClient {
 	// PATH AND ID VALIDATION
 	// ============================================================================
 
+	/**
+	 * Characters that are illegal in store paths and IDs on all supported
+	 * platforms (Windows, Linux, macOS, and object-storage back-ends).
+	 *
+	 * `\x00` is the null byte; the rest are shell/filesystem metacharacters
+	 * that would cause ambiguous or dangerous behaviour in path construction.
+	 */
 	private static readonly INVALID_PATH_CHARS = new Set(['*', '?', '<', '>', '|', '"', '\x00']);
 
+	/**
+	 * Validate a relative path intended for the account file store.
+	 *
+	 * Splits the path on `/` (after normalising backslashes) and checks every
+	 * segment for path-traversal attempts (`..`) and forbidden characters.
+	 * Empty segments (from leading/trailing/double slashes) are skipped because
+	 * they carry no security risk on the server side.
+	 *
+	 * @param path - Relative path to validate (e.g. `.templates/my-pipe.json`)
+	 * @throws Error if any segment is `..` or contains illegal characters
+	 */
 	private validateStorePath(path: string): void {
+		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
+			// Reject parent-directory traversal attempts in any position of the path
 			if (segment === '..') throw new Error(`Path traversal not allowed: ${path}`);
+			// Only validate non-empty segments (empty ones arise from leading/trailing slashes)
 			if (segment) {
 				for (const ch of segment) {
+					// Reject forbidden metacharacters and ASCII control characters (< 0x20)
 					if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
 						throw new Error(`Path contains invalid characters: ${path}`);
 					}
@@ -1965,39 +2234,29 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
+	/**
+	 * Validate a single identifier (projectId, source, templateId, etc.) used
+	 * to construct store paths.
+	 *
+	 * IDs must be non-empty strings that contain no path separators and no
+	 * characters from the forbidden set. This prevents an ID from escaping its
+	 * intended directory when interpolated into a path.
+	 *
+	 * @param value - The identifier string to validate
+	 * @param name - Human-readable field name used in error messages (e.g. `"projectId"`)
+	 * @throws Error if value is empty, contains path separators, or contains illegal characters
+	 */
 	private validateId(value: string, name: string): void {
+		// Require a non-empty value
 		if (!value) throw new Error(`${name} is required`);
+		// Reject forward and backward slashes to prevent path injection
 		if (value.includes('/') || value.includes('\\')) throw new Error(`${name} must not contain path separators`);
+		// Reject any forbidden metacharacter or ASCII control character
 		for (const ch of value) {
 			if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
 				throw new Error(`${name} contains invalid characters: ${value}`);
 			}
 		}
-	}
-
-	// ============================================================================
-	// RAW REQUEST METHOD
-	// ============================================================================
-
-	/**
-	 * Send an arbitrary DAP command with command name, arguments, and optional token.
-	 *
-	 * This is a convenience method for callers that don't want to construct
-	 * full DAPMessage objects. It builds the request internally and delegates
-	 * to the underlying request() method.
-	 *
-	 * @param command - The DAP command name (e.g., 'rrext_services', 'rrext_monitor')
-	 * @param args - Optional arguments for the command
-	 * @param token - Optional task/session token
-	 * @param timeout - Optional per-request timeout in ms
-	 * @returns The response DAPMessage from the server
-	 */
-	async dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage> {
-		const message = this.buildRequest(command, {
-			arguments: args,
-			token,
-		});
-		return await this.request(message, timeout);
 	}
 
 	// ============================================================================
@@ -2013,12 +2272,62 @@ export class RocketRideClient extends DAPClient {
 	 * @returns DashboardResponse containing overview, connections, and tasks
 	 */
 	async getDashboard(): Promise<DashboardResponse> {
-		const response = await this.dapRequest('rrext_dashboard', {});
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Failed to retrieve dashboard';
-			throw new Error(`Failed to retrieve dashboard: ${errorMsg}`);
-		}
-		return (response.body ?? {}) as unknown as DashboardResponse;
+		return this.call<DashboardResponse>('rrext_dashboard', {});
+	}
+
+	// ============================================================================
+	// CPROFILE PROFILING
+	// ============================================================================
+
+	/**
+	 * Start a cProfile profiling session on the server process or a pipeline.
+	 *
+	 * @param target  - Task token to profile a pipeline subprocess, or
+	 *                  undefined/null to profile the server process itself.
+	 * @param session - Optional human-readable session name.
+	 * @returns Status object with session info and start time.
+	 */
+	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		if (session) args.session = session;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_start', args);
+	}
+
+	/**
+	 * Stop the active cProfile profiling session.
+	 *
+	 * @param target - Task token if profiling a pipeline, or undefined for server.
+	 * @returns Result with session name and runtime.
+	 */
+	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStopResponse>('rrext_cprofile_stop', args);
+	}
+
+	/**
+	 * Get the current cProfile profiling status.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Status indicating active/inactive, owner, runtime.
+	 */
+	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileStatusResponse>('rrext_cprofile_status', args);
+	}
+
+	/**
+	 * Get the full cProfile report from the last completed session.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Object containing the full pstats text report.
+	 */
+	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileReportResponse>('rrext_cprofile_report', args);
 	}
 
 	// ============================================================================
@@ -2040,7 +2349,7 @@ export class RocketRideClient extends DAPClient {
 	static async withConnection<T>(config: RocketRideClientConfig, callback: (client: RocketRideClient) => Promise<T>): Promise<T> {
 		const client = new RocketRideClient(config);
 		try {
-			await client.connect();
+			await client.connect(config.auth);
 			return await callback(client);
 		} finally {
 			await client.disconnect();
@@ -2078,20 +2387,7 @@ export class RocketRideClient extends DAPClient {
 	 * ```
 	 */
 	async getServices(): Promise<ServicesResponse> {
-		// Build services request (no service argument = get all)
-		const request = this.buildRequest('rrext_services', {});
-
-		// Send to server and wait for response
-		const response = await this.request(request);
-
-		// Check if request failed
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Failed to retrieve services';
-			throw new Error(`Failed to retrieve services: ${errorMsg}`);
-		}
-
-		// Return the body containing all service definitions
-		return (response.body || {}) as unknown as ServicesResponse;
+		return this.call<ServicesResponse>('rrext_services', {});
 	}
 
 	/**
@@ -2121,22 +2417,7 @@ export class RocketRideClient extends DAPClient {
 			throw new Error('Service name is required');
 		}
 
-		// Build services request with specific service name
-		const request = this.buildRequest('rrext_services', {
-			arguments: { service },
-		});
-
-		// Send to server and wait for response
-		const response = await this.request(request);
-
-		// Check if request failed
-		if (this.didFail(response)) {
-			const errorMsg = response.message || `Service '${service}' not found`;
-			throw new Error(`Failed to retrieve service '${service}': ${errorMsg}`);
-		}
-
-		// Return the body containing the service definition
-		return (response.body as unknown as ServiceDefinition) ?? undefined;
+		return this.call<ServiceDefinition>('rrext_services', { service });
 	}
 
 	// ============================================================================
@@ -2163,6 +2444,109 @@ export class RocketRideClient extends DAPClient {
 	 */
 	getApiKey(): string | undefined {
 		return this._apikey;
+	}
+
+	// ============================================================================
+	// ACCOUNT & BILLING NAMESPACES
+	// ============================================================================
+
+	/**
+	 * Lazily-initialised account API namespace.
+	 *
+	 * Provides typed methods for managing the authenticated user's profile,
+	 * API keys, organization, members, and teams.
+	 *
+	 * @example
+	 * ```typescript
+	 * const profile = await client.account.getProfile();
+	 * ```
+	 */
+	get account(): AccountApi {
+		if (!this._account) {
+			this._account = new AccountApi(this);
+		}
+		return this._account;
+	}
+
+	/**
+	 * Lazily-initialised billing API namespace.
+	 *
+	 * Provides typed methods for managing subscriptions, Stripe checkout
+	 * sessions, billing portal access, and compute credit wallets.
+	 *
+	 * @example
+	 * ```typescript
+	 * const details = await client.billing.getDetails(orgId);
+	 * ```
+	 */
+	get billing(): BillingApi {
+		if (!this._billing) {
+			this._billing = new BillingApi(this);
+		}
+		return this._billing;
+	}
+
+	/**
+	 * Lazily-initialised database API namespace.
+	 *
+	 * Provides direct SQL/Cypher execution against database pipelines, bypassing
+	 * the LLM translation layer that {@link RocketRideClient.chat} uses.
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.database.query({ token, sql: 'SELECT 1' });
+	 * ```
+	 */
+	get database(): DatabaseApi {
+		if (!this._database) {
+			this._database = new DatabaseApi(this);
+		}
+		return this._database;
+	}
+
+	// ============================================================================
+	// CALL — PUBLIC DAP COMMAND INTERFACE
+	// ============================================================================
+
+	/**
+	 * Sends a DAP command, unwraps the response body, and throws on failure.
+	 *
+	 * This is the single public entry point for all typed DAP operations.
+	 * The {@link AccountApi} and {@link BillingApi} namespaces delegate here.
+	 *
+	 * If an `onTrace` callback was provided in the constructor config, it is
+	 * invoked before the request (TraceType.Request) and after completion
+	 * (TraceType.Success or TraceType.Error).
+	 *
+	 * @param command - DAP command name (e.g. "rrext_account_me").
+	 * @param args    - Key/value arguments forwarded in the request.
+	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
+	 * @returns The `body` field of a successful DAP response.
+	 * @throws Error if the server signals failure.
+	 */
+	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
+		// Build the raw DAP request
+		const message = this.buildRequest(command, {
+			arguments: args,
+			token: options?.token,
+		});
+
+		// Trace: outbound request
+		this._onTrace?.(TraceType.Request, message);
+
+		const response = await this.request(message, options?.timeout);
+
+		// Throw on server-reported failure
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? `${command} failed`);
+		}
+
+		// Trace: success response
+		this._onTrace?.(TraceType.Success, response);
+
+		// Unwrap the body envelope
+		return (response.body ?? response) as T;
 	}
 }
 

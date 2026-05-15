@@ -503,7 +503,9 @@ class RocketRideCLI:
         mkdir_parser.add_argument('path', help='Directory path')
 
         # stat - file/directory metadata
-        stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata', parents=[store_common_parser])
+        stat_parser = store_subparsers.add_parser(
+            'stat', help='Get file/directory metadata', parents=[store_common_parser]
+        )
         stat_parser.add_argument('path', help='File or directory path')
 
         return parser
@@ -535,10 +537,9 @@ class RocketRideCLI:
             parser.print_help()
             return 1
 
-        # Validate required authentication
+        # Validate we have something for apikey
         if not self.args.apikey:
-            print('Error: API key is required. Use --apikey or set ROCKETRIDE_APIKEY environment variable')
-            return 1
+            self.args.apikey = ''
 
         # Command-specific validation and preprocessing
         if self.args.command == 'start' and not self.args.pipeline_path:

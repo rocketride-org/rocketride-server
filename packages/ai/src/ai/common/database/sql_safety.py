@@ -36,10 +36,21 @@ import re
 def is_sql_safe(sql: str) -> bool:
     """Return False if the SQL is not a read-only query.
 
-    Uses a whitelist approach: only SELECT and WITH (CTE) statements are
-    allowed.  Everything else is rejected.  This is safer than a blacklist
-    because new or uncommon SQL commands (SET, COPY, PREPARE/EXECUTE, DO,
-    HANDLER, etc.) are blocked by default.
+    Uses a whitelist approach: only SELECT statements (optionally prefixed by
+    EXPLAIN) are allowed. Everything else is rejected. This is safer than a
+    blacklist because new or uncommon SQL commands (SET, COPY, PREPARE /
+    EXECUTE, DO, HANDLER, etc.) are blocked by default.
+
+    Empty / whitespace-only input passes vacuously (no statements means no
+    statement to reject). Callers that want to forbid empty SQL must guard
+    that at a higher layer.
+
+    WITH (CTE) is deliberately NOT in the allowlist. PostgreSQL accepts
+    CTE-into-mutation — e.g. ``WITH x AS (...) DELETE FROM t WHERE id IN
+    (SELECT id FROM x)`` — so a naive `select|with` allowlist would let
+    write operations through. If WITH support is needed later it must be
+    matched with a stricter pattern that guarantees the trailing data
+    operation is a SELECT, not a DELETE / INSERT / UPDATE.
     """
     # Strip comments first so embedded keywords in comments don't fool the
     # patterns, and so comment-based bypasses (e.g. /*!DROP*/) are neutralised.
@@ -50,8 +61,8 @@ def is_sql_safe(sql: str) -> bool:
     # A single input may contain multiple statements chained with ';'.
     statements = [s.strip() for s in re.split(r';\s*', sql.strip()) if s.strip()]
 
-    # Only SELECT and WITH (common-table-expression leading into SELECT) are
-    # allowed.  EXPLAIN is permitted as a prefix to either.
+    # Only SELECT is allowed. EXPLAIN is permitted as a prefix.
+    # WITH (CTE) is intentionally excluded — see docstring.
     allowed_pattern = re.compile(r'^\s*(explain\s+)?(select)\b', re.IGNORECASE)
 
     for stmt in statements:

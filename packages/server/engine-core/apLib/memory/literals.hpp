@@ -25,7 +25,7 @@
 
 namespace ap {
 
-inline memory::DataView<const char> operator"" _dv(const char *str,
+inline memory::DataView<const char> operator""_dv(const char *str,
                                                    std::size_t count) noexcept {
     return {str, count};
 }

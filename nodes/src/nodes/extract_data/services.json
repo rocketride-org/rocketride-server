@@ -70,36 +70,6 @@
 		"table": ["answers", "documents"],
 		"text": ["answers", "documents"]
 	},
-	"input": [
-		{
-			"description": "Extracts data from an existing table (transformation)",
-			"lane": "table",
-			"output": [
-				{
-					"lane": "answers",
-					"description": "Outputs the extracted data"
-				},
-				{
-					"lane": "documents",
-					"description": "Outputs the extracted data"
-				}
-			]
-		},
-		{
-			"description": "Extracts data from an text",
-			"lane": "text",
-			"output": [
-				{
-					"lane": "answers",
-					"description": "Outputs the extracted data"
-				},
-				{
-					"lane": "documents",
-					"description": "Outputs the extracted data"
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
