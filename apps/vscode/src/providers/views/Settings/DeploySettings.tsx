@@ -26,6 +26,9 @@ interface DeploySettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
 	onClearCredentials: () => void;
 	onTestConnection: (hostUrl: string, apiKey: string) => void;
 	testMessage: MessageData | null;
@@ -98,7 +101,7 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 
 	return (
 		<div style={S.card}>
-			<SettingsCardHeader title="Deployment Target" onSave={onSave} />
+			<SettingsCardHeader title="Deployment Target" onSave={props.onSave} onCancel={props.onCancel} dirty={props.dirty} saved={props.saved} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
 				<div style={S.formGrid}>

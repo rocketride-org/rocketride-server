@@ -501,8 +501,7 @@ def pipeline(
     output_fields = output_fields or _get_output_fields_for_task(task)
 
     if should_proxy:
-        host, port = server_addr
-        return PipelineProxy(task, model, port, host, output_fields, **kwargs)
+        return PipelineProxy(task, model, server_addr, output_fields, **kwargs)
     else:
         return PipelineLocal(task, model, output_fields, device, **kwargs)
 
@@ -514,8 +513,7 @@ class PipelineProxy:
         self,
         task: str,
         model: Optional[str],
-        port: int,
-        host: str,
+        address: str,
         output_fields: List[str],
         **kwargs,
     ):
@@ -524,7 +522,7 @@ class PipelineProxy:
         self.model = model
         self.output_fields = output_fields
         self.kwargs = kwargs
-        self._client = ModelClient(port, host)
+        self._client = ModelClient(address)
         self._metadata: dict = {}
 
         self._init_proxy()
@@ -657,8 +655,7 @@ class AutoModel:
         output_fields = output_fields or ['output']
 
         if should_proxy:
-            host, port = server_addr
-            return ModelProxy(model_name, port, host, output_fields, **kwargs)
+            return ModelProxy(model_name, server_addr, output_fields, **kwargs)
         else:
             return ModelLocal(model_name, output_fields, device, **kwargs)
 
@@ -669,8 +666,7 @@ class ModelProxy:
     def __init__(
         self,
         model_name: str,
-        port: int,
-        host: str,
+        address: str,
         output_fields: List[str],
         **kwargs,
     ):
@@ -678,7 +674,7 @@ class ModelProxy:
         self.model_name = model_name
         self.output_fields = output_fields
         self.kwargs = kwargs
-        self._client = ModelClient(port, host)
+        self._client = ModelClient(address)
 
         self._init_proxy()
 

@@ -45,7 +45,7 @@ module.exports = {
 			// Clean all UI build artifacts in parallel.
 			name: 'ui:clean',
 			action: () => ({
-				description: 'Clean all UI app build artifacts',
+				description: 'Cleaning ui (all)',
 				steps: [
 					parallel([
 						'shell-ui:clean',
@@ -63,7 +63,7 @@ module.exports = {
 			// Build all UI apps. Shell builds first (host), then remotes in parallel.
 			name: 'ui:build',
 			action: () => ({
-				description: 'Build all UI apps (shell + remotes)',
+				description: 'Build ui (all)',
 				steps: [
 					'shell-ui:build',
 					parallel([

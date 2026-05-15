@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { useState, useMemo, CSSProperties } from 'react';
+import React, { useState, useRef, useMemo, useCallback, CSSProperties } from 'react';
 import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
@@ -208,12 +208,30 @@ export const settingsStyles = {
 // SHARED CARD HEADER WITH SAVE BUTTON
 // ============================================================================
 
-export const SettingsCardHeader: React.FC<{ title: string; onSave: () => void }> = ({ title, onSave }) => (
+export const SettingsCardHeader: React.FC<{
+	title: string;
+	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
+}> = ({ title, onSave, onCancel, dirty, saved }) => (
 	<div style={settingsStyles.cardHeader}>
 		{title}
-		<button style={commonStyles.buttonPrimary} onClick={onSave}>
-			Save All Settings
-		</button>
+		<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+			{saved && <span style={{ fontSize: 11, color: 'var(--rr-color-success)' }}>Saved</span>}
+			{dirty && (
+				<>
+					{onCancel && (
+						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onCancel}>
+							Cancel
+						</button>
+					)}
+					<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onSave}>
+						Save All Settings
+					</button>
+				</>
+			)}
+		</div>
 	</div>
 );
 
@@ -303,6 +321,12 @@ export const Settings: React.FC = () => {
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
 
+	// Dirty-state tracking — buttons only appear when user has edited something
+	const [dirty, setDirty] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const savedSettingsRef = useRef<SettingsData | null>(null);
+	const pendingSaveSnapshotRef = useRef<SettingsData | null>(null);
+
 	// ========================================================================
 	// WEBVIEW MESSAGING
 	// ========================================================================
@@ -313,6 +337,9 @@ export const Settings: React.FC = () => {
 			switch (message.type) {
 				case 'settingsLoaded':
 					setSettings(message.settings);
+					// Snapshot for cancel/reset and clear dirty state
+					savedSettingsRef.current = JSON.parse(JSON.stringify(message.settings));
+					setDirty(false);
 					if (message.settings.development.connectionMode === 'local') {
 						setEngineVersionsLoading(true);
 						sendMessage({ type: 'fetchEngineVersions' });
@@ -355,6 +382,14 @@ export const Settings: React.FC = () => {
 					} else {
 						setMessage(msg);
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
+						// Show "Saved" in card header on successful save
+						if (message.level === 'success') {
+							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
+							pendingSaveSnapshotRef.current = null;
+							setDirty(false);
+							setSaved(true);
+							setTimeout(() => setSaved(false), 5000);
+						}
 					}
 					break;
 				}
@@ -422,8 +457,19 @@ export const Settings: React.FC = () => {
 	 * Save all settings to extension storage
 	 */
 	const handleSaveSettings = (): void => {
-		sendMessage({ type: 'saveSettings', settings });
+		const snapshot = JSON.parse(JSON.stringify(settings)) as SettingsData;
+		pendingSaveSnapshotRef.current = snapshot;
+		sendMessage({ type: 'saveSettings', settings: snapshot });
 	};
+
+	/** Revert to last-saved settings and clear dirty state. */
+	const handleCancelSettings = useCallback((): void => {
+		if (savedSettingsRef.current) {
+			setSettings(JSON.parse(JSON.stringify(savedSettingsRef.current)));
+		}
+		setDirty(false);
+		setSaved(false);
+	}, []);
 
 	/**
 	 * Test development connection (run/debug server)
@@ -460,6 +506,8 @@ export const Settings: React.FC = () => {
 	 * Update settings with partial changes
 	 */
 	const handleSettingsChange = (changes: Partial<SettingsData>): void => {
+		setDirty(true);
+		setSaved(false);
 		setSettings((prev) => {
 			const next = { ...prev };
 
@@ -576,6 +624,9 @@ export const Settings: React.FC = () => {
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
 							onSave={handleSaveSettings}
+							onCancel={handleCancelSettings}
+							dirty={dirty}
+							saved={saved}
 							onClearCredentials={handleClearCredentials}
 							onTestDevelopmentConnection={handleTestConnection}
 							serverCapabilities={serverCapabilities}
@@ -632,6 +683,9 @@ export const Settings: React.FC = () => {
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
 							onSave={handleSaveSettings}
+							onCancel={handleCancelSettings}
+							dirty={dirty}
+							saved={saved}
 							serverCapabilities={serverCapabilities}
 							teams={teams}
 							engineVersions={engineVersions}
@@ -684,7 +738,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
+						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
 					</div>
 				),
 			},
@@ -692,7 +746,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
+						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
 					</div>
 				),
 			},
@@ -700,7 +754,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} />
+						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
 					</div>
 				),
 			},

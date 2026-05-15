@@ -30,7 +30,7 @@
  * 
  * @returns Echo pipeline configuration
  */
-export function getEchoPipeline() {
+export function getEchoPipeline(projectId: string = 'e612b741-748c-4b35-a8b7-186797a8ea42') {
 	return {
 		components: [
 			{
@@ -52,6 +52,6 @@ export function getEchoPipeline() {
 			}
 		],
 		source: "webhook_1",
-		project_id: "e612b741-748c-4b35-a8b7-186797a8ea42"
+		project_id: projectId
 	};
 }

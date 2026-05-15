@@ -99,7 +99,7 @@ export const OrganizationPanel: React.FC<OrganizationPanelProps> = ({ org, onSav
 										setError(null);
 									}}
 									disabled={saving}
-									style={commonStyles.buttonSecondarySmall as CSSProperties}
+									style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties}
 								>
 									Cancel
 								</button>
@@ -108,7 +108,8 @@ export const OrganizationPanel: React.FC<OrganizationPanelProps> = ({ org, onSav
 									disabled={saving}
 									style={
 										{
-											...commonStyles.buttonPrimarySmall,
+											...commonStyles.buttonPrimary,
+											...commonStyles.cardHeaderButton,
 											...(saving ? commonStyles.buttonDisabled : {}),
 										} as CSSProperties
 									}

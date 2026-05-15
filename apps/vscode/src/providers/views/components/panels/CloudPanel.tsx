@@ -42,18 +42,22 @@ export interface CloudPanelProps {
 // COMPONENT
 // =============================================================================
 
-export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams: _onFetchTeams }) => {
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 	const theme = useTheme();
 
-	// Probe on mount to check if server supports cloud/OAuth.
-	// The probe also fetches teams automatically if SaaS + signed in,
-	// so no separate fetchTeams effect is needed.
-	// Probe the cloud endpoint on mount
 	const cloudUrl = process.env.ROCKETRIDE_URI || '';
+
+	// Step 1: Probe on mount to confirm server is SaaS.
 	useEffect(() => {
 		if (onProbeServer && cloudUrl) onProbeServer(cloudUrl);
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Step 3: Once SaaS is confirmed and user is signed in, fetch teams.
+	// (Step 2 — sign-in — is handled by the Sign In button / auth listener.)
+	useEffect(() => {
+		if (isSaas && cloudSignedIn && onFetchTeams && cloudUrl) onFetchTeams(cloudUrl);
+	}, [isSaas, cloudSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	return (
 		<>

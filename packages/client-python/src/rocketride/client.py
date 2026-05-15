@@ -144,6 +144,8 @@ class RocketRideClient(
             **kwargs: Additional options:
                 - env: Dictionary of environment variables to use instead of os.environ
                 - module: Custom module name for client identification
+                - ws_path: Custom WebSocket path override (default: '/task/service').
+                    Use '/models' for the model server.
                 - request_timeout: Default timeout in ms for individual requests (default: no timeout)
                 - max_retry_time: Max total time in ms to keep retrying connections (default: forever)
                 - persist: Enable automatic reconnection with exponential backoff (default: False)
@@ -203,9 +205,10 @@ class RocketRideClient(
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
 
-        # Convert the HTTP/HTTPS URI (or bare host:port) to a wss:// or ws:// URI
-        # pointing at the /task/service WebSocket endpoint.
-        self._uri = ConnectionMixin._get_websocket_uri(uri)
+        # Convert the HTTP/HTTPS URI (or bare host:port) to a wss:// or ws:// URI.
+        # ws_path defaults to '/task/service'; model server clients pass '/models'.
+        self._ws_path = kwargs.get('ws_path', '/task/service')
+        self._uri = ConnectionMixin._get_websocket_uri(uri, self._ws_path)
         self._apikey = auth
 
         # Initialize chat question counter — each chat request gets a unique sequential ID
@@ -236,8 +239,18 @@ class RocketRideClient(
         # Public mode — permanently unauthenticated, only rrext_public_* commands
         self._public = kwargs.get('public', False)
 
+        # Pop kwargs consumed by this constructor so they don't collide
+        # with the explicit keyword arguments passed to super().__init__().
+        module = kwargs.pop('module', client_name)
+        kwargs.pop('ws_path', None)
+        kwargs.pop('client_name', None)
+        kwargs.pop('client_version', None)
+        kwargs.pop('public', None)
+        kwargs.pop('on_trace', None)
+        kwargs.pop('env', None)
+
         # Initialize the underlying DAP client; transport is created in _internal_connect
-        super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
+        super().__init__(transport=None, module=module, **kwargs)
 
     # =========================================================================
     # CALL — PUBLIC DAP COMMAND INTERFACE

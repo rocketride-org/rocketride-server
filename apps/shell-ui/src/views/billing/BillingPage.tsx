@@ -32,6 +32,7 @@ import { BillingView } from 'shared';
 import type { BillingDetail, CreditBalance, CreditPack } from 'rocketride';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useAuthUser } from '../../hooks/useAuthUser';
+import { useWorkspace } from '../../workspace/WorkspaceContext';
 
 // =============================================================================
 // COMPONENT
@@ -47,6 +48,7 @@ import { useAuthUser } from '../../hooks/useAuthUser';
 const BillingPage: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 	const { client, isConnected } = useShellConnection();
 	const identity = useAuthUser();
+	const { appManifest } = useWorkspace();
 
 	// ── State ────────────────────────────────────────────────────────────────
 	const [subscriptions, setSubscriptions] = useState<BillingDetail[]>([]);
@@ -137,6 +139,7 @@ const BillingPage: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 			onCancelSubscription={handleCancel}
 			onOpenPortal={handlePortal}
 			onBuyCredits={handleBuyCredits}
+			apps={appManifest}
 		/>
 	);
 };

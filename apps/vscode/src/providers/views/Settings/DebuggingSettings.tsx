@@ -32,20 +32,23 @@ interface DebuggingSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
+export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({ settings, onSettingsChange, onSave, onCancel, dirty, saved }) => {
 	const handleRestartBehaviorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
 		onSettingsChange({ pipelineRestartBehavior: e.target.value as 'auto' | 'manual' | 'prompt' });
 	};
 
 	return (
 		<div style={S.card}>
-			<SettingsCardHeader title="Debugging Settings" onSave={onSave} />
+			<SettingsCardHeader title="Debugging Settings" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Configure debugging and pipeline restart behavior</div>
 				<div style={S.formGrid}>

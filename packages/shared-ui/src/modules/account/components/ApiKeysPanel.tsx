@@ -50,7 +50,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 				<span style={commonStyles.labelUppercase}>
 					API Keys — {keys.length} key{keys.length !== 1 ? 's' : ''}
 				</span>
-				<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onCreateKey}>
+				<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onCreateKey}>
 					+ New Key
 				</button>
 			</div>
@@ -73,7 +73,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 						</div>
 						{k.active && !k.isSession && (
 							<div style={S.rowActions}>
-								<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRevokeKey(k)}>
+								<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRevokeKey(k)}>
 									Revoke
 								</button>
 							</div>

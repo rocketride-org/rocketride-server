@@ -185,7 +185,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 					<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 						<input type="text" placeholder="Search by name or email…" value={search} onChange={(e) => setSearch(e.target.value)} style={styles.search} />
 						{isOrgAdmin && (
-							<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onInvite}>
+							<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onInvite}>
 								+ Invite
 							</button>
 						)}
@@ -215,7 +215,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 									<div style={S.rowActions}>
 										<Badge variant="pending">Pending</Badge>
 										{isOrgAdmin && (
-											<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemove(m)}>
+											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRemove(m)}>
 												Cancel
 											</button>
 										)}
@@ -226,10 +226,10 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 										<Badge variant={m.role === 'admin' ? 'admin' : 'member'}>{m.role}</Badge>
 										{isOrgAdmin && (
 											<>
-												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.buttonSmall, border: 'none', background: 'transparent' } as CSSProperties} onClick={() => onChangeRole(m)}>
+												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton, border: 'none', background: 'transparent' } as CSSProperties} onClick={() => onChangeRole(m)}>
 													Edit
 												</button>
-												<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemove(m)}>
+												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRemove(m)}>
 													Remove
 												</button>
 											</>

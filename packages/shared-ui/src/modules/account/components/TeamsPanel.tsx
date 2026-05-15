@@ -72,7 +72,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 					<div style={commonStyles.cardHeader}>
 						<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-							<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.buttonSmall, border: 'none', background: 'transparent', fontSize: 20, fontWeight: 900, padding: '0 6px', lineHeight: '1rem' } as CSSProperties} onClick={onBack}>
+							<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton, border: 'none', background: 'transparent', fontSize: 20, fontWeight: 900, padding: '0 6px', lineHeight: '1rem' } as CSSProperties} onClick={onBack}>
 								{'\u2190'}
 							</button>
 							<div style={{ width: 22, height: 22, borderRadius: 5, background: avatarColor(teamDetail.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{teamDetail.name[0]}</div>
@@ -81,7 +81,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 							</span>
 						</div>
 						{isTeamAdmin && (
-							<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onAddMember}>
+							<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onAddMember}>
 								+ Add Member
 							</button>
 						)}
@@ -110,12 +110,12 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 										</div>
 										{isTeamAdmin && (
 											<div style={S.rowActions}>
-												<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onEditPerms(m)}>
+												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onEditPerms(m)}>
 													Edit Perms
 												</button>
 												{/* Hide Remove if this is the last admin (team must always have one). */}
 												{!isLastAdmin && (
-													<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={() => onRemoveMember(m.userId, m.displayName)}>
+													<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRemoveMember(m.userId, m.displayName)}>
 														Remove
 													</button>
 												)}
@@ -140,7 +140,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 						Teams — {teams.length} team{teams.length !== 1 ? 's' : ''}
 					</span>
 					{isOrgAdmin && (
-						<button style={commonStyles.buttonPrimarySmall as CSSProperties} onClick={onCreateTeam}>
+						<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onCreateTeam}>
 							+ New Team
 						</button>
 					)}
@@ -158,7 +158,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 							<div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
 								{isOrgAdmin && (
 									<button
-										style={commonStyles.buttonSecondarySmall as CSSProperties}
+										style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}
 										onClick={(e) => {
 											e.stopPropagation();
 											onDeleteTeam(t.id);
@@ -168,7 +168,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 									</button>
 								)}
 								<button
-									style={commonStyles.buttonSecondarySmall as CSSProperties}
+									style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}
 									onClick={(e) => {
 										e.stopPropagation();
 										onSelectTeam(t.id);

@@ -92,6 +92,31 @@ const cardFlat: CSSProperties = {
 	padding: 16,
 };
 
+/**
+ * Card header button size modifier — compact sizing for buttons rendered
+ * inside `cardHeader`. Compose with a colour variant:
+ *   style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton }}
+ * Same dimensions as `cardBodyButton` today; split so header vs body
+ * can diverge independently later.
+ */
+const cardHeaderButton: CSSProperties = {
+	padding: '3px 9px',
+	fontSize: 11,
+	lineHeight: 1.4,
+};
+
+/**
+ * Card body button size modifier — compact sizing for buttons rendered
+ * inside `cardBody` rows (actions like Revoke, Remove, Cancel, etc.).
+ * Compose with a colour variant:
+ *   style={{ ...commonStyles.buttonDanger, ...commonStyles.cardBodyButton }}
+ */
+const cardBodyButton: CSSProperties = {
+	padding: '3px 9px',
+	fontSize: 11,
+	lineHeight: 1.4,
+};
+
 // =============================================================================
 // SECTIONS
 // =============================================================================
@@ -842,6 +867,9 @@ export const commonStyles = {
 	buttonSecondarySmall,
 	buttonDangerSmall,
 	buttonDisabled,
+	// Card button size modifiers — compose with colour variants
+	cardHeaderButton,
+	cardBodyButton,
 	// Toggle buttons — toggleGroup wraps toggleButton(active) items
 	toggleButton,
 	toggleGroup,

@@ -144,8 +144,8 @@ export interface BillingPanelProps {
 	onBuyCredits: (pack: CreditPack) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
-	/** Map of appId → display name for subscription rows. */
-	appNames?: Record<string, string>;
+	/** App manifest entries for resolving display names, icons, etc. from appId. */
+	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 }
 
 // =============================================================================
@@ -158,7 +158,13 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, appNames, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
+	// Build appId → app lookup for display name resolution
+	const appMap = React.useMemo(() => {
+		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
+		for (const a of apps ?? []) map[a.id] = a;
+		return map;
+	}, [apps]);
 	return (
 		<section>
 			{/* Error banner */}
@@ -174,7 +180,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 						{subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
 					</span>
 					{isOrgAdmin && (
-						<button style={commonStyles.buttonSecondarySmall as CSSProperties} onClick={onOpenPortal}>
+						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onOpenPortal}>
 							Manage Payment Methods →
 						</button>
 					)}
@@ -193,7 +199,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 								<div key={sub.appId} style={{ ...SharedS.rowItem, borderBottom: i < subscriptions.length - 1 ? '1px solid var(--rr-border)' : 'none', alignItems: 'flex-start' }}>
 									<div style={SharedS.rowInfo}>
 										{/* App name + renewal info */}
-										<div style={SharedS.rowName}>{appNames?.[sub.appId] ?? sub.appId}</div>
+										<div style={SharedS.rowName}>{appMap[sub.appId]?.name ?? sub.appId}</div>
 										{sub.currentPeriodEnd && <div style={S.meta}>{sub.cancelAtPeriodEnd ? `Cancels on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}` : `Renews on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`}</div>}
 
 										{/* Subscription detail grid */}
@@ -269,7 +275,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 									<div style={SharedS.rowActions}>
 										<Badge variant={sv.variant}>{sv.label}</Badge>
 										{isCancelable && isOrgAdmin && (
-											<button style={commonStyles.buttonDangerSmall as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
+											<button style={{ ...commonStyles.buttonDanger, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
 												Cancel
 											</button>
 										)}

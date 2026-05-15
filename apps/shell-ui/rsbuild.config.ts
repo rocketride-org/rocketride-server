@@ -215,6 +215,15 @@ export default defineConfig(({ command }) => {
 			// Remove stale files from the output directory before each build to
 			// prevent leftover chunks from a previous build being served.
 			cleanDistPath: true,
+
+			// Copy theme JSON files into the build output so they are served at
+			// /shell/themes/*.json in both dev and production.  rsbuild's publicDir
+			// serves files at the root path, but assetPrefix: '/shell/' means the
+			// app requests /shell/themes/ — placing them in the build output
+			// ensures they resolve correctly under the prefix.
+			copy: [
+				{ from: path.resolve(__dirname, 'public/themes'), to: 'themes' },
+			],
 		},
 	};
 });

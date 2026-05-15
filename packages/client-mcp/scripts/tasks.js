@@ -219,7 +219,7 @@ module.exports = {
 
         // Public actions (have descriptions)
         { name: 'client-mcp:build', action: () => ({
-            description: 'Build MCP client',
+            description: 'Build client-mcp',
             steps: [
                 'server:build',
                 'client-mcp:sync-source',
@@ -229,7 +229,7 @@ module.exports = {
         })},
         { name: 'client-mcp:build-wheel', action: makeBuildWheelAction },
         { name: 'client-mcp:test', action: () => ({
-            description: 'Test MCP client',
+            description: 'Testing client-mcp',
             steps: [
                 'server:build',
                 parallel([
@@ -247,7 +247,7 @@ module.exports = {
             ]
         })},
         { name: 'client-mcp:clean', action: () => ({
-            description: 'Clean MCP client',
+            description: 'Cleaning client-mcp',
             run: async (ctx, task) => {
                 await removeDirs([
                     path.join(PACKAGE_DIR, 'build'),

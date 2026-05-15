@@ -32,20 +32,23 @@ interface PipelineSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
 }
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, onSettingsChange, onSave }) => {
+export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, onSettingsChange, onSave, onCancel, dirty, saved }) => {
 	const handleDefaultPipelinePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ defaultPipelinePath: e.target.value });
 	};
 
 	return (
 		<div style={S.card}>
-			<SettingsCardHeader title="Pipeline Settings" onSave={onSave} />
+			<SettingsCardHeader title="Pipeline Settings" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Configure default settings for pipeline creation and management</div>
 				<div style={S.formGrid}>

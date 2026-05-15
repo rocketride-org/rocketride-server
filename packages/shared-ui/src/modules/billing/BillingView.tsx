@@ -15,7 +15,7 @@
  * VS Code) is responsible for fetching data and executing API calls.
  */
 
-import React, { useState, useCallback, type CSSProperties } from 'react';
+import React, { useState, useCallback, useMemo, type CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import type { BillingDetail, CreditBalance, CreditPack } from './types';
 import { CreditsPanel } from './components/CreditsPanel';
@@ -270,6 +270,8 @@ export interface IBillingViewProps {
 	onOpenPortal: () => Promise<void>;
 	/** Purchase a credit pack. Host handles Stripe checkout redirect/URL. */
 	onBuyCredits: (pack: CreditPack) => Promise<void>;
+	/** App manifest entries for resolving display names, icons, etc. from appId. */
+	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 }
 
 // =============================================================================
@@ -277,7 +279,13 @@ export interface IBillingViewProps {
 // =============================================================================
 
 /** Pure subscription and payment management view. */
-const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, loading, error: externalError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits }) => {
+const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, loading, error: externalError, creditBalance, creditPacks, onCancelSubscription, onOpenPortal, onBuyCredits, apps }) => {
+	// Build appId → app lookup for display name resolution
+	const appMap = useMemo(() => {
+		const map: Record<string, { name: string; icon?: string; description?: string }> = {};
+		for (const a of apps ?? []) map[a.id] = a;
+		return map;
+	}, [apps]);
 	// ── Local action error state ────────────────────────────────────────────
 	const [actionError, setActionError] = useState<string | null>(null);
 	const displayError = actionError || externalError;
@@ -353,7 +361,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 								<div style={S.row}>
 									<div>
 										<div style={S.appName}>
-											{sub.appId}
+											{appMap[sub.appId]?.name ?? sub.appId}
 											<span style={S.badge(badge.color, badge.bg)}>{badge.label}</span>
 										</div>
 										{/* Renewal / cancellation date */}
@@ -400,7 +408,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 								{/* Action buttons */}
 								<div style={S.actions}>
 									{isCancelable && (
-										<button style={commonStyles.buttonDangerOutline as CSSProperties} onClick={() => requestCancel(sub.appId)}>
+										<button style={{ ...commonStyles.buttonDangerOutline, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => requestCancel(sub.appId)}>
 											Cancel Subscription
 										</button>
 									)}
@@ -412,7 +420,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 
 					{/* Stripe customer portal link */}
 					<div style={S.portalRow}>
-						<button style={commonStyles.buttonSecondary as CSSProperties} onClick={handlePortal}>
+						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={handlePortal}>
 							Manage Payment Methods →
 						</button>
 					</div>
@@ -425,7 +433,7 @@ const BillingView: React.FC<IBillingViewProps> = ({ isConnected, subscriptions, 
 					<div style={S.confirmDialog} onClick={(e) => e.stopPropagation()}>
 						<div style={S.confirmTitle}>Cancel Subscription</div>
 						<div style={S.confirmBody}>
-							Are you sure you want to cancel <strong>{confirmAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
+							Are you sure you want to cancel <strong>{appMap[confirmAppId!]?.name ?? confirmAppId}</strong>? Your access will continue until the end of the current billing period, after which the subscription will not renew.
 						</div>
 						<div style={S.confirmActions}>
 							<button style={commonStyles.buttonSecondary as CSSProperties} onClick={dismissCancel} disabled={cancelling}>

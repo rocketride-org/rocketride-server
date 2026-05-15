@@ -22,9 +22,16 @@ export default defineConfig(() => {
 					'./AppDescriptor': './src/AppDescriptor.ts',
 				},
 				dts: false,
+				// runtime: false — the host (shell-ui) provides the MF runtime;
+				// remotes don't embed their own copy, keeping remoteEntry.js
+				// stable across app-code-only rebuilds.
+				runtime: false,
 				shared: {
-					react: { singleton: true, requiredVersion: '^18.2.0' },
-					'react-dom': { singleton: true, requiredVersion: '^18.2.0' },
+					// eager: true makes shared-scope negotiation synchronous on
+					// both host and remote, eliminating the async deadlock that
+					// hangs the browser when only one remote is recompiled.
+					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
+					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false — host always provides these, no fallback needed.
 					'shell-ui': { singleton: true, requiredVersion: false, import: false },
 					'shared':   { singleton: true, requiredVersion: false, import: false },

@@ -328,14 +328,14 @@ module.exports = {
 		{
 			name: 'client-typescript:build',
 			action: () => ({
-				description: 'Build TypeScript client',
+				description: 'Build client-typescript',
 				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync'],
 			}),
 		},
 		{
 			name: 'client-typescript:test',
 			action: () => ({
-				description: 'Test TypeScript client',
+				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
 					parallel(['ai:build', 'nodes:build', 'client-python:build', 'client-typescript:build'], 'Build dependencies'),
@@ -351,7 +351,7 @@ module.exports = {
 		{
 			name: 'client-typescript:clean',
 			action: () => ({
-				description: 'Clean TypeScript client',
+				description: 'Cleaning client-typescript',
 				run: async (ctx, task) => {
 					await removeDirs([LOCAL_DIST]);
 					await removeDirAndParents(PROJECT_ROOT, [PACKAGE_DIST, SERVER_STATIC_DIR, path.join(BUILD_ROOT, 'clients', 'typescript')]);

@@ -488,8 +488,7 @@ class Whisper:
         if should_proxy:
             # === REMOTE MODE ===
             self._proxy_mode = True
-            host, port = server_addr
-            self._client = ModelClient(port, host)
+            self._client = ModelClient(server_addr)
             self._model = None
             self._metadata = {}
             self._init_proxy()

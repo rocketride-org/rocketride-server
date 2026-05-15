@@ -23,6 +23,9 @@ interface ConnectionSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onSave: () => void;
+	onCancel?: () => void;
+	dirty?: boolean;
+	saved?: boolean;
 	onClearCredentials: () => void;
 	onTestConnection: (hostUrl: string, apiKey: string) => void;
 	testMessage: MessageData | null;
@@ -106,7 +109,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 			}}
 			id="developmentSection"
 		>
-			<SettingsCardHeader title="Development Mode" onSave={onSave} />
+			<SettingsCardHeader title="Development Mode" onSave={onSave} onCancel={props.onCancel} dirty={props.dirty} saved={props.saved} />
 			<div style={S.cardBody}>
 				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and Direct Connect modes require authentication.</div>
 				<div style={S.formGrid}>
