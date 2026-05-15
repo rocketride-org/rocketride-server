@@ -383,7 +383,9 @@ class TestFullHybridSearch:
         vector_scores = [0.1, 0.2, 0.3, 0.4, 0.9]
 
         engine_vector_heavy = HybridSearchEngine(alpha=0.8)
-        results_heavy = engine_vector_heavy.search('machine learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=5)
+        results_heavy = engine_vector_heavy.search(
+            'machine learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=5
+        )
 
         engine_bm25_heavy = HybridSearchEngine(alpha=0.2)
         results_bm25 = engine_bm25_heavy.search('machine learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=5)

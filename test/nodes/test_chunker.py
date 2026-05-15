@@ -267,11 +267,15 @@ class TestSentenceChunker:
         for i, chunk in enumerate(chunks):
             meta = chunk['metadata']
             # The slice must match the chunk text exactly
-            assert chunk['text'] == text[meta['start_char'] : meta['end_char']], f'Chunk {i} text mismatch: {chunk["text"]!r} != {text[meta["start_char"] : meta["end_char"]]!r}'
+            assert chunk['text'] == text[meta['start_char'] : meta['end_char']], (
+                f'Chunk {i} text mismatch: {chunk["text"]!r} != {text[meta["start_char"] : meta["end_char"]]!r}'
+            )
             # Actual span must not wildly exceed chunk_size (allow single-sentence overflow)
             actual_span = meta['end_char'] - meta['start_char']
             max_sentence_len = max(len(s) for s in ['Go.', 'Stop.'])
-            assert actual_span <= chunker.chunk_size + max_sentence_len, f'Chunk {i} span {actual_span} exceeds chunk_size {chunker.chunk_size} + max_sentence {max_sentence_len}'
+            assert actual_span <= chunker.chunk_size + max_sentence_len, (
+                f'Chunk {i} span {actual_span} exceeds chunk_size {chunker.chunk_size} + max_sentence {max_sentence_len}'
+            )
 
     def test_overlap_with_multichar_whitespace_respects_chunk_size(self):
         """Multi-char whitespace between sentences must not cause unbounded chunk growth."""
@@ -397,7 +401,9 @@ class TestTokenChunker:
         # but no prefix decode calls scale with chunk index.
         # Key check: decode should NOT be called with tokens[:N] for large N.
         # We verify the count is bounded linearly: at most 2*num_chunks calls
-        assert call_counts['decode'] <= 2 * len(chunks), f'decode called {call_counts["decode"]} times for {len(chunks)} chunks; expected at most {2 * len(chunks)} (linear)'
+        assert call_counts['decode'] <= 2 * len(chunks), (
+            f'decode called {call_counts["decode"]} times for {len(chunks)} chunks; expected at most {2 * len(chunks)} (linear)'
+        )
 
     def test_start_char_correctness_with_overlap(self):
         """start_char values should be correct even with token overlap."""
@@ -627,7 +633,9 @@ class TestChunkerLifecycle:
             inst, mock_instance = self._make_instance(IInstance, strategy=strategy)
 
             meta = DocMetadata(objectId='doc-123', chunkId=0)
-            doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=meta)
+            doc = Doc(
+                page_content='This is text that will be split into multiple chunks by the strategy.', metadata=meta
+            )
             inst.writeDocuments([doc])
 
             assert mock_instance.writeDocuments.called
@@ -647,7 +655,9 @@ class TestChunkerLifecycle:
             strategy = RC(chunk_size=20, chunk_overlap=0)
             inst, mock_instance = self._make_instance(IInstance, strategy=strategy)
 
-            doc = Doc(page_content='This is text that will be split into multiple chunks by the strategy.', metadata=None)
+            doc = Doc(
+                page_content='This is text that will be split into multiple chunks by the strategy.', metadata=None
+            )
             inst.writeDocuments([doc])
 
             assert mock_instance.writeDocuments.called
