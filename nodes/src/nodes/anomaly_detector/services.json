@@ -1,0 +1,217 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Anomaly Detector",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "anomaly_detector://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.anomaly_detector",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "anomaly_detector",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A pipeline monitoring component that detects anomalies in numeric output values using ", "statistical methods. It supports Z-Score, IQR (Interquartile Range), and Rolling Average ", "deviation detection with configurable sensitivity and window sizes. Detected anomalies are ", "classified by severity (normal, warning, critical) and added to document metadata.</br>", "</br>", "Use this node to monitor pipeline outputs for unexpected patterns, outliers, or shifts ", "in data distribution that may indicate issues requiring attention."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text containing numeric values to monitor for anomalies",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Original text with anomaly annotations"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Documents with numeric fields to monitor",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Documents with anomaly metadata"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section for configuration options
+	//
+	"preconfig": {
+		"default": "z_score",
+		"profiles": {
+			"z_score": {
+				"title": "Z-Score - Standard deviation based detection",
+				"method": "z_score",
+				"sensitivity": 2.0,
+				"windowSize": 100,
+				"metric": "value",
+				"warningThreshold": 2.0,
+				"criticalThreshold": 3.0
+			},
+			"iqr": {
+				"title": "IQR - Interquartile range based detection",
+				"method": "iqr",
+				"sensitivity": 1.5,
+				"windowSize": 100,
+				"metric": "value",
+				"warningThreshold": 1.5,
+				"criticalThreshold": 3.0
+			},
+			"rolling_avg": {
+				"title": "Rolling Average - Moving average deviation detection",
+				"method": "rolling_avg",
+				"sensitivity": 2.0,
+				"windowSize": 50,
+				"metric": "value",
+				"warningThreshold": 2.0,
+				"criticalThreshold": 3.0
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions
+	//
+	"fields": {
+		"anomaly_detector.method": {
+			"type": "string",
+			"title": "Detection method",
+			"description": "Statistical method used for anomaly detection",
+			"default": "z_score",
+			"enum": ["z_score", "iqr", "rolling_avg"]
+		},
+		"anomaly_detector.sensitivity": {
+			"type": "number",
+			"title": "Sensitivity",
+			"description": "Detection sensitivity threshold (lower = more sensitive)",
+			"default": 2.0,
+			"minimum": 0.1,
+			"maximum": 10.0
+		},
+		"anomaly_detector.windowSize": {
+			"type": "integer",
+			"title": "Window size",
+			"description": "Number of recent values to consider for statistical calculations",
+			"default": 100,
+			"minimum": 10,
+			"maximum": 10000
+		},
+		"anomaly_detector.metric": {
+			"type": "string",
+			"title": "Metric field",
+			"description": "The metadata field name containing the numeric value to monitor",
+			"default": "value",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"anomaly_detector.warningThreshold": {
+			"type": "number",
+			"title": "Warning threshold",
+			"description": "Threshold multiplier for warning-level anomalies",
+			"default": 2.0,
+			"minimum": 0.1,
+			"maximum": 10.0
+		},
+		"anomaly_detector.criticalThreshold": {
+			"type": "number",
+			"title": "Critical threshold",
+			"description": "Threshold multiplier for critical-level anomalies",
+			"default": 3.0,
+			"minimum": 0.5,
+			"maximum": 20.0
+		},
+		"anomaly_detector.z_score": {
+			"object": "z_score",
+			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
+		},
+		"anomaly_detector.iqr": {
+			"object": "iqr",
+			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
+		},
+		"anomaly_detector.rolling_avg": {
+			"object": "rolling_avg",
+			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
+		},
+		"anomaly_detector.profile": {
+			"title": "Detection Method",
+			"description": "Anomaly detection configuration",
+			"type": "string",
+			"default": "z_score",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "z_score",
+					"properties": ["anomaly_detector.z_score"]
+				},
+				{
+					"value": "iqr",
+					"properties": ["anomaly_detector.iqr"]
+				},
+				{
+					"value": "rolling_avg",
+					"properties": ["anomaly_detector.rolling_avg"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Anomaly Detection",
+			"properties": ["anomaly_detector.profile"]
+		}
+	]
+}
