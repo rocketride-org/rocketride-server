@@ -74,7 +74,7 @@
 	//		itself
 	//
 	"preconfig": {
-		"default": "gemini-3.1-pro-preview",
+		"default": "gemini-3_1-pro-preview",
 		"profiles": {
 			"custom": {
 				"model": "",
@@ -82,7 +82,7 @@
 				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
-			"gemini-3.1-pro-preview": {
+			"gemini-3_1-pro-preview": {
 				"title": "Gemini 3.1 Pro",
 				"model": "models/gemini-3.1-pro-preview",
 				"modelSource": "manual",
@@ -90,7 +90,7 @@
 				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
-			"gemini-3.1-flash-image-preview": {
+			"gemini-3_1-flash-image-preview": {
 				"title": "Gemini 3.1 Flash Image Preview",
 				"model": "models/gemini-3.1-flash-image-preview",
 				"modelSource": "manual",
@@ -98,7 +98,7 @@
 				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
-			"gemini-3.1-flash-lite-preview": {
+			"gemini-3_1-flash-lite-preview": {
 				"title": "Gemini 3.1 Flash Lite",
 				"model": "models/gemini-3.1-flash-lite-preview",
 				"modelSource": "manual",
@@ -122,7 +122,7 @@
 				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
-			"gemini-2.5-pro": {
+			"gemini-2_5-pro": {
 				"title": "Gemini 2.5 Pro",
 				"model": "models/gemini-2.5-pro",
 				"modelSource": "manual",
@@ -130,7 +130,7 @@
 				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
-			"gemini-2.5-flash": {
+			"gemini-2_5-flash": {
 				"title": "Gemini 2.5 Flash",
 				"model": "models/gemini-2.5-flash",
 				"modelSource": "manual",
@@ -138,7 +138,7 @@
 				"modelOutputTokens": 65535, // openrouter
 				"apikey": ""
 			},
-			"gemini-2.5-flash-lite": {
+			"gemini-2_5-flash-lite": {
 				"title": "Gemini 2.5 Flash Lite",
 				"model": "models/gemini-2.5-flash-lite",
 				"modelSource": "manual",
@@ -146,7 +146,7 @@
 				"modelOutputTokens": 65535, // openrouter
 				"apikey": ""
 			},
-			"gemini-2.5-flash-image": {
+			"gemini-2_5-flash-image": {
 				"title": "Gemini 2.5 Flash Image",
 				"model": "models/gemini-2.5-flash-image",
 				"modelSource": "manual",
@@ -276,15 +276,15 @@
 			}
 		},
 		"gemini.gemini-3.1-pro-preview": {
-			"object": "gemini-3.1-pro-preview",
+			"object": "gemini-3_1-pro-preview",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-3.1-flash-image-preview": {
-			"object": "gemini-3.1-flash-image-preview",
+			"object": "gemini-3_1-flash-image-preview",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-3.1-flash-lite-preview": {
-			"object": "gemini-3.1-flash-lite-preview",
+			"object": "gemini-3_1-flash-lite-preview",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-3-flash-preview": {
@@ -296,19 +296,19 @@
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2.5-pro": {
-			"object": "gemini-2.5-pro",
+			"object": "gemini-2_5-pro",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2.5-flash": {
-			"object": "gemini-2.5-flash",
+			"object": "gemini-2_5-flash",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2.5-flash-lite": {
-			"object": "gemini-2.5-flash-lite",
+			"object": "gemini-2_5-flash-lite",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-2.5-flash-image": {
-			"object": "gemini-2.5-flash-image",
+			"object": "gemini-2_5-flash-image",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"gemini.gemini-3-pro-preview": {
@@ -335,7 +335,7 @@
 			"title": "Model",
 			"description": "Gemini LLM model",
 			"type": "string",
-			"default": "gemini-3.1-pro-preview",
+			"default": "gemini-3_1-pro-preview",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
@@ -343,15 +343,15 @@
 					"properties": ["gemini.custom"]
 				},
 				{
-					"value": "gemini-3.1-pro-preview",
+					"value": "gemini-3_1-pro-preview",
 					"properties": ["gemini.gemini-3.1-pro-preview"]
 				},
 				{
-					"value": "gemini-3.1-flash-image-preview",
+					"value": "gemini-3_1-flash-image-preview",
 					"properties": ["gemini.gemini-3.1-flash-image-preview"]
 				},
 				{
-					"value": "gemini-3.1-flash-lite-preview",
+					"value": "gemini-3_1-flash-lite-preview",
 					"properties": ["gemini.gemini-3.1-flash-lite-preview"]
 				},
 				{
@@ -363,19 +363,19 @@
 					"properties": ["gemini.gemini-3-pro-image-preview"]
 				},
 				{
-					"value": "gemini-2.5-pro",
+					"value": "gemini-2_5-pro",
 					"properties": ["gemini.gemini-2.5-pro"]
 				},
 				{
-					"value": "gemini-2.5-flash",
+					"value": "gemini-2_5-flash",
 					"properties": ["gemini.gemini-2.5-flash"]
 				},
 				{
-					"value": "gemini-2.5-flash-lite",
+					"value": "gemini-2_5-flash-lite",
 					"properties": ["gemini.gemini-2.5-flash-lite"]
 				},
 				{
-					"value": "gemini-2.5-flash-image",
+					"value": "gemini-2_5-flash-image",
 					"properties": ["gemini.gemini-2.5-flash-image"]
 				},
 				{
@@ -464,7 +464,7 @@
 	//		real API key is required. ROCKETRIDE_MOCK must point to nodes/test/mocks.
 	//
 	"test": {
-		"profiles": ["gemini-2.5-flash"],
+		"profiles": ["gemini-2_5-flash"],
 		"outputs": ["answers"],
 		"cases": [
 			{
