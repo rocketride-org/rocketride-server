@@ -173,17 +173,19 @@ class AnomalyDetector:
         # Percentage deviation from the rolling mean
         pct_deviation = abs(value - local_mean) / abs(local_mean) * 100.0
 
-        # Normalize pct_deviation into a score: score = pct_deviation / (sensitivity * 10).
-        # With sensitivity=2.0, warning_threshold=2.0, critical_threshold=3.0 the defaults
-        # fire at pct_deviation >= 40% (warning) and >= 60% (critical).
+        # Effective threshold formula: pct = sensitivity * 10 * threshold.
+        # With defaults (sensitivity=2.0, warning_threshold=2.0, critical_threshold=3.0),
+        # warning fires at pct_deviation >= 40%, critical at >= 60%.
         score = pct_deviation / (self.sensitivity * 10.0) if self.sensitivity > 0 else 0.0
         severity = self._classify_severity(score)
+        warning_pct = self.sensitivity * 10.0 * self.warning_threshold
+        critical_pct = self.sensitivity * 10.0 * self.critical_threshold
 
         return {
             'score': round(score, 4),
             'severity': severity,
             'is_anomalous': score >= self.warning_threshold,
-            'details': f'pct_deviation={pct_deviation:.2f}% local_mean={local_mean:.4f} rolling_n={len(recent)}',
+            'details': f'pct_deviation={pct_deviation:.2f}% local_mean={local_mean:.4f} rolling_n={len(recent)} warning_at={warning_pct:.2f}% critical_at={critical_pct:.2f}%',
         }
 
     def detect(self, value: float) -> Dict[str, Any]:
