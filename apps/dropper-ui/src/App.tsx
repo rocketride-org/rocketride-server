@@ -69,9 +69,7 @@ const App: React.FC = () => {
 		// left over from a previous task on the same origin.
 		token = urlParams.get('auth') || '';
 		if (token) {
-			if (window.location.search.includes('auth=')) {
-				window.history.replaceState({}, '', window.location.pathname);
-			}
+			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
 			token = sessionStorage.getItem('auth') || '';
 		}
