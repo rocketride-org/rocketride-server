@@ -14,9 +14,10 @@ the server runtime. They cover:
 * Tool name namespacing — descriptor names must be ``<serverName>.<tool>``.
 * Dispatch — ``search``, ``upsert``, ``delete`` call through to a fake store
   and propagate errors when the store is missing.
-* Semantic-vs-keyword fallback — when ``IGlobal.embed_query`` is present the
-  mixin populates ``question.embedding``; when absent it routes to keyword
-  search (exactly once per warning).
+* Semantic search — when ``IGlobal.embed_query`` is present the mixin
+  populates ``question.embedding``; when absent returns an error envelope.
+* Auto-embed on upsert — mixin computes embeddings via IGlobal.embed_query
+  and sets both Doc.embedding and Doc.embedding_model before addChunks.
 """
 
 from __future__ import annotations
@@ -417,22 +418,24 @@ def test_two_instances_different_server_names_do_not_collide() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_search_uses_keyword_when_no_embedding_provider() -> None:
+def test_search_returns_error_envelope_when_no_embedder() -> None:
+    """No embed_query on IGlobal → search must return a failure envelope, not fall back to keyword."""
     _fresh_warnings()
     store = FakeStore(keyword_docs=[_StubDoc(page_content='cat', score=0.9, metadata=_StubDocMetadata(objectId='d1'))])
     instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
 
     result = instance.search({'query': 'cat'})
 
+    assert result.get('success') is False
+    assert 'error' in result
+    assert 'embed' in result['error'].lower() or 'embedding' in result['error'].lower()
+    # Must NOT have called keyword search — this is a hard failure, not a silent fallback
+    assert store.keyword_calls == []
     assert store.semantic_calls == []
-    assert len(store.keyword_calls) == 1
-    assert result['total'] == 1
-    assert result['results'][0]['content'] == 'cat'
-    # Warns exactly once about keyword-only mode
-    assert sum(1 for w in _WARNINGS if 'keyword-only mode' in w) == 1
 
 
 def test_search_warns_only_once_across_calls() -> None:
+    """The no-embedder warning (if any) must fire at most once across repeated calls."""
     _fresh_warnings()
     store = FakeStore()
     instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
@@ -441,7 +444,9 @@ def test_search_warns_only_once_across_calls() -> None:
     instance.search({'query': 'b'})
     instance.search({'query': 'c'})
 
-    assert sum(1 for w in _WARNINGS if 'keyword-only mode' in w) == 1
+    # At most one warning mentioning the missing embedder
+    embedder_warnings = [w for w in _WARNINGS if 'embed' in w.lower()]
+    assert len(embedder_warnings) <= 1
 
 
 def test_search_uses_semantic_when_embed_query_present() -> None:
@@ -466,17 +471,38 @@ def test_search_uses_semantic_when_embed_query_present() -> None:
     assert result['total'] == 1
 
 
-def test_search_empty_query_raises() -> None:
+def test_search_uses_iglobal_embed_query_when_bound() -> None:
+    """embed_query result AND embed_model_name must flow into QuestionText before searchSemantic."""
+    embedded_vector = [0.5, 0.6, 0.7]
+    embed_calls: List[str] = []
+
+    def embed_query(text: str) -> list:
+        embed_calls.append(text)
+        return embedded_vector
+
+    store = FakeStore(semantic_docs=[_StubDoc(page_content='result', score=0.9, metadata=_StubDocMetadata(objectId='r1'))])
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='ada-002'))
+
+    result = instance.search({'query': 'find me'})
+
+    assert result.get('success') is not False, f'Expected success but got: {result}'
+    assert len(store.semantic_calls) == 1
+    question, _ = store.semantic_calls[0]
+    assert question.embedding == embedded_vector
+    assert question.embedding_model == 'ada-002'
+    assert embed_calls == ['find me']
+
+
+def test_search_empty_query_returns_error_envelope() -> None:
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='vdb'))
-    try:
-        instance.search({'query': ''})
-    except ValueError as e:
-        assert 'non-empty' in str(e)
-    else:
-        raise AssertionError('Expected ValueError for empty query')
+    result = instance.search({'query': ''})
+    assert result.get('success') is False
+    assert 'error' in result
+    assert 'non-empty' in result['error'] or 'query' in result['error'].lower()
 
 
 def test_search_falls_back_to_keyword_on_semantic_exception() -> None:
+    """When embed_query IS bound but searchSemantic raises, fall back to keyword search."""
     _fresh_warnings()
     store = FakeStore(keyword_docs=[_StubDoc(page_content='kw', score=0.5, metadata=_StubDocMetadata(objectId='d1'))])
     store.raise_semantic = RuntimeError('index missing')
@@ -502,7 +528,11 @@ def test_search_raises_when_store_missing() -> None:
 
 def test_upsert_adds_chunks() -> None:
     store = FakeStore()
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
+
+    def embed_query(text: str) -> list:
+        return [0.1, 0.2, 0.3]
+
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model'))
 
     result = instance.upsert(
         {
@@ -524,7 +554,11 @@ def test_upsert_adds_chunks() -> None:
 
 def test_upsert_skips_invalid_entries() -> None:
     store = FakeStore()
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
+
+    def embed_query(text: str) -> list:
+        return [0.1, 0.2, 0.3]
+
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model'))
 
     result = instance.upsert(
         {
@@ -541,14 +575,108 @@ def test_upsert_skips_invalid_entries() -> None:
     assert result['skipped'] == 3
 
 
+def test_upsert_auto_embeds_when_iglobal_has_embedder() -> None:
+    """When IGlobal.embed_query is bound and no per-doc embedding is supplied,
+    the mixin must compute and set Doc.embedding + Doc.embedding_model before addChunks.
+    """
+    store = FakeStore()
+    embed_calls: List[str] = []
+
+    def embed_query(text: str) -> list:
+        embed_calls.append(text)
+        return [0.9, 0.8, 0.7]
+
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='my-model'))
+
+    result = instance.upsert({'documents': [{'content': 'hello world', 'object_id': 'doc-1'}]})
+
+    assert result.get('success') is True
+    assert len(store.added_chunks) == 1
+    chunks = store.added_chunks[0]
+    assert len(chunks) == 1
+    doc = chunks[0]
+    assert doc.embedding == [0.9, 0.8, 0.7], f'Expected embedding to be set, got {doc.embedding}'
+    assert doc.embedding_model == 'my-model', f'Expected embedding_model to be set, got {doc.embedding_model}'
+    assert embed_calls == ['hello world']
+
+
+def test_upsert_uses_caller_supplied_embedding_and_model() -> None:
+    """When the caller passes embedding + embedding_model per-doc, those values must be
+    used verbatim and embed_query must NOT be called.
+    """
+    store = FakeStore()
+    embed_calls: List[str] = []
+
+    def embed_query(text: str) -> list:
+        embed_calls.append(text)
+        return [0.0]  # should never be reached
+
+    caller_vector = [1.0, 2.0, 3.0]
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='iglobal-model'))
+
+    result = instance.upsert(
+        {
+            'documents': [
+                {
+                    'content': 'pre-embedded text',
+                    'object_id': 'doc-2',
+                    'embedding': caller_vector,
+                    'embedding_model': 'caller-model',
+                }
+            ]
+        }
+    )
+
+    assert result.get('success') is True
+    assert embed_calls == [], 'embed_query must not be called when caller supplies embedding'
+    chunks = store.added_chunks[0]
+    doc = chunks[0]
+    assert doc.embedding == caller_vector
+    assert doc.embedding_model == 'caller-model'
+
+
+def test_upsert_returns_error_envelope_when_no_embedder_and_no_caller_vector() -> None:
+    """No IGlobal.embed_query and no per-doc embedding → error envelope, no addChunks call."""
+    store = FakeStore()
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
+
+    result = instance.upsert({'documents': [{'content': 'some text', 'object_id': 'doc-3'}]})
+
+    assert result.get('success') is False
+    assert 'error' in result
+    assert 'embed' in result['error'].lower() or 'embedding' in result['error'].lower()
+    assert store.added_chunks == [], 'addChunks must not be called when embedder is missing'
+
+
+def test_upsert_returns_error_envelope_when_caller_supplies_only_embedding_no_model() -> None:
+    """Caller provides embedding but omits embedding_model → error envelope."""
+    store = FakeStore()
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
+
+    result = instance.upsert(
+        {
+            'documents': [
+                {
+                    'content': 'text',
+                    'object_id': 'doc-4',
+                    'embedding': [0.1, 0.2],
+                    # intentionally no 'embedding_model'
+                }
+            ]
+        }
+    )
+
+    assert result.get('success') is False
+    assert 'error' in result
+    assert store.added_chunks == []
+
+
 def test_upsert_requires_documents() -> None:
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='vdb'))
-    try:
-        instance.upsert({'documents': []})
-    except ValueError as e:
-        assert 'non-empty' in str(e) or 'documents' in str(e)
-    else:
-        raise AssertionError('Expected ValueError on empty documents')
+    result = instance.upsert({'documents': []})
+    # Must be an error envelope (success=False) rather than raising ValueError
+    assert result.get('success') is False
+    assert 'error' in result
 
 
 def test_delete_calls_store_remove() -> None:
@@ -572,18 +700,22 @@ def test_delete_strips_whitespace_and_drops_empty() -> None:
 
 def test_delete_requires_object_ids() -> None:
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='vdb'))
-    try:
-        instance.delete({'object_ids': []})
-    except ValueError as e:
-        assert 'object_ids' in str(e)
-    else:
-        raise AssertionError('Expected ValueError on empty object_ids')
+    result = instance.delete({'object_ids': []})
+    # Must be an error envelope (success=False) rather than raising ValueError
+    assert result.get('success') is False
+    assert 'error' in result
 
 
 def test_dispatch_via_namespaced_name() -> None:
     """End-to-end: _collect_tool_methods -> lookup -> invoke via namespaced key."""
-    store = FakeStore(keyword_docs=[_StubDoc(page_content='hit', score=1.0, metadata=_StubDocMetadata(objectId='o1'))])
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='pinecone'))
+    embed_calls: List[str] = []
+
+    def embed_query(text: str) -> list:
+        embed_calls.append(text)
+        return [1.0, 0.0]
+
+    store = FakeStore(semantic_docs=[_StubDoc(page_content='hit', score=1.0, metadata=_StubDocMetadata(objectId='o1'))])
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='pinecone', embed_query=embed_query, embed_model_name='test'))
 
     methods = instance._collect_tool_methods()
     assert 'pinecone.search' in methods
