@@ -74,6 +74,39 @@ class IGlobal(IGlobalTransform):
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
 
+            # Wire an embedder for the control-plane tool path (search/upsert).
+            # Mirrors autopipe pattern: only instantiate when embedding config present.
+            self._tool_embedding = None
+            self.embed_query = None
+            self.embed_model_name = None
+
+            try:
+                embed_provider, embed_config = Config.getMultiProviderConfig('embedding', connConfig)
+            except Exception:
+                embed_provider, embed_config = None, None
+
+            if embed_provider:
+                try:
+                    from ai.common.embedding import getEmbedding as _getEmbedding
+
+                    self._tool_embedding = _getEmbedding(embed_provider, embed_config, bag)
+                except Exception as exc:  # noqa: BLE001
+                    warning(f'{self.glb.logicalType}: tool path embedder unavailable: {exc}')
+                    self._tool_embedding = None
+
+            if self._tool_embedding is not None:
+                from ai.common.schema import Question as _Question, QuestionText as _QuestionText
+
+                def _embed_query(text: str, _emb=self._tool_embedding) -> list:
+                    qt = _QuestionText(text=text)
+                    q = _Question()
+                    q.questions = [qt]
+                    _emb.encodeQuestion(q)
+                    return list(qt.embedding or [])
+
+                self.embed_query = _embed_query
+                self.embed_model_name = getattr(self._tool_embedding, '_model', None)
+
             # Get the info about our store
             collection = self.store.collection
             host = self.store.host
@@ -196,5 +229,7 @@ class IGlobal(IGlobalTransform):
         """
         Clean up global resources and release Pinecone store connection.
         """
-        # Release the index and embeddings
+        self._tool_embedding = None
+        self.embed_query = None
+        self.embed_model_name = None
         self.store = None

@@ -821,13 +821,15 @@ class VectorStoreToolMixin:
                     },
                 },
                 'total': {'type': 'integer'},
+                'success': {'type': 'boolean'},
+                'error': {'type': 'string'},
             },
         },
         description=(
-            'Search for documents in the vector database. If an embedding provider is bound to this '
-            'node (via IGlobal.embed_query), performs semantic similarity search. Otherwise falls back '
-            'to keyword (substring) matching — bind an upstream embedding module to enable semantic '
-            'ranking. Returns matching documents with their content, metadata, and scores.'
+            'Search for documents in the vector database. Requires an embedding provider bound to this '
+            'node (via IGlobal.embed_query) for semantic similarity search. Returns matching documents '
+            'with their content, metadata, and scores. Returns {"success": false, "error": "..."} on '
+            'failure (missing embedder, empty query, store error).'
         ),
     )
     def search(self, args):
@@ -837,7 +839,7 @@ class VectorStoreToolMixin:
 
         query_text = str(args.get('query', '')).strip()
         if not query_text:
-            raise ValueError('search requires a non-empty "query" string')
+            return {'success': False, 'error': 'search requires a non-empty "query" string'}
 
         default_top_k = self._vectordb_default_top_k()
         try:
@@ -862,39 +864,28 @@ class VectorStoreToolMixin:
         doc_filter.limit = top_k
         question = QuestionText(text=query_text)
 
-        # Attempt to compute an embedding for semantic search. The control-plane
+        # Require an embedding provider for semantic search. The control-plane
         # invoke() path does not flow through the data-lane embedding filters,
-        # so we give nodes a hook (``IGlobal.embed_query``) to plug in their
-        # own embedder. If unavailable, we do a keyword-only search — which is
-        # lossy but is always better than a hard failure on every call.
+        # so nodes must bind IGlobal.embed_query at startup.
         embedding = self._vectordb_compute_embedding(query_text)
-        if embedding is not None:
-            question.embedding = embedding
-            embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
-            if isinstance(embed_model, str) and embed_model:
-                question.embedding_model = embed_model
-            try:
-                docs: List[Doc] = store.searchSemantic(question, doc_filter)
-            except Exception as exc:
-                warning(f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.')
-                try:
-                    docs = store.searchKeyword(question, doc_filter)
-                except Exception as exc2:
-                    raise RuntimeError(f'vectordb tool: search failed: {exc2}') from exc2
-        else:
-            # No embedding available — use keyword search directly. Emit a
-            # one-shot warning (via a flag on self) so repeated tool calls
-            # don't spam the log.
-            if not getattr(self, '_vectordb_keyword_fallback_warned', False):
-                warning(f'vectordb tool: no embedding provider bound to IGlobal.embed_query; the {self._vectordb_server_name()}.search tool is running in keyword-only mode. To enable semantic similarity ranking, set IGlobal.embed_query to a callable(text) -> list[float].')
-                try:
-                    setattr(self, '_vectordb_keyword_fallback_warned', True)
-                except Exception:
-                    pass
+        if embedding is None:
+            return {
+                'success': False,
+                'error': (f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'),
+            }
+
+        question.embedding = embedding
+        embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
+        if isinstance(embed_model, str) and embed_model:
+            question.embedding_model = embed_model
+        try:
+            docs: List[Doc] = store.searchSemantic(question, doc_filter)
+        except Exception as exc:
+            warning(f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.')
             try:
                 docs = store.searchKeyword(question, doc_filter)
-            except Exception as exc:
-                raise RuntimeError(f'vectordb tool: keyword search failed: {exc}') from exc
+            except Exception as exc2:
+                return {'success': False, 'error': f'vectordb tool: search failed: {exc2}'}
 
         score_threshold = self._vectordb_score_threshold()
         results: List[Dict[str, Any]] = []
@@ -948,6 +939,15 @@ class VectorStoreToolMixin:
                                 'description': 'Optional metadata key-value pairs to store with the document.',
                                 'additionalProperties': True,
                             },
+                            'embedding': {
+                                'type': 'array',
+                                'items': {'type': 'number'},
+                                'description': 'Pre-computed embedding vector. If provided together with embedding_model, skips automatic embedding computation.',
+                            },
+                            'embedding_model': {
+                                'type': 'string',
+                                'description': 'Name of the model used to compute the supplied embedding vector.',
+                            },
                         },
                         'required': ['content', 'object_id'],
                     },
@@ -962,7 +962,13 @@ class VectorStoreToolMixin:
                 'skipped': {'type': 'integer'},
             },
         },
-        description='Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.',
+        description=(
+            'Add or update documents in the vector database. Each document requires content text and an '
+            'object ID for deduplication. Embeddings are computed automatically when an embedding provider '
+            'is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
+            '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
+            'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
+        ),
     )
     def upsert(self, args):
         """Add or update documents in the vector database."""
@@ -971,7 +977,9 @@ class VectorStoreToolMixin:
 
         raw_docs = args.get('documents', [])
         if not isinstance(raw_docs, list) or not raw_docs:
-            raise ValueError('upsert requires a non-empty "documents" array')
+            return {'success': False, 'error': 'upsert requires a non-empty "documents" array'}
+
+        embed_model_name = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
 
         docs: List[Doc] = []
         skipped = 0
@@ -997,15 +1005,31 @@ class VectorStoreToolMixin:
                 page_content=content,
                 metadata=metadata,
             )
+
+            supplied_embedding = raw.get('embedding')
+            supplied_model = raw.get('embedding_model')
+            if supplied_embedding and supplied_model:
+                doc.embedding = list(supplied_embedding)
+                doc.embedding_model = str(supplied_model)
+            else:
+                computed = self._vectordb_compute_embedding(content)
+                if computed is None:
+                    return {
+                        'success': False,
+                        'error': (f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'),
+                    }
+                doc.embedding = computed
+                doc.embedding_model = embed_model_name or ''
+
             docs.append(doc)
 
         if not docs:
-            raise ValueError('upsert: no valid documents provided')
+            return {'success': False, 'error': 'upsert: no valid documents provided'}
 
-        if any(not getattr(doc, 'embedding', None) for doc in docs):
-            warning('vectordb tool: upserting documents without pre-computed embeddings. Ensure the backend is configured to generate embeddings on ingest, or results may not be searchable via semantic search.')
-
-        store.addChunks(docs)
+        try:
+            store.addChunks(docs)
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
         return {'success': True, 'count': len(docs), 'skipped': skipped}
 
     @tool_function(
@@ -1036,11 +1060,11 @@ class VectorStoreToolMixin:
 
         object_ids = args.get('object_ids', [])
         if not isinstance(object_ids, list) or not object_ids:
-            raise ValueError('delete requires a non-empty "object_ids" array')
+            return {'success': False, 'error': 'delete requires a non-empty "object_ids" array'}
 
         clean_ids = [str(oid).strip() for oid in object_ids if str(oid).strip()]
         if not clean_ids:
-            raise ValueError('delete: no valid object IDs provided')
+            return {'success': False, 'error': 'delete: no valid object IDs provided'}
 
         store.remove(clean_ids)
         return {'success': True, 'deleted_count': len(clean_ids)}
