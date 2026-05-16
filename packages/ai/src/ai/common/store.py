@@ -871,7 +871,9 @@ class VectorStoreToolMixin:
         if embedding is None:
             return {
                 'success': False,
-                'error': (f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'),
+                'error': (
+                    f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'
+                ),
             }
 
         question.embedding = embedding
@@ -881,7 +883,9 @@ class VectorStoreToolMixin:
         try:
             docs: List[Doc] = store.searchSemantic(question, doc_filter)
         except Exception as exc:
-            warning(f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.')
+            warning(
+                f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.'
+            )
             try:
                 docs = store.searchKeyword(question, doc_filter)
             except Exception as exc2:
@@ -1016,7 +1020,9 @@ class VectorStoreToolMixin:
                 if computed is None:
                     return {
                         'success': False,
-                        'error': (f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'),
+                        'error': (
+                            f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'
+                        ),
                     }
                 doc.embedding = computed
                 doc.embedding_model = embed_model_name or ''
