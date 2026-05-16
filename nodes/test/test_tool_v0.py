@@ -89,6 +89,14 @@ def _load_iinstance():
 
 
 _mod = _load_iinstance()
+# Force the loaded module's `warning` reference to our stub. Required because
+# `from rocketlib import warning` binds the name at import time, so when the
+# real rocketlib is already in sys.modules (e.g. on CI inside the engine
+# pytest runner) our sys.modules stub is ignored and _mod.warning points at
+# the engine's logger. Overriding the attribute on the loaded module patches
+# the actual reference used by _normalize_tool_input.
+_mod.warning = _stub_warning
+
 _normalize_tool_input = _mod._normalize_tool_input
 _extract_code = _mod._extract_code
 IInstance = _mod.IInstance
