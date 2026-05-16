@@ -431,9 +431,10 @@ class TaskConn(
         if self._account_info.auth.startswith('tk_'):
             return self._account_info.auth
 
-        # Extract token from arguments
+        # Extract token from arguments, falling back to request root
+        # for backward compatibility with older clients.
         args = request.get('arguments') or {}
-        token = args.get('token', None)
+        token = args.get('token') or request.get('token')
 
         # Permission checks are deferred to get_task() / callers where the
         # task's team is known, so we can resolve against the correct team.
