@@ -237,7 +237,9 @@ _normalize_vectordb_tool_input = _store_module._normalize_vectordb_tool_input
 class FakeStore:
     """Captures calls to searchSemantic/searchKeyword/addChunks/remove."""
 
-    def __init__(self, semantic_docs: Optional[List[_StubDoc]] = None, keyword_docs: Optional[List[_StubDoc]] = None) -> None:
+    def __init__(
+        self, semantic_docs: Optional[List[_StubDoc]] = None, keyword_docs: Optional[List[_StubDoc]] = None
+    ) -> None:
         """Seed the fake store with optional pre-canned result lists."""
         self.semantic_docs = semantic_docs if semantic_docs is not None else []
         self.keyword_docs = keyword_docs if keyword_docs is not None else []
@@ -457,7 +459,9 @@ def test_search_uses_semantic_when_embed_query_present() -> None:
         return [0.1, 0.2, 0.3]
 
     store = FakeStore(semantic_docs=[_StubDoc(page_content='dog', score=0.8, metadata=_StubDocMetadata(objectId='d2'))])
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model')
+    )
 
     result = instance.search({'query': 'dog'})
 
@@ -480,8 +484,12 @@ def test_search_uses_iglobal_embed_query_when_bound() -> None:
         embed_calls.append(text)
         return embedded_vector
 
-    store = FakeStore(semantic_docs=[_StubDoc(page_content='result', score=0.9, metadata=_StubDocMetadata(objectId='r1'))])
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='ada-002'))
+    store = FakeStore(
+        semantic_docs=[_StubDoc(page_content='result', score=0.9, metadata=_StubDocMetadata(objectId='r1'))]
+    )
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='ada-002')
+    )
 
     result = instance.search({'query': 'find me'})
 
@@ -532,7 +540,9 @@ def test_upsert_adds_chunks() -> None:
     def embed_query(text: str) -> list:
         return [0.1, 0.2, 0.3]
 
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model')
+    )
 
     result = instance.upsert(
         {
@@ -558,7 +568,9 @@ def test_upsert_skips_invalid_entries() -> None:
     def embed_query(text: str) -> list:
         return [0.1, 0.2, 0.3]
 
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='test-model')
+    )
 
     result = instance.upsert(
         {
@@ -586,7 +598,9 @@ def test_upsert_auto_embeds_when_iglobal_has_embedder() -> None:
         embed_calls.append(text)
         return [0.9, 0.8, 0.7]
 
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='my-model'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='my-model')
+    )
 
     result = instance.upsert({'documents': [{'content': 'hello world', 'object_id': 'doc-1'}]})
 
@@ -612,7 +626,9 @@ def test_upsert_uses_caller_supplied_embedding_and_model() -> None:
         return [0.0]  # should never be reached
 
     caller_vector = [1.0, 2.0, 3.0]
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='iglobal-model'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='iglobal-model')
+    )
 
     result = instance.upsert(
         {
@@ -718,7 +734,9 @@ def test_upsert_returns_envelope_on_store_addchunks_exception() -> None:
     def embed_query(text: str) -> list:
         return [0.1, 0.2]
 
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='text-3'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='text-3')
+    )
 
     result = instance.upsert({'documents': [{'content': 'some text', 'object_id': 'doc-5'}]})
 
@@ -735,7 +753,9 @@ def test_dispatch_via_namespaced_name() -> None:
         return [1.0, 0.0]
 
     store = FakeStore(semantic_docs=[_StubDoc(page_content='hit', score=1.0, metadata=_StubDocMetadata(objectId='o1'))])
-    instance = FakeIInstance(FakeIGlobal(store=store, server_name='pinecone', embed_query=embed_query, embed_model_name='test'))
+    instance = FakeIInstance(
+        FakeIGlobal(store=store, server_name='pinecone', embed_query=embed_query, embed_model_name='test')
+    )
 
     methods = instance._collect_tool_methods()
     assert 'pinecone.search' in methods
