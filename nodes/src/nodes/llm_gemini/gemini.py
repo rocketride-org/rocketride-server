@@ -66,13 +66,22 @@ class Chat(ChatBase):
         config = Config.getNodeConfig(provider, connConfig)
         api_key = config.get('apikey')
 
-        # API key validation logic
-        if not api_key or not api_key.startswith('AI'):
-            raise ValueError('Invalid Gemini API key format... Please check your API key.')
+        # The C++ engine derives the profile sub-key as the segment after the first underscore
+        # of the profile name (e.g. "gemini-2_5-pro" → stored as "5-pro"). Try that fallback.
+        # IJson.get() requires a default argument — always pass one.
+        if not api_key and hasattr(connConfig, 'get'):
+            _profile = connConfig.get('profile', None) or ''
+            if _profile and '_' in _profile:
+                _sub = connConfig.get(_profile.split('_', 1)[1], None)
+                if _sub and hasattr(_sub, 'get'):
+                    api_key = _sub.get('apikey', None) or ''
+
+        if not api_key:
+            raise ValueError('Please enter your Gemini API key.')
 
         self._modelTotalTokens = config.get('modelTotalTokens', 8192)
 
-        # Initialize the Google GenAI client
+        # Initialize the Google GenAI client — key format validation is delegated to the library
         self._client = genai.Client(api_key=api_key)
 
         # Store chat instance in shared bag for access by other components

@@ -47,8 +47,8 @@ How Mock Loading Works:
 
 Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
 ------------------------------------------------------------------------------
-- LLM providers: langchain_openai, langchain_anthropic, langchain_google_vertexai,
-  langchain_aws, langchain_xai (Chat* classes return stub responses)
+- LLM providers: langchain_openai, langchain_anthropic, langchain_aws, langchain_xai
+  (Chat* classes return stub responses)
 - LLM validateConfig: openai, anthropic (direct SDK - no real API calls)
 - Vector stores: qdrant_client, weaviate, psycopg2, pgvector, pinecone,
   chromadb, pymilvus, astrapy, elasticsearch, opensearchpy (index_search)
@@ -57,7 +57,7 @@ LLM credential placeholders (pipeline injects when ROCKETRIDE_MOCK): anthropic, 
 openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock.
 
 Not mocked (native SDK; would need mocks for full test): Mistral SDK, Google genai,
-IBM Watson. Vertex/Bedrock use langchain mocks + credential placeholders.
+IBM Watson. Bedrock uses langchain mocks + credential placeholders.
 Not mocked (tests use requires= or skip): OCR (img2table/opencv), embedding
 transformer (sentence-transformers), NER (transformers), ibm_watsonx_ai.
 
@@ -71,7 +71,6 @@ Each mock is a directory matching the library's package name:
         anthropic/               <- Mock for anthropic SDK (validateConfig)
         langchain_openai/        <- Mock for ChatOpenAI, OpenAIEmbeddings
         langchain_anthropic/     <- Mock for ChatAnthropic
-        langchain_google_vertexai/
         langchain_aws/
         langchain_xai/
         qdrant_client/           <- Mock for qdrant_client library

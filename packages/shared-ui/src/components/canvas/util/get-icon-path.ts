@@ -93,7 +93,6 @@ import thumbnailIcon from '../../../assets/nodes/thumbnail.svg';
 import unknownIcon from '../../../assets/nodes/unknown.svg';
 import utilInfrastructureIcon from '../../../assets/nodes/util-infrastructure.svg';
 import utilTextIcon from '../../../assets/nodes/util-text.svg';
-import vertexIcon from '../../../assets/nodes/vertex.svg';
 import weaviateIcon from '../../../assets/nodes/weaviate.svg';
 import webhookIcon from '../../../assets/nodes/webhook.svg';
 import slackIcon from '../../../assets/nodes/slack.svg';
@@ -194,7 +193,6 @@ const iconMap: Record<string, string> = {
 	unknown: unknownIcon,
 	'util-infrastructure': utilInfrastructureIcon,
 	'util-text': utilTextIcon,
-	vertex: vertexIcon,
 	weaviate: weaviateIcon,
 	webhook: webhookIcon,
 	xai: xaiIcon,
