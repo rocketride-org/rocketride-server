@@ -706,6 +706,26 @@ def test_delete_requires_object_ids() -> None:
     assert 'error' in result
 
 
+def test_upsert_returns_envelope_on_store_addchunks_exception() -> None:
+    """If addChunks raises (e.g. model-mismatch), upsert must catch it and return an error envelope."""
+
+    class RaisingStore(FakeStore):
+        def addChunks(self, chunks: list) -> None:
+            raise RuntimeError('model mismatch: collection uses ada-002 but doc encoded with text-3')
+
+    store = RaisingStore()
+
+    def embed_query(text: str) -> list:
+        return [0.1, 0.2]
+
+    instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb', embed_query=embed_query, embed_model_name='text-3'))
+
+    result = instance.upsert({'documents': [{'content': 'some text', 'object_id': 'doc-5'}]})
+
+    assert result.get('success') is False
+    assert 'error' in result
+
+
 def test_dispatch_via_namespaced_name() -> None:
     """End-to-end: _collect_tool_methods -> lookup -> invoke via namespaced key."""
     embed_calls: List[str] = []
