@@ -91,29 +91,18 @@ const App: React.FC = () => {
 			uri = window.location.origin;
 		}
 
-		// Try to get the token from session storage (skip in VSCode webview - shared storage would mix auth across tabs)
-		if (!isVSCode) {
+		// URL param always wins — it carries the freshly-minted pk for the
+		// current task and must not be shadowed by a stale sessionStorage value
+		// left over from a previous task on the same origin.
+		token = urlParams.get('auth') || '';
+		if (token) {
+			window.history.replaceState({}, '', window.location.pathname);
+		} else if (!isVSCode) {
+			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 			token = sessionStorage.getItem('auth') || '';
 		}
-
-		// If we don't have a token yet
-		if (!token) {
-			// See if we can get from the .env if we are in dev mode
-			if (API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
-				token = API_CONFIG.ROCKETRIDE_APIKEY;
-			}
-		}
-
-		// If still do not have a token...
-		if (!token) {
-			// It has to be in the query string
-			token = urlParams.get('auth') || '';
-
-			// If we got it from the query string...
-			if (token) {
-				// Remove it so the user doesn't see it in the URL
-				window.history.replaceState({}, '', window.location.pathname);
-			}
+		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
+			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
 		// Check these
