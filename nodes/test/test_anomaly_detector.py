@@ -6,13 +6,8 @@ Covers:
   - Early-warmup rolling_n uses len(window)//2, not window_size//2
 """
 
-import math
-import sys
 import os
-
-import pytest
-
-# Make the node importable without installing rocketlib by stubbing it out
+import sys
 import types
 
 rocketlib = types.ModuleType('rocketlib')
@@ -63,13 +58,17 @@ class TestRollingAvgBoundaries:
     def test_40_pct_deviation_is_warning_boundary(self):
         """A value at exactly +40% deviation must classify as 'warning' (boundary)."""
         result = self.detector.detect(140.0)
-        assert result['severity'] == 'warning', f"Expected 'warning', got {result['severity']} (score={result['score']})"
+        assert result['severity'] == 'warning', (
+            f"Expected 'warning', got {result['severity']} (score={result['score']})"
+        )
         assert result['is_anomalous'] is True
 
     def test_60_pct_deviation_is_critical(self):
         """A value at +60% deviation must classify as 'critical'."""
         result = self.detector.detect(160.0)
-        assert result['severity'] == 'critical', f"Expected 'critical', got {result['severity']} (score={result['score']})"
+        assert result['severity'] == 'critical', (
+            f"Expected 'critical', got {result['severity']} (score={result['score']})"
+        )
         assert result['is_anomalous'] is True
 
 
@@ -91,7 +90,7 @@ class TestNonFiniteInputs:
         before = self._snapshot()
         self.detector.detect(float('nan'))
         after = self._snapshot()
-        assert before == after, f"Window mutated by NaN: {before} → {after}"
+        assert before == after, f'Window mutated by NaN: {before} -> {after}'
 
     def test_pos_inf_returns_not_anomalous(self):
         result = self.detector.detect(float('inf'))
@@ -101,7 +100,7 @@ class TestNonFiniteInputs:
         before = self._snapshot()
         self.detector.detect(float('inf'))
         after = self._snapshot()
-        assert before == after, f"Window mutated by +inf: {before} → {after}"
+        assert before == after, f'Window mutated by +inf: {before} -> {after}'
 
     def test_neg_inf_returns_not_anomalous(self):
         result = self.detector.detect(float('-inf'))
@@ -111,7 +110,7 @@ class TestNonFiniteInputs:
         before = self._snapshot()
         self.detector.detect(float('-inf'))
         after = self._snapshot()
-        assert before == after, f"Window mutated by -inf: {before} → {after}"
+        assert before == after, f'Window mutated by -inf: {before} -> {after}'
 
 
 class TestEarlyWarmupRollingN:
@@ -138,9 +137,9 @@ class TestEarlyWarmupRollingN:
         rolling_n_reported = int(rolling_n_str[0].split('=')[1])
 
         assert rolling_n_reported == 2, (
-            f"Expected rolling_n=2 (len(window)//2 with 4-item window), "
-            f"got rolling_n={rolling_n_reported}. "
-            f"If rolling_n=50, the implementation used window_size//2 instead of len(window)//2."
+            f'Expected rolling_n=2 (len(window)//2 with 4-item window), '
+            f'got rolling_n={rolling_n_reported}. '
+            f'If rolling_n=50, the implementation used window_size//2 instead of len(window)//2.'
         )
 
     def test_rolling_n_recent_values_are_last_two(self):
@@ -156,5 +155,5 @@ class TestEarlyWarmupRollingN:
         result = detector.detect(70.0)
         assert result['severity'] == 'critical', (
             f"Expected 'critical' (rolling from last 2 values, mean=35), "
-            f"got {result['severity']} (score={result['score']}, details={result['details']})"
+            f'got {result["severity"]} (score={result["score"]}, details={result["details"]})'
         )
