@@ -151,8 +151,9 @@ class AnomalyDetector:
 
         Computes a simple moving average from the most recent N values (where
         N defaults to half the window size) and measures how far the new value
-        deviates from that local mean as a percentage. The percentage is then
-        compared against the sensitivity threshold to classify severity.
+        deviates from that local mean as a percentage. The percentage is divided
+        by (sensitivity * 10) to produce a normalized score compared against
+        warning_threshold / critical_threshold to classify severity.
 
         Unlike Z-Score, this method does NOT normalize by standard deviation.
         It uses relative percentage deviation, making it more intuitive for
@@ -172,9 +173,9 @@ class AnomalyDetector:
         # Percentage deviation from the rolling mean
         pct_deviation = abs(value - local_mean) / abs(local_mean) * 100.0
 
-        # Map percentage deviation to score using sensitivity as the
-        # percentage threshold (e.g., sensitivity=2.0 means thresholds at
-        # warning_threshold * 10% and critical_threshold * 10%)
+        # Normalize pct_deviation into a score: score = pct_deviation / (sensitivity * 10).
+        # With sensitivity=2.0, warning_threshold=2.0, critical_threshold=3.0 the defaults
+        # fire at pct_deviation >= 40% (warning) and >= 60% (critical).
         score = pct_deviation / (self.sensitivity * 10.0) if self.sensitivity > 0 else 0.0
         severity = self._classify_severity(score)
 
