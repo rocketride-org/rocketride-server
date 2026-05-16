@@ -97,7 +97,7 @@ class IInstance(IInstanceBase):
         try:
             response = self._call_v0_api(messages, model)
             code, message_id = _extract_code(response)
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
             return {'success': False, 'error': f'v0 API call failed: {e}'}
 
         if not code:
@@ -180,7 +180,7 @@ class IInstance(IInstanceBase):
         try:
             response = self._call_v0_api(messages, model, parent_message_id=message_id)
             code, new_message_id = _extract_code(response)
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
             return {'success': False, 'error': f'v0 API call failed: {e}'}
 
         if not code:
