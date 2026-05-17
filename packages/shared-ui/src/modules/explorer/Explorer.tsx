@@ -435,10 +435,10 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 		(type: 'file' | 'folder') => {
 			let parentDir = '';
 			if (selectedPath) {
-				const isDir = entries.some((e) => e.type === 'dir' && e.path === selectedPath);
-				if (isDir) {
+				const selectedEntry = entries.find((e) => e.path === selectedPath);
+				if (selectedEntry?.type === 'dir') {
 					parentDir = selectedPath;
-				} else {
+				} else if (selectedEntry) {
 					parentDir = selectedPath.includes('/') ? selectedPath.substring(0, selectedPath.lastIndexOf('/')) : '';
 				}
 			}
