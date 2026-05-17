@@ -435,10 +435,10 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 		(type: 'file' | 'folder') => {
 			let parentDir = '';
 			if (selectedPath) {
-				const isDir = entries.some((e) => e.type === 'dir' && e.path === selectedPath);
-				if (isDir) {
+				const selectedEntry = entries.find((e) => e.path === selectedPath);
+				if (selectedEntry?.type === 'dir') {
 					parentDir = selectedPath;
-				} else {
+				} else if (selectedEntry) {
 					parentDir = selectedPath.includes('/') ? selectedPath.substring(0, selectedPath.lastIndexOf('/')) : '';
 				}
 			}
@@ -742,9 +742,14 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 			</div>
 
 			{/* ── File tree ───────────────────────────────────────────── */}
+			{/* When the tree is empty we still need to render the inline create
+			    input if the user just clicked +File / +Folder at the root, since
+			    that input lives inside renderChildren(). */}
 			<div style={S.treeList}>
-				{entries.length === 0 && <div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>}
-				{entries.length > 0 && renderChildren()}
+				{entries.length === 0 && !(createState && createState.parentDir === '') && (
+					<div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>
+				)}
+				{(entries.length > 0 || (createState && createState.parentDir === '')) && renderChildren()}
 			</div>
 		</div>
 	);
