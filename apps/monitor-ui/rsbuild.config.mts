@@ -1,13 +1,15 @@
 // =============================================================================
-// WORLD-UI — Module Federation Remote (Hello World demo app)
+// MONITOR-UI — Module Federation Remote (Server Monitor app)
 // =============================================================================
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
 
@@ -38,11 +40,8 @@ export default defineConfig(() => {
 				},
 			}),
 		],
-		// No resolve aliases — all shared modules resolve through node_modules
-		// and MF provides the host's singleton at runtime.
-		resolve: {
-		},
-		server: { port: 3014 },
+		resolve: {},
+		server: { port: 3016 },
 		source: {
 			entry: {
 				index: './src/index.ts',
@@ -50,7 +49,7 @@ export default defineConfig(() => {
 		},
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'world-ui'),
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'monitor-ui'),
 			},
 			assetPrefix: 'auto',
 			cleanDistPath: true,

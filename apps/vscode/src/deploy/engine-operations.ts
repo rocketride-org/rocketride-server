@@ -522,12 +522,15 @@ export class EngineOperations {
 	// =========================================================================
 
 	private static readonly CONFIG_DIR = path.join(process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')), 'RocketRide');
-	private static readonly SERVICE_CONFIG_PATH = path.join(EngineOperations.CONFIG_DIR, 'config.json');
+	private static readonly SERVICE_CONFIG_PATH = path.join(EngineOperations.CONFIG_DIR, 'service-config.json');
+	/** @deprecated Legacy path — migrated to service-config.json on next install/update. */
+	private static readonly LEGACY_SERVICE_CONFIG_PATH = path.join(EngineOperations.CONFIG_DIR, 'config.json');
 	private static readonly DOCKER_CONFIG_PATH = path.join(EngineOperations.CONFIG_DIR, 'docker-config.json');
 
 	private writeServiceConfig(info: { versionSpec: string; version: string; publishedAt: string }): void {
 		fs.mkdirSync(EngineOperations.CONFIG_DIR, { recursive: true });
 		fs.writeFileSync(EngineOperations.SERVICE_CONFIG_PATH, JSON.stringify({ ...info, installedAt: new Date().toISOString() }, null, 2), 'utf8');
+		this.deleteLegacyServiceConfig();
 	}
 
 	private readServiceConfig(): { versionSpec: string; version: string; publishedAt: string } | null {
@@ -535,10 +538,23 @@ export class EngineOperations {
 			if (fs.existsSync(EngineOperations.SERVICE_CONFIG_PATH)) {
 				return JSON.parse(fs.readFileSync(EngineOperations.SERVICE_CONFIG_PATH, 'utf8'));
 			}
+			if (fs.existsSync(EngineOperations.LEGACY_SERVICE_CONFIG_PATH)) {
+				return JSON.parse(fs.readFileSync(EngineOperations.LEGACY_SERVICE_CONFIG_PATH, 'utf8'));
+			}
 		} catch {
 			/* corrupt */
 		}
 		return null;
+	}
+
+	private deleteLegacyServiceConfig(): void {
+		try {
+			if (fs.existsSync(EngineOperations.LEGACY_SERVICE_CONFIG_PATH)) {
+				fs.unlinkSync(EngineOperations.LEGACY_SERVICE_CONFIG_PATH);
+			}
+		} catch {
+			/* best effort */
+		}
 	}
 
 	private writeDockerConfig(info: { versionSpec: string; imageTag: string }): void {
