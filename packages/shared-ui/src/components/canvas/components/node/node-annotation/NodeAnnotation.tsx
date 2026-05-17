@@ -46,6 +46,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { INodeData, INodeType } from '../../../types';
 import ConditionalRender from '../../ConditionalRender';
 import NodeHeader from '../node-component/header';
+import { useFlow } from '../../../hooks';
 
 // =============================================================================
 // Styles
@@ -167,6 +168,8 @@ interface INodeAnnotationProps {
  * @returns The rendered annotation node.
  */
 export default function NodeAnnotation({ id, data, type, parentId, selected }: INodeAnnotationProps): ReactElement {
+	const { setEditingNodeId } = useFlow();
+
 	// Annotation-specific display fields from node config
 	const bgColor = (data.config?.bgColor as string) || DEFAULT_BG_COLOR;
 	const fgColor = (data.config?.fgColor as string) || DEFAULT_FG_COLOR;
@@ -191,6 +194,10 @@ export default function NodeAnnotation({ id, data, type, parentId, selected }: I
 					color: fgColor,
 				}}
 				className="nowheel rr-annotation-root"
+				onDoubleClick={(e) => {
+					e.stopPropagation();
+					setEditingNodeId(id);
+				}}
 			>
 				{/* Header — hidden until hover via CSS */}
 				<div style={{ ...styles.header, color: 'var(--rr-text-primary)' }} className="annotation-header">
@@ -199,7 +206,7 @@ export default function NodeAnnotation({ id, data, type, parentId, selected }: I
 
 				{/* Content area — rendered markdown */}
 				<div className="rr-annotation-content">
-					<ConditionalRender condition={content} fallback={<span style={styles.placeholder}>Double-click gear to add content...</span>}>
+					<ConditionalRender condition={content} fallback={<span style={styles.placeholder}>Double-click to add content...</span>}>
 						<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
 							{content}
 						</ReactMarkdown>
