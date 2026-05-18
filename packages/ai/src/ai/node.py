@@ -234,13 +234,17 @@ def run():
     # engine.exe spawns this file as a script, so Python loads it as
     # `sys.modules['__main__']`. The `global shared_web_server` above
     # therefore writes to `__main__.shared_web_server`. When source nodes
-    # later do `from ai import node as ai_node`, Python imports the file
-    # AGAIN as `sys.modules['ai.node']` — a SEPARATE module with
-    # `shared_web_server = None`. They'd see None, fall back to legacy,
-    # and the data plane would be torn between two WebServers.
+    # later do `from ai import node as ai_node`, Python would otherwise
+    # import the file AGAIN as `sys.modules['ai.node']` — a SEPARATE module
+    # that would re-run all top-level code, INCLUDING creating a second
+    # `server_loop` daemon thread (see `_create_loop()` at module top).
+    # Source nodes would then see `ai.node.server_loop` (loop B) while the
+    # shared `WebServer.serve()` was scheduled on `__main__.server_loop`
+    # (loop A) — two unaware event loops, broken cross-thread scheduling.
     #
-    # Mirror the assignment into `ai.node` so the standard import path
-    # used by source nodes returns the live value.
+    # Aliasing `ai.node` to this very module object via `setdefault` makes
+    # both names resolve to the same module: same `server_loop`, same
+    # `shared_web_server`, no second module evaluation.
     #
     # Thread-safety: this runs ONCE on the main thread before
     # `processArguments` starts the C engine (which is what eventually
@@ -250,9 +254,7 @@ def run():
     try:
         import sys as _sys
 
-        _ai_node_mod = _sys.modules.get('ai.node')
-        if _ai_node_mod is None:
-            import ai.node as _ai_node_mod  # type: ignore
+        _ai_node_mod = _sys.modules.setdefault('ai.node', _sys.modules[__name__])
         _ai_node_mod.shared_web_server = shared_web_server
     except Exception as e:
         debug(f'failed to mirror shared_web_server into ai.node: {e}')
