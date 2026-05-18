@@ -52,6 +52,7 @@
 			}
 		},
 		"overrides": {
+			"@remix-run/router": ">=1.23.2 <2",
 			"cross-spawn": ">=6.0.6",
 			"dompurify": ">=3.4.0 <3.5.0",
 			"fast-uri": ">=3.1.2 <4",
@@ -69,6 +70,7 @@
 			"postcss": ">=8.4.31",
 			"protobufjs": ">=7.5.5 <8",
 			"qs": ">=6.14.1",
+			"react-router": ">=6.30.2 <7",
 			"serialize-javascript": ">=7.0.5 <8",
 			"undici": ">=7.24.0 <8"
 		},
