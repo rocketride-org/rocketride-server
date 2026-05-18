@@ -101,7 +101,7 @@ class IEndpoint(IEndpointBase):
         # Config was already loaded in _run() (sync context) — use stored values
         if not self._bot_token:
             monitorStatus('Telegram Bot: missing bot token')
-            return
+            raise RuntimeError('Telegram Bot startup aborted: bot token not configured')
 
         import aiohttp
 
@@ -111,7 +111,7 @@ class IEndpoint(IEndpointBase):
             self._webhook_secret = secrets.token_hex(32)
             if not await self._setup_webhook():
                 monitorStatus('Telegram Bot: webhook setup failed')
-                return
+                raise RuntimeError('Telegram Bot startup aborted: webhook registration failed')
         else:
             await self._clear_webhook()
             self._poll_task = asyncio.create_task(self._poll_loop())
