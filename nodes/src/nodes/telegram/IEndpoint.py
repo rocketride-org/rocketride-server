@@ -656,6 +656,7 @@ class IEndpoint(IEndpointBase):
             startup_future.result(timeout=30)
         except Exception as e:
             debug(f'telegram _startup raised: {e}')
+            raise
 
         # Block scanObjects() until something signals shutdown. Today
         # nothing in the codebase sets this event in production — the
