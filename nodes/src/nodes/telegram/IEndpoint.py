@@ -22,7 +22,6 @@
 # =============================================================================
 
 import json
-import os
 import argparse
 import sys
 import asyncio
@@ -32,7 +31,6 @@ import uuid
 from typing import Any, Callable, Dict
 from urllib.parse import urlparse
 from requests.status_codes import codes as status_codes
-import aiohttp
 from fastapi.responses import JSONResponse
 
 from rocketlib import (
@@ -46,11 +44,6 @@ from rocketlib import (
     AVI_ACTION,
 )
 from ai.web import WebServer
-
-from depends import depends  # type: ignore
-
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
 
 
 class IEndpoint(IEndpointBase):
@@ -109,6 +102,8 @@ class IEndpoint(IEndpointBase):
         if not self._bot_token:
             monitorStatus('Telegram Bot: missing bot token')
             return
+
+        import aiohttp
 
         self._http_session = aiohttp.ClientSession()
 
@@ -234,6 +229,10 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
+        # `aiohttp` is installed lazily by `IGlobal.beginGlobal`; import it here
+        # rather than at module top so this file loads in clean environments.
+        import aiohttp
+
         offset = 0
         poll_count = 0
         while True:
