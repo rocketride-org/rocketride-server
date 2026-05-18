@@ -1,26 +1,4 @@
 #!/usr/bin/env python3
-# =============================================================================
-# MIT License
-# Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-# =============================================================================
 """
 new_node.py - RocketRide node scaffolding CLI
 =============================================
@@ -55,10 +33,12 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-NODES_ROOT = Path(__file__).parent / "nodes" / "src" / "nodes"
+# Script lives at contrib/node-scaffolder/new_node.py; traverse three levels
+# up (node-scaffolder/ -> contrib/ -> repo-root/) to reach the repository root.
+NODES_ROOT = Path(__file__).parent.parent.parent / "nodes" / "src" / "nodes"
 DOCS_URL = "https://docs.rocketride.org"
 LICENSE_YEAR = "2026"
-LICENSE_HOLDER = "Aparavi Software AG"
+LICENSE_HOLDER = "<INSERT_YOUR_LICENSE_HERE>"
 
 # Valid enum values sourced from corpus analysis of all existing nodes.
 VALID_CLASS_TYPES = {
@@ -129,29 +109,14 @@ _BASE_MAP: dict[str, tuple[str, str, list[str], list[str]]] = {
 
 
 def _license_header() -> str:
-    """Return the standard MIT licence header comment block."""
+    """Return a license header comment block for generated files.
+
+    Replace the LICENSE_HOLDER constant at the top of this script with your
+    own copyright holder string before using this scaffolder.
+    """
     return textwrap.dedent(f"""\
         # =============================================================================
-        # MIT License
-        # Copyright (c) {LICENSE_YEAR} {LICENSE_HOLDER}
-        #
-        # Permission is hereby granted, free of charge, to any person obtaining a copy
-        # of this software and associated documentation files (the "Software"), to deal
-        # in the Software without restriction, including without limitation the rights
-        # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-        # copies of the Software, and to permit persons to whom the Software is
-        # furnished to do so, subject to the following conditions:
-        #
-        # The above copyright notice and this permission notice shall be included in
-        # all copies or substantial portions of the Software.
-        #
-        # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-        # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-        # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-        # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-        # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-        # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-        # SOFTWARE.
+        # {LICENSE_HOLDER}
         # =============================================================================
     """)
 
