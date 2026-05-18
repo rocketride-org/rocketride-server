@@ -379,8 +379,23 @@ def test_startup_raises_when_bot_token_missing():
         asyncio.run(ep._startup())
 
 
-def test_startup_raises_when_webhook_setup_fails():
-    """_startup must raise when _setup_webhook returns False (webhook mode)."""
+def test_startup_raises_when_webhook_setup_fails(monkeypatch):
+    """_startup must raise when _setup_webhook returns False (webhook mode).
+
+    `_startup` does `import aiohttp` then `aiohttp.ClientSession()` BEFORE
+    reaching the webhook check we want to exercise. In production the import
+    resolves because `IGlobal.beginGlobal()` ran `depends(requirements.txt)`
+    first and pip-installed `aiohttp`. Unit tests bypass that lifecycle, and
+    the broader test framework intentionally mocks `depends` to a `MagicMock`
+    in `test_contracts.py::mock_engine_libs` — so even calling `beginGlobal`
+    from a fixture is a no-op. The test doesn't actually need real aiohttp:
+    `_setup_webhook` is stubbed to return False, so the session is never used.
+    Stubbing `sys.modules['aiohttp']` for the test's duration lets the
+    function reach the webhook-failure branch under test. Same pattern
+    `test_contracts.py:579-580` uses for other engine dependencies.
+    """
+    monkeypatch.setitem(sys.modules, 'aiohttp', MagicMock(name='aiohttp-stub'))
+
     ep = _make_endpoint(mode='webhook', webhook_url='https://example.com/telegram/webhook')
     ep._bot_token = 'test-token'
     ep._mode = 'webhook'
