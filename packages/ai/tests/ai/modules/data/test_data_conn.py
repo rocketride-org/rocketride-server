@@ -27,9 +27,14 @@ from ai.modules.data.data_conn import DataConn
 
 
 def _make_conn():
-    """Build a DataConn instance with __init__ bypassed."""
+    """Build a DataConn instance with __init__ bypassed.
+
+    `DataConn._target` is a lazy `@property` delegating to `self._server._target`,
+    so target injection happens on the server mock — not directly on the conn.
+    """
     conn = DataConn.__new__(DataConn)
-    conn._target = MagicMock()
+    conn._server = MagicMock()
+    conn._server._target = MagicMock()
     conn.debug_message = MagicMock()
     return conn
 

@@ -22,7 +22,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
@@ -90,19 +90,20 @@ class DataConn(DAPConn):
     through the familiar DAP interface.
     """
 
-    def __init__(self, server: 'DataServer', target: IServiceEndpoint, **kwargs) -> None:
+    def __init__(self, server: 'DataServer', **kwargs) -> None:
         """
         Initialize a new DataConnection instance.
 
-        Sets up the connection with the data server and target endpoint, initializes
-        pipe mapping for tracking active data streams, and prepares the connection
-        for handling DAP commands related to data pipeline operations.
+        Sets up the connection with the data server and prepares it for handling
+        DAP commands. The target endpoint is NOT captured here — it's resolved
+        lazily on every access via the :pyattr:`_target` property so source
+        nodes that bind ``state.target`` AFTER a WebSocket connect (the typical
+        race window in CI under load) still produce a correct target lookup.
 
         Args:
             server (DataServer): The data server managing operations and monitors.
-                                Used for operation lifecycle management and coordination.
-            target (IServiceEndpoint): The target endpoint for this connection.
-                                      Provides access to data processing pipes.
+                                Used for operation lifecycle management and for
+                                lazy ``state.target`` access via ``server._target``.
             **kwargs: Additional arguments passed to parent DAPConn constructor.
                      May include transport, logging, and other DAP-specific settings.
         """
@@ -110,26 +111,26 @@ class DataConn(DAPConn):
         # This helps distinguish data connections in logs from other DAP connections
         module_name = 'DATA'
 
-        # Get the specified thread count. Target may be None for sourceless
-        # pipelines (e.g., agentic pipelines that only receive process-scope
-        # DAP commands such as rrext_cprofile_*). Fall back to the existing
-        # default rather than dereferencing None.taskConfig.
-        if target is not None:
-            self._thread_count = target.taskConfig.get('threadCount', 4)
-        else:
-            self._thread_count = 4
-
         # Initialize parent DAPConn with transport and module identification
         # Note: transport should be passed via kwargs or created here
         super().__init__(module=module_name, **kwargs)
 
-        # Store server reference for operation management
-        # The server provides access to operation lifecycle, monitoring, and coordination
+        # Store server reference for operation management AND lazy target lookup.
+        # Must be set before reading `self._target` (the property delegates to
+        # `self._server._target` via DataServer's own lazy property).
         self._server = server
 
-        # Store target endpoint for pipe management
-        # The endpoint provides access to data processing pipes and their lifecycle
-        self._target = target
+        # Get the specified thread count. Target may be None at this point for
+        # sourceless pipelines (agentic) OR because the source-node `_run()` has
+        # not yet executed `state.target = self.target` (CI race window). The
+        # snapshot here only sizes the asyncio semaphore for this connection;
+        # defaulting to 4 when target isn't yet bound is acceptable — the
+        # semaphore is a soft concurrency limit, not a correctness boundary.
+        snapshot_target = self._target
+        if snapshot_target is not None:
+            self._thread_count = snapshot_target.taskConfig.get('threadCount', 4)
+        else:
+            self._thread_count = 4
 
         # Mapping a pipe id to its DataConnPipe instance for tracking active data streams
         # This allows us to correlate DAP commands with specific pipe instances and their metadata
@@ -153,6 +154,24 @@ class DataConn(DAPConn):
         self.debug_message(
             f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
         )
+
+    @property
+    def _target(self) -> Optional['IServiceEndpoint']:
+        """Read the source target lazily — never snapshot at connection time.
+
+        Source nodes set ``server.app.state.target`` from their ``_run()``
+        method, which the C engine invokes AFTER ``node.py`` has bootstrapped
+        the shared WebServer. EaaS can open a ``/task/data`` WebSocket BEFORE
+        the source has had a chance to bind — capturing the target value at
+        connection time then locks in ``None`` for the connection's lifetime,
+        causing silent empty-result pipelines under CI load (Ubuntu).
+
+        Delegating to ``self._server._target`` (DataServer's own lazy property)
+        re-reads ``state.target`` on every access. Returns ``None`` if no
+        source has registered a target yet; callers route through
+        :pyfunc:`_require_target` to surface a controlled error in that case.
+        """
+        return self._server._target
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.

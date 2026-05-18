@@ -67,12 +67,19 @@ def _make_server_mock(target=None, *, omit_target_attr=False):
 def _make_data_conn_uninitialized():
     """Build a DataConn with __init__ bypassed, ready for attribute injection.
 
+    `DataConn._target` is a lazy `@property` delegating to `self._server._target`,
+    so callers configure target state via `conn._server._target = ...` rather
+    than `conn._target = ...` (the latter raises AttributeError — property has
+    no setter). Initial `_target` is None so tests get a clean baseline.
+
     Mirrors the helper pattern in test_data_conn.py.
     """
     from ai.modules.data.data_conn import DataConn
 
     conn = DataConn.__new__(DataConn)
     conn.debug_message = MagicMock()
+    conn._server = MagicMock()
+    conn._server._target = None
     return conn
 
 
@@ -198,53 +205,105 @@ def test_dataserver_target_reflects_subsequent_overwrites():
     assert ds._target is second
 
 
+async def test_dataconn_target_picks_up_state_writes_after_construction():
+    """DataConn._target is lazy too — reflects state.target writes AFTER __init__.
+
+    This pins the fix for the Ubuntu CI race: previously DataConn captured
+    target as a snapshot at WebSocket-connect time, locking in None whenever
+    the connection opened before the source node bound state.target. Now
+    DataConn._target delegates through DataServer._target to state.target,
+    so a late source-node bind is visible to every subsequent data
+    operation on that connection.
+
+    Async because DataConn.__init__ schedules an asyncio task internally
+    (the zombie-pipe monitor).
+    """
+    from ai.modules.data.data_conn import DataConn
+    from ai.modules.data.data_server import DataServer
+
+    transport_mock = MagicMock()
+
+    # Construct with state.target=None — the broken race condition.
+    server = _make_server_mock(target=None)
+    ds = DataServer(server=server)
+    conn = DataConn(server=ds, transport=transport_mock)
+    assert conn._target is None  # baseline at construction
+
+    # Source node binds state.target AFTER the WebSocket has already connected.
+    late_target = MagicMock(name='source-bound-late')
+    server.app.state.target = late_target
+
+    # Without the lazy property this assertion would fail — the snapshot
+    # would still report None for the connection's lifetime.
+    assert conn._target is late_target
+
+
+def test_dataconn_target_setter_via_server_state_is_visible():
+    """Direct sanity: setting server._target propagates to conn._target.
+
+    Used by other tests in this file (via the `_make_data_conn_uninitialized`
+    helper that swaps `conn._server._target`) — pin it explicitly.
+    """
+    conn = _make_data_conn_uninitialized()
+    assert conn._target is None
+
+    bound = MagicMock(name='bound-target')
+    conn._server._target = bound
+    assert conn._target is bound
+
+
 # ---------------------------------------------------------------------------
 # DataConn.__init__ — tolerate target=None
 # ---------------------------------------------------------------------------
 
 
-async def test_dataconn_init_with_target_None_does_not_AttributeError():
-    """DataConn(target=None, ...) must not raise AttributeError on init.
+async def test_dataconn_init_with_server_target_None_does_not_AttributeError():
+    """DataConn(server with `_target=None`, ...) must not raise on init.
 
-    Before the fix, line ``self._thread_count = target.taskConfig.get(...)``
-    raised ``AttributeError: 'NoneType' object has no attribute 'taskConfig'``.
-    After the fix, ``target=None`` falls back to a sensible default.
+    Before the lazy-target refactor, line ``self._thread_count =
+    target.taskConfig.get(...)`` raised ``AttributeError: 'NoneType' object
+    has no attribute 'taskConfig'``. After the fix, a `None` target from
+    ``server._target`` falls back to a sensible default and `conn._target`
+    (a property delegating to ``server._target``) is `None`.
 
     Async because DataConn.__init__ schedules an asyncio task internally.
     """
     from ai.modules.data.data_conn import DataConn
 
     server_mock = MagicMock()
+    server_mock._target = None
     transport_mock = MagicMock()
 
     # Should not raise.
-    conn = DataConn(server=server_mock, target=None, transport=transport_mock)
+    conn = DataConn(server=server_mock, transport=transport_mock)
 
-    # Sanity check: object constructed, _target attribute is None.
+    # Sanity check: object constructed, lazy `_target` resolves to None.
     assert conn._target is None
 
 
-async def test_dataconn_init_with_target_None_uses_default_thread_count():
-    """When target is None, _thread_count falls back to 4 (the existing default)."""
+async def test_dataconn_init_with_server_target_None_uses_default_thread_count():
+    """When server._target is None at init, _thread_count falls back to 4 (the existing default)."""
     from ai.modules.data.data_conn import DataConn
 
     server_mock = MagicMock()
+    server_mock._target = None
     transport_mock = MagicMock()
-    conn = DataConn(server=server_mock, target=None, transport=transport_mock)
+    conn = DataConn(server=server_mock, transport=transport_mock)
 
     assert conn._thread_count == 4
 
 
-async def test_dataconn_init_with_target_set_reads_taskConfig_threadCount():
-    """When target is present, _thread_count comes from target.taskConfig (unchanged)."""
+async def test_dataconn_init_with_server_target_set_reads_taskConfig_threadCount():
+    """When server._target is set at init, _thread_count comes from target.taskConfig (unchanged)."""
     from ai.modules.data.data_conn import DataConn
 
     target = MagicMock()
     target.taskConfig = {'threadCount': 16}
     server_mock = MagicMock()
+    server_mock._target = target
     transport_mock = MagicMock()
 
-    conn = DataConn(server=server_mock, target=target, transport=transport_mock)
+    conn = DataConn(server=server_mock, transport=transport_mock)
 
     assert conn._thread_count == 16
 
@@ -256,9 +315,10 @@ async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
     target = MagicMock()
     target.taskConfig = {}  # no 'threadCount' key
     server_mock = MagicMock()
+    server_mock._target = target
     transport_mock = MagicMock()
 
-    conn = DataConn(server=server_mock, target=target, transport=transport_mock)
+    conn = DataConn(server=server_mock, transport=transport_mock)
 
     assert conn._thread_count == 4
 
@@ -272,7 +332,7 @@ def test_require_target_returns_target_when_set():
     """_require_target returns the stored target when it's not None."""
     conn = _make_data_conn_uninitialized()
     target = MagicMock(name='source-target')
-    conn._target = target
+    conn._server._target = target
 
     assert conn._require_target() is target
 
@@ -280,7 +340,7 @@ def test_require_target_returns_target_when_set():
 def test_require_target_raises_RuntimeError_when_target_is_None():
     """_require_target raises a controlled RuntimeError, not AttributeError, on None."""
     conn = _make_data_conn_uninitialized()
-    conn._target = None
+    conn._server._target = None
 
     with pytest.raises(RuntimeError) as exc_info:
         conn._require_target()
@@ -299,7 +359,7 @@ def test_require_target_called_by_cleanup_pipe(monkeypatch):
     monkeypatch.setattr(data_conn_mod, 'monitorFailed', lambda s: None)
 
     conn = _make_data_conn_uninitialized()
-    conn._target = None
+    conn._server._target = None
     pipe_conn = SimpleNamespace(
         pipe=MagicMock(),
         pipe_id='p-x',
