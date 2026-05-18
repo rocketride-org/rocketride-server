@@ -13,7 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["image"],
+	"classType": ["image", "vision"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying

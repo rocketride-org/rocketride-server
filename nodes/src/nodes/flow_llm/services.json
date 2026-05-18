@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.flow_llm",
 	"prefix": "flow_llm",
-	"description": ["Two-branch conditional router whose decision is made by a wired LLM. ", "The condition is a natural-language yes/no question (e.g. 'Is there a ", "dog in this image?'). The chunk and the question are sent to the LLM ", "via the control-plane invoke channel; the LLM is instructed to reply ", "with one word YES or NO. YES → THEN, anything else → ELSE. For image ", "lanes connect a vision-capable LLM. Audio and video need preprocessing ", "(STT, frame grabber) upstream — LLM APIs do not accept raw media buffers."],
+	"description": ["Two-branch conditional router whose decision is made by a wired LLM. ", "The condition is a natural-language yes/no question (e.g. 'Is there a ", "dog in this image?'). The chunk and the question are sent to the LLM ", "via the control-plane invoke channel; the LLM is instructed to reply ", "with one word YES or NO. YES → THEN, anything else → ELSE. Wire a ", "text LLM on the 'llm' channel for text lanes, and a vision-capable ", "LLM on the 'vision' channel for image lanes. Audio and video need ", "preprocessing (STT, frame grabber) upstream — LLM APIs do not accept ", "raw media buffers."],
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org",
 	"tile": ["Question: flow_llm.condition"],
@@ -17,8 +17,12 @@
 	"branches": ["then", "else"],
 	"invoke": {
 		"llm": {
-			"description": "LLM that evaluates the natural-language condition. Connect any llm_* node; for image lanes connect a vision-capable LLM (llm_vision_mistral, llm_vision_ollama, or any future vision-capable provider).",
-			"min": 1
+			"description": "Text LLM that evaluates the natural-language condition for text-family lanes (text, documents, questions, answers, ...). Connect any llm_* node. Required when routing text lanes; ignored for image lanes.",
+			"min": 0
+		},
+		"vision": {
+			"description": "Vision-capable LLM that evaluates the natural-language condition for image lanes. Connect any llm_vision_* node. Required when routing image lanes; ignored for text lanes.",
+			"min": 0
 		}
 	},
 	"preconfig": {
@@ -36,7 +40,7 @@
 		"flow_llm.condition": {
 			"type": "string",
 			"title": "Question",
-			"description": "Natural-language yes/no question evaluated by the connected LLM. The chunk being routed is provided as context. Examples: 'Is this image a screenshot?', 'Is this text in Spanish?', 'Does the image contain a person?'. Be specific — the LLM is instructed to answer with a single word YES or NO.",
+			"description": "Natural-language yes/no question evaluated by the connected LLM. The chunk being routed is provided as context. Write ONLY the question — the node automatically prepends the routing-classifier system prompt and appends the 'Reply with EXACTLY one word: YES or NO' instruction. Do not add 'answer YES/NO' yourself. Examples: 'Is this image a screenshot?', 'Is this text in Spanish?', 'Does the image contain a person?'. Be specific.",
 			"default": "Does the content match the criterion?"
 		},
 		"flow_llm.timeout_s": {

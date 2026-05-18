@@ -1,7 +1,7 @@
 {
 	"title": "OpenAI Vision",
 	"protocol": "image_vision_openai://",
-	"classType": ["image"],
+	"classType": ["image", "vision"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
@@ -96,13 +96,15 @@
 			"type": "string",
 			"format": "textarea",
 			"title": "System Instructions",
-			"description": "Define the model's role and behavior for image analysis"
+			"description": "Define the model's role and behavior for image analysis. Leave empty when this node is wired as the decision LLM of a flow_llm node — the flow control supplies its own instructions and a stale system prompt can conflict with the YES/NO classifier.",
+			"optional": true
 		},
 		"vision.prompt": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Analysis Prompt",
-			"description": "Describe what you want to analyze or extract from the image"
+			"description": "Describe what you want to analyze or extract from the image. Ignored when this node is wired as the decision LLM of a flow_llm node — flow_llm overrides this prompt with its own routing question.",
+			"optional": true
 		},
 		"image_vision_openai.openai-4-1": {
 			"object": "openai-4-1",
