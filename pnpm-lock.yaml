@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@remix-run/router': '>=1.23.2 <2'
   cross-spawn: '>=6.0.6'
   dompurify: '>=3.4.0 <3.5.0'
   fast-uri: '>=3.1.2 <4'
@@ -22,6 +23,7 @@ overrides:
   postcss: '>=8.4.31'
   protobufjs: '>=7.5.5 <8'
   qs: '>=6.14.1'
+  react-router: '>=6.30.2 <7'
   serialize-javascript: '>=7.0.5 <8'
   undici: '>=7.24.0 <8'
 
@@ -2288,8 +2290,8 @@ packages:
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
 
-  '@remix-run/router@1.19.2':
-    resolution: {integrity: sha512-baiMx18+IMuD1yyvOGaHM9QrVUPGGG0jC+z+IPHnRJWUAUvaKuWKyE8gjDj2rzv3sz9zOGoRSPgeBVHRhZnBlA==}
+  '@remix-run/router@1.23.2':
+    resolution: {integrity: sha512-Ic6m2U/rMjTkhERIa/0ZtXJP17QUi2CbWE7cqx4J58M8aA3QTfW+2UlQ4psvTX9IO1RfNVhK3pcpdjej7L+t2w==}
     engines: {node: '>=14.0.0'}
 
   '@rjsf/core@5.20.1':
@@ -7218,8 +7220,8 @@ packages:
       react: '>=16.8'
       react-dom: '>=16.8'
 
-  react-router@6.26.2:
-    resolution: {integrity: sha512-tvN1iuT03kHgOFnLPfLJ8V95eijteveqdOSk+srqfePtQvqCExB8eHOYnlilbOcyJyKnYkr1vJvf7YqotAJu1A==}
+  react-router@6.30.3:
+    resolution: {integrity: sha512-XRnlbKMTmktBkjCLE8/XcZFlnHvr2Ltdr1eJX4idL55/9BbORzyZEaIkBFDhFGCEWBBItsVrDxwx3gnisMitdw==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       react: '>=16.8'
@@ -10500,7 +10502,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.1': {}
 
-  '@remix-run/router@1.19.2': {}
+  '@remix-run/router@1.23.2': {}
 
   '@rjsf/core@5.20.1(@rjsf/utils@5.20.1(react@18.3.1))(react@18.3.1)':
     dependencies:
@@ -16410,14 +16412,14 @@ snapshots:
 
   react-router-dom@6.26.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
-      '@remix-run/router': 1.19.2
+      '@remix-run/router': 1.23.2
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
-      react-router: 6.26.2(react@18.3.1)
+      react-router: 6.30.3(react@18.3.1)
 
-  react-router@6.26.2(react@18.3.1):
+  react-router@6.30.3(react@18.3.1):
     dependencies:
-      '@remix-run/router': 1.19.2
+      '@remix-run/router': 1.23.2
       react: 18.3.1
 
   react-smooth@4.0.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
