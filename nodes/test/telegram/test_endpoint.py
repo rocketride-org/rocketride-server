@@ -20,10 +20,13 @@ Legacy fallback (shared_web_server is None): construct own WebServer
 and run() blocking — today's behavior, preserved.
 """
 
+import asyncio
 import sys
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 if str(NODES_SRC) not in sys.path:
@@ -63,6 +66,20 @@ def _shared_server_mock():
     shared = MagicMock(name='shared-WebServer')
     shared.app.state = MagicMock(name='app.state')
     return shared
+
+
+def _make_awaitable(value):
+    """Wrap a plain value in an already-resolved awaitable.
+
+    Used to stub `async def` methods (e.g. `_setup_webhook`) on a MagicMock
+    so `await ep._setup_webhook()` resolves to the chosen value without
+    spinning up a real coroutine.
+    """
+
+    async def _coro():
+        return value
+
+    return _coro()
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +354,38 @@ def test_legacy_path_constructs_own_WebServer_with_webhook_mode():
     mock_server_instance.add_route.assert_called_once()
     assert mock_server_instance.add_route.call_args.args[0] == '/telegram/webhook'
     mock_server_instance.run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# `_startup` soft-fail paths must raise (CodeRabbit review #4313515126)
+#
+# `_startup()` previously returned normally for fatal startup conditions like
+# a missing bot token or a failed webhook registration. That left the source
+# thread blocking on `_shutdown_event.wait()` with no active Telegram session
+# and no failure surfaced to the engine. These tests pin the new contract:
+# fatal startup states raise so `_run`'s existing try/except re-raises out
+# of the source-node thread.
+# ---------------------------------------------------------------------------
+
+
+def test_startup_raises_when_bot_token_missing():
+    """_startup must raise for the missing-token soft-fail path."""
+    ep = _make_endpoint(mode='polling')
+    ep._bot_token = ''
+    ep._mode = 'polling'
+    ep._webhook_url = ''
+
+    with pytest.raises(RuntimeError, match='bot token'):
+        asyncio.run(ep._startup())
+
+
+def test_startup_raises_when_webhook_setup_fails():
+    """_startup must raise when _setup_webhook returns False (webhook mode)."""
+    ep = _make_endpoint(mode='webhook', webhook_url='https://example.com/telegram/webhook')
+    ep._bot_token = 'test-token'
+    ep._mode = 'webhook'
+    ep._webhook_url = 'https://example.com/telegram/webhook'
+    ep._setup_webhook = MagicMock(return_value=_make_awaitable(False))
+
+    with pytest.raises(RuntimeError, match='webhook'):
+        asyncio.run(ep._startup())
