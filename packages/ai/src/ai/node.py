@@ -131,7 +131,17 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     # safety-net timeout so a misbehaving uvicorn can't deadlock the
     # subprocess. The timeout is generous in production (10s) and is
     # dialled down by tests.
-    if not startup_ready.wait(timeout=_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS):
+    signalled = startup_ready.wait(timeout=_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS)
+
+    # Fail fast if `serve()` exited before signalling startup (e.g. bind
+    # error, permission denied, port already in use). Without this check
+    # we'd publish a dead `shared_web_server` whose `/task/data` is
+    # unreachable for the rest of the subprocess lifetime, and source
+    # nodes would silently fail when they try to write `state.target`.
+    if future.done():
+        future.result()  # re-raises the exception from serve()
+
+    if not signalled:
         debug(
             f'shared WebServer startup did not signal within '
             f'{_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS}s; proceeding anyway'

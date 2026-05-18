@@ -216,9 +216,14 @@ def test_setup_blocks_until_on_startup_fires(monkeypatch):
 
     on_startup_holder = {}
     return_marker = []
+    # Signal-based handoff: the fake server sets this once it has captured
+    # the callback, so the test never races against `_setup_shared_web_server`
+    # on a slow runner.
+    callback_captured = threading.Event()
 
     def fake_web_server(config=None, on_startup=None, **kwargs):
         on_startup_holder['cb'] = on_startup
+        callback_captured.set()
         # Note: do NOT fire on_startup here — the test controls timing.
         return MagicMock()
 
@@ -232,6 +237,9 @@ def test_setup_blocks_until_on_startup_fires(monkeypatch):
 
     setup_thread = threading.Thread(target=call_setup, daemon=True)
     setup_thread.start()
+
+    # Wait for the fake server to capture the callback before touching it.
+    assert callback_captured.wait(timeout=2.0), 'on_startup callback was never captured'
 
     # Give _setup a moment to reach the wait.
     setup_thread.join(timeout=0.2)
