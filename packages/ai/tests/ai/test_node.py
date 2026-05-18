@@ -36,6 +36,8 @@ import sys
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
 import ai.node as node
 
 
@@ -277,6 +279,32 @@ def test_setup_returns_even_when_startup_callback_never_fires(monkeypatch):
     assert any('timeout' in m.lower() or 'startup' in m.lower() for m in debug_messages), (
         f'expected timeout/startup mention in debug log; got {debug_messages!r}'
     )
+
+
+def test_setup_reraises_when_serve_future_already_failed(monkeypatch):
+    """If ``serve()`` exits before signalling startup, ``_setup`` must re-raise.
+
+    Pins the fail-fast contract: rather than publishing a dead ``shared_web_server``
+    whose ``/task/data`` is unreachable for the rest of the subprocess lifetime,
+    the call site must surface the bind-failure exception immediately so source
+    nodes don't silently fail when they try to write ``state.target``.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=12345'])
+    # Tiny timeout: the wait elapses, then the done()/result() branch fires.
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.05)
+
+    future = MagicMock(name='future')
+    future.done.return_value = True
+    future.result.side_effect = RuntimeError('bind failed')
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        return MagicMock(name='WebServer-instance')
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    with pytest.raises(RuntimeError, match='bind failed'):
+        node._setup_shared_web_server()
 
 
 # ---------------------------------------------------------------------------
