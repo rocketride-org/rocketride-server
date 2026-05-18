@@ -227,15 +227,21 @@ async def test_dataconn_target_picks_up_state_writes_after_construction():
     server = _make_server_mock(target=None)
     ds = DataServer(server=server)
     conn = DataConn(server=ds, transport=transport_mock)
-    assert conn._target is None  # baseline at construction
+    try:
+        assert conn._target is None  # baseline at construction
 
-    # Source node binds state.target AFTER the WebSocket has already connected.
-    late_target = MagicMock(name='source-bound-late')
-    server.app.state.target = late_target
+        # Source node binds state.target AFTER the WebSocket has already connected.
+        late_target = MagicMock(name='source-bound-late')
+        server.app.state.target = late_target
 
-    # Without the lazy property this assertion would fail — the snapshot
-    # would still report None for the connection's lifetime.
-    assert conn._target is late_target
+        # Without the lazy property this assertion would fail — the snapshot
+        # would still report None for the connection's lifetime.
+        assert conn._target is late_target
+    finally:
+        # `DataConn.__init__` schedules `_monitor_task` via asyncio.create_task;
+        # `disconnect()` signals shutdown and awaits the task, preventing the
+        # pending-task warnings + flaky teardown CodeRabbit flagged.
+        await conn.disconnect()
 
 
 def test_dataconn_target_setter_via_server_state_is_visible():
@@ -276,9 +282,11 @@ async def test_dataconn_init_with_server_target_None_does_not_AttributeError():
 
     # Should not raise.
     conn = DataConn(server=server_mock, transport=transport_mock)
-
-    # Sanity check: object constructed, lazy `_target` resolves to None.
-    assert conn._target is None
+    try:
+        # Sanity check: object constructed, lazy `_target` resolves to None.
+        assert conn._target is None
+    finally:
+        await conn.disconnect()
 
 
 async def test_dataconn_init_with_server_target_None_uses_default_thread_count():
@@ -289,8 +297,10 @@ async def test_dataconn_init_with_server_target_None_uses_default_thread_count()
     server_mock._target = None
     transport_mock = MagicMock()
     conn = DataConn(server=server_mock, transport=transport_mock)
-
-    assert conn._thread_count == 4
+    try:
+        assert conn._thread_count == 4
+    finally:
+        await conn.disconnect()
 
 
 async def test_dataconn_init_with_server_target_set_reads_taskConfig_threadCount():
@@ -304,8 +314,10 @@ async def test_dataconn_init_with_server_target_set_reads_taskConfig_threadCount
     transport_mock = MagicMock()
 
     conn = DataConn(server=server_mock, transport=transport_mock)
-
-    assert conn._thread_count == 16
+    try:
+        assert conn._thread_count == 16
+    finally:
+        await conn.disconnect()
 
 
 async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
@@ -319,8 +331,10 @@ async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
     transport_mock = MagicMock()
 
     conn = DataConn(server=server_mock, transport=transport_mock)
-
-    assert conn._thread_count == 4
+    try:
+        assert conn._thread_count == 4
+    finally:
+        await conn.disconnect()
 
 
 # ---------------------------------------------------------------------------
