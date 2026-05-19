@@ -30,7 +30,7 @@ from rocketride.chat import (
     list_chats,
     parse_chat_file,
 )
-from rocketride.schema import Question
+from rocketride.schema import Attachment, Question
 
 
 class MockFsClient:
@@ -119,6 +119,27 @@ async def test_round_trip_create_send_open():
     assert reopened.id == chat.id
     assert reopened.pipeline_id == PIPELINE_ID
     assert [t.seq for t in reopened.history] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_send_persists_and_rehydrates_attachments():
+    fs = MockFsClient()
+    chat = await Chat.create(client=fs, token=TOKEN, pipeline_id=PIPELINE_ID)
+    att = Attachment(
+        attachment_id='11111111-1111-1111-1111-111111111111',
+        mime='application/pdf',
+        filename='report.pdf',
+        size_bytes=482113,
+        path=f'.chats/{chat.id}/11111111-1111-1111-1111-111111111111.pdf',
+    )
+    await chat.send('summarize this', attachments=[att])
+
+    lines = [line for line in fs.files[f'.chats/{chat.id}/chat.jsonl'].split('\n') if line]
+    turn = json.loads(lines[1])
+    assert turn['question']['attachments'] == [att.model_dump()]
+
+    reopened = await Chat.open(client=fs, token=TOKEN, chat_id=chat.id)
+    assert reopened.history[0].question['attachments'] == [att.model_dump()]
 
 
 @pytest.mark.asyncio
