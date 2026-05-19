@@ -73,7 +73,6 @@ export class EngineRegistry extends EventEmitter {
 	static getInstance(config?: EngineManagerConfig): EngineRegistry {
 		if (!EngineRegistry.instance) {
 			if (!config) throw new Error('EngineRegistry must be initialized with config on first call');
-			console.log('[EngineRegistry] Creating singleton instance');
 			EngineRegistry.instance = new EngineRegistry(config);
 		}
 		return EngineRegistry.instance;
@@ -119,15 +118,11 @@ export class EngineRegistry extends EventEmitter {
 			needed.add(deployMode);
 		}
 
-		const running = [...this.engines.keys()];
-		console.log(`[EngineRegistry] reconcile: needed=[${[...needed]}], running=[${running}]`);
-
 		// Pass 1: Stop engines no longer needed.
 		// Each backend emits idle/error — ConnectionManagers watching that
 		// connectedMode will disconnect their WebSocket clients.
 		for (const [mode, engine] of this.engines) {
 			if (!needed.has(mode)) {
-				console.log(`[EngineRegistry] reconcile: stopping ${mode} (no longer needed)`);
 				await engine.teardown();
 				await engine.dispose();
 				this.engines.delete(mode);
@@ -139,7 +134,6 @@ export class EngineRegistry extends EventEmitter {
 		// effectiveMode will connect.
 		for (const mode of needed) {
 			if (!this.engines.has(mode)) {
-				console.log(`[EngineRegistry] reconcile: creating EngineManager for ${mode}`);
 				const engine = new EngineManager(this.config);
 				engine.on('status', (event: EngineStatusEvent) => {
 					this.emit('status', { ...event, mode });
@@ -158,7 +152,6 @@ export class EngineRegistry extends EventEmitter {
 				|| engine.configChecksum !== checksum;
 
 			if (needsRestart) {
-				console.log(`[EngineRegistry] reconcile: transitioning ${mode} (mode=${engine.mode}, phase=${engine.phase}, checksumChanged=${engine.configChecksum !== checksum})`);
 				if (engine.mode === mode && engine.phase !== 'idle') {
 					// Same mode but config changed — tear down first so it restarts clean
 					await engine.teardown();
@@ -166,7 +159,6 @@ export class EngineRegistry extends EventEmitter {
 				await engine.transitionTo(mode, groupConfig, checksum);
 			} else {
 				// Already running with same config — re-emit status so new/changed connections pick it up
-				console.log(`[EngineRegistry] reconcile: ${mode} already running, re-emitting status`);
 				engine.emitCurrentStatus();
 			}
 		}

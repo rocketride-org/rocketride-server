@@ -277,9 +277,16 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus();
 
-		// Full cycle: disconnect old manager → create new for new mode → connect
+		// Full cycle: disconnect old manager → validate config → reconcile
 		await this.disconnect();
 		await this.initialize();
+
+		// Ask the registry to reconcile — for config-only changes (e.g.,
+		// rotating credentials) the engine may already be 'ready' and will
+		// re-emit its status, triggering handleEngineStatus → connectToEngine.
+		if (this.engineRegistry) {
+			await this.engineRegistry.reconcile();
+		}
 	}
 
 	/**
@@ -554,7 +561,8 @@ export class ConnectionManager extends EventEmitter {
 	public getHttpUrl(): string {
 		if (this.engineUri) {
 			const url = new URL(this.engineUri);
-			return `${url.protocol}//${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+			const httpProtocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
+			return `${httpProtocol}//${url.hostname}:${url.port || (httpProtocol === 'https:' ? '443' : '80')}`;
 		}
 		const hostUrl = this.getGroupConfig().hostUrl;
 		if (!hostUrl) return 'http://localhost:5565';

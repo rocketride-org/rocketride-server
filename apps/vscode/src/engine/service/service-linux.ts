@@ -76,7 +76,23 @@ export class LinuxServiceManager extends ServiceManager {
 	 * to the current user so EngineInstaller can write without elevation.
 	 */
 	public async prepareInstallRoot(): Promise<void> {
-		await this.runSudo('apt-get', ['install', '-y', '--no-install-recommends', ...LinuxServiceManager.ENGINE_DEPS]);
+		const pkgMgr = await this.detectPackageManager();
+		switch (pkgMgr) {
+			case 'apt-get':
+				await this.runSudo('apt-get', ['install', '-y', '--no-install-recommends', ...LinuxServiceManager.ENGINE_DEPS]);
+				break;
+			case 'dnf':
+				await this.runSudo('dnf', ['install', '-y', ...LinuxServiceManager.ENGINE_DEPS]);
+				break;
+			case 'yum':
+				await this.runSudo('yum', ['install', '-y', ...LinuxServiceManager.ENGINE_DEPS]);
+				break;
+			case 'pacman':
+				await this.runSudo('pacman', ['-S', '--noconfirm', ...LinuxServiceManager.ENGINE_DEPS]);
+				break;
+			default:
+				throw new Error(`Unsupported Linux distribution: no supported package manager found (tried apt-get, dnf, yum, pacman)`);
+		}
 
 		const enginesDir = path.join(INSTALL_ROOT, 'engine');
 		await this.runSudo('mkdir', ['-p', enginesDir]);
@@ -207,6 +223,19 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 `;
+	}
+
+	/**
+	 * Detects which package manager is available on this Linux distribution.
+	 */
+	private async detectPackageManager(): Promise<'apt-get' | 'dnf' | 'yum' | 'pacman' | null> {
+		for (const pm of ['apt-get', 'dnf', 'yum', 'pacman'] as const) {
+			try {
+				await execFileAsync('which', [pm]);
+				return pm;
+			} catch { /* not found */ }
+		}
+		return null;
 	}
 
 	/**

@@ -173,6 +173,9 @@ export class EngineInstaller {
 		try {
 			const p = this.versionJsonPath();
 			if (fs.existsSync(p)) {
+				// Verify the engine binary actually exists — version file alone
+				// can be a leftover from a partial uninstall
+				if (!fs.existsSync(this.getExecutablePath())) return null;
 				return JSON.parse(fs.readFileSync(p, 'utf8')) as InstalledVersion;
 			}
 		} catch {
@@ -373,8 +376,14 @@ export class EngineInstaller {
 		if (!fs.existsSync(this.engineDir)) return;
 
 		for (const entry of fs.readdirSync(this.engineDir, { withFileTypes: true })) {
-			// Keep active PID files (engine processes still running)
-			if (entry.name.endsWith('.pid')) continue;
+			// Keep PID files for processes that are still alive
+			if (entry.name.endsWith('.pid')) {
+				try {
+					const pidStr = fs.readFileSync(path.join(this.engineDir, entry.name), 'utf8').trim();
+					const pid = parseInt(pidStr, 10);
+					if (!isNaN(pid) && isPidAlive(pid)) continue;
+				} catch { /* stale — allow removal */ }
+			}
 
 			const fullPath = path.join(this.engineDir, entry.name);
 			try {

@@ -120,14 +120,14 @@ export class EngineManager extends EventEmitter {
 	 * @param config - Connection group config with host URL, API key, engine version, etc.
 	 */
 	public async transitionTo(mode: ConnectionMode, config: ConnectionGroupConfig, checksum?: number): Promise<void> {
-		console.log(`[EngineManager] transitionTo: mode=${mode}, currentMode=${this._mode}, currentPhase=${this._phase}, hasBackend=${!!this.backend}`);
 		if (checksum !== undefined) this._configChecksum = checksum;
 
 		this.cancelCurrentOperation();
 
 		if (this._mode !== mode && this.backend) {
-			console.log(`[EngineManager] transitionTo: mode changing from ${this._mode} to ${mode}, tearing down old backend`);
-			await this.backend.stop();
+			try {
+				await this.backend.stop();
+			} catch { /* best effort */ }
 			await this.backend.dispose();
 			this.backend = null;
 		}
@@ -136,22 +136,17 @@ export class EngineManager extends EventEmitter {
 		this.cts = new vscode.CancellationTokenSource();
 
 		if (!this.backend) {
-			console.log(`[EngineManager] transitionTo: creating backend for ${mode}`);
 			this.backend = this.createBackend(mode);
 		}
 
 		try {
-			console.log(`[EngineManager] transitionTo: calling backend.start() for ${mode}`);
 			await this.backend.start(config, this.cts.token);
-			console.log(`[EngineManager] transitionTo: backend.start() completed for ${mode}`);
 		} catch (err) {
 			if (err instanceof vscode.CancellationError) {
-				console.log(`[EngineManager] transitionTo: cancelled for ${mode}`);
 				this.emitStatus({ phase: 'idle', message: 'Cancelled' });
 				return;
 			}
 			const msg = err instanceof Error ? err.message : String(err);
-			console.log(`[EngineManager] transitionTo: error for ${mode}: ${msg}`);
 			this.emitStatus({ phase: 'error', message: msg, error: msg });
 		}
 	}
@@ -180,7 +175,6 @@ export class EngineManager extends EventEmitter {
 
 	/** Stops and disposes the current backend, resetting the manager to idle. */
 	public async teardown(): Promise<void> {
-		console.log(`[EngineManager] teardown: mode=${this._mode}, hasBackend=${!!this.backend}`);
 		this.cancelCurrentOperation();
 
 		if (this.backend) {
@@ -190,13 +184,11 @@ export class EngineManager extends EventEmitter {
 		}
 
 		this._mode = null;
-		console.log(`[EngineManager] teardown: complete`);
 	}
 
 	/** Cancels any in-flight start/install operation via the CancellationToken. */
 	public cancelCurrentOperation(): void {
 		if (this.cts) {
-			console.log(`[EngineManager] cancelCurrentOperation: cancelling for mode=${this._mode}`);
 			this.cts.cancel();
 			this.cts.dispose();
 			this.cts = undefined;
@@ -251,7 +243,6 @@ export class EngineManager extends EventEmitter {
 	 * Also updates the internal phase tracker.
 	 */
 	private emitStatus(event: EngineStatusEvent): void {
-		console.log(`[EngineManager] emitStatus: mode=${this._mode}, phase=${event.phase}, message="${event.message}"${event.uri ? `, uri=${event.uri}` : ''}${event.error ? `, error=${event.error}` : ''}`);
 		this._phase = event.phase;
 		this.emit('status', event);
 	}

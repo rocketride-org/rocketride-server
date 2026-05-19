@@ -114,8 +114,9 @@ export function migrateLocalEngine(globalStorageEnginesDir: string): void {
 		const pointer = readLegacyPointer(globalStorageEnginesDir);
 		if (!pointer) return;
 
-		// Locate the versioned directory the pointer references
-		const sourceDir = path.join(globalStorageEnginesDir, pointer.dir);
+		// Validate pointer.dir to prevent directory traversal
+		const sourceDir = path.resolve(globalStorageEnginesDir, pointer.dir);
+		if (!sourceDir.startsWith(path.resolve(globalStorageEnginesDir) + path.sep)) return;
 		if (!fs.existsSync(sourceDir)) return;
 
 		logger.output(`Migrating local engine from ${sourceDir}...`);

@@ -104,6 +104,7 @@ export class EngineDocker extends EngineBackend {
 		const onProgress = (message: string) => this.emitStatus({ phase: 'working', message });
 
 		await this.dockerManager.install(imageTag, onProgress);
+		EngineDocker.writeVersionFile(imageTag);
 
 		this.emitStatus({
 			phase: 'ready',
@@ -161,6 +162,7 @@ export class EngineDocker extends EngineBackend {
 		const onProgress = (message: string) => this.emitStatus({ phase: 'working', message });
 
 		await this.dockerManager.update(imageTag, onProgress);
+		EngineDocker.writeVersionFile(imageTag);
 
 		this.emitStatus({
 			phase: 'ready',
@@ -176,6 +178,7 @@ export class EngineDocker extends EngineBackend {
 	async remove(): Promise<void> {
 		this.emitStatus({ phase: 'working', message: 'Removing container and image...' });
 		await this.dockerManager.remove(true);
+		EngineDocker.deleteVersionFile();
 		this.emitStatus({ phase: 'idle', message: 'Container removed' });
 	}
 

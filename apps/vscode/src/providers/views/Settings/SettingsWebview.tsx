@@ -416,9 +416,9 @@ export const Settings: React.FC = () => {
 					} else {
 						setMessage(msg);
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
-						// On successful save: update the saved snapshot so Cancel reverts
-						// to the newly saved values, and show brief "Saved" confirmation
-						if (message.level === 'success') {
+						// On successful save acknowledgement: update the saved snapshot
+						// so Cancel reverts to the newly saved values
+						if (message.level === 'success' && message.context === 'save') {
 							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
 							pendingSaveSnapshotRef.current = null;
 							setDirty(false);

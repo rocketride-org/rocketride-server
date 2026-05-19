@@ -39,6 +39,7 @@ export class EngineCloud extends EngineBackend {
 	 */
 	async start(config: ConnectionGroupConfig, _token?: vscode.CancellationToken): Promise<void> {
 		if (!config.hostUrl) {
+			this.hostUrl = undefined;
 			this.emitStatus({ phase: 'error', message: 'Cloud host URL not configured', error: 'Host URL is required' });
 			return;
 		}
@@ -53,6 +54,7 @@ export class EngineCloud extends EngineBackend {
 
 	/** No process to stop in cloud mode. */
 	async stop(): Promise<void> {
+		this.hostUrl = undefined;
 		this.emitStatus({ phase: 'idle', message: 'Disconnected from cloud' });
 	}
 

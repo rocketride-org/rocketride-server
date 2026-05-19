@@ -567,8 +567,8 @@ export const Welcome: React.FC = () => {
 					</div>
 					<div style={{ ...commonStyles.textMuted, marginTop: 4, lineHeight: 1.4, marginBottom: 20 }}>Automatically install RocketRide documentation for detected coding agents (Copilot, Claude Code, Cursor, Windsurf)</div>
 
-					{/* Message area (for non-onprem modes — onprem shows inline via testMessage) */}
-					{settings.development.connectionMode !== 'onprem' && <MessageDisplay message={message} />}
+					{/* General host messages — on-prem test results shown inline via testMessage in ConnectionConfig */}
+					<MessageDisplay message={message} />
 
 					{/* Action buttons */}
 					<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

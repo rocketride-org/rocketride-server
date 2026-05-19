@@ -116,6 +116,7 @@ export class EngineService extends EngineBackend {
 		// Register and start the OS service
 		this.emitStatus({ phase: 'working', message: 'Registering service...' });
 		await this.serviceManager.install(executablePath, engineDir);
+		await this.waitForReady();
 
 		this.emitStatus({
 			phase: 'ready',
@@ -152,6 +153,7 @@ export class EngineService extends EngineBackend {
 		// Stopped or other state — start it (triggers UAC on Windows)
 		this.emitStatus({ phase: 'working', message: 'Starting service...' });
 		await this.serviceManager.start();
+		await this.waitForReady();
 
 		this.emitStatus({
 			phase: 'ready',
@@ -197,6 +199,7 @@ export class EngineService extends EngineBackend {
 		// Restart (same path, no NSSM reconfiguration needed)
 		this.emitStatus({ phase: 'working', message: 'Starting service...' });
 		await this.serviceManager.start();
+		await this.waitForReady();
 
 		this.emitStatus({
 			phase: 'ready',
@@ -237,6 +240,21 @@ export class EngineService extends EngineBackend {
 	/** Nothing to dispose — service runs independently. */
 	async dispose(): Promise<void> {
 		// Service continues running after VS Code closes — nothing to clean up
+	}
+
+	/**
+	 * Waits for the service to become reachable on its port before returning.
+	 * Polls every 500ms for up to 30 seconds.
+	 */
+	private async waitForReady(): Promise<void> {
+		const maxAttempts = 60;
+		for (let i = 0; i < maxAttempts; i++) {
+			const status = await this.serviceManager.getStatus();
+			if (status.state === 'running') return;
+			this.emitStatus({ phase: 'working', message: 'Waiting for service to become ready...' });
+			await new Promise(r => setTimeout(r, 500));
+		}
+		throw new Error('Service did not become reachable within 30 seconds');
 	}
 
 	// =========================================================================

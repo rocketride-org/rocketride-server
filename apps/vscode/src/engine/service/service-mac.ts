@@ -74,14 +74,15 @@ export class MacServiceManager extends ServiceManager {
 	}
 
 	/**
-	 * Creates /Library directories and chowns them to the current user so
-	 * EngineInstaller and config writes don't need elevation later.
+	 * Creates /Library directories and chowns only user-writable subdirs.
+	 * INSTALL_ROOT stays root-owned so the daemon binary can't be replaced
+	 * by an unprivileged user.
 	 */
 	public async prepareInstallRoot(): Promise<void> {
 		const enginesDir = path.join(INSTALL_ROOT, 'engine');
 		await this.runSudo('mkdir', ['-p', enginesDir, LOGS_DIR, CONFIG_DIR]);
 		const user = os.userInfo().username;
-		await this.runSudo('chown', ['-R', user, INSTALL_ROOT, CONFIG_DIR]);
+		await this.runSudo('chown', ['-R', user, enginesDir, LOGS_DIR, CONFIG_DIR]);
 	}
 
 	/**

@@ -100,7 +100,9 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 	const handleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.checked) {
 			const isSaas = (props.serverCapabilities ?? []).includes('saas');
-			const defaultMode: ConnectionMode = cloudSignedIn && isSaas ? 'cloud' : 'local';
+			const devMode = settings.development.connectionMode;
+			const canUseCloud = cloudSignedIn && isSaas && devMode !== 'cloud';
+			const defaultMode: ConnectionMode = canUseCloud ? 'cloud' : 'local';
 			onSettingsChange({ deployment: { connectionMode: defaultMode } } as Partial<SettingsData>);
 		} else {
 			onSettingsChange({ deployment: { connectionMode: null, teamId: '' } } as Partial<SettingsData>);

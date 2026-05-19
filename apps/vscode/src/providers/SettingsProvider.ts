@@ -297,12 +297,17 @@ export class SettingsProvider {
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
 			// Step 2: Confirm save to the user immediately — don't wait for engine ops
-			this.showMessage(webview, 'success', 'Settings saved successfully!');
+			this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
 			}
 
-			// Step 3: Reconcile engines — compares config checksums to detect changes
+			// Step 3: Cancel any pending debounced config-change handlers so they
+			// don't race with the reconcile triggered by the explicit save.
+			const cm = getConnectionManager();
+			cm?.cancelPendingConfigChange();
+
+			// Reconcile engines — compares config checksums to detect changes
 			// (API key, host URL, connection mode, etc.) and restarts affected engines.
 			// Runs after the UI has updated so downloads don't block the "Saved" feedback.
 			const registry = getEngineRegistry();
@@ -353,7 +358,7 @@ export class SettingsProvider {
 	 * Sends a message to the webview.
 	 * @param context When 'development', the message is shown inside that section's box; otherwise shown in the global message area.
 	 */
-	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development'): void {
+	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development' | 'save'): void {
 		webview.postMessage({
 			type: 'showMessage',
 			level: level,

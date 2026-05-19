@@ -160,10 +160,13 @@ export class WindowsServiceManager extends ServiceManager {
 			await this.runElevatedScript('remove.ps1', script);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (!/not installed|service does not exist|does not exist as an installed|1060/i.test(msg)) {
+			if (
+				!/not installed|service does not exist|does not exist as an installed|1060/i.test(msg) &&
+				!/cancell?ed by the user|1223|0x4c7/i.test(msg)
+			) {
 				throw err;
 			}
-			// Service was not installed — nothing to unregister, proceed with cleanup
+			// Service missing or elevation cancelled — proceed with best-effort local cleanup
 		}
 
 		// Best-effort fallback: if the elevated script couldn't fully clean up
@@ -265,9 +268,8 @@ export class WindowsServiceManager extends ServiceManager {
 				`& '${nssm}' 'remove' '${svcName}' 'confirm'`,
 				`Start-Sleep -Seconds 2`,
 				``,
-				`Write-Host "Cleaning up engine and log directories..."`,
-				`Remove-Item -Recurse -Force '${enginesDir}' -ErrorAction SilentlyContinue`,
-				`Remove-Item -Recurse -Force '${logsDir}' -ErrorAction SilentlyContinue`,
+				`Write-Host "Cleaning up install directory..."`,
+				`Remove-Item -Recurse -Force '${psEscape(INSTALL_ROOT)}' -ErrorAction SilentlyContinue`,
 				``,
 				`Write-Host "RocketRide service uninstalled successfully."`,
 				`Write-Host "Press any key to close..."`,

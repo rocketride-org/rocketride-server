@@ -39,6 +39,7 @@ export class EngineOnprem extends EngineBackend {
 	 */
 	async start(config: ConnectionGroupConfig, _token?: vscode.CancellationToken): Promise<void> {
 		if (!config.hostUrl) {
+			this.hostUrl = undefined;
 			this.emitStatus({ phase: 'error', message: 'Host URL not configured', error: 'Host URL is required for on-prem connections' });
 			return;
 		}
@@ -53,6 +54,7 @@ export class EngineOnprem extends EngineBackend {
 
 	/** No process to stop in on-prem mode. */
 	async stop(): Promise<void> {
+		this.hostUrl = undefined;
 		this.emitStatus({ phase: 'idle', message: 'Disconnected from on-prem' });
 	}
 

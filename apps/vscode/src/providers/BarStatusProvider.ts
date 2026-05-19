@@ -102,6 +102,8 @@ export class BarStatus {
 	 * states (connected, auth-failed, disconnected) and engine progress
 	 * (downloading, extracting, starting) via progressMessage.
 	 */
+	private statusChangeHandler?: (status: ConnectionStatus) => void;
+
 	private setupEventListeners(): void {
 		if (!this.connectionManager) {
 			console.warn('[BarStatus] No connection manager available for event listeners');
@@ -109,9 +111,10 @@ export class BarStatus {
 		}
 
 		try {
-			this.connectionManager.on('shell:statusChange', (status: ConnectionStatus) => {
+			this.statusChangeHandler = (status: ConnectionStatus) => {
 				this.handleConnectionStatusChange(status);
-			});
+			};
+			this.connectionManager.on('shell:statusChange', this.statusChangeHandler);
 		} catch {
 			// Ignore any error
 		}
@@ -269,6 +272,10 @@ export class BarStatus {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
+		if (this.statusChangeHandler && this.connectionManager) {
+			this.connectionManager.removeListener('shell:statusChange', this.statusChangeHandler);
+			this.statusChangeHandler = undefined;
+		}
 		this.statusBarItem.dispose();
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];

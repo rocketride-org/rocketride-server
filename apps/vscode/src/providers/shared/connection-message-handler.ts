@@ -176,6 +176,7 @@ export class ConnectionMessageHandler {
 	}
 
 	private statusPollInterval?: NodeJS.Timeout;
+	private progressHandler?: (event: { mode: string; command: string; message: string }) => void;
 
 	/**
 	 * Start polling engine status and forwarding events to all active webviews.
@@ -191,11 +192,12 @@ export class ConnectionMessageHandler {
 		// Forward ioControl progress events to webviews
 		const registry = this.opts.getEngineRegistry?.();
 		if (registry) {
-			registry.on('progress', (event: { mode: string; command: string; message: string }) => {
+			this.progressHandler = (event: { mode: string; command: string; message: string }) => {
 				for (const w of this.opts.getActiveWebviews()) {
 					w.postMessage({ type: 'ioProgress', mode: event.mode, command: event.command, message: event.message });
 				}
-			});
+			};
+			registry.on('progress', this.progressHandler);
 		}
 
 		// Send initial status for service and docker
@@ -235,6 +237,11 @@ export class ConnectionMessageHandler {
 		if (this.statusPollInterval) {
 			clearInterval(this.statusPollInterval);
 			this.statusPollInterval = undefined;
+		}
+		if (this.progressHandler) {
+			const registry = this.opts.getEngineRegistry?.();
+			registry?.removeListener('progress', this.progressHandler);
+			this.progressHandler = undefined;
 		}
 	}
 
@@ -389,6 +396,7 @@ export class ConnectionMessageHandler {
 					// Cache the failure so we don't retry immediately
 					this.versionCache.versions = [];
 					this.versionCache.fetchedAt = Date.now();
+					setCachedEngineVersions([]);
 				}
 			}
 		}
@@ -476,6 +484,7 @@ export class ConnectionMessageHandler {
 				if (attempt === MAX_FETCH_ATTEMPTS) {
 					this.dockerTagCache.tags = [];
 					this.dockerTagCache.fetchedAt = Date.now();
+					setCachedDockerTags([]);
 				}
 			}
 		}
@@ -495,8 +504,9 @@ export class ConnectionMessageHandler {
 					'User-Agent': 'RocketRide-VSCode',
 					...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
 				},
+				timeout: 15000,
 			};
-			https.get(url, options, (res) => {
+			const req = https.get(url, options, (res) => {
 				if (res.statusCode !== 200) {
 					res.resume();
 					reject(new Error(`HTTP ${res.statusCode} from ${url}`));
@@ -508,7 +518,9 @@ export class ConnectionMessageHandler {
 					try { resolve(JSON.parse(body)); }
 					catch (e) { reject(e); }
 				});
-			}).on('error', reject);
+			});
+			req.on('error', reject);
+			req.on('timeout', () => { req.destroy(new Error(`Request to ${url} timed out`)); });
 		});
 	}
 
@@ -528,6 +540,7 @@ export class ConnectionMessageHandler {
 	}
 
 	public dispose(): void {
+		this.stopStatusPolling();
 		for (const cleanup of this.cloudAuthCleanups) {
 			cleanup();
 		}
