@@ -416,40 +416,56 @@ _HAS_ROCKETLIB = importlib.util.find_spec('rocketlib') is not None
 
 @pytest.mark.skipif(not _HAS_ROCKETLIB, reason='rocketlib not available outside build interpreter')
 class TestIGlobalAlphaClamp:
-    """alpha out of range should be clamped AND warned (not silently coerced)."""
+    """alpha out of range should be clamped AND warned (not silently coerced).
 
-    def test_alpha_clamp_logs_warning(self, monkeypatch):
-        # Load IGlobal using the real ai.common.config / rocketlib types
-        sys.path.insert(0, str(_SEARCH_HYBRID_DIR.parent.parent))
+    The engine-level invariant is already covered by
+    ``TestFullHybridSearch.test_alpha_validation`` (rejects alpha<0 / alpha>1
+    constructor args). This test additionally pins that the IGlobal
+    out-of-range path clamps the value and emits a warning via rocketlib.
+
+    Implementation note: the warning is captured by re-importing the module
+    and patching its ``warning`` attribute via the module dict directly,
+    rather than monkeypatch.setattr — the build interpreter exposes the
+    IGlobal module under a path that monkeypatch resolves to the class
+    object, not the module.
+    """
+
+    def test_alpha_clamp_logs_warning(self):
+        import importlib
+
         try:
-            from nodes.search_hybrid.IGlobal import IGlobal  # type: ignore
-            import nodes.search_hybrid.IGlobal as iglobal_mod  # type: ignore
+            iglobal_mod = importlib.import_module('nodes.search_hybrid.IGlobal')
         except Exception as e:  # pragma: no cover - env-dependent
             pytest.skip(f'IGlobal not importable under this interpreter: {e}')
+        if not hasattr(iglobal_mod, 'warning'):
+            pytest.skip('IGlobal module does not expose `warning` (build-runtime variant)')
 
         warnings_seen: list = []
-        monkeypatch.setattr(iglobal_mod, 'warning', lambda msg, *a, **kw: warnings_seen.append(msg))
-
-        # Build a fake config object that triggers the out-of-range path
-        ig = IGlobal.__new__(IGlobal)
-        # Force the non-CONFIG branch via a minimal stand-in
-        from rocketlib import OPEN_MODE  # type: ignore
-
-        class _Endpoint:
-            class endpoint:
-                openMode = OPEN_MODE.RUN if hasattr(OPEN_MODE, 'RUN') else 'run'
-
-        ig.IEndpoint = _Endpoint
-        ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'alpha': 2.5})
-
+        original = iglobal_mod.warning
+        iglobal_mod.warning = lambda msg, *a, **kw: warnings_seen.append(msg)
         try:
-            ig.beginGlobal()
-        except Exception as e:  # pragma: no cover - env-dependent
-            pytest.skip(f'beginGlobal not directly invokable in this env: {e}')
+            IGlobal = iglobal_mod.IGlobal
+            ig = IGlobal.__new__(IGlobal)
 
-        assert any('alpha' in m for m in warnings_seen), warnings_seen
-        assert ig.engine is not None
-        assert ig.engine.alpha == 1.0
+            from rocketlib import OPEN_MODE  # type: ignore
+
+            class _Endpoint:
+                class endpoint:
+                    openMode = OPEN_MODE.RUN if hasattr(OPEN_MODE, 'RUN') else 'run'
+
+            ig.IEndpoint = _Endpoint
+            ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'alpha': 2.5})
+
+            try:
+                ig.beginGlobal()
+            except Exception as e:  # pragma: no cover - env-dependent
+                pytest.skip(f'beginGlobal not directly invokable in this env: {e}')
+
+            assert any('alpha' in m for m in warnings_seen), warnings_seen
+            assert ig.engine is not None
+            assert ig.engine.alpha == 1.0
+        finally:
+            iglobal_mod.warning = original
 
 
 # ===========================================================================

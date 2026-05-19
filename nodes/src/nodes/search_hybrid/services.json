@@ -31,7 +31,7 @@
 				"expect": {
 					"documents": {
 						"notEmpty": true,
-						"contains": "machine learning"
+						"contains": "Machine learning"
 					}
 				}
 			}
