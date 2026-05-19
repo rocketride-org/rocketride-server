@@ -2,7 +2,7 @@
 	"title": "Text Chunker",
 	"protocol": "chunker://",
 	"classType": ["transform"],
-	"capabilities": [],
+	"capabilities": ["experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.chunker",
@@ -52,16 +52,18 @@
 	},
 	"fields": {
 		"chunker.chunk_size": {
-			"type": "number",
+			"type": "integer",
 			"title": "Chunk size",
 			"description": "Maximum size of each chunk (characters for recursive/sentence, tokens for token strategy)",
-			"default": 1000
+			"default": 1000,
+			"minimum": 1
 		},
 		"chunker.chunk_overlap": {
-			"type": "number",
+			"type": "integer",
 			"title": "Chunk overlap",
-			"description": "Number of characters or tokens to overlap between consecutive chunks",
-			"default": 200
+			"description": "Number of characters or tokens to overlap between consecutive chunks; must be less than chunk size.",
+			"default": 200,
+			"minimum": 0
 		},
 		"chunker.encoding_name": {
 			"type": "string",
