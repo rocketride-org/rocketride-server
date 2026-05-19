@@ -65,10 +65,6 @@ class Chat(ChatBase):
             raise ValueError(
                 'Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.'
             )
-        if not api_key.startswith('AI'):
-            raise ValueError(
-                'Invalid Gemini API key format. Google AI API keys start with "AI". Please check your API key at https://aistudio.google.com/apikey'
-            )
 
         try:
             self._api_key = api_key

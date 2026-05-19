@@ -20,13 +20,19 @@ permissions:
 # and the `if:` below skips the run, so a broken develop commit never
 # becomes a published prerelease.
 #
-# `workflow_dispatch` is kept as the manual escape hatch for hot-fix
-# flows or for re-publishing a known-good ref out of cycle.
+# `workflow_dispatch` is the manual escape hatch for hot-fix flows
+# or for re-publishing a known-good ref out of cycle. Allowed from
+# develop, stage, or main — the long-lived release branches — so a
+# release manager can promote any of those branches into the current
+# nightly slot (e.g. publishing stage as the prerelease ahead of a
+# stable cut). Feature branches are intentionally not allowed: see
+# the trust-boundary discussion in the init job's `if:` comment.
 #
 # NB: per GitHub's rules, `workflow_run` triggers always execute the
-# version of this file from the *default* branch (main), not from the
-# branch that produced the triggering CI run. So edits here only take
-# effect after they land on main — keep that in mind if iterating.
+# version of this file from the repo's *default* branch (develop),
+# not from the branch that produced the triggering CI run. So edits
+# here only take effect after they land on develop — keep that in
+# mind if iterating.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -37,23 +43,33 @@ on:
 jobs:
   init:
     name: Initialize
-    # Skip when CI failed; manual dispatch always runs.
+    # Skip when CI failed; manual dispatch runs for any of the allowed
+    # release branches (develop, stage, main).
     #
-    # The `head_branch == 'develop'` guard makes explicit what the
-    # `branches: [develop]` filter on the trigger already enforces:
-    # this workflow runs privileged jobs (secrets: inherit, contents:
-    # write) on the head_sha of the triggering CI run. Static analyzers
-    # (e.g. OSSF Scorecard's DangerousWorkflow rule) flag workflow_run
-    # patterns that checkout `head_sha` without a branch check, since
-    # in principle workflow_run can be triggered by CI runs on any
-    # branch and a checkout of an untrusted ref with secrets is the
-    # canonical supply-chain attack vector. The explicit branch check
-    # below ties the trust boundary to develop's branch protection
-    # (PR + code-owner review + required checks), which is the actual
-    # safety guarantee.
+    # The `head_branch == 'develop'` guard on the workflow_run side
+    # makes explicit what the `branches: [develop]` filter on the
+    # trigger already enforces: this workflow runs privileged jobs
+    # (secrets: inherit, contents: write) on the head_sha of the
+    # triggering CI run. Static analyzers (e.g. OSSF Scorecard's
+    # DangerousWorkflow rule) flag workflow_run patterns that
+    # checkout `head_sha` without a branch check, since in principle
+    # workflow_run can be triggered by CI runs on any branch and a
+    # checkout of an untrusted ref with secrets is the canonical
+    # supply-chain attack vector. The explicit branch check below ties
+    # the trust boundary to develop's branch protection (PR +
+    # code-owner review + required checks), which is the actual safety
+    # guarantee.
+    #
+    # On the workflow_dispatch side the dispatcher already needs
+    # `Actions: write` on the repo, so the branch allowlist is more
+    # about preventing accidents (someone dispatching from a stale
+    # personal branch and publishing a broken prerelease) than a true
+    # privilege boundary.
     if: >
       (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/develop') ||
+       (github.ref == 'refs/heads/develop' ||
+        github.ref == 'refs/heads/stage' ||
+        github.ref == 'refs/heads/main')) ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'develop')
     uses: ./.github/workflows/_init.yaml

@@ -81,7 +81,10 @@ class IGlobal(IGlobalBase):
             apikey = config.get('apikey')
             model = config.get('model')
 
-            # Minimal probe; UI prompts for missing keys
+            # Minimal probe; secure fields are not decrypted at validate time
+            if not apikey:
+                return
+
             try:
                 client = genai.Client(api_key=apikey)
                 client.models.generate_content(model=model, contents=self.VALIDATION_PROMPT)
@@ -186,11 +189,8 @@ class IGlobal(IGlobalBase):
             # Get our bag
             bag = self.IEndpoint.endpoint.bag
 
-            # Get this nodes config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
             # Get a chat to interface
-            self._chat = Chat(self.glb.logicalType, config, bag)
+            self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
 
     def endGlobal(self):
         """Clean up the global chat instance."""
