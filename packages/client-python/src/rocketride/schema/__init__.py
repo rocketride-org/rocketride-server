@@ -57,6 +57,7 @@ Usage:
     filter = DocFilter(where={'category': 'financial'})
 """
 
+from .attachment import Attachment
 from .doc import Doc
 from .doc_group import DocGroup
 from .doc_filter import DocFilter
@@ -72,6 +73,7 @@ from .question import (
 
 __all__ = [
     'Answer',
+    'Attachment',
     'Question',
     'QuestionExample',
     'QuestionHistory',
