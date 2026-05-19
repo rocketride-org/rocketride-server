@@ -279,10 +279,16 @@ class CrewBase(AgentBase):
                 # per TDD §16).  v1: drop attachments from the LLM call and
                 # warn once per run.  Tool-call attachment forwarding via the
                 # picker is unaffected (see HostTool._run below).
-                # TODO Slice J: increment attachment.dropped_agent_unsupported
-                # telemetry counter.
+                # Structured METRIC line per TDD §13. One log per dropped
+                # attachment so the counter aggregates cleanly by MIME.
+                # Privacy: MIME only — never filename or path.
                 attachments = getattr(outer_context, 'attachments', ()) or ()
                 if attachments:
+                    for _att in attachments:
+                        logger.info(
+                            'METRIC attachment.dropped_agent_unsupported framework=crewai mime=%s',
+                            getattr(_att, 'mime', 'application/octet-stream'),
+                        )
                     run_id = getattr(outer_context, 'run_id', '')
                     if run_id and run_id not in CrewBase._attachment_drop_warned_runs:
                         CrewBase._attachment_drop_warned_runs.add(run_id)
@@ -402,12 +408,27 @@ class CrewBase(AgentBase):
                 # method.  LLM-decided args win via setdefault semantics.
                 try:
                     input_schema = getattr(self, '_rr_input_schema', None) or {}
+                    candidates = getattr(outer_context, 'attachments', ()) or ()
                     picker_kwargs = pick_for_tool_call(
                         input_schema=input_schema if isinstance(input_schema, dict) else {},
-                        candidates=getattr(outer_context, 'attachments', ()) or (),
+                        candidates=candidates,
                     )
                     for _k, _v in picker_kwargs.items():
-                        framework_args.setdefault(_k, _v)
+                        if _k in framework_args:
+                            continue
+                        framework_args[_k] = _v
+                        # METRIC tool.call_with_attachment per slot we
+                        # actually filled from the picker (TDD §13).
+                        _mime = 'unknown'
+                        for _c in candidates:
+                            if getattr(_c, 'path', None) == _v:
+                                _mime = getattr(_c, 'mime', 'unknown')
+                                break
+                        logger.info(
+                            'METRIC tool.call_with_attachment tool_name=%s mime=%s',
+                            self.name,
+                            _mime,
+                        )
                 except Exception:
                     # Picker is best-effort; never block a tool call on it.
                     pass

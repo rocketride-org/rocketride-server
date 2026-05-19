@@ -24,9 +24,15 @@
 
 from __future__ import annotations  # Enables forward references
 import json
+import logging
 from typing import TYPE_CHECKING, Dict, Any, Iterable, List, Optional, TypedDict, Callable, Protocol
 from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke
 from .error import APERR, Ec
+
+# Telemetry surface — METRIC-prefixed log lines are picked up by a
+# follow-up metrics adapter (TDD §13).  Privacy: tool_name + MIME only,
+# never filename or path.
+_telemetry_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -1279,6 +1285,14 @@ class IInstanceBase:
             mimes = prop_schema.get('x-rocketride-mimes') or []
             mime = mimes[0] if mimes else None
             input_obj[prop_name] = {'path': path, 'mime': mime, 'bytes': data}
+            # METRIC tool.attachment_resolved — fired per successfully
+            # resolved attachment-typed slot (TDD §13).  Privacy: tool
+            # name + property name only, never the path itself.
+            _telemetry_logger.info(
+                'METRIC tool.attachment_resolved tool_name=%s prop=%s',
+                tool_name,
+                prop_name,
+            )
 
     def _get_attachment_file_store(self) -> Any:
         """Return a sync FileStore-like object exposing ``read_bytes(path)``.

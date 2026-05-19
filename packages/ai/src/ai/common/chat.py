@@ -10,11 +10,18 @@ implementations (e.g., OpenAI, Anthropic, etc.) that handle the actual
 communication with their respective APIs.
 """
 
+import logging
 import time
 import json
 import importlib
 from typing import Dict, Any
 from rocketlib import debug
+
+# Telemetry logger — METRIC-prefixed structured lines emitted from this
+# module are picked up by a follow-up adapter that fans them out to the
+# MetricsManager surface (TDD §13). Privacy: MIME + counts only, never
+# filenames or paths.
+_telemetry_logger = logging.getLogger(__name__)
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
@@ -477,31 +484,58 @@ class ChatBase:
 
         def _log_drops(dropped):
             for d in dropped:
-                # TODO(slice-J): emit metrics.counter('attachment.dropped_unsupported', 1,
-                # tags={'provider': d.provider, 'mime': d.mime}) once the per-pipe metrics
-                # surface is reachable from ChatBase. Logging already happened inside the
-                # translator.
-                debug(f'attachment.dropped_unsupported provider={d.provider} mime={d.mime}')
+                # Structured METRIC log line — picked up by the follow-up
+                # logging-to-metrics adapter. MIME only, no path/filename
+                # (TDD §13 privacy invariant).
+                _telemetry_logger.info(
+                    'METRIC attachment.dropped_unsupported provider=%s mime=%s',
+                    d.provider,
+                    d.mime,
+                )
+
+        def _log_forwarded(provider_name, kept_count, sample_mimes):
+            # One emission per surviving attachment per send. Tagged with
+            # provider and the per-attachment MIME so the §13 counter can
+            # be aggregated by both axes downstream.
+            for mime in sample_mimes:
+                _telemetry_logger.info(
+                    'METRIC llm.attachment_forwarded provider=%s mime=%s',
+                    provider_name,
+                    mime,
+                )
+
+        def _kept_mimes(all_atts, dropped_list):
+            """Return the MIME list of attachments that survived translation."""
+            dropped_ids = {getattr(d, 'attachment_id', None) for d in dropped_list}
+            return [
+                getattr(a, 'mime', 'application/octet-stream')
+                for a in all_atts
+                if getattr(a, 'attachment_id', None) not in dropped_ids
+            ]
 
         if shape == 'openai':
             file_store = self._get_file_store()
             blocks, dropped = translate_openai_shape(prompt_text, attachments, file_store, self._provider)
             _log_drops(dropped)
+            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
             return self._chat_blocks(blocks)
         elif shape == 'anthropic':
             file_store = self._get_file_store()
             blocks, dropped = translate_anthropic_shape(prompt_text, attachments, file_store, self._provider)
             _log_drops(dropped)
+            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
             return self._chat_blocks(blocks)
         elif shape == 'gemini':
             file_store = self._get_file_store()
             parts, dropped = translate_gemini_shape(prompt_text, attachments, file_store, self._provider)
             _log_drops(dropped)
+            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
             return self._chat_blocks(parts)
         elif shape == 'bedrock':
             file_store = self._get_file_store()
             blocks, dropped = translate_bedrock_shape(prompt_text, attachments, file_store, self._provider)
             _log_drops(dropped)
+            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
             return self._chat_blocks(blocks)
 
         # Unknown shape: log warning and fall back to text-only so the
@@ -539,6 +573,14 @@ class ChatBase:
         # production behavior changes until Slice G wires per-node shapes.
         # FileStore IO errors raise per Q-E1; unsupported MIMEs drop+warn.
         attachments = list(getattr(question, 'attachments', []) or [])
+        # Per TDD §13 / Q-J1: emit count_per_message on every send (including
+        # zero) so the orphan-volume signal (upload_starts − Σ counts) is
+        # computable from production logs without a reaper in v1.
+        _telemetry_logger.info(
+            'METRIC attachment.count_per_message provider=%s count=%d',
+            getattr(self, '_provider', 'unknown'),
+            len(attachments),
+        )
         if attachments:
             response = self._chat_with_attachments(question, attachments)
         else:

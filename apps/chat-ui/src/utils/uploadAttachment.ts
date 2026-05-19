@@ -63,9 +63,20 @@ export async function uploadAttachment(opts: {
 }): Promise<Attachment> {
 	const { client, chatId, file } = opts;
 	const attachment_id = crypto.randomUUID();
-	const ext = extFromFilename(file.name, file.type || 'application/octet-stream');
+	const mime = file.type || 'application/octet-stream';
+	const ext = extFromFilename(file.name, mime);
 	const path = `.chats/${chatId}/${attachment_id}.${ext}`;
 	const bytes = new Uint8Array(await file.arrayBuffer());
+
+	// METRIC attachment.upload_start — fired before the first write so
+	// the orphan-volume signal (upload_starts − Σ count_per_message)
+	// is computable from production logs without a reaper in v1
+	// (TDD §13, Q-J1).  Privacy: MIME + size only, never filename.
+	console.info(
+		`METRIC attachment.upload_start mime=${mime} size_bytes=${bytes.byteLength}`,
+	);
+	// METRIC attachment.bytes — histogram bucket source.
+	console.info(`METRIC attachment.bytes size_bytes=${bytes.byteLength}`);
 
 	const { handle } = await client.fsOpen(path, 'w');
 	try {
@@ -73,13 +84,19 @@ export async function uploadAttachment(opts: {
 			const chunk = bytes.subarray(offset, offset + CHUNK_SIZE);
 			await client.fsWrite(handle, chunk);
 		}
+	} catch (err) {
+		// METRIC attachment.upload_error — MIME + error class only.
+		console.info(
+			`METRIC attachment.upload_error mime=${mime} error_class=${err instanceof Error ? err.constructor.name : 'Unknown'}`,
+		);
+		throw err;
 	} finally {
 		await client.fsClose(handle, 'w');
 	}
 
 	return {
 		attachment_id,
-		mime: file.type || 'application/octet-stream',
+		mime,
 		filename: file.name,
 		size_bytes: bytes.byteLength,
 		path,

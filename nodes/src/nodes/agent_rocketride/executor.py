@@ -27,6 +27,7 @@ The path component is a JMESPath expression and may itself contain colons
 from __future__ import annotations
 
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List
@@ -40,6 +41,8 @@ from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
 
 from .formatters import format_data
+
+logger = logging.getLogger(__name__)
 
 # Maximum number of concurrent tool executions per wave.  Keeping this at 8
 # prevents runaway thread counts when the LLM issues many parallel calls.
@@ -469,12 +472,27 @@ def _execute_wave_calls(
                         if isinstance(_isch, dict):
                             input_schema = _isch
                         break
+                candidates = getattr(context, 'attachments', ()) or ()
                 picker_kwargs = pick_for_tool_call(
                     input_schema=input_schema,
-                    candidates=getattr(context, 'attachments', ()) or (),
+                    candidates=candidates,
                 )
                 for _k, _v in picker_kwargs.items():
-                    args.setdefault(_k, _v)
+                    if _k in args:
+                        continue
+                    args[_k] = _v
+                    # METRIC tool.call_with_attachment per slot the picker
+                    # actually filled (TDD §13).
+                    _mime = 'unknown'
+                    for _c in candidates:
+                        if getattr(_c, 'path', None) == _v:
+                            _mime = getattr(_c, 'mime', 'unknown')
+                            break
+                    logger.info(
+                        'METRIC tool.call_with_attachment tool_name=%s mime=%s',
+                        tool,
+                        _mime,
+                    )
             except Exception:
                 # Picker is best-effort; never block a tool call on it.
                 pass

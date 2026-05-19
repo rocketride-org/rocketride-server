@@ -219,9 +219,16 @@ def _build_wave_question(
     # require upstream framework work deferred per TDD §16.  v1: warn once
     # per run and let the picker (tools path) still satisfy attachment-typed
     # tool inputs from AgentContext.attachments.
-    # TODO Slice J: increment attachment.dropped_agent_unsupported counter.
     attachments = getattr(context, 'attachments', ()) or ()
     if attachments:
+        # Structured METRIC line per TDD §13. One emission per dropped
+        # attachment so downstream aggregation can split by MIME. Privacy:
+        # MIME only, never filename or path.
+        for _att in attachments:
+            logger.info(
+                'METRIC attachment.dropped_agent_unsupported framework=rocketride_wave mime=%s',
+                getattr(_att, 'mime', 'application/octet-stream'),
+            )
         run_id = getattr(context, 'run_id', '')
         if run_id and run_id not in _attachment_drop_warned_runs:
             _attachment_drop_warned_runs.add(run_id)

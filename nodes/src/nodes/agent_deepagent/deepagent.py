@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,6 +36,8 @@ from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -179,12 +182,27 @@ def _build_deepagent_tools(
             # the tool method. LLM-decided args win via setdefault semantics.
             try:
                 input_schema = getattr(self, '_rr_input_schema', None) or {}
+                candidates = getattr(context, 'attachments', ()) or ()
                 picker_kwargs = pick_for_tool_call(
                     input_schema=input_schema if isinstance(input_schema, dict) else {},
-                    candidates=getattr(context, 'attachments', ()) or (),
+                    candidates=candidates,
                 )
                 for _k, _v in picker_kwargs.items():
-                    framework_args.setdefault(_k, _v)
+                    if _k in framework_args:
+                        continue
+                    framework_args[_k] = _v
+                    # METRIC tool.call_with_attachment per slot we actually
+                    # filled from the picker (TDD §13).
+                    _mime = 'unknown'
+                    for _c in candidates:
+                        if getattr(_c, 'path', None) == _v:
+                            _mime = getattr(_c, 'mime', 'unknown')
+                            break
+                    logger.info(
+                        'METRIC tool.call_with_attachment tool_name=%s mime=%s',
+                        tool_name,
+                        _mime,
+                    )
             except Exception:
                 # Picker is best-effort; never block a tool call on it.
                 pass
