@@ -284,3 +284,11 @@ class AgentContext:
     pipe_id: int
     framework: str
     started_at: str
+
+    # Attachments scoped to this agent run — captured at the top of
+    # AgentBase.run_agent from Question.attachments and threaded onto
+    # every synthesized Question in call_llm / call_llm_json so the
+    # provider-side translators in LLMBase can auto-forward them.
+    # Tuple for the frozen dataclass; Attachment Pydantic models are
+    # themselves immutable-ish.
+    attachments: tuple = ()

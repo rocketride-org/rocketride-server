@@ -161,6 +161,7 @@ class AgentBase(ABC):
                 pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
                 framework=self.FRAMEWORK,
                 started_at=started_at,
+                attachments=tuple(getattr(question, 'attachments', []) or []),
             )
 
             # And execute
@@ -299,11 +300,12 @@ class AgentBase(ABC):
         from rocketlib.types import IInvokeLLM
 
         if isinstance(prompt, Question):
-            q = prompt
+            q = prompt  # caller's Question wins; their decision about attachments stands
         else:
             transcript = messages_to_transcript(prompt)
             q = Question(role=role or '')
             q.addQuestion(transcript)
+            q.attachments = list(context.attachments)  # propagate from run-entry. TDD §8.1.
 
         result = context.llm.invoke(IInvokeLLM.Ask(question=q))
         return truncate_at_stop_words(extract_text(result), stop_words)
@@ -341,11 +343,12 @@ class AgentBase(ABC):
         from rocketlib.types import IInvokeLLM
 
         if isinstance(prompt, Question):
-            q = prompt
+            q = prompt  # caller's Question wins; their decision about attachments stands
         else:
             transcript = messages_to_transcript(prompt)
             q = Question(role=role or '')
             q.addQuestion(transcript)
+            q.attachments = list(context.attachments)  # propagate from run-entry. TDD §8.1.
 
         result = context.llm.invoke(IInvokeLLM.Ask(question=q))
         return result.getJson()
