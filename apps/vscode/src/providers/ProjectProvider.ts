@@ -314,6 +314,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
 					const cached = this.connectionManager.getCachedServices();
 					const client = this.connectionManager.getClient();
+					const envKeys = await client?.account?.getEnvironmentKeys().catch(() => []) ?? [];
 
 					// Send everything in one message
 					webview.postMessage({
@@ -326,6 +327,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
+						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 

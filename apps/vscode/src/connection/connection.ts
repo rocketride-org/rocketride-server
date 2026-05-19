@@ -562,7 +562,8 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	public getHttpUrl(): string {
 		if (this.engineUri) {
-			const url = new URL(this.engineUri);
+			const normalized = RocketRideClient.normalizeUri(this.engineUri);
+			const url = new URL(normalized);
 			const httpProtocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
 			return `${httpProtocol}//${url.hostname}:${url.port || (httpProtocol === 'https:' ? '443' : '80')}`;
 		}
