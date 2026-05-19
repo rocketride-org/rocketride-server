@@ -16,18 +16,27 @@
 import React, { useState, useEffect } from 'react';
 import serviceIcon from '../../../../assets/service.svg';
 import { ServiceStatus, VersionOption, displayVersion, stateLabels, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
+import { MessageData } from '../../Settings/SettingsWebview';
+import { MessageDisplay } from '../../Settings/MessageDisplay';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export interface ServicePanelProps {
+	/** Unique prefix for HTML element IDs (e.g. 'dev', 'deploy', 'welcome'). */
 	idPrefix: string;
+	/** Current service daemon state from OS-level polling. */
 	status: ServiceStatus;
+	/** Streamed progress text during install/update/remove (null when idle). */
 	progress: string | null;
+	/** Error message from the last failed action (null on success). */
 	error: string | null;
+	/** True while an ioControl action is in flight. */
 	busy: boolean;
+	/** Which action is currently running (drives button label text). */
 	action: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	/** Available versions for the split-button dropdown. */
 	versions: VersionOption[];
 	selectedVersion: string;
 	onVersionChange: (version: string) => void;
@@ -36,10 +45,16 @@ export interface ServicePanelProps {
 	onRemove: () => void;
 	onStart: () => void;
 	onStop: () => void;
+	/** Whether the sudo password overlay is visible (Linux/macOS only). */
 	sudoPromptVisible: boolean;
 	sudoPasswordInput: string;
 	onSudoPasswordChange: (password: string) => void;
 	onSudoSubmit: () => void;
+	/** Test connection callback — only enabled when service is running. */
+	onTestConnection?: () => void;
+	/** Inline test result (success/error) shown below the test button. */
+	testMessage?: MessageData | null;
+	/** When true, hides advanced fields (used on Welcome page). */
 	simplified?: boolean;
 }
 
@@ -47,7 +62,7 @@ export interface ServicePanelProps {
 // COMPONENT
 // =============================================================================
 
-export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop, sudoPromptVisible, sudoPasswordInput, onSudoPasswordChange, onSudoSubmit }) => {
+export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop, sudoPromptVisible, sudoPasswordInput, onSudoPasswordChange, onSudoSubmit, onTestConnection, testMessage }) => {
 	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 	const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 	const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -108,32 +123,28 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 				</button>
 				{dropdownOpen && (
 					<div role="menu" style={S.splitDropdown}>
-						{versions.map((opt) => {
+						<div style={S.splitDropdownGroupLabel}>Recommended</div>
+						{versions.filter((v) => v.value === 'latest' || v.value === 'prerelease').map((opt) => {
 							const optKey = `${idPrefix}-service-${opt.value}`;
 							return (
-								<button
-									type="button"
-									key={opt.value}
-									role="menuitem"
-									style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)}
-									onClick={() => {
-										onVersionChange(opt.value);
-										setDropdownOpen(false);
-									}}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											onVersionChange(opt.value);
-											setDropdownOpen(false);
-										}
-										if (e.key === 'Escape') setDropdownOpen(false);
-									}}
-									onMouseEnter={() => setHoveredOption(optKey)}
-									onMouseLeave={() => setHoveredOption(null)}
-								>
+								<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
 									{opt.label}
 								</button>
 							);
 						})}
+						{versions.some((v) => v.value !== 'latest' && v.value !== 'prerelease') && (
+							<>
+								<div style={S.splitDropdownGroupLabel}>All versions</div>
+								{versions.filter((v) => v.value !== 'latest' && v.value !== 'prerelease').map((opt) => {
+									const optKey = `${idPrefix}-service-${opt.value}`;
+									return (
+										<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
+											{opt.label}
+										</button>
+									);
+								})}
+							</>
+						)}
 					</div>
 				)}
 			</div>
@@ -228,6 +239,23 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 					</>
 				)}
 			</div>
+
+			{/* Test connection — visible when installed, enabled only when running */}
+			{onTestConnection && status.state !== 'not-installed' && (
+				<div style={{ marginTop: 12 }}>
+					<button
+						type="button"
+						onClick={onTestConnection}
+						disabled={status.state !== 'running' || busy}
+						style={secondaryBtnStyle(hoveredBtn === `${idPrefix}-service-test`, status.state !== 'running' || busy)}
+						onMouseEnter={() => setHoveredBtn(`${idPrefix}-service-test`)}
+						onMouseLeave={() => setHoveredBtn(null)}
+					>
+						Test Connection
+					</button>
+				</div>
+			)}
+			{testMessage && <MessageDisplay message={testMessage} inline />}
 		</>
 	);
 };

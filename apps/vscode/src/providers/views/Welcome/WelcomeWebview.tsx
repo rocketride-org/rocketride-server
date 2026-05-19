@@ -21,6 +21,19 @@
 // SOFTWARE.
 // =============================================================================
 
+/**
+ * WelcomeWebview — first-run onboarding page shown in a VS Code webview.
+ *
+ * Presents a branded split-panel layout: branding/features on the left,
+ * simplified connection configuration on the right. Uses the same
+ * ConnectionConfig component as the full Settings page but in `simplified`
+ * mode (fewer fields, single "Save & Connect" action).
+ *
+ * Message flow mirrors SettingsWebview: the extension host sends
+ * settingsLoaded/showMessage/ioProgress/ioResult, and the webview
+ * responds with saveAndConnect/ioControl/cloud:signIn/etc.
+ */
+
 import React, { useState, CSSProperties } from 'react';
 import { useMessaging } from '../hooks/useMessaging';
 import { useTheme } from '../hooks/useTheme';
@@ -40,7 +53,7 @@ import '../../styles/root.css';
 
 interface WelcomeExtraSettings {}
 
-type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'engineVersionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'teamsLoaded'; teams: Array<{ id: string; name: string }> } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerProgress'; message: string } | { type: 'dockerComplete' } | { type: 'dockerError'; message: string } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceProgress'; message: string } | { type: 'serviceComplete' } | { type: 'serviceError'; message: string } | { type: 'serviceNeedsSudo' };
+type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'teamsLoaded'; teams: Array<{ id: string; name: string }> } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
 
 type OutgoingMessage = { type: string; [key: string]: unknown };
 
@@ -159,6 +172,7 @@ export const Welcome: React.FC = () => {
 
 	// Messages
 	const [message, setMessage] = useState<MessageData | null>(null);
+	const [testMessage, setTestMessage] = useState<MessageData | null>(null);
 
 	// Engine versions
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
@@ -204,7 +218,7 @@ export const Welcome: React.FC = () => {
 					if (msg.logoLightUri) setLogoLightUri(msg.logoLightUri);
 					if (msg.settings.development.connectionMode === 'local') {
 						setEngineVersionsLoading(true);
-						sendMessage({ type: 'fetchEngineVersions' });
+						sendMessage({ type: 'fetchVersions' });
 					}
 					sendMessage({ type: 'cloud:getStatus' });
 					break;
@@ -216,7 +230,7 @@ export const Welcome: React.FC = () => {
 					break;
 				}
 
-				case 'engineVersionsLoaded':
+				case 'versionsLoaded':
 					setEngineVersions((msg as any).versions);
 					setEngineVersionsLoading(false);
 					break;
@@ -230,57 +244,68 @@ export const Welcome: React.FC = () => {
 					setTeams((msg as any).teams || []);
 					break;
 
-				// Docker messages
+				// Status polling — actual OS/Docker daemon state
 				case 'dockerStatus':
 					setDockerStatus((msg as any).status);
 					if (!dockerBusy) setDockerProgress(null);
 					break;
-				case 'dockerProgress':
-					setDockerProgress((msg as any).message);
-					setDockerError(null);
-					break;
-				case 'dockerComplete':
-					setDockerBusy(false);
-					setDockerAction(null);
-					setDockerProgress(null);
-					break;
-				case 'dockerError':
-					setDockerError((msg as any).message);
-					setDockerBusy(false);
-					setDockerAction(null);
-					setDockerProgress(null);
-					break;
-				case 'dockerVersionsLoaded':
-					setDockerTags((msg as any).tags || []);
-					break;
-
-				// Service messages
 				case 'serviceStatus':
 					setServiceStatus((msg as any).status);
 					if (!serviceBusy) setServiceProgress(null);
 					break;
-				case 'serviceProgress':
-					setServiceProgress((msg as any).message);
-					setServiceError(null);
-					break;
-				case 'serviceComplete':
-					setServiceBusy(false);
-					setServiceAction(null);
-					setServiceProgress(null);
-					setSudoPromptVisible(false);
-					setSudoPasswordInput('');
-					break;
-				case 'serviceError':
-					setServiceError((msg as any).message);
-					setServiceBusy(false);
-					setServiceAction(null);
-					setServiceProgress(null);
-					setSudoPromptVisible(false);
-					setSudoPasswordInput('');
+				case 'dockerVersionsLoaded':
+					setDockerTags((msg as any).tags || []);
 					break;
 				case 'serviceNeedsSudo':
 					setSudoPromptVisible(true);
 					break;
+
+				// Unified ioControl progress — shows download/install status
+				case 'ioProgress': {
+					const mode = (msg as any).mode;
+					const progressMsg = (msg as any).message;
+					if (mode === 'service') {
+						setServiceProgress(progressMsg);
+						setServiceError(null);
+					} else if (mode === 'docker') {
+						setDockerProgress(progressMsg);
+						setDockerError(null);
+					}
+					break;
+				}
+
+				// Unified ioControl result — clears busy state for the mode
+				case 'ioResult': {
+					const mode = (msg as any).mode;
+					const command = (msg as any).command;
+					const success = (msg as any).success;
+					const error = (msg as any).error;
+
+					// Test results show inline via testMessage
+					if (command === 'test') {
+						const data: MessageData = success
+							? { level: 'success', message: 'Connection successful!' }
+							: { level: 'error', message: error || 'Connection failed' };
+						setTestMessage(data);
+						if (success) setTimeout(() => setTestMessage(null), 5000);
+						break;
+					}
+
+					if (mode === 'service') {
+						setServiceBusy(false);
+						setServiceAction(null);
+						setServiceProgress(null);
+						setSudoPromptVisible(false);
+						setSudoPasswordInput('');
+						if (!success && error) setServiceError(error);
+					} else if (mode === 'docker') {
+						setDockerBusy(false);
+						setDockerAction(null);
+						setDockerProgress(null);
+						if (!success && error) setDockerError(error);
+					}
+					break;
+				}
 
 				case 'serverInfo' as string: {
 					const caps = (msg as any).capabilities || [];
@@ -296,7 +321,16 @@ export const Welcome: React.FC = () => {
 	// HANDLERS
 	// =========================================================================
 
+	/**
+	 * Merge partial changes into local settings state.
+	 * Same deep-merge logic as SettingsWebview.handleSettingsChange,
+	 * plus side effects for version/cloud fetching on mode switch.
+	 */
 	const handleSettingsChange = (changes: Partial<SettingsData>) => {
+		// Clear stale test results when mode changes
+		if (changes.development?.connectionMode) {
+			setTestMessage(null);
+		}
 		setSettings((prev) => {
 			const next = { ...prev };
 
@@ -324,7 +358,7 @@ export const Welcome: React.FC = () => {
 			const devMode = changes.development?.connectionMode;
 			if (devMode === 'local' && prev.development.connectionMode !== 'local') {
 				setEngineVersionsLoading(true);
-				sendMessage({ type: 'fetchEngineVersions' });
+				sendMessage({ type: 'fetchVersions' });
 			}
 			if (devMode === 'cloud' && prev.development.connectionMode !== 'cloud') {
 				sendMessage({ type: 'cloud:getStatus' });
@@ -359,30 +393,40 @@ export const Welcome: React.FC = () => {
 		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
-	const handleTestConnection = (hostUrl: string, apiKey: string) => {
-		sendMessage({ type: 'testConnection', hostUrl, apiKey } as any);
+	/**
+	 * Send a test connection request via ioControl.
+	 * On-prem passes hostUrl/apiKey as params; docker/service use backend defaults.
+	 */
+	const handleTestConnection = (mode: string, params?: Record<string, unknown>) => {
+		setTestMessage(null);
+		sendMessage({ type: 'ioControl', mode, command: 'test', params } as any);
 	};
 
-	// Docker/Service action helpers
-	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
-		setDockerBusy(true);
-		setDockerAction(actionType);
-		setDockerError(null);
-		const msgType = `docker${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
-		const payload: Record<string, unknown> = { type: msgType };
-		if (actionType === 'install' || actionType === 'update') payload.version = dockerSelectedVersion;
-		sendMessage(payload);
+	/**
+	 * Factory for docker/service lifecycle actions.
+	 * Sets busy/action state, attaches the selected version for install/update,
+	 * and dispatches an ioControl message. The host streams ioProgress updates
+	 * and sends a final ioResult to clear busy state.
+	 */
+	const makeEngineHandler = (mode: 'docker' | 'service', actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
+		const setBusy = mode === 'docker' ? setDockerBusy : setServiceBusy;
+		const setAction = mode === 'docker' ? setDockerAction : setServiceAction;
+		const setError = mode === 'docker' ? setDockerError : setServiceError;
+		const selectedVersion = mode === 'docker' ? dockerSelectedVersion : serviceSelectedVersion;
+
+		setBusy(true);
+		setAction(actionType);
+		setError(null);
+
+		const params: Record<string, unknown> = {};
+		if (actionType === 'install' || actionType === 'update') {
+			params.version = selectedVersion;
+		}
+		sendMessage({ type: 'ioControl', mode, command: actionType, params } as any);
 	};
 
-	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
-		setServiceBusy(true);
-		setServiceAction(actionType);
-		setServiceError(null);
-		const msgType = `service${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
-		const payload: Record<string, unknown> = { type: msgType };
-		if (actionType === 'install' || actionType === 'update') payload.version = serviceSelectedVersion;
-		sendMessage(payload);
-	};
+	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('docker', actionType);
+	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('service', actionType);
 
 	const handleSudoSubmit = () => {
 		const password = sudoPasswordInput;
@@ -391,7 +435,7 @@ export const Welcome: React.FC = () => {
 		sendMessage({ type: 'sudoPassword', password });
 	};
 
-	const dockerVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...dockerTags.map((t) => ({ value: t, label: t }))];
+	const dockerVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...dockerTags.filter((t) => t !== 'latest' && t !== 'prerelease').map((t) => ({ value: t, label: t }))];
 
 	const serviceVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...engineVersions.map((v) => ({ value: v.tag_name, label: v.tag_name.replace(/^server-/, '') }))];
 
@@ -479,7 +523,7 @@ export const Welcome: React.FC = () => {
 							}));
 						}}
 						onTestConnection={handleTestConnection}
-						testMessage={message}
+						testMessage={testMessage}
 						engineVersions={engineVersions}
 						engineVersionsLoading={engineVersionsLoading}
 						dockerStatus={dockerStatus}

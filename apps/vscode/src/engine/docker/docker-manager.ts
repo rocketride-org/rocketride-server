@@ -14,15 +14,22 @@
 
 import Docker from 'dockerode';
 import * as net from 'net';
-import { getLogger } from '../shared/util/output';
-import { icons } from '../shared/util/icons';
+import { getLogger } from '../../shared/util/output';
+import { icons } from '../../shared/util/icons';
 
+/** Docker container name used for the RocketRide engine. */
 export const CONTAINER_NAME = 'rocketride-engine';
+
+/** Base image path on GHCR (tag is appended, e.g. `:latest`). */
 export const IMAGE_BASE = 'ghcr.io/rocketride-org/rocketride-engine';
+
+/** The fixed port the engine container exposes and binds to localhost. */
 export const CONTAINER_PORT = 5565;
 
+/** Possible states of the Docker-managed engine. */
 export type DockerState = 'not-installed' | 'no-docker' | 'starting' | 'running' | 'stopping' | 'stopped';
 
+/** Status snapshot returned by {@link DockerManager.getStatus}. */
 export interface DockerStatus {
 	state: DockerState;
 	version: string | null;
@@ -30,6 +37,7 @@ export interface DockerStatus {
 	imageTag: string | null;
 }
 
+/** Callback for reporting progress messages during long operations. */
 export type ProgressCallback = (message: string) => void;
 
 // Windows named pipes — Docker Desktop uses 'dockerDesktopLinuxEngine',
@@ -39,11 +47,19 @@ const WINDOWS_PIPES = [
 	'//./pipe/docker_engine',
 ];
 
+/**
+ * Manages the RocketRide engine Docker container lifecycle.
+ *
+ * Wraps dockerode to provide high-level install/start/stop/remove/update
+ * operations. Handles platform differences (Windows named pipes, ARM Mac
+ * platform overrides) transparently.
+ */
 export class DockerManager {
+	/** The dockerode client instance. May be swapped on Windows if the first pipe fails. */
 	private docker: Docker;
 	private readonly logger = getLogger();
 
-	// ARM Macs need to pull amd64 images since GHCR may not have arm64 builds
+	/** ARM Macs need explicit `linux/amd64` platform since GHCR may lack arm64 builds. */
 	private readonly needsPlatformOverride =
 		process.platform === 'darwin' && process.arch === 'arm64';
 
@@ -76,6 +92,11 @@ export class DockerManager {
 	// Docker daemon availability
 	// =========================================================================
 
+	/**
+	 * Checks whether the Docker daemon is reachable.
+	 * On Windows, tries multiple named pipe paths if the default fails.
+	 * @returns `true` if Docker responded to a ping.
+	 */
 	async isDockerAvailable(): Promise<boolean> {
 		// Try current client first
 		try {
@@ -107,6 +128,9 @@ export class DockerManager {
 
 	/**
 	 * Pull the image, create a container, and start it.
+	 *
+	 * @param imageTag - Docker image tag to pull (e.g. 'latest', '3.2.0').
+	 * @param onProgress - Optional callback for progress messages.
 	 */
 	async install(imageTag: string, onProgress?: ProgressCallback): Promise<void> {
 		const fullImage = `${IMAGE_BASE}:${imageTag}`;
@@ -163,6 +187,8 @@ export class DockerManager {
 
 	/**
 	 * Stop and remove the container, optionally remove the image.
+	 *
+	 * @param removeImage - If true, also removes the Docker image after the container.
 	 */
 	async remove(removeImage: boolean = false): Promise<void> {
 		this.logger.output(`${icons.info} Docker: removing container ${CONTAINER_NAME}`);
@@ -198,6 +224,9 @@ export class DockerManager {
 	/**
 	 * Update: pull new image first (so the old container survives a failed pull),
 	 * then remove old container, create + start new container.
+	 *
+	 * @param imageTag - Docker image tag to pull (e.g. 'latest', '3.2.0').
+	 * @param onProgress - Optional callback for progress messages.
 	 */
 	async update(imageTag: string, onProgress?: ProgressCallback): Promise<void> {
 		const fullImage = `${IMAGE_BASE}:${imageTag}`;
@@ -234,6 +263,12 @@ export class DockerManager {
 	// Status
 	// =========================================================================
 
+	/**
+	 * Queries the Docker daemon for the container's current state.
+	 * Returns 'no-docker' if the daemon is unreachable, 'not-installed' if
+	 * the container doesn't exist. For 'running' state, also verifies the
+	 * port is actually accepting connections (to distinguish from 'starting').
+	 */
 	async getStatus(): Promise<DockerStatus> {
 		const empty: DockerStatus = { state: 'not-installed', version: null, publishedAt: null, imageTag: null };
 
@@ -279,6 +314,13 @@ export class DockerManager {
 	// Image pull with progress
 	// =========================================================================
 
+	/**
+	 * Pulls a Docker image with streaming progress updates.
+	 * Uses `linux/amd64` platform override on ARM Macs.
+	 *
+	 * @param fullImage - Fully qualified image name with tag (e.g. `ghcr.io/.../engine:latest`).
+	 * @param onProgress - Optional callback receiving pull progress messages.
+	 */
 	private pullImage(fullImage: string, onProgress?: ProgressCallback): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const opts = this.needsPlatformOverride ? { platform: 'linux/amd64' } : {};
@@ -310,12 +352,14 @@ export class DockerManager {
 	// Helpers
 	// =========================================================================
 
+	/** Extracts the tag portion from a full image name (after the last `:`). */
 	private extractTag(image: string): string | null {
 		// "ghcr.io/rocketride-org/rocketride-engine:3.1.1" -> "3.1.1"
 		const colonIndex = image.lastIndexOf(':');
 		return colonIndex >= 0 ? image.substring(colonIndex + 1) : null;
 	}
 
+	/** TCP-connects to localhost:port to check if something is listening. */
 	private isPortOpen(port: number = CONTAINER_PORT): Promise<boolean> {
 		return new Promise((resolve) => {
 			const socket = new net.Socket();
@@ -327,14 +371,17 @@ export class DockerManager {
 		});
 	}
 
+	/** Checks if a dockerode error is a 404 (container/image not found). */
 	private isNotFoundError(err: unknown): boolean {
 		return typeof err === 'object' && err !== null && (err as { statusCode?: number }).statusCode === 404;
 	}
 
+	/** Checks if a dockerode error is a 304 (container already in desired state). */
 	private isNotModifiedError(err: unknown): boolean {
 		return typeof err === 'object' && err !== null && (err as { statusCode?: number }).statusCode === 304;
 	}
 
+	/** Maps low-level Docker errors to user-friendly messages. */
 	private mapError(err: Error): Error {
 		const msg = err.message || '';
 		const statusCode = (err as { statusCode?: number }).statusCode;
@@ -353,4 +400,5 @@ export class DockerManager {
 		}
 		return err;
 	}
+
 }

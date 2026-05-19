@@ -43,14 +43,25 @@ import '../../styles/root.css';
 // TYPE DEFINITIONS
 // ============================================================================
 
+/** Available connection modes for dev/deploy targets. */
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
+/**
+ * Per-group (development or deployment) connection configuration.
+ * Null connectionMode means "use the other group's target" (shared mode).
+ */
 export interface ConnectionGroupSettings {
+	/** Active connection mode, or null when sharing the other group's target. */
 	connectionMode: ConnectionMode | null;
+	/** Server URL for cloud/onprem modes. */
 	hostUrl: string;
+	/** Whether the secret store already has an API key for this group. */
 	hasApiKey: boolean;
+	/** User-entered API key (cleared after save to secret storage). */
 	apiKey: string;
+	/** Selected team ID for cloud mode multi-tenant deployments. */
 	teamId: string;
+	/** Local engine settings (applies to local mode only). */
 	local: {
 		engineVersion: string;
 		debugOutput: boolean;
@@ -58,12 +69,16 @@ export interface ConnectionGroupSettings {
 	};
 }
 
+/** Root settings object persisted by the extension. */
 export interface SettingsData {
 	development: ConnectionGroupSettings;
 	deployment: ConnectionGroupSettings;
+	/** Workspace-relative path where pipeline files are stored. */
 	defaultPipelinePath: string;
+	/** How pipelines behave after file changes: auto-restart, manual, or prompt the user. */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
+	/** Auto-install RocketRide docs for detected coding agents. */
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
@@ -73,16 +88,24 @@ export interface SettingsData {
 	integrationAgentsMd: boolean;
 }
 
+/** A version entry returned from the GitHub releases API. */
 export interface EngineVersionItem {
 	tag_name: string;
 	prerelease: boolean;
 }
 
+/** Message displayed in the status banner (inline or global). */
 export interface MessageData {
 	level: 'success' | 'error' | 'info' | 'warning';
 	message: string;
 }
 
+/**
+ * Messages the extension host sends **to** this webview.
+ * Additional message types (cloud:status, ioProgress, ioResult, etc.) are
+ * handled via `as any` casts because the discriminated union only covers
+ * the core types — engine/IO messages are added dynamically.
+ */
 export type SettingsIncomingMessage =
 	| {
 			type: 'settingsLoaded';
@@ -92,13 +115,15 @@ export type SettingsIncomingMessage =
 			type: 'showMessage';
 			level: 'success' | 'error' | 'info' | 'warning';
 			message: string;
+			/** When 'development', the message targets the inline test banner instead of the global banner. */
 			context?: 'development';
 	  }
 	| {
-			type: 'engineVersionsLoaded';
+			type: 'versionsLoaded';
 			versions: EngineVersionItem[];
 	  };
 
+/** Messages this webview sends **to** the extension host. */
 export type SettingsOutgoingMessage =
 	| {
 			type: 'view:ready';
@@ -116,19 +141,22 @@ export type SettingsOutgoingMessage =
 			type: 'clearCredentials';
 	  }
 	| {
-			type: 'fetchEngineVersions';
+			type: 'fetchVersions';
 	  }
 	| {
 			type: 'fetchTeams';
 	  };
 
 // ============================================================================
-// SHARED STYLES
+// SHARED STYLES — reused by ConnectionSettings, DeploySettings, and panels
 // ============================================================================
 
 export const settingsStyles = {
 	// Card structure (from commonStyles)
-	card: commonStyles.card as CSSProperties,
+	card: {
+		...commonStyles.card,
+		overflow: 'visible', // Allow child dropdowns (e.g., version picker) to extend beyond the card
+	} as CSSProperties,
 	cardHeader: commonStyles.cardHeader as CSSProperties,
 	cardBody: {
 		...commonStyles.cardBody,
@@ -166,6 +194,7 @@ export const settingsStyles = {
 		display: 'flex',
 		flexDirection: 'column',
 		gap: 16,
+		overflow: 'visible', // Allow version dropdown to extend beyond the card boundary
 	} as CSSProperties,
 	modeConfigDesc: {
 		...commonStyles.textMuted,
@@ -208,6 +237,11 @@ export const settingsStyles = {
 // SHARED CARD HEADER WITH SAVE BUTTON
 // ============================================================================
 
+/**
+ * Card header with title + conditional Save/Cancel buttons.
+ * Buttons only render when `dirty` is true (user has unsaved edits).
+ * A brief "Saved" confirmation appears after a successful save.
+ */
 export const SettingsCardHeader: React.FC<{
 	title: string;
 	onSave: () => void;
@@ -333,23 +367,21 @@ export const Settings: React.FC = () => {
 
 	const { sendMessage, isReady: _isReady } = useMessaging<SettingsOutgoingMessage, SettingsIncomingMessage>({
 		onMessage: (message) => {
-			// Handle all incoming messages from your discriminated union
 			switch (message.type) {
 				case 'settingsLoaded':
 					setSettings(message.settings);
-					// Snapshot for cancel/reset and clear dirty state
+					// Deep-clone for cancel/reset so future edits don't mutate the snapshot
 					savedSettingsRef.current = JSON.parse(JSON.stringify(message.settings));
 					setDirty(false);
-					if (message.settings.development.connectionMode === 'local') {
-						setEngineVersionsLoading(true);
-						sendMessage({ type: 'fetchEngineVersions' });
-					}
-					// Request cloud auth status when settings load
+					// Pre-fetch versions from GitHub (cached on backend, shared across all modes)
+					setEngineVersionsLoading(true);
+					sendMessage({ type: 'fetchVersions' });
+					// Hydrate cloud auth status so the Cloud panel renders correctly
 					sendMessage({ type: 'cloud:getStatus' } as any);
 					break;
 
-				case 'engineVersionsLoaded':
-					setEngineVersions(message.versions);
+				case 'versionsLoaded' as any:
+					setEngineVersions((message as any).versions ?? []);
 					setEngineVersionsLoading(false);
 					break;
 
@@ -376,13 +408,16 @@ export const Settings: React.FC = () => {
 				case 'showMessage': {
 					const msg = { level: message.level, message: message.message };
 					const clearAfter = message.level === 'success' ? 5000 : undefined;
+
+					// Route to inline test banner vs. global banner based on context
 					if (message.context === 'development') {
 						setTestMessage(msg);
 						if (clearAfter) setTimeout(() => setTestMessage(null), clearAfter);
 					} else {
 						setMessage(msg);
 						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
-						// Show "Saved" in card header on successful save
+						// On successful save: update the saved snapshot so Cancel reverts
+						// to the newly saved values, and show brief "Saved" confirmation
 						if (message.level === 'success') {
 							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
 							pendingSaveSnapshotRef.current = null;
@@ -394,57 +429,72 @@ export const Settings: React.FC = () => {
 					break;
 				}
 
-				// Docker messages
+				// Status polling — actual OS/Docker daemon state
 				case 'dockerStatus' as any:
 					setDockerStatus((message as any).status);
 					if (!dockerBusy) setDockerProgress(null);
 					break;
-				case 'dockerProgress' as any:
-					setDockerProgress((message as any).message);
-					setDockerError(null);
-					break;
-				case 'dockerComplete' as any:
-					setDockerBusy(false);
-					setDockerAction(null);
-					setDockerProgress(null);
-					break;
-				case 'dockerError' as any:
-					setDockerError((message as any).message);
-					setDockerBusy(false);
-					setDockerAction(null);
-					setDockerProgress(null);
-					break;
-				case 'dockerVersionsLoaded' as any:
-					setDockerTags((message as any).tags || []);
-					break;
-
-				// Service messages
 				case 'serviceStatus' as any:
 					setServiceStatus((message as any).status);
 					if (!serviceBusy) setServiceProgress(null);
 					break;
-				case 'serviceProgress' as any:
-					setServiceProgress((message as any).message);
-					setServiceError(null);
-					break;
-				case 'serviceComplete' as any:
-					setServiceBusy(false);
-					setServiceAction(null);
-					setServiceProgress(null);
-					setSudoPromptVisible(false);
-					setSudoPasswordInput('');
-					break;
-				case 'serviceError' as any:
-					setServiceError((message as any).message);
-					setServiceBusy(false);
-					setServiceAction(null);
-					setServiceProgress(null);
-					setSudoPromptVisible(false);
-					setSudoPasswordInput('');
+				case 'dockerVersionsLoaded' as any:
+					setDockerTags((message as any).tags || []);
 					break;
 				case 'serviceNeedsSudo' as any:
 					setSudoPromptVisible(true);
 					break;
+
+				// ioProgress: streamed progress updates during install/update/remove.
+				// Clears any previous error so the progress message replaces it.
+				case 'ioProgress' as any: {
+					const mode = (message as any).mode;
+					const progressMsg = (message as any).message;
+					if (mode === 'service') {
+						setServiceProgress(progressMsg);
+						setServiceError(null);
+					} else if (mode === 'docker') {
+						setDockerProgress(progressMsg);
+						setDockerError(null);
+					}
+					break;
+				}
+
+				// ioResult: final outcome of an ioControl command.
+				// Resets busy/action/progress state and surfaces errors.
+				case 'ioResult' as any: {
+					const mode = (message as any).mode;
+					const command = (message as any).command;
+					const success = (message as any).success;
+					const error = (message as any).error;
+
+					// 'test' commands display results inline via testMessage
+					// rather than resetting engine busy state
+					if (command === 'test') {
+						const msg: MessageData = success
+							? { level: 'success', message: 'Connection successful!' }
+							: { level: 'error', message: error || 'Connection failed' };
+						setTestMessage(msg);
+						if (success) setTimeout(() => setTestMessage(null), 5000);
+						break;
+					}
+
+					if (mode === 'service') {
+						setServiceBusy(false);
+						setServiceAction(null);
+						setServiceProgress(null);
+						setSudoPromptVisible(false);
+						setSudoPasswordInput('');
+						if (!success && error) setServiceError(error);
+					} else if (mode === 'docker') {
+						setDockerBusy(false);
+						setDockerAction(null);
+						setDockerProgress(null);
+						if (!success && error) setDockerError(error);
+					}
+					break;
+				}
+
 			}
 		},
 	});
@@ -472,10 +522,12 @@ export const Settings: React.FC = () => {
 	}, []);
 
 	/**
-	 * Test development connection (run/debug server)
+	 * Test connection via ioControl. On-prem passes hostUrl/apiKey as params;
+	 * service/docker use their known defaults on the backend.
 	 */
-	const handleTestConnection = (hostUrl: string, apiKey: string): void => {
-		sendMessage({ type: 'testConnection', hostUrl, apiKey });
+	const handleTestConnection = (mode: string, params?: Record<string, unknown>): void => {
+		setTestMessage(null);
+		sendMessage({ type: 'ioControl', mode, command: 'test', params } as any);
 	};
 
 	/**
@@ -503,11 +555,21 @@ export const Settings: React.FC = () => {
 	};
 
 	/**
-	 * Update settings with partial changes
+	 * Merge partial changes into settings state.
+	 *
+	 * Deep-merges nested `development` and `deployment` groups so callers
+	 * can pass e.g. `{ development: { connectionMode: 'cloud' } }` without
+	 * losing other group fields. Also triggers side effects like version
+	 * fetching when modes that need engine versions are selected.
 	 */
 	const handleSettingsChange = (changes: Partial<SettingsData>): void => {
 		setDirty(true);
 		setSaved(false);
+		// Clear stale test results when the user switches mode —
+		// previous test output is no longer relevant to the new mode
+		if (changes.development?.connectionMode || changes.deployment?.connectionMode) {
+			setTestMessage(null);
+		}
 		setSettings((prev) => {
 			const next = { ...prev };
 
@@ -534,19 +596,14 @@ export const Settings: React.FC = () => {
 			// Side effects: fetch engine versions when switching to local mode
 			const devMode = changes.development?.connectionMode;
 			const depMode = changes.deployment?.connectionMode;
-			if ((devMode === 'local' && prev.development.connectionMode !== 'local') || (depMode === 'local' && prev.deployment.connectionMode !== 'local')) {
-				setEngineVersionsLoading(true);
-				sendMessage({ type: 'fetchEngineVersions' });
+			// Refresh versions when switching to any mode that needs them.
+			// The handler caches results, so repeated calls are cheap.
+			const needsVersions = ['local', 'service', 'docker'];
+			if ((devMode && needsVersions.includes(devMode)) || (depMode && needsVersions.includes(depMode))) {
+				sendMessage({ type: 'fetchVersions' });
 			}
 
 			// Teams are fetched by CloudPanel after it confirms the server is SaaS
-
-			// Fetch versions when switching to docker or service
-			const switchingToDockerOrService = (devMode === 'docker' || devMode === 'service') && prev.development.connectionMode !== devMode;
-			const deploySwitchingToDockerOrService = (depMode === 'docker' || depMode === 'service') && prev.deployment.connectionMode !== depMode;
-			if (switchingToDockerOrService || deploySwitchingToDockerOrService) {
-				sendMessage({ type: 'fetchVersions' } as any);
-			}
 
 			return next;
 		});
@@ -556,7 +613,7 @@ export const Settings: React.FC = () => {
 	// DOCKER / SERVICE VERSION OPTIONS
 	// ========================================================================
 
-	const dockerVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...dockerTags.map((t) => ({ value: t, label: t }))];
+	const dockerVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...dockerTags.filter((t) => t !== 'latest' && t !== 'prerelease').map((t) => ({ value: t, label: t }))];
 
 	const serviceVersionOptions: VersionOption[] = [{ value: 'latest', label: '<Latest>' }, { value: 'prerelease', label: '<Prerelease>' }, ...engineVersions.map((v) => ({ value: v.tag_name, label: v.tag_name.replace(/^server-/, '') }))];
 
@@ -564,29 +621,34 @@ export const Settings: React.FC = () => {
 	// DOCKER / SERVICE ACTION HANDLERS
 	// ========================================================================
 
-	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
-		setDockerBusy(true);
-		setDockerAction(actionType);
-		setDockerError(null);
-		const msgType = `docker${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
-		const payload: Record<string, unknown> = { type: msgType };
+	/**
+	 * Factory for docker/service action handlers.
+	 *
+	 * Returns a zero-arg callback that sets the mode's busy/action state,
+	 * attaches the selected version (for install/update), and sends an
+	 * `ioControl` message to the extension host. The host streams back
+	 * `ioProgress` updates and a final `ioResult` to clear busy state.
+	 */
+	const makeEngineHandler = (mode: 'docker' | 'service', actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
+		const setBusy = mode === 'docker' ? setDockerBusy : setServiceBusy;
+		const setAction = mode === 'docker' ? setDockerAction : setServiceAction;
+		const setError = mode === 'docker' ? setDockerError : setServiceError;
+		const selectedVersion = mode === 'docker' ? dockerSelectedVersion : serviceSelectedVersion;
+
+		setBusy(true);
+		setAction(actionType);
+		setError(null);
+
+		const params: Record<string, unknown> = {};
 		if (actionType === 'install' || actionType === 'update') {
-			payload.version = dockerSelectedVersion;
+			params.version = selectedVersion;
 		}
-		sendMessage(payload as any);
+		sendMessage({ type: 'ioControl', mode, command: actionType, params } as any);
 	};
 
-	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => () => {
-		setServiceBusy(true);
-		setServiceAction(actionType);
-		setServiceError(null);
-		const msgType = `service${actionType.charAt(0).toUpperCase()}${actionType.slice(1)}`;
-		const payload: Record<string, unknown> = { type: msgType };
-		if (actionType === 'install' || actionType === 'update') {
-			payload.version = serviceSelectedVersion;
-		}
-		sendMessage(payload as any);
-	};
+	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('docker', actionType);
+	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('service', actionType);
+
 
 	const handleSudoSubmit = (): void => {
 		const password = sudoPasswordInput;
@@ -628,7 +690,7 @@ export const Settings: React.FC = () => {
 							dirty={dirty}
 							saved={saved}
 							onClearCredentials={handleClearCredentials}
-							onTestDevelopmentConnection={handleTestConnection}
+							onTestConnection={handleTestConnection}
 							serverCapabilities={serverCapabilities}
 							testMessage={testMessage}
 							engineVersions={engineVersions}

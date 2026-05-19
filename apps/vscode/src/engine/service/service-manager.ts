@@ -18,21 +18,40 @@
  */
 
 import * as net from 'net';
-import { getLogger } from '../shared/util/output';
+import { getLogger } from '../../shared/util/output';
 
+/** The service name as registered with the OS (NSSM / systemd / launchd). */
 export const SERVICE_NAME = 'RocketRide';
+
+/** Human-readable display name shown in OS service management UIs. */
 export const SERVICE_DISPLAY_NAME = 'RocketRide Engine';
+
+/** Fixed port the engine service listens on (localhost only). */
 export const SERVICE_PORT = 5565;
 
+/** Possible states of the OS-level service. */
 export type ServiceState = 'not-installed' | 'starting' | 'running' | 'stopping' | 'stopped';
 
+/** Snapshot of the OS service state, returned by {@link ServiceManager.getStatus}. */
 export interface ServiceStatus {
+	/** Current lifecycle state of the service. */
 	state: ServiceState;
+	/** Engine version string, if known (null when not installed or unknown). */
 	version: string | null;
+	/** ISO date string of when this version was published on GitHub. */
 	publishedAt: string | null;
+	/** Filesystem path where the engine is installed, or null if not installed. */
 	installPath: string | null;
 }
 
+/**
+ * ServiceManager — abstract base for platform-specific OS service lifecycle.
+ *
+ * Subclasses implement the actual register/start/stop/remove commands for
+ * Windows (NSSM), Linux (systemd), and macOS (launchd). This base class
+ * provides shared helpers like port-checking and no-op defaults for optional
+ * capabilities (elevation, install-root preparation).
+ */
 export abstract class ServiceManager {
 	protected readonly logger = getLogger();
 
