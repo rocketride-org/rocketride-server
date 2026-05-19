@@ -139,13 +139,11 @@ export class EngineLocal extends EngineBackend {
 			await this.stopProcess();
 		}
 
-		// Build engine args from config — split into separate argv entries
+		// Build engine args from config — passed as a single string intentionally;
+		// the engine server handles OS-appropriate parsing on its side.
 		const rawArgs = String(config.local.engineArgs || '').trim();
 		const effectiveArgs: string[] = [];
-		if (rawArgs) {
-			const tokens = rawArgs.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
-			effectiveArgs.push(...tokens.map(t => t.replace(/^["']|["']$/g, '')));
-		}
+		if (rawArgs) effectiveArgs.push(rawArgs);
 		if (config.local.debugOutput && !rawArgs.includes('--trace=')) {
 			effectiveArgs.push('--trace=debugOut');
 		}
