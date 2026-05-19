@@ -115,8 +115,8 @@ export type SettingsIncomingMessage =
 			type: 'showMessage';
 			level: 'success' | 'error' | 'info' | 'warning';
 			message: string;
-			/** When 'development', the message targets the inline test banner instead of the global banner. */
-			context?: 'development';
+			/** 'development' routes to inline test banner; 'save' indicates successful settings save. */
+			context?: 'development' | 'save';
 	  }
 	| {
 			type: 'versionsLoaded';

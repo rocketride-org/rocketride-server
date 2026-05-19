@@ -80,6 +80,7 @@ export class ConnectionManager extends EventEmitter {
 
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
+	private engineStatusHandler?: (event: EngineStatusEvent & { mode?: ConnectionMode }) => void;
 
 	// Resource cleanup tracking
 	protected disposables: vscode.Disposable[] = [];
@@ -113,9 +114,10 @@ export class ConnectionManager extends EventEmitter {
 	public setEngineRegistry(registry: EngineRegistry): void {
 		this.engineRegistry = registry;
 		// Listen for engine status events from any engine in the registry
-		this.engineRegistry.on('status', (event: EngineStatusEvent) => {
+		this.engineStatusHandler = (event: EngineStatusEvent & { mode?: ConnectionMode }) => {
 			this.handleEngineStatus(event);
-		});
+		};
+		this.engineRegistry.on('status', this.engineStatusHandler);
 	}
 
 
@@ -705,6 +707,11 @@ export class ConnectionManager extends EventEmitter {
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
 			this.configChangeTimeout = undefined;
+		}
+
+		if (this.engineRegistry && this.engineStatusHandler) {
+			this.engineRegistry.removeListener('status', this.engineStatusHandler);
+			this.engineStatusHandler = undefined;
 		}
 
 		if (this.client?.isConnected()) {

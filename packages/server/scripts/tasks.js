@@ -768,11 +768,11 @@ function makeInstallPipAction() {
                 const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
 
                 task.output = 'Bootstrapping pip...';
-                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
+                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
 
                 const pipInstall = (...deps) => execCommand(enginePath, [
                     '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
-                ], { task, cwd: DIST_DIR });
+                ], { task, cwd: DIST_DIR, env: pipEnv });
 
                 task.output = 'Installing build tools...';
                 await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');
