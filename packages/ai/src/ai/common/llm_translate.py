@@ -1,0 +1,122 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""Provider-shape translators for Question.attachments.
+
+Each translator turns a (prompt_text, attachments, file_store) triple into
+the provider's native content-block list. Unsupported attachment x provider
+pairs are dropped and reported per TDD §7.3. FileStore read failures
+raise per Q-E1 (data-plane breakage propagates).
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
+
+from ai.common.schema import Attachment
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AttachmentDropReport:
+    """One drop-and-warn record emitted when an attachment cannot be carried.
+
+    ``provider`` is the concrete node provider name (e.g. ``'openai'``,
+    ``'groq'``, ``'mistral'``) so telemetry can tag the dropping node even
+    though many providers share the same block shape.
+    """
+
+    provider: str
+    mime: str
+    reason: str  # 'unsupported' | (future) 'too_large' | etc.
+
+
+# --- OpenAI shape -------------------------------------------------------
+#
+# Covers OpenAI-compat providers per TDD §9: openai, groq, mistral, fireworks,
+# together, cerebras, deepseek (and any other ``messages[0].content`` block
+# API). See ROCKETRIDE_COMPONENT_REFERENCE for provider list.
+
+_OPENAI_IMAGE_MIMES = {'image/png', 'image/jpeg', 'image/webp', 'image/gif'}
+_OPENAI_AUDIO_FORMATS = {
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+}
+_OPENAI_FILE_MIMES = {'application/pdf'}
+
+
+def translate_openai_shape(
+    prompt_text: str,
+    attachments: List[Attachment],
+    file_store: Any,
+    provider_name: str,
+) -> Tuple[List[Dict[str, Any]], List[AttachmentDropReport]]:
+    """Translate (prompt, attachments) into an OpenAI-compat content list.
+
+    Attachments first, prompt text last (mirrors OpenAI examples). FileStore
+    reads happen here; bytes are base64-inline. Drop-and-warn for unsupported
+    MIMEs. File-store IO errors propagate per Q-E1.
+
+    Args:
+        prompt_text: The synthesized question text.
+        attachments: List of Attachment carrying filestore paths.
+        file_store: Object with ``read_bytes(path) -> bytes`` (sync).
+        provider_name: Concrete node provider name; tags drop reports.
+
+    Returns:
+        ``(blocks, dropped)`` — blocks is the content list ready for the
+        OpenAI ``messages[0].content`` field; dropped is the per-attachment
+        report for telemetry.
+    """
+    blocks: List[Dict[str, Any]] = []
+    dropped: List[AttachmentDropReport] = []
+
+    for att in attachments:
+        if att.mime in _OPENAI_IMAGE_MIMES:
+            data = file_store.read_bytes(att.path)
+            b64 = base64.b64encode(data).decode('ascii')
+            blocks.append(
+                {
+                    'type': 'image_url',
+                    'image_url': {'url': f'data:{att.mime};base64,{b64}'},
+                }
+            )
+        elif att.mime in _OPENAI_FILE_MIMES:
+            data = file_store.read_bytes(att.path)
+            b64 = base64.b64encode(data).decode('ascii')
+            blocks.append(
+                {
+                    'type': 'file',
+                    'file': {'file_data': b64, 'filename': att.filename},
+                }
+            )
+        elif att.mime in _OPENAI_AUDIO_FORMATS:
+            data = file_store.read_bytes(att.path)
+            b64 = base64.b64encode(data).decode('ascii')
+            blocks.append(
+                {
+                    'type': 'input_audio',
+                    'input_audio': {
+                        'data': b64,
+                        'format': _OPENAI_AUDIO_FORMATS[att.mime],
+                    },
+                }
+            )
+        else:
+            logger.warning(
+                'Dropped attachment: provider %s does not support %s',
+                provider_name,
+                att.mime,
+            )
+            dropped.append(AttachmentDropReport(provider=provider_name, mime=att.mime, reason='unsupported'))
+
+    blocks.append({'type': 'text', 'text': prompt_text})
+    return blocks, dropped

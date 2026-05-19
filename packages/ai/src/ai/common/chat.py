@@ -40,6 +40,13 @@ class ChatBase:
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
 
+    # Provider block-shape selector for Question.attachments dispatch (TDD §7.2).
+    # Subclasses override; default 'openai' because most providers in the catalog
+    # are OpenAI-compatible. Recognized values: 'openai' | 'anthropic' | 'gemini'
+    # | 'bedrock'. Slice F adds the other three translators; Slice G overrides
+    # this on each per-provider Chat subclass.
+    provider_shape: str = 'openai'
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the ChatBase instance with provider configuration.
@@ -57,6 +64,10 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
+        # Remember the provider name for drop-and-warn telemetry tagging when
+        # a Question carries attachments the shape cannot represent (TDD §7.3).
+        self._provider = provider
+
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
@@ -326,6 +337,26 @@ class ChatBase:
         # This should never be reached due to the raise in the loop
         raise Exception('Unexpected exit from retry loop')
 
+    def _chat_blocks(self, blocks):
+        """Send a provider-native content-block list and return the text response.
+
+        Default implementation refuses, so a node that advertises a
+        ``provider_shape`` without overriding this method fails loudly rather
+        than silently dropping every attachment back to text-only. Provider
+        Chat subclasses with multimodal support override this in Slice G.
+
+        Args:
+            blocks: The translated content list for the provider (e.g. the
+                OpenAI ``messages[0].content`` array of typed dicts).
+
+        Returns:
+            str: The model's response text.
+        """
+        raise NotImplementedError(
+            f"Provider '{self._provider}' does not support attachment blocks; "
+            'override _chat_blocks on the Chat subclass (TDD §7.2).'
+        )
+
     def chat_string(self, prompt: str) -> str:
         """
         Invoke the chat interface with string input, token management, and network retry handling.
@@ -388,6 +419,74 @@ class ChatBase:
         # Return the model's response
         return result
 
+    def _get_file_store(self):
+        """Return the per-account FileStore used to read attachment bytes.
+
+        ChatBase doesn't construct one itself; per TDD §7.1 the LLM node
+        injects ``self._file_store`` (Slice G). Until then, fall back to
+        resolving via :mod:`ai.account.store` using the ambient
+        ``ROCKETRIDE_CLIENT_ID`` env var — same boundary used by
+        ``AgentBase._read_chat_jsonl_bytes``. Returns an object exposing
+        ``read_bytes(path) -> bytes`` (sync).
+        """
+        injected = getattr(self, '_file_store', None)
+        if injected is not None:
+            return injected
+
+        import asyncio
+        import os
+
+        from ai.account.store import Store
+
+        client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
+        if not client_id:
+            raise RuntimeError('ROCKETRIDE_CLIENT_ID env var is missing; cannot resolve filestore for attachments')
+        async_fs = Store.create().get_file_store(client_id)
+
+        class _SyncFileStoreShim:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def read_bytes(self, path: str) -> bytes:
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    return asyncio.run(self._inner.read(path))
+                raise RuntimeError('ChatBase attachment read cannot run inside an active event loop')
+
+        return _SyncFileStoreShim(async_fs)
+
+    def _chat_with_attachments(self, question: Question, attachments) -> str:
+        """Dispatch a Question with attachments through the provider-shape translator.
+
+        Picks the translator by ``self.provider_shape``, reads each
+        attachment's bytes via the per-account FileStore, builds the
+        provider-native content blocks, and invokes ``_chat_blocks``.
+        Unsupported MIMEs drop+warn per TDD §7.3; FileStore IO errors
+        propagate per Q-E1.
+        """
+        from ai.common.llm_translate import translate_openai_shape
+
+        prompt_text = question.getPrompt()
+        shape = getattr(self, 'provider_shape', 'openai')
+
+        if shape == 'openai':
+            file_store = self._get_file_store()
+            blocks, dropped = translate_openai_shape(prompt_text, attachments, file_store, self._provider)
+            for d in dropped:
+                # TODO(slice-J): emit metrics.counter('attachment.dropped_unsupported', 1,
+                # tags={'provider': d.provider, 'mime': d.mime}) once the per-pipe metrics
+                # surface is reachable from ChatBase. Logging already happened inside the
+                # translator.
+                debug(f'attachment.dropped_unsupported provider={d.provider} mime={d.mime}')
+            return self._chat_blocks(blocks)
+
+        # Other shapes ('anthropic', 'gemini', 'bedrock') ship in Slice F.
+        # Fall back to text-only so the existing pipeline keeps working until
+        # the rest of the dispatch tree lands.
+        debug(f'provider_shape={shape!r} not yet implemented; falling back to text-only for provider {self._provider}')
+        return self.chat_string(prompt_text)
+
     def chat(self, question: Question) -> Answer:
         """
         Chat using structured Question/Answer objects with JSON validation and network retry handling.
@@ -413,8 +512,16 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
-        # Use chat_string which already handles network retries and token management
-        response = self.chat_string(question.getPrompt())
+        # Per-shape attachment dispatch (TDD §7.1, §7.2). Backwards-compatible:
+        # text-only Questions take the existing single-string fast path so no
+        # production behavior changes until Slice G wires per-node shapes.
+        # FileStore IO errors raise per Q-E1; unsupported MIMEs drop+warn.
+        attachments = list(getattr(question, 'attachments', []) or [])
+        if attachments:
+            response = self._chat_with_attachments(question, attachments)
+        else:
+            # Use chat_string which already handles network retries and token management
+            response = self.chat_string(question.getPrompt())
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —

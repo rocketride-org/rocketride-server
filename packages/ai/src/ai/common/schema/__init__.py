@@ -12,9 +12,11 @@ from rocketride import (
     Doc,
     DocGroup,
 )
+from rocketride.schema import Attachment
 
 __all__ = [
     'Answer',
+    'Attachment',
     'Question',
     'QuestionExample',
     'QuestionHistory',
