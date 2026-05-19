@@ -88,11 +88,14 @@ class IGlobal(IGlobalBase):
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
                 )
-            else:
-                # Default to recursive character chunker
+            elif strategy_name == 'recursive':
                 self.strategy = RecursiveCharacterChunker(
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
+                )
+            else:
+                raise ValueError(
+                    f"Unknown chunker strategy '{strategy_name}'. Expected one of: recursive, sentence, token."
                 )
 
     def endGlobal(self):
