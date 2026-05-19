@@ -68,9 +68,9 @@
 		"@rollup/plugin-replace": "~6.0.3",
 		"@rollup/plugin-terser": "~0.4.4",
 		"@rollup/plugin-typescript": "~12.3.0",
-		"@rsbuild/core": "1.1.0",
-		"@rsbuild/plugin-react": "1.0.7",
-		"@rsbuild/plugin-sass": "1.1.0",
+		"@rsbuild/core": "~1.7.5",
+		"@rsbuild/plugin-react": "~1.4.6",
+		"@rsbuild/plugin-sass": "~1.5.2",
 		"@rslib/core": "~0.13.3",
 		"@types/react": "~18.3.28",
 		"@types/react-dom": "~18.3.7",
@@ -79,11 +79,7 @@
 		"rollup-plugin-peer-deps-external": "~2.2.4",
 		"rollup-plugin-postcss": "~4.0.2",
 		"run-script-os": "^1.1.6",
-		"typescript": "^5.6.3",
-		"@rspack/binding-darwin-arm64": "1.1.8",
-		"@rspack/binding-darwin-x64": "1.1.8",
-		"@rspack/binding-win32-arm64-msvc": "1.1.8",
-		"@rspack/binding-win32-x64-msvc": "1.1.8"
+		"typescript": "^5.6.3"
 	},
 	"exports": {
 		".": "./index.ts",

@@ -763,12 +763,16 @@ function makeInstallPipAction() {
             const pipInstalled = await getState('server.pipInstalledV8');
             if (!pipInstalled) {
                 // Bootstrap pip
+                // Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
+                const scriptsDir = path.join(DIST_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
+                const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
+
                 task.output = 'Bootstrapping pip...';
-                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
+                await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
 
                 const pipInstall = (...deps) => execCommand(enginePath, [
                     '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
-                ], { task, cwd: DIST_DIR });
+                ], { task, cwd: DIST_DIR, env: pipEnv });
 
                 task.output = 'Installing build tools...';
                 await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');

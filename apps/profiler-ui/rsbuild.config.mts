@@ -1,13 +1,15 @@
 // =============================================================================
-// MONITOR-UI — Module Federation Remote (Server Monitor app)
+// PROFILER-UI — Module Federation Remote (cProfile Profiler app)
 // =============================================================================
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
 
@@ -39,7 +41,7 @@ export default defineConfig(() => {
 			}),
 		],
 		resolve: {},
-		server: { port: 3016 },
+		server: { port: 3017 },
 		source: {
 			entry: {
 				index: './src/index.ts',
@@ -47,7 +49,7 @@ export default defineConfig(() => {
 		},
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'monitor-ui'),
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'profiler-ui'),
 			},
 			assetPrefix: 'auto',
 			cleanDistPath: true,

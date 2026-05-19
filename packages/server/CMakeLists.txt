@@ -9,9 +9,9 @@
 
 # -----------------------------------------------------------------------------
 # CMake minimum version requirement
-# We require CMake 3.14+ for modern CMake features like FetchContent
+# We require CMake 3.19+ (vcpkg manifest mode + modern CMake features)
 # -----------------------------------------------------------------------------
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 # -----------------------------------------------------------------------------
 # Project directories
