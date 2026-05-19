@@ -36,6 +36,7 @@ import jmespath
 from rocketlib import debug, error
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
 
 from .formatters import format_data
@@ -455,6 +456,28 @@ def _execute_wave_calls(
                     'length': len(chunk),
                     'total_chars': len(value),
                 }
+
+            # TDD §6.5 / §10.3 — fill any unset attachment-typed slot with a
+            # path-by-reference picked from AgentContext.attachments.  The
+            # dispatcher (Slice H) resolves the path to bytes before invoking
+            # the tool method.  LLM-decided args win via setdefault semantics.
+            try:
+                input_schema: Dict[str, Any] = {}
+                for _td in getattr(context.tools, 'list', None) or []:
+                    if (_td.get('name') if hasattr(_td, 'get') else getattr(_td, 'name', None)) == tool:
+                        _isch = _td.get('inputSchema') if hasattr(_td, 'get') else getattr(_td, 'inputSchema', None)
+                        if isinstance(_isch, dict):
+                            input_schema = _isch
+                        break
+                picker_kwargs = pick_for_tool_call(
+                    input_schema=input_schema,
+                    candidates=getattr(context, 'attachments', ()) or (),
+                )
+                for _k, _v in picker_kwargs.items():
+                    args.setdefault(_k, _v)
+            except Exception:
+                # Picker is best-effort; never block a tool call on it.
+                pass
 
             # Regular tool — route through AgentBase.call_tool, which forwards
             # to context.tools.invoke (and ultimately the engine's control-plane

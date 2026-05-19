@@ -32,12 +32,23 @@ Usage::
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+import logging
+from typing import Any, Dict, List, Set
 
 from rocketlib import debug
 
 from ai.common.agent import AgentBase, AgentContext, safe_str
 from ai.common.schema import Question
+
+logger = logging.getLogger(__name__)
+
+# Per-process set of run_ids for which we have already emitted the
+# "Wave does not support multimodal forwarding" warning.  TDD §8.3 — Wave's
+# q.addInstruction() / Question.addQuestion() prompt assembly is plain text;
+# forwarding multimodal blocks requires upstream framework work deferred
+# per TDD §16.  v1: drop attachments from the LLM call and warn at most
+# once per run so the multi-wave loop does not spam the log.
+_attachment_drop_warned_runs: Set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +213,24 @@ def _build_wave_question(
     # for how prominently it registers in the model's attention.
     tools_block = (tools_block + '\n' + peek_descriptor) if tools_block != '(none)' else peek_descriptor
     q.addInstruction('Available Tools', tools_block)
+
+    # TDD §8.3 — Wave's prompt assembly is plain text via q.addInstruction()
+    # / q.addQuestion().  Forwarding multimodal blocks to the LLM call would
+    # require upstream framework work deferred per TDD §16.  v1: warn once
+    # per run and let the picker (tools path) still satisfy attachment-typed
+    # tool inputs from AgentContext.attachments.
+    # TODO Slice J: increment attachment.dropped_agent_unsupported counter.
+    attachments = getattr(context, 'attachments', ()) or ()
+    if attachments:
+        run_id = getattr(context, 'run_id', '')
+        if run_id and run_id not in _attachment_drop_warned_runs:
+            _attachment_drop_warned_runs.add(run_id)
+            logger.warning(
+                'RocketRide Wave does not support multimodal forwarding; '
+                '%d attachment(s) dropped from LLM call (run_id=%s)',
+                len(attachments),
+                run_id,
+            )
 
     # ------------------------------------------------------------------
     # User-specified additional instructions

@@ -34,11 +34,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Union
+import logging
+from typing import Any, Dict, List, Optional, Set, Union
 
 from rocketlib import ToolDescriptor
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.attachment_picker import pick_for_tool_call
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -193,6 +197,15 @@ class CrewBase(AgentBase):
     _DEFAULT_BACKSTORY = 'You are a specialized agent in a multi-agent pipeline with access to tools. Use your tools and reasoning to complete tasks effectively.'
     _DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
+    # Per-process set of (run_id) values for which we have already emitted
+    # the "CrewAI does not support multimodal forwarding" warning.  TDD §8.2
+    # — CrewAI's Task(description=...) / Agent(backstory=...) surface is
+    # plain-string at the upstream API; forwarding multimodal blocks on the
+    # LLM call requires upstream framework work deferred per TDD §16.  We
+    # drop attachments from the LLM call and warn at most once per run so a
+    # multi-iteration crew does not spam the log.
+    _attachment_drop_warned_runs: Set[str] = set()
+
     # ─────────────────────────────────────────────────────────────────────
     # SHARED UTILITIES
     # ─────────────────────────────────────────────────────────────────────
@@ -260,6 +273,25 @@ class CrewBase(AgentBase):
                 available_functions: Optional[Dict[str, Any]] = None,
                 **kwargs: Any,
             ) -> Union[str, Any]:
+                # TDD §8.2 — CrewAI's Task/Agent surface is plain-string at
+                # the upstream API.  We cannot pass multimodal blocks through
+                # CrewAI's prompt assembly without an upstream fork (deferred
+                # per TDD §16).  v1: drop attachments from the LLM call and
+                # warn once per run.  Tool-call attachment forwarding via the
+                # picker is unaffected (see HostTool._run below).
+                # TODO Slice J: increment attachment.dropped_agent_unsupported
+                # telemetry counter.
+                attachments = getattr(outer_context, 'attachments', ()) or ()
+                if attachments:
+                    run_id = getattr(outer_context, 'run_id', '')
+                    if run_id and run_id not in CrewBase._attachment_drop_warned_runs:
+                        CrewBase._attachment_drop_warned_runs.add(run_id)
+                        logger.warning(
+                            'CrewAI does not support multimodal forwarding; '
+                            '%d attachment(s) dropped from LLM call (run_id=%s)',
+                            len(attachments),
+                            run_id,
+                        )
                 stop_words = getattr(self, 'stop', None)
                 return outer_self.call_llm(
                     outer_context,
@@ -363,6 +395,23 @@ class CrewBase(AgentBase):
             __str__ = __repr__
 
             def _run(self, **framework_args: Any) -> str:
+                # TDD §6.5 / §10.3 — fill any unset attachment-typed slot
+                # with a path-by-reference picked from
+                # AgentContext.attachments.  The dispatcher (Slice H)
+                # resolves the path to bytes before invoking the tool
+                # method.  LLM-decided args win via setdefault semantics.
+                try:
+                    input_schema = getattr(self, '_rr_input_schema', None) or {}
+                    picker_kwargs = pick_for_tool_call(
+                        input_schema=input_schema if isinstance(input_schema, dict) else {},
+                        candidates=getattr(outer_context, 'attachments', ()) or (),
+                    )
+                    for _k, _v in picker_kwargs.items():
+                        framework_args.setdefault(_k, _v)
+                except Exception:
+                    # Picker is best-effort; never block a tool call on it.
+                    pass
+
                 try:
                     out = outer_self.call_tool(outer_context, self.name, framework_args)
                 except Exception as e:
@@ -406,5 +455,14 @@ class CrewBase(AgentBase):
                     desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
 
             schema_cls = _make_args_schema(input_schema)
-            tools.append(HostTool(name=name, description=desc, args_schema=schema_cls))
+            tool = HostTool(name=name, description=desc, args_schema=schema_cls)
+            try:
+                # Stash the raw inputSchema so HostTool._run can run the
+                # attachment picker (TDD §6.5).  setattr() is required
+                # because BaseTool is a Pydantic model; arbitrary attrs
+                # are not first-class fields.
+                setattr(tool, '_rr_input_schema', input_schema)
+            except Exception:
+                pass
+            tools.append(tool)
         return tools
