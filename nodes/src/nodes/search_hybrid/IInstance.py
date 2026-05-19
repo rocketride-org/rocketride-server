@@ -120,4 +120,6 @@ class IInstance(IInstanceBase):
             answer_text = f'Hybrid search returned {len(reranked_docs)} results:\n\n' + '\n\n'.join(context_parts)
             ans = Answer()
             ans.setAnswer(answer_text)
-            self.instance.writeAnswers([ans])
+            # Repo convention (see index_search, response, guardrails, etc.):
+            # writeAnswers takes a single Answer, not a list.
+            self.instance.writeAnswers(ans)
