@@ -39,28 +39,10 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     chunkId: int = 0
-    _pending_docs: list[Doc]
 
     def open(self, obj: Entry):
-        """Reset chunk counter for each new object."""
+        """Reset the chunk counter so each new object starts at chunkId=0."""
         self.chunkId = 0
-        self._pending_docs = []
-
-    def _flush_documents(self):
-        """Emit buffered chunks once the current object has been fully written."""
-        pending_docs = getattr(self, '_pending_docs', [])
-        if pending_docs:
-            debug(f'Chunker emitting {len(pending_docs)} chunks')
-            self.instance.writeDocuments(pending_docs)
-            self._pending_docs = []
-
-    def closing(self):
-        """Flush chunks when the caller uses the explicit closing lifecycle."""
-        self._flush_documents()
-
-    def close(self):
-        """Flush chunks when the data pipe finalizes the object."""
-        self._flush_documents()
 
     @staticmethod
     def _coerce_document(document) -> Doc:
@@ -86,16 +68,29 @@ class IInstance(IInstanceBase):
         return copy.copy(document)
 
     @staticmethod
-    def _copy_metadata(metadata) -> tuple[DocMetadata, str]:
+    def _build_metadata(metadata_data: dict) -> DocMetadata:
+        """Construct a DocMetadata, preferring model_validate when available.
+
+        DocMetadata uses ``ConfigDict(extra='allow')`` in production, so unknown
+        keys are tolerated; ``model_validate`` is used when available because it
+        performs schema-aware coercion (vs the positional ``pInstance`` arg in
+        ``__init__`` which can collide with user-supplied data).
+        """
+        if hasattr(DocMetadata, 'model_validate'):
+            return DocMetadata.model_validate(metadata_data)
+        return DocMetadata(**metadata_data)
+
+    @classmethod
+    def _copy_metadata(cls, metadata) -> tuple[DocMetadata, str]:
         """Return mutable document metadata and the original object id."""
         if metadata is None:
-            return DocMetadata(objectId='', chunkId=0), ''
+            return cls._build_metadata({'objectId': '', 'chunkId': 0}), ''
 
         if isinstance(metadata, Mapping):
             metadata_data = dict(metadata)
             metadata_data.setdefault('objectId', '')
             metadata_data.setdefault('chunkId', 0)
-            return DocMetadata(**metadata_data), metadata_data.get('objectId', '') or ''
+            return cls._build_metadata(metadata_data), metadata_data.get('objectId', '') or ''
 
         if hasattr(metadata, 'model_copy'):
             return metadata.model_copy(), getattr(metadata, 'objectId', '') or ''
@@ -112,9 +107,6 @@ class IInstance(IInstanceBase):
         """
         if self.IGlobal.strategy is None:
             raise RuntimeError('Chunker strategy not initialized')
-
-        if not hasattr(self, '_pending_docs'):
-            self._pending_docs = []
 
         chunked_docs: list[Doc] = []
         for raw_document in documents:
@@ -164,4 +156,8 @@ class IInstance(IInstanceBase):
         if chunked_docs:
             debug(f'Chunker emitting {len(chunked_docs)} chunks')
             self.instance.writeDocuments(chunked_docs)
-            return self.preventDefault()
+
+        # Always prevent the default forward: we have consumed this batch even
+        # when every document produced zero chunks (empty/whitespace input).
+        # Otherwise the originals leak downstream.
+        return self.preventDefault()
