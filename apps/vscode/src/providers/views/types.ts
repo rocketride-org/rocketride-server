@@ -39,7 +39,7 @@ export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initia
 // =============================================================================
 
 /** All messages the extension host can send to the AccountWebview. */
-export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:env'; scope: 'org' | 'team' | 'user'; scopeId?: string; env: Record<string, string> } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
+export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
 
 /** All messages the AccountWebview can send to the extension host. */
 export type AccountWebviewToHost =
@@ -60,6 +60,104 @@ export type AccountWebviewToHost =
 	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
-	| { type: 'account:getEnv'; scope: 'org' | 'team' | 'user'; scopeId?: string }
-	| { type: 'account:saveEnv'; scope: 'org' | 'team' | 'user'; env: Record<string, string>; scopeId?: string }
 	| { type: 'account:sectionChange'; section: string };
+
+// =============================================================================
+// ENVIRONMENT PAGE PROTOCOL
+// =============================================================================
+
+/**
+ * Per-slot connection state sent from the extension host to the Environment
+ * webview.  One of these is emitted for each connection slot (development /
+ * deployment) so the webview knows what scopes to show and whether the
+ * server is OSS or SaaS.
+ */
+export interface EnvironmentSlotState {
+	/** Which connection slot this state describes. */
+	slot: 'development' | 'deployment';
+	/** Whether this slot currently has an active, authenticated connection. */
+	isConnected: boolean;
+	/**
+	 * Whether the connected server is a SaaS instance (cloud auth with
+	 * org/team/user hierarchy).  When false the server is OSS and only
+	 * the org-level env scope is available.
+	 */
+	isSaas: boolean;
+	/**
+	 * The connection mode for this slot ('cloud', 'local', 'docker', etc.)
+	 * or null when the deployment slot shares the development target.
+	 */
+	connectionMode: string | null;
+	/** Whether the authenticated user has org-admin permissions. */
+	isOrgAdmin: boolean;
+	/** Whether the authenticated user has team-admin permissions. */
+	isTeamAdmin: boolean;
+	/** The organisation ID (if available from the connected server). */
+	orgId?: string;
+	/** The active team ID (if available from the connected server). */
+	teamId?: string;
+}
+
+/** All messages the extension host can send to the EnvironmentWebview. */
+export type EnvironmentHostToWebview =
+	| {
+			/** Sent once on view:ready with both slots' state. */
+			type: 'env:init';
+			/** True when deployment shares the development target (no pill bar). */
+			shared: boolean;
+			/** State for each connection slot (always two entries). */
+			slots: EnvironmentSlotState[];
+	  }
+	| {
+			/** Sent when a single slot's connection state changes. */
+			type: 'env:slotUpdate';
+			/** Updated state for the affected slot. */
+			slot: EnvironmentSlotState;
+	  }
+	| {
+			/** Response carrying loaded environment variables for one scope. */
+			type: 'env:data';
+			/** Which connection slot this data belongs to. */
+			slot: 'development' | 'deployment';
+			/** The scope level (org, team, or user). */
+			scope: 'org' | 'team' | 'user';
+			/** Optional scope identifier (orgId for org, teamId for team). */
+			scopeId?: string;
+			/** The key-value environment dict for this scope. */
+			env: Record<string, string>;
+	  }
+	| {
+			/** Sent when an env operation fails. */
+			type: 'env:error';
+			/** Human-readable error description. */
+			error: string;
+	  };
+
+/** All messages the EnvironmentWebview can send to the extension host. */
+export type EnvironmentWebviewToHost =
+	| {
+			/** Webview is mounted and ready to receive initial data. */
+			type: 'view:ready';
+	  }
+	| {
+			/** Request to load environment variables for one scope. */
+			type: 'env:getEnv';
+			/** Which connection slot to query. */
+			slot: 'development' | 'deployment';
+			/** The scope level to fetch. */
+			scope: 'org' | 'team' | 'user';
+			/** Optional scope identifier (orgId for org, teamId for team). */
+			scopeId?: string;
+	  }
+	| {
+			/** Request to save the full environment dict for one scope. */
+			type: 'env:saveEnv';
+			/** Which connection slot to target. */
+			slot: 'development' | 'deployment';
+			/** The scope level to write. */
+			scope: 'org' | 'team' | 'user';
+			/** The full key-value dict to persist (replaces existing). */
+			env: Record<string, string>;
+			/** Optional scope identifier (orgId for org, teamId for team). */
+			scopeId?: string;
+	  };

@@ -141,7 +141,6 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 	 *   - Same mode as dev → hidden (it's implicitly shared)
 	 */
 	const getModeOptions = (): Array<{ value: string; label: string }> => {
-		const capabilities = props.serverCapabilities ?? [];
 		const allModes = [
 			{ value: 'cloud', label: 'RocketRide Cloud' },
 			{ value: 'docker', label: 'Docker' },
@@ -153,9 +152,6 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 		const otherMode = props.otherGroupMode;
 
 		return allModes.filter(({ value }) => {
-			// Hide cloud if server doesn't have SaaS capability
-			if (value === 'cloud' && !capabilities.includes('saas')) return false;
-
 			if (!otherMode) return true;
 
 			// Service + Docker conflict on port 5565 (both directions)

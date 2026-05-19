@@ -186,7 +186,11 @@ export class DeployManager extends ConnectionManager {
 	 * engine lifecycle and connection in that case.
 	 */
 	public override setEngineRegistry(registry: import('../engine').EngineRegistry): void {
-		if (this.isSharedMode()) return;
+		// Always register the engine status listener, even in shared mode.
+		// When the user switches from shared → independent, the listener
+		// must already be in place to receive the 'ready' event from the
+		// newly started engine. Mode filtering in handleEngineStatus()
+		// ensures we only connect to the engine matching our target mode.
 		super.setEngineRegistry(registry);
 	}
 
@@ -264,6 +268,12 @@ export class DeployManager extends ConnectionManager {
 			await super.disconnect();
 			await this.updateCredentialsStatus();
 			await this.connect();
+			// Ask the registry to reconcile — if the deploy engine is already
+			// running it will re-emit 'ready', which handleEngineStatus() picks
+			// up and connects the WebSocket.
+			if (this.engineRegistry) {
+				await this.engineRegistry.reconcile();
+			}
 			return;
 		}
 

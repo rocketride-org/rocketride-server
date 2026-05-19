@@ -183,7 +183,7 @@ export const EnvScopeCard: React.FC<{
 	return (
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 			<div style={{ ...commonStyles.cardHeader, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-				<span style={commonStyles.labelUppercase}>{label} Environment</span>
+				<span style={commonStyles.labelUppercase}>{label} Variables</span>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 					{error && <span style={{ fontSize: 11, color: 'var(--rr-color-error)' }}>{error}</span>}
 					{saved && <span style={{ fontSize: 11, color: 'var(--rr-color-success)' }}>Saved</span>}

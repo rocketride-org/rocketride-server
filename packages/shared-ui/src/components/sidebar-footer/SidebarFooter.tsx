@@ -31,7 +31,7 @@ import { createPortal } from 'react-dom';
 import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { PopupRow } from '../PopupRow';
-import { BxBookOpen, BxCog, BxChevronRight, BxCheck } from '../BoxIcon';
+import { BxBookOpen, BxCog, BxChevronRight, BxCheck, BxLock } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
 
 // =============================================================================
@@ -75,6 +75,8 @@ export interface SidebarFooterProps {
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
 	onOpenDocs?: () => void;
+	/** Opens the Environment page (shown in flat mode when connected). */
+	onEnvironmentClick?: () => void;
 	/** Opens the Settings page directly (used in both flat and popup modes). */
 	onSettingsClick?: () => void;
 
@@ -205,7 +207,7 @@ const S = {
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, onSettingsClick, connectionStatus, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, onEnvironmentClick, onSettingsClick, connectionStatus, menuItems }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
 		if (!userName) return 'U';
@@ -222,6 +224,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [hovered, setHovered] = useState(false);
 	const [docsHovered, setDocsHovered] = useState(false);
+	const [envHovered, setEnvHovered] = useState(false);
 	const triggerRef = useRef<HTMLDivElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState(200);
@@ -328,7 +331,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const [tickerFade, setTickerFade] = useState(true);
 
 	useEffect(() => {
-		if (!flatMode) return;
+		if (announcements.length === 0) return;
 		const interval = setInterval(() => {
 			setTickerFade(false);
 			setTimeout(() => {
@@ -337,7 +340,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 			}, 300);
 		}, 7000);
 		return () => clearInterval(interval);
-	}, [flatMode, announcements.length]);
+	}, [announcements.length]);
 
 	// ── Render ──────────────────────────────────────────────────────────────
 
@@ -365,6 +368,12 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 					<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
 						<BxBookOpen size={16} />
 						{!collapsed && 'Documentation'}
+					</button>
+				)}
+				{onEnvironmentClick && (
+					<button style={{ ...S.docsBtn, background: envHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setEnvHovered(true)} onMouseLeave={() => setEnvHovered(false)} onClick={onEnvironmentClick}>
+						<BxLock size={16} />
+						{!collapsed && 'Variables'}
 					</button>
 				)}
 				{onSettingsClick && (
@@ -400,6 +409,20 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	return (
 		<div style={S.wrapper}>
+			{/* ── Announcements ticker (popup mode) ────────────────────── */}
+			{!collapsed && announcements.length > 0 && (
+				<>
+					<div style={S.fullDivider} />
+					<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+						<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
+							<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{announcements[tickerIndex].title}</div>
+							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>{announcements[tickerIndex].body}</div>
+							<a href={announcements[tickerIndex].linkUrl} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>{announcements[tickerIndex].linkText} &rarr;</a>
+						</div>
+					</div>
+				</>
+			)}
+
 			{/* ── Documentation button ──────────────────────────────────── */}
 			{onOpenDocs && (
 				<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>

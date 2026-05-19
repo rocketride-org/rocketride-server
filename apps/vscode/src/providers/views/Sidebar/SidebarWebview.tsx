@@ -27,7 +27,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport, BxLock } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
@@ -396,6 +396,7 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Flat vs popup mode ──────────────────────────────────────────────────
 	// Flat: shared connection + no cloud account → show status inline, no popup.
 	// Popup: independent deploy target OR cloud account → full popup menu.
+	const anyConnected = connection.state === 'connected' || deployConnectionState === 'connected';
 	const useFlatFooter = !deployTargetMode && !cloudConnected;
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
@@ -431,12 +432,20 @@ const SidebarViewWebview: React.FC = () => {
 			});
 		}
 
-		// ── Account / Settings / Log out ─────────────────────────────────────
+		// ── Account / Environment / Settings / Log out ──────────────────────
 		if (cloudConnected) {
 			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) });
 		}
 
-		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
+		// Environment is visible whenever at least one connection is active,
+		// regardless of whether the server is OSS or SaaS.
+		if (anyConnected) {
+			items.push({ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.environment.open' }) });
+		}
+
+		// Settings is always shown. Divider only when neither Account nor
+		// Environment was shown above (i.e. not connected and not cloud).
+		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected && !anyConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
 
 		if (cloudConnected) {
 			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.cloud.logout' }) });
@@ -457,9 +466,10 @@ const SidebarViewWebview: React.FC = () => {
 	}, [useFlatFooter, connection.state, developmentMode, devProgressMessage]);
 
 	const handleSettingsClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }), [sendMessage]);
+	const handleEnvironmentClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.environment.open' }), [sendMessage]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} onSettingsClick={handleSettingsClick} connectionStatus={flatConnectionStatus} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} onEnvironmentClick={anyConnected ? handleEnvironmentClick : undefined} onSettingsClick={handleSettingsClick} connectionStatus={flatConnectionStatus} menuItems={footerMenuItems} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
