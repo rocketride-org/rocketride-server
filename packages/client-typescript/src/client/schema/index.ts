@@ -28,6 +28,7 @@
  * Re-exports all schema classes and interfaces for convenient imports.
  */
 
+export type { Attachment } from './Attachment.js';
 export * from './Doc.js';
 export * from './DocFilter.js';
 export * from './DocGroup.js';
