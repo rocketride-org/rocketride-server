@@ -25,7 +25,7 @@
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
 import os
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
 from .hybrid_search import HybridSearchEngine
@@ -64,8 +64,13 @@ class IGlobal(IGlobalBase):
             self.top_k = int(config.get('top_k', 10))
             self.rrf_k = int(config.get('rrf_k', 60))
 
-            # Validate alpha range
-            alpha = max(0.0, min(1.0, alpha))
+            # Validate alpha range — clamp to [0, 1] but warn loudly so a
+            # misconfigured profile is visible in the logs instead of being
+            # silently coerced.
+            if not 0.0 <= alpha <= 1.0:
+                clamped = max(0.0, min(1.0, alpha))
+                warning(f'search_hybrid: alpha={alpha} is outside [0.0, 1.0]; clamping to {clamped}')
+                alpha = clamped
 
             # Create the hybrid search engine
             self.engine = HybridSearchEngine(alpha=alpha)
