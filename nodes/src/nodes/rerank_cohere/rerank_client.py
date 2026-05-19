@@ -151,14 +151,26 @@ class RerankClient:
             ValueError: If documents list is empty or query is empty.
             Exception: On Cohere API errors (auth, rate limit, server).
         """
-        if not query:
+        if not isinstance(query, str) or not query.strip():
             raise ValueError('Query must not be empty')
+        query = query.strip()
 
         if not documents:
             raise ValueError('Documents list must not be empty')
+        normalized_documents: List[str] = []
+        for document in documents:
+            if not isinstance(document, str) or not document.strip():
+                raise ValueError('Documents must contain non-empty strings')
+            normalized_documents.append(document.strip())
+        documents = normalized_documents
 
         effective_top_n = _coerce_top_n(top_n) if top_n is not None else self._top_n
-        effective_model = model or self._model
+        if model is not None:
+            if not isinstance(model, str) or not model.strip():
+                raise ValueError('Model must not be empty')
+            effective_model = model.strip()
+        else:
+            effective_model = self._model
 
         try:
             response = self._client.rerank(
