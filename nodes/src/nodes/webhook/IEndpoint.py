@@ -69,18 +69,26 @@ class IEndpoint(IEndpointBase):
                 parameters = getattr(self.endpoint, 'parameters', None) or {}
                 persist_sessions = bool(parameters.get('persistSessions', False))
 
-                service_config = getattr(self.endpoint, 'serviceConfig', None) or {}
                 job_config = getattr(self.endpoint, 'jobConfig', None) or {}
-                # Prefer the named pipeline service over the per-run task id —
-                # taskId rolls on every run, so it cannot anchor a resume.
-                pipeline_id = (service_config.get('name') if isinstance(service_config, dict) else None) or (job_config.get('taskId') if isinstance(job_config, dict) else None) or ''
+                # The pipeline's stable project_id lives at
+                # jobConfig.config.pipeline.project_id and survives across runs
+                # (taskId rolls every run and cannot anchor a resume).
+                pipeline_id = ''
+                try:
+                    pipeline_id = job_config.get('config', {}).get('pipeline', {}).get('project_id', '') or ''
+                except Exception:
+                    pipeline_id = ''
 
                 # Add the persist + pipelineId params if persistence is on.
                 # ``button-link`` is rendered with {host}/{public_auth} late by
                 # the dropper-ui; the chat-ui parses pipelineId/persist from
                 # its own URL alongside auth (see chat-ui App.tsx).
                 if persist_sessions and pipeline_id:
-                    button_link = f'{{host}}/chat?auth={{public_auth}}&pipelineId={pipeline_id}&persist=1'
+                    # Persistent chat needs task.store permission for fs_mkdir / fs_write
+                    # on the user's filestore.  Public auth keys (pk_*) lack that scope —
+                    # only the private task token (tk_*) carries it.  See
+                    # task_server.py: tk_* → ['task.control','task.data','task.monitor','task.debug','task.store'].
+                    button_link = f'{{host}}/chat?auth={{token}}&pipelineId={pipeline_id}&persist=1'
                 else:
                     button_link = '{host}/chat?auth={public_auth}'
 

@@ -287,8 +287,10 @@ export class Chat {
 		});
 		try {
 			await this._client.fsRmdir(`${CHATS_ROOT}/${this.id}`, true);
-		} catch {
+		} catch (err) {
 			// Best-effort. Orphan directory is recoverable by §5.5 rebuild.
+			// Log so we can see WHY rmdir is failing during development.
+			console.warn(`Chat.delete: fsRmdir failed for ${CHATS_ROOT}/${this.id}`, err);
 		}
 	}
 
@@ -469,8 +471,21 @@ export async function mutateCatalog(client: RocketRideChatClient, mutator: (cat:
 			if (err instanceof CatalogContentionError) throw err;
 			// catalog absent on second read — proceed; the write will create it.
 		}
-		await client.fsWriteJson(CATALOG_PATH, catalog);
-		return;
+		try {
+			await client.fsWriteJson(CATALOG_PATH, catalog);
+			return;
+		} catch (err) {
+			// The filestore enforces a per-path write-lock — concurrent writers
+			// hit "File already open for writing" before our version check sees
+			// the conflict. Retry the read-modify-write cycle like a normal
+			// version-contention case.
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg.includes('already open for writing') && attempt < CATALOG_MAX_RETRY) {
+				await sleep(20 * attempt);
+				continue;
+			}
+			throw err;
+		}
 	}
 	throw new CatalogContentionError(CATALOG_MAX_RETRY);
 }

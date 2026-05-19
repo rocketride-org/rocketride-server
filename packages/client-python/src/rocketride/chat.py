@@ -459,7 +459,9 @@ async def _mutate_catalog(
             fresh_version = int((fresh or {}).get('version', 0) or 0) if isinstance(fresh, dict) else 0
             if fresh_version != observed:
                 if attempt == CATALOG_MAX_RETRY:
-                    raise CatalogContentionError(f'catalog.json optimistic-lock retry exhausted after {attempt} attempts')
+                    raise CatalogContentionError(
+                        f'catalog.json optimistic-lock retry exhausted after {attempt} attempts'
+                    )
                 await asyncio.sleep(0.02 * attempt)
                 continue
         except CatalogContentionError:
@@ -483,6 +485,16 @@ async def _mutate_catalog(
                 for c in catalog.chats
             ],
         }
-        await client.fs_write_json(CATALOG_PATH, payload)
-        return
+        try:
+            await client.fs_write_json(CATALOG_PATH, payload)
+            return
+        except Exception as e:
+            # The filestore enforces a per-path write-lock — concurrent writers
+            # hit "File already open for writing" before our version check sees
+            # the conflict.  Retry the read-modify-write cycle like a normal
+            # version-contention case.
+            if 'already open for writing' in str(e) and attempt < CATALOG_MAX_RETRY:
+                await asyncio.sleep(0.02 * attempt)
+                continue
+            raise
     raise CatalogContentionError(f'catalog.json optimistic-lock retry exhausted after {CATALOG_MAX_RETRY} attempts')

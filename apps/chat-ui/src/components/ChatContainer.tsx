@@ -83,11 +83,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	// Initialize connection
 	const { isConnected, client } = useRocketRideClient(handleConnected, handleDisconnected, setStatusMessage);
 
-	// When persistence is on but no chat is loaded yet, hydrate from the most
-	// recent existing chat (so users land back in their last conversation) or
-	// leave it null and let the next send create one (TDD §7.1).
+	// When persistence is on, auto-open the most recent chat ONCE per chat-ui
+	// session — so users land back in their last conversation after a window
+	// close/refresh.  Gated by a ref so subsequent transitions to currentChat=null
+	// (e.g. clicking "New chat") don't immediately re-open the old chat.
+	const autoResumeAttemptedRef = useRef(false);
 	useEffect(() => {
-		if (!persistEnabled || !client || !pipelineId || !authToken || currentChat) return;
+		if (!persistEnabled || !client || !pipelineId || !authToken) return;
+		if (autoResumeAttemptedRef.current) return;
+		autoResumeAttemptedRef.current = true;
 		let cancelled = false;
 		(async () => {
 			try {
@@ -107,7 +111,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 		return () => {
 			cancelled = true;
 		};
-	}, [persistEnabled, client, pipelineId, authToken, currentChat, hydrateFromChat]);
+	}, [persistEnabled, client, pipelineId, authToken, hydrateFromChat]);
 
 	const handleSelectChat = useCallback(
 		async (chatId: string) => {

@@ -109,7 +109,7 @@
 		{
 			"section": "Pipe",
 			"title": "Chat",
-			"properties": ["hideForm", "type", "source.mode", "Pipe.source.parameters"]
+			"properties": ["type", "source.mode", "Pipe.source.parameters"]
 		}
 	]
 }

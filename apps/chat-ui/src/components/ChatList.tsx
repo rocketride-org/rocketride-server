@@ -50,6 +50,10 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 	const [loading, setLoading] = useState(true);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [editingTitle, setEditingTitle] = useState('');
+	// Two-stage delete: first trash click arms the row, second click commits.
+	// Native window.confirm() is silently dropped inside this VS Code webview
+	// because the iframe sandbox omits `allow-modals`.
+	const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
 	const loadEntries = useCallback(async () => {
 		setLoading(true);
@@ -85,10 +89,18 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 		}
 	};
 
-	const handleDelete = async (entry: ChatCatalogEntry) => {
-		if (!window.confirm(`Delete chat "${entry.title}"? This cannot be undone.`)) return;
-		await onDeleteChat(entry.guid);
-		void loadEntries();
+	const handleDeleteClick = async (entry: ChatCatalogEntry) => {
+		if (pendingDeleteId === entry.guid) {
+			setPendingDeleteId(null);
+			await onDeleteChat(entry.guid);
+			void loadEntries();
+		} else {
+			setPendingDeleteId(entry.guid);
+			// Auto-disarm after 3s if user doesn't confirm.
+			window.setTimeout(() => {
+				setPendingDeleteId((current) => (current === entry.guid ? null : current));
+			}, 3000);
+		}
 	};
 
 	return (
@@ -188,7 +200,13 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 														e.stopPropagation();
 														handleStartRename(entry);
 													}}
-													style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px' }}
+													style={{
+														background: 'transparent',
+														border: 'none',
+														cursor: 'pointer',
+														padding: '2px',
+														color: 'var(--rr-text-secondary, #6b7280)',
+													}}
 													aria-label={`Rename ${entry.title}`}
 													title="Rename"
 												>
@@ -198,11 +216,18 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 													type="button"
 													onClick={(e) => {
 														e.stopPropagation();
-														void handleDelete(entry);
+														void handleDeleteClick(entry);
 													}}
-													style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px' }}
-													aria-label={`Delete ${entry.title}`}
-													title="Delete"
+													style={{
+														background: pendingDeleteId === entry.guid ? 'var(--rr-danger, #dc2626)' : 'transparent',
+														border: 'none',
+														cursor: 'pointer',
+														padding: '2px',
+														borderRadius: '4px',
+														color: pendingDeleteId === entry.guid ? 'white' : 'var(--rr-text-secondary, #6b7280)',
+													}}
+													aria-label={pendingDeleteId === entry.guid ? `Confirm delete ${entry.title}` : `Delete ${entry.title}`}
+													title={pendingDeleteId === entry.guid ? 'Click again to confirm' : 'Delete'}
 												>
 													<Trash2 className="w-3 h-3" />
 												</button>
