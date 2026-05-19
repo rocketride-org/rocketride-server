@@ -36,6 +36,7 @@ class IGlobal(IGlobalBase):
     _lang: str
     _pipeline: Optional[Any] = None
     _remote_client: Optional[Any] = None
+    _cloud_engine: Optional[Any] = None
 
     def beginGlobal(self):
         """Initialise local pipeline or remote client from the node configuration.
@@ -50,6 +51,21 @@ class IGlobal(IGlobalBase):
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        engine = str(cfg.get('engine') or 'kokoro').strip().lower()
+        if engine != 'kokoro':
+            from .cloud_engine import SUPPORTED_CLOUD_ENGINES, CloudTTSEngine
+
+            if engine not in SUPPORTED_CLOUD_ENGINES:
+                raise Exception(
+                    f'audio_tts: unsupported engine "{engine}". '
+                    f'Supported: kokoro, {", ".join(sorted(SUPPORTED_CLOUD_ENGINES))}'
+                )
+            from depends import depends  # type: ignore
+
+            depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
+            self._cloud_engine = CloudTTSEngine(engine, cfg)
+            return
+
         voice = str(cfg.get('kokoro_voice') or '').strip()
         if not voice:
             raise Exception('Kokoro: choose a voice from the list')
@@ -109,6 +125,9 @@ class IGlobal(IGlobalBase):
         streamed. On any synthesis error the temp file is removed before the
         exception propagates so there are no orphans on disk.
         """
+        if self._cloud_engine is not None:
+            return self._cloud_engine.synthesize(text)
+
         fd, out_path = tempfile.mkstemp(prefix='tts_', suffix='.wav')
         os.close(fd)
         try:
@@ -160,6 +179,7 @@ class IGlobal(IGlobalBase):
     def endGlobal(self):
         """Release the local pipeline and disconnect the remote client, if any."""
         self._pipeline = None
+        self._cloud_engine = None
         client = self._remote_client
         if client is not None:
             try:

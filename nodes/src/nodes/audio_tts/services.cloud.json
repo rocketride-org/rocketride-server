@@ -1,0 +1,218 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text To Speech (Cloud)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "audio_tts_cloud://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most nodes.
+	//		Shares the audio_tts module with the Kokoro variant; engine
+	//		selection happens via the "engine" profile field.
+	//
+	"path": "nodes.audio_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "audio_tts_cloud",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech via cloud TTS providers (OpenAI, ElevenLabs).", "Cloud engines run on the engine host via in-process HTTPS calls and do not go through the model server.", "Output is sent on the audio lane as MP3 bytes (or the configured format).", "API keys are read from the api_key field or the OPENAI_API_KEY / ELEVENLABS_API_KEY environment variables."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "audio-player.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"],
+		"documents": ["audio"],
+		"questions": ["audio"],
+		"answers": ["audio"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "openai",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"openai": {
+				"engine": "openai",
+				"openai_model": "gpt-4o-mini-tts",
+				"openai_voice": "alloy",
+				"api_key": ""
+			},
+			"elevenlabs": {
+				"engine": "elevenlabs",
+				"elevenlabs_model": "eleven_multilingual_v2",
+				"elevenlabs_voice": "EXAVITQu4vr4xnSDxMaL",
+				"api_key": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		// ── OpenAI ────────────────────────────────────────────────────────────
+		"audio_tts_cloud.openai_model": {
+			"type": "string",
+			"title": "Model",
+			"description": "OpenAI TTS model id.",
+			"default": "gpt-4o-mini-tts",
+			"enum": [
+				["gpt-4o-mini-tts", "GPT-4o mini TTS"],
+				["gpt-4o-tts", "GPT-4o TTS"],
+				["tts-1", "TTS-1"],
+				["tts-1-hd", "TTS-1 HD"]
+			]
+		},
+		"audio_tts_cloud.openai_voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "OpenAI TTS voice (GPT-4o TTS models support additional voices).",
+			"default": "alloy",
+			"enum": [
+				["alloy", "Alloy"],
+				["ash", "Ash"],
+				["ballad", "Ballad"],
+				["coral", "Coral"],
+				["echo", "Echo"],
+				["fable", "Fable"],
+				["onyx", "Onyx"],
+				["nova", "Nova"],
+				["sage", "Sage"],
+				["shimmer", "Shimmer"],
+				["verse", "Verse"],
+				["marin", "Marin"],
+				["cedar", "Cedar"]
+			]
+		},
+		// ── ElevenLabs ────────────────────────────────────────────────────────
+		"audio_tts_cloud.elevenlabs_model": {
+			"type": "string",
+			"title": "Model",
+			"description": "ElevenLabs model_id.",
+			"default": "eleven_multilingual_v2",
+			"enum": [
+				["eleven_multilingual_v2", "Multilingual v2"],
+				["eleven_turbo_v2_5", "Turbo v2.5"],
+				["eleven_flash_v2_5", "Flash v2.5"],
+				["eleven_v3", "Eleven v3"],
+				["eleven_monolingual_v1", "Monolingual v1"]
+			]
+		},
+		"audio_tts_cloud.elevenlabs_voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "Premade ElevenLabs voice (voice_id).",
+			"default": "EXAVITQu4vr4xnSDxMaL",
+			"enum": [
+				["21m00Tcm4TlvDq8ikWAM", "Rachel"],
+				["AZnzlk1XvdvUeBnXmlld", "Domi"],
+				["EXAVITQu4vr4xnSDxMaL", "Bella"],
+				["ErXwobaYiN019PkySvjV", "Antoni"],
+				["MF3mGyEYCl7XYWbV9V6O", "Elli"],
+				["TxGEqnHWrfWFTfGW9XjX", "Josh"],
+				["VR6AewLTigWG4xSOukaG", "Arnold"],
+				["pNInz6obpgDQGcFmaJgB", "Adam"],
+				["yoZ06aMxZJJ28mfd3POQ", "Sam"]
+			]
+		},
+		// ── Shared ────────────────────────────────────────────────────────────
+		"audio_tts_cloud.api_key": {
+			"type": "string",
+			"title": "API key",
+			"description": "API key for the selected cloud TTS engine. Falls back to OPENAI_API_KEY / ELEVENLABS_API_KEY environment variables when blank.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		// ── Form objects (one per profile) ────────────────────────────────────
+		"audio_tts_cloud.form.openai": {
+			"object": "openai",
+			"properties": ["audio_tts_cloud.openai_model", "audio_tts_cloud.openai_voice", "audio_tts_cloud.api_key"]
+		},
+		"audio_tts_cloud.form.elevenlabs": {
+			"object": "elevenlabs",
+			"properties": ["audio_tts_cloud.elevenlabs_model", "audio_tts_cloud.elevenlabs_voice", "audio_tts_cloud.api_key"]
+		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
+		"audio_tts_cloud.profile": {
+			"title": "TTS profile",
+			"type": "string",
+			"default": "openai",
+			"enum": [
+				["openai", "OpenAI TTS"],
+				["elevenlabs", "ElevenLabs"]
+			],
+			"conditional": [
+				{
+					"value": "openai",
+					"properties": ["audio_tts_cloud.form.openai"]
+				},
+				{
+					"value": "elevenlabs",
+					"properties": ["audio_tts_cloud.form.elevenlabs"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Text To Speech (Cloud)",
+			"properties": ["audio_tts_cloud.profile"]
+		}
+	]
+}
