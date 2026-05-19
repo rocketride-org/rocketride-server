@@ -126,6 +126,7 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 
        def process(self, input_data):
            # Process data
+           output_data = input_data
            return output_data
    ```
 

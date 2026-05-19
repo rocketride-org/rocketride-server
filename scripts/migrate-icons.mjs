@@ -120,6 +120,14 @@ for (const jsonFile of serviceJsonFiles) {
 	collectIcons(parsed, icons);
 	for (const iconValue of icons) {
 		if (/^(https?|ftp):\/\//i.test(iconValue)) continue;
+		// `iconValue` is used as a destination filename in path.join(targetDir,
+		// destName) below. Reject anything that isn't a plain basename so a
+		// malformed service JSON (e.g. `"icon": "../../foo.svg"`) can't write
+		// outside the owning node directory.
+		if (iconValue !== path.basename(iconValue)) {
+			console.warn(`! skipping non-basename icon "${iconValue}" in ${rel(jsonFile)}`);
+			continue;
+		}
 		if (!iconTargets.has(iconValue)) iconTargets.set(iconValue, new Set());
 		iconTargets.get(iconValue).add(dir);
 	}
@@ -143,9 +151,21 @@ let totalCopies = 0;
 // Build a case-insensitive lookup from the iconTargets map so that legacy
 // SVGs with case variations (e.g. `Prompt.svg`) match JSON references with
 // the canonical casing (`prompt.svg`).
+//
+// When two iconTargets keys collide on case (e.g. `Foo.svg` and `foo.svg`),
+// merge their target directories instead of letting the second entry
+// overwrite the first — otherwise some node dirs silently miss the copy.
+// The first-seen canonical name wins (arbitrary but deterministic over the
+// Map iteration order, which is insertion order).
 const iconTargetsLower = new Map();
 for (const [key, set] of iconTargets) {
-	iconTargetsLower.set(key.toLowerCase(), { canonicalName: key, targets: set });
+	const lower = key.toLowerCase();
+	const existing = iconTargetsLower.get(lower);
+	if (existing) {
+		for (const dir of set) existing.targets.add(dir);
+	} else {
+		iconTargetsLower.set(lower, { canonicalName: key, targets: new Set(set) });
+	}
 }
 
 for (const sourceSvg of legacySvgs) {
