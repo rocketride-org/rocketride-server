@@ -13,42 +13,24 @@ deep copy mutation prevention, and IGlobal/IInstance lifecycle.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import sys
 import threading
 import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-# Ensure the node source and engine libs are importable
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-NODES_SRC = PROJECT_ROOT / 'nodes' / 'src' / 'nodes'
-ROCKETLIB = PROJECT_ROOT / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib'
-AI_SRC = PROJECT_ROOT / 'packages' / 'ai' / 'src'
-
-for p in (NODES_SRC, ROCKETLIB, AI_SRC):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
-
-# Import memory_store directly via importlib to avoid triggering the package
-# __init__.py which imports IGlobal/IInstance (requires engine runtime).
-import importlib.util
-
-_spec = importlib.util.spec_from_file_location(
-    'memory_persistent.memory_store',
-    NODES_SRC / 'memory_persistent' / 'memory_store.py',
+from nodes.memory_persistent.IGlobal import IGlobal
+from nodes.memory_persistent.IInstance import IInstance
+from nodes.memory_persistent.memory_store import (
+    InMemoryBackend,
+    PersistentMemoryStore,
+    RedisBackend,
+    _validate_key,
+    _validate_session_id,
 )
-_module = importlib.util.module_from_spec(_spec)
-sys.modules['memory_persistent.memory_store'] = _module
-_spec.loader.exec_module(_module)
-
-InMemoryBackend = _module.InMemoryBackend
-PersistentMemoryStore = _module.PersistentMemoryStore
-RedisBackend = _module.RedisBackend
-_validate_key = _module._validate_key
-_validate_session_id = _module._validate_session_id
 
 
 # =============================================================================
@@ -784,82 +766,11 @@ class TestInMemoryBounds:
 # =============================================================================
 
 
-def _build_engine_mock_entries() -> dict:
-    """Build a dict of mock sys.modules entries for the C++ engine and ai packages.
-
-    Returns a mapping suitable for ``patch.dict(sys.modules, ...)``.
-    """
-    mock_englib = MagicMock()
-    mock_englib.PROTOCOL_CAPS = MagicMock()
-    mock_englib.TAG_ID = MagicMock()
-    mock_englib.TAG = MagicMock()
-
-    mock_depends_mod = MagicMock()
-    mock_depends_mod.depends = MagicMock(return_value=None)
-
-    entries: dict = {
-        'engLib': mock_englib,
-        'depends': mock_depends_mod,
-        'ai': MagicMock(),
-        'ai.common': MagicMock(),
-        'ai.common.schema': MagicMock(),
-        'ai.common.config': MagicMock(),
-    }
-    return entries
-
-
-@pytest.fixture
-def engine_mocks(monkeypatch):
-    """Install engine mocks into sys.modules for the duration of the test.
-
-    Returns the mock entries dict so tests can inspect individual mocks.
-    Cleanup is automatic via monkeypatch.
-    """
-    entries = _build_engine_mock_entries()
-    for name, mod in entries.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-    # Clear cached rocketlib modules so they re-import with the mocks
-    for key in list(sys.modules.keys()):
-        if key.startswith('rocketlib'):
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return entries
-
-
-def _import_iglobal():
-    """Import IGlobal via importlib to avoid triggering package __init__.py.
-
-    Caller must ensure engine mocks are installed (e.g. via the ``engine_mocks`` fixture).
-    """
-    spec = importlib.util.spec_from_file_location(
-        'memory_persistent.IGlobal',
-        NODES_SRC / 'memory_persistent' / 'IGlobal.py',
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.IGlobal
-
-
-def _import_iinstance():
-    """Import IInstance via importlib to avoid triggering package __init__.py.
-
-    Caller must ensure engine mocks are installed (e.g. via the ``engine_mocks`` fixture).
-    """
-    spec = importlib.util.spec_from_file_location(
-        'memory_persistent.IInstance',
-        NODES_SRC / 'memory_persistent' / 'IInstance.py',
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.IInstance
-
-
 class TestIGlobalLifecycle:
     """Tests for IGlobal initialization and teardown."""
 
-    def test_iglobal_config_mode_skips_store(self, engine_mocks):
+    def test_iglobal_config_mode_skips_store(self):
         """In CONFIG mode, store should not be created."""
-        IGlobal = _import_iglobal()
-
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.IEndpoint = MagicMock()
         from rocketlib import OPEN_MODE
@@ -869,9 +780,7 @@ class TestIGlobalLifecycle:
         iglobal.beginGlobal()
         assert iglobal.store is None
 
-    def test_endglobal_clears_store(self, engine_mocks):
-        IGlobal = _import_iglobal()
-
+    def test_endglobal_clears_store(self):
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.store = MagicMock()
         iglobal.config = {'some': 'config'}
@@ -888,13 +797,7 @@ class TestIGlobalLifecycle:
 class TestIInstanceLifecycle:
     """Tests for IInstance writeQuestions and writeAnswers."""
 
-    @pytest.fixture(autouse=True)
-    def _setup_engine_mocks(self, engine_mocks):
-        """Ensure engine mocks are active for every test in this class."""
-
     def _make_instance(self, store=None):
-        IInstance = _import_iinstance()
-
         inst = IInstance.__new__(IInstance)
         inst.IGlobal = MagicMock()
         inst.IGlobal.store = store
@@ -1033,3 +936,31 @@ class TestIInstanceLifecycle:
         # Original question metadata should not have memory_context
         # (the deep copy was modified, not the original)
         assert 'memory_context' not in question.metadata
+
+
+# =============================================================================
+# 15. IGlobal Resource Cleanup
+# =============================================================================
+
+
+class TestIGlobalResourceCleanup:
+    """endGlobal must release the backend even on exception (try/finally)."""
+
+    def test_endglobal_clears_state_even_if_close_raises(self):
+        """The try/finally contract: store and config are nulled even when
+        backend.close() raises (e.g. transient Redis disconnect).
+        """
+        g = IGlobal.__new__(IGlobal)
+        mock_backend = MagicMock()
+        mock_backend.close.side_effect = RuntimeError('disconnect failed')
+        mock_store = MagicMock()
+        mock_store.backend = mock_backend
+        g.store = mock_store
+        g.config = {'some': 'config'}
+
+        with contextlib.suppress(RuntimeError):
+            g.endGlobal()
+
+        assert g.store is None, 'endGlobal must null store in finally block'
+        assert g.config is None, 'endGlobal must null config in finally block'
+        mock_backend.close.assert_called_once()

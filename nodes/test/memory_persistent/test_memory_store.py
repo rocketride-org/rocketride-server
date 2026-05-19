@@ -13,27 +13,18 @@ Covers the CodeRabbit review follow-ups:
 
 from __future__ import annotations
 
-import contextlib
-import importlib.util
 import logging
 import sys
 import threading
 import time
-import types
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
-if str(NODES_SRC) not in sys.path:
-    sys.path.insert(0, str(NODES_SRC))
-
-_ms_path = NODES_SRC / 'memory_persistent' / 'memory_store.py'
-_ms_spec = importlib.util.spec_from_file_location('memory_persistent_memory_store_under_test', str(_ms_path))
-_memory_store = importlib.util.module_from_spec(_ms_spec)
-_ms_spec.loader.exec_module(_memory_store)  # type: ignore[union-attr]
-InMemoryBackend = _memory_store.InMemoryBackend
-PersistentMemoryStore = _memory_store.PersistentMemoryStore
-RedisBackend = _memory_store.RedisBackend
+from redis_fake import FakeRedis
+from nodes.memory_persistent.memory_store import (
+    InMemoryBackend,
+    PersistentMemoryStore,
+    RedisBackend,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -134,130 +125,10 @@ def test_inmemory_create_prunes_expired_session_before_duplicate_check():
 # ---------------------------------------------------------------------------
 
 
-class _FakeRedisClient:
-    """Minimal fake Redis for verifying TTL-alignment behavior."""
-
-    def __init__(self):
-        self._kv = {}
-        self._sets = {}
-        self._hashes = {}
-        self._lists = {}
-        self._ttl_ms = {}
-        self.close_called = False
-
-    # Key lifetime tracking ------------------------------------------------
-    def pexpire(self, key, ms):
-        self._ttl_ms[key] = ms
-        return 1
-
-    def pttl(self, key):
-        if key in self._ttl_ms:
-            return self._ttl_ms[key]
-        if key in self._kv or key in self._hashes or key in self._sets or key in self._lists:
-            return -1
-        return -2
-
-    # Sets ----------------------------------------------------------------
-    def sadd(self, key, *members):
-        self._sets.setdefault(key, set()).update(members)
-        return len(members)
-
-    def sismember(self, key, member):
-        return member in self._sets.get(key, set())
-
-    def smembers(self, key):
-        return set(self._sets.get(key, set()))
-
-    def srem(self, key, *members):
-        s = self._sets.get(key, set())
-        removed = 0
-        for m in members:
-            if m in s:
-                s.discard(m)
-                removed += 1
-        return removed
-
-    def scard(self, key):
-        return len(self._sets.get(key, set()))
-
-    # Strings -------------------------------------------------------------
-    def set(self, key, value):
-        self._kv[key] = value
-        return True
-
-    def get(self, key):
-        return self._kv.get(key)
-
-    def incrby(self, key, amount):
-        current = int(self._kv.get(key, 0))
-        new = current + amount
-        self._kv[key] = str(new)
-        return new
-
-    def delete(self, key):
-        removed = 0
-        for store in (self._kv, self._sets, self._hashes, self._lists, self._ttl_ms):
-            if key in store:
-                store.pop(key, None)
-                removed = 1
-        return removed
-
-    def exists(self, key):
-        return int(key in self._kv or key in self._sets or key in self._hashes or key in self._lists)
-
-    # Hashes --------------------------------------------------------------
-    def hset(self, key, mapping=None, **_kwargs):
-        self._hashes.setdefault(key, {}).update(mapping or {})
-        return len(mapping or {})
-
-    def hget(self, key, field):
-        return self._hashes.get(key, {}).get(field)
-
-    # Lists ---------------------------------------------------------------
-    def rpush(self, key, *values):
-        self._lists.setdefault(key, []).extend(values)
-        return len(self._lists[key])
-
-    def lrange(self, key, start, stop):
-        lst = self._lists.get(key, [])
-        if stop == -1:
-            return lst[start:]
-        return lst[start : stop + 1]
-
-    # Pipeline ------------------------------------------------------------
-    def pipeline(self):
-        return _FakePipeline(self)
-
-    # Cleanup -------------------------------------------------------------
-    def close(self):
-        self.close_called = True
-
-
-class _FakePipeline:
-    def __init__(self, client):
-        self._client = client
-        self._ops = []
-
-    def __getattr__(self, name):
-        def _queue(*args, **kwargs):
-            self._ops.append((name, args, kwargs))
-            return self
-
-        return _queue
-
-    def execute(self):
-        results = []
-        for name, args, kwargs in self._ops:
-            fn = getattr(self._client, name)
-            results.append(fn(*args, **kwargs))
-        self._ops = []
-        return results
-
-
-def _make_redis_backend_with_fake():
-    """Construct a RedisBackend whose client is the fake above."""
+def _make_redis_backend_with_fake() -> RedisBackend:
+    """Construct a RedisBackend whose client is a ``FakeRedis`` instance."""
     fake_redis_module = MagicMock()
-    fake_redis_module.Redis.return_value = _FakeRedisClient()
+    fake_redis_module.Redis.return_value = FakeRedis()
     with patch.dict(sys.modules, {'redis': fake_redis_module}):
         backend = RedisBackend(host='fake', port=0)
     return backend
@@ -399,120 +270,6 @@ def test_store_facade_exposes_backend_close():
     store.backend.close()
 
 
-# ---------------------------------------------------------------------------
-# IGlobal teardown — try/finally guarantees resource release
-# ---------------------------------------------------------------------------
-
-
-def test_iglobal_endglobal_clears_state_even_if_close_raises():
-    """EndGlobal must null out self.store / self.config even when
-    backend.close() raises — this is the try/finally contract that
-    prevents leaked references on error paths.
-    """
-    # Import IGlobal lazily — it depends on rocketlib and ai.common.config,
-    # which are not installed in the test environment. We mock those modules
-    # just enough to import IGlobal.
-    fake_rocketlib = MagicMock()
-
-    class _FakeBase:
-        pass
-
-    fake_rocketlib.IGlobalBase = _FakeBase
-    fake_rocketlib.OPEN_MODE = MagicMock(CONFIG='CONFIG')
-    fake_ai_common_config = MagicMock()
-
-    fake_depends = MagicMock()
-    with patch.dict(
-        sys.modules,
-        {
-            'rocketlib': fake_rocketlib,
-            'ai.common.config': fake_ai_common_config,
-            'ai': MagicMock(),
-            'ai.common': MagicMock(),
-            'depends': fake_depends,
-        },
-    ):
-        # Load IGlobal.py directly (bypass package __init__)
-        iglobal_path = NODES_SRC / 'memory_persistent' / 'IGlobal.py'
-        spec = importlib.util.spec_from_file_location('memory_persistent_iglobal_under_test', str(iglobal_path))
-        iglobal_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(iglobal_mod)  # type: ignore[union-attr]
-        IGlobal = iglobal_mod.IGlobal
-
-        g = IGlobal()
-        # Fake a store with a close() that raises
-        mock_backend = MagicMock()
-        mock_backend.close.side_effect = RuntimeError('disconnect failed')
-        mock_store = MagicMock()
-        mock_store.backend = mock_backend
-        g.store = mock_store
-        g.config = {'some': 'config'}
-
-        with contextlib.suppress(RuntimeError):
-            g.endGlobal()
-
-        assert g.store is None, 'endGlobal must null store in finally block'
-        assert g.config is None, 'endGlobal must null config in finally block'
-        mock_backend.close.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# os.path.join cross-platform usage
-# ---------------------------------------------------------------------------
-
-
-def test_iglobal_begin_global_passes_portable_requirements_path():
-    """Regression: requirements.txt path should be computed as a filesystem path."""
-    fake_rocketlib = MagicMock()
-
-    class _FakeBase:
-        pass
-
-    fake_rocketlib.IGlobalBase = _FakeBase
-    fake_rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='CONFIG')
-
-    fake_config_module = types.ModuleType('ai.common.config')
-    fake_config_module.Config = MagicMock()
-    fake_config_module.Config.getNodeConfig.return_value = {
-        'backend': 'memory',
-        'max_history': 100,
-        'auto_summarize': True,
-        'session_ttl_hours': 0,
-    }
-
-    fake_depends_module = types.ModuleType('depends')
-    fake_depends_module.depends = MagicMock(return_value=None)
-
-    fake_package = types.ModuleType('memory_persistent')
-    fake_package.__path__ = [str(NODES_SRC / 'memory_persistent')]
-
-    with patch.dict(
-        sys.modules,
-        {
-            'rocketlib': fake_rocketlib,
-            'ai': types.ModuleType('ai'),
-            'ai.common': types.ModuleType('ai.common'),
-            'ai.common.config': fake_config_module,
-            'depends': fake_depends_module,
-            'memory_persistent': fake_package,
-            'memory_persistent.memory_store': _memory_store,
-        },
-    ):
-        iglobal_path = NODES_SRC / 'memory_persistent' / 'IGlobal.py'
-        spec = importlib.util.spec_from_file_location('memory_persistent.IGlobal', str(iglobal_path))
-        iglobal_mod = importlib.util.module_from_spec(spec)
-        sys.modules['memory_persistent.IGlobal'] = iglobal_mod
-        spec.loader.exec_module(iglobal_mod)  # type: ignore[union-attr]
-
-        g = iglobal_mod.IGlobal()
-        g.IEndpoint = MagicMock()
-        g.IEndpoint.endpoint.openMode = 'RUN'
-        g.glb = MagicMock()
-        g.glb.logicalType = 'memory_persistent'
-        g.glb.connConfig = {}
-
-        g.beginGlobal()
-
-        expected_requirements = str(NODES_SRC / 'memory_persistent' / 'requirements.txt')
-        fake_depends_module.depends.assert_called_once_with(expected_requirements)
-        g.endGlobal()
+# NOTE: IGlobal lifecycle tests live in test_node.py — that file owns the
+# IGlobal/IInstance surface. This module is scoped to the storage layer
+# (memory_store.py), which has no rocketlib/ai dependencies.
