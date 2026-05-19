@@ -25,8 +25,10 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any, Optional
+from uuid import uuid4
 
 
 class HybridSearchEngine:
@@ -89,10 +91,12 @@ class HybridSearchEngine:
 
         scores = bm25.get_scores(query_tokens)
 
-        # Map scores back to original document indices
+        # Map scores back to original document indices.
+        # Deep-copy so nested mutable values (metadata dicts, lists) cannot leak
+        # back into the caller's documents via shared references.
         scored_docs = []
         for rank_idx, orig_idx in enumerate(non_empty_indices):
-            doc_copy = dict(documents[orig_idx])
+            doc_copy = copy.deepcopy(documents[orig_idx])
             doc_copy['bm25_score'] = float(scores[rank_idx])
             scored_docs.append(doc_copy)
 
@@ -137,20 +141,29 @@ class HybridSearchEngine:
             for rank, doc in enumerate(result_list):
                 doc_id = str(doc.get(id_key, ''))
                 if not doc_id:
-                    # Use text content as fallback identifier
-                    doc_id = str(doc.get('text', f'__unnamed_{rank}'))
+                    # Fall back to text content as identifier. If text is also
+                    # missing, synthesise a globally unique id so anonymous
+                    # documents from different source lists cannot collide and
+                    # accidentally accumulate each other's RRF scores.
+                    text_id = doc.get('text')
+                    if text_id:
+                        doc_id = str(text_id)
+                    else:
+                        doc_id = f'__unnamed_{list_idx}_{rank}_{uuid4().hex}'
 
                 rrf_score = weight * (1.0 / (k + rank + 1))  # rank is 0-indexed, RRF uses 1-indexed
                 rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + rrf_score
 
-                # Keep the first occurrence of each document
+                # Keep the first occurrence of each document. Deep-copy so any
+                # nested mutable state (metadata dicts, embeddings list) cannot
+                # be mutated through the result we return.
                 if doc_id not in doc_map:
-                    doc_map[doc_id] = dict(doc)
+                    doc_map[doc_id] = copy.deepcopy(doc)
 
         # Attach RRF scores and sort
         results = []
         for doc_id, rrf_score in rrf_scores.items():
-            doc = dict(doc_map[doc_id])
+            doc = copy.deepcopy(doc_map[doc_id])
             doc['rrf_score'] = rrf_score
             results.append(doc)
 
