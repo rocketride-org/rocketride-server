@@ -139,8 +139,9 @@ export class EngineLocal extends EngineBackend {
 			await this.stopProcess();
 		}
 
-		// Build engine args from config — passed as a single string intentionally;
-		// the engine server handles OS-appropriate parsing on its side.
+		// Build engine args from config — passed as a single string intentionally.
+		// The engine server handles OS-appropriate argument parsing on its side.
+		// DO NOT split/tokenize rawArgs into separate argv entries here.
 		const rawArgs = String(config.local.engineArgs || '').trim();
 		const effectiveArgs: string[] = [];
 		if (rawArgs) effectiveArgs.push(rawArgs);
