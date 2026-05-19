@@ -84,7 +84,7 @@ class RecursiveCharacterChunker(ChunkingStrategy):
         # Merge parts into chunks that respect chunk_size
         chunks = []
         current = ''
-        for i, part in enumerate(parts):
+        for part in parts:
             # Build the candidate string
             if current:
                 candidate = current + separator + part
@@ -94,9 +94,15 @@ class RecursiveCharacterChunker(ChunkingStrategy):
             if len(candidate) <= self.chunk_size:
                 current = candidate
             else:
-                # Current chunk is ready (if non-empty)
+                # Current chunk is ready (if non-empty). Preserve the separator
+                # that would have joined ``current`` to ``part`` by attaching it
+                # to the emitted chunk: without this, every emit silently drops
+                # ``separator`` characters and downstream start/end offsets drift.
                 if current:
-                    chunks.append(current)
+                    if separator:
+                        chunks.append(current + separator)
+                    else:
+                        chunks.append(current)
                 # If this single part exceeds chunk_size, recurse with next separators
                 if len(part) > self.chunk_size:
                     sub_chunks = self._split_text(part, remaining_separators)
@@ -125,10 +131,18 @@ class RecursiveCharacterChunker(ChunkingStrategy):
         chunk_index = 0
         search_start = 0
         for i, raw in enumerate(raw_chunks):
-            # Compute overlap prefix from the previous chunk
+            # Compute overlap prefix from the previous chunk, capped so the
+            # final chunk never exceeds chunk_size. Without the cap, the
+            # prepended overlap can push len(chunk_text) past the configured
+            # limit (e.g. raw=chunk_size + overlap=N -> chunk_size + N).
+            applied_overlap = 0
             if i > 0 and self.chunk_overlap > 0:
+                budget = max(0, self.chunk_size - len(raw))
+                applied_overlap = min(self.chunk_overlap, budget)
+
+            if applied_overlap > 0:
                 prev = raw_chunks[i - 1]
-                overlap_text = prev[-self.chunk_overlap :]
+                overlap_text = prev[-applied_overlap:]
                 chunk_text = overlap_text + raw
             else:
                 chunk_text = raw
@@ -137,10 +151,9 @@ class RecursiveCharacterChunker(ChunkingStrategy):
             start_char = text.find(raw, search_start)
             if start_char == -1:
                 start_char = search_start
-            # Adjust for overlap prefix
-            if i > 0 and self.chunk_overlap > 0:
-                overlap_start = max(0, start_char - self.chunk_overlap)
-                start_char = overlap_start
+            # Adjust for the *actually applied* overlap so offsets stay truthful.
+            if applied_overlap > 0:
+                start_char = max(0, start_char - applied_overlap)
             end_char = start_char + len(chunk_text)
 
             result.append(
@@ -303,6 +316,28 @@ class TokenChunker(ChunkingStrategy):
             self._encoder = tiktoken.get_encoding(self.encoding_name)
         return self._encoder
 
+    @staticmethod
+    def _safe_decode(encoder, token_ids: list[int]) -> str:
+        """Decode a list of token ids, surviving invalid UTF-8 sequences.
+
+        ``tiktoken``'s ``Encoding.decode`` does not support an ``errors=`` kwarg
+        (passing one raises ``TypeError``). When the default decode fails we
+        rebuild the byte stream via ``decode_single_token_bytes`` and decode
+        with ``errors='replace'`` so malformed multi-byte sequences become
+        U+FFFD instead of aborting the whole chunk.
+        """
+        try:
+            return encoder.decode(token_ids)
+        except Exception:  # noqa: BLE001 - tiktoken raises various error types
+            # Per-token fallback: gather bytes and decode tolerantly.
+            buf = bytearray()
+            for tid in token_ids:
+                try:
+                    buf.extend(encoder.decode_single_token_bytes(tid))
+                except Exception:  # noqa: BLE001
+                    buf.extend(b'\xef\xbf\xbd')  # U+FFFD replacement character
+            return buf.decode('utf-8', errors='replace')
+
     def chunk(self, text: str) -> list[dict]:
         """Split text by token count with overlap, decoding back to text."""
         if not text or not text.strip():
@@ -334,16 +369,13 @@ class TokenChunker(ChunkingStrategy):
             chunk_tokens = tokens[start:end]
 
             # Decode tokens back to text, handling errors gracefully
-            try:
-                chunk_text = encoder.decode(chunk_tokens)
-            except Exception:
-                chunk_text = encoder.decode(chunk_tokens, errors='replace')
+            chunk_text = self._safe_decode(encoder, chunk_tokens)
 
             # Use cached character position for start_char (O(1) lookup)
             start_char = char_pos_cache.get(start)
             if start_char is None:
                 # Fallback: decode prefix (should not happen with correct step caching)
-                prefix_text = encoder.decode(tokens[:start])
+                prefix_text = self._safe_decode(encoder, tokens[:start])
                 start_char = len(prefix_text)
                 char_pos_cache[start] = start_char
             end_char = start_char + len(chunk_text)
@@ -365,10 +397,7 @@ class TokenChunker(ChunkingStrategy):
             if next_start not in char_pos_cache and next_start < len(tokens):
                 # Decode only the step-sized segment to get its character length
                 step_tokens = tokens[start:next_start]
-                try:
-                    step_text = encoder.decode(step_tokens)
-                except Exception:
-                    step_text = encoder.decode(step_tokens, errors='replace')
+                step_text = self._safe_decode(encoder, step_tokens)
                 char_pos_cache[next_start] = start_char + len(step_text)
 
             # Advance by step (chunk_size - overlap)
