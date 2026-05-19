@@ -66,11 +66,25 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 	}
 
 	// User message
+	const attachments = message.attachments ?? [];
 	return (
 		<div className="message-wrapper user">
 			<div className="message-bubble user">
 				<div className="user-bubble-content">
-					<p>{message.text}</p>
+					{message.text && <p>{message.text}</p>}
+					{attachments.length > 0 && (
+						<div className="attachment-pills attachment-pills--bubble">
+							{attachments.map(a => (
+								<span
+									key={a.attachment_id}
+									className="attachment-pill"
+									title={`${a.mime} · ${a.size_bytes} bytes`}
+								>
+									<span className="attachment-pill-name">{a.filename}</span>
+								</span>
+							))}
+						</div>
+					)}
 				</div>
 				<div className="message-timestamp">
 					{message.timestamp}

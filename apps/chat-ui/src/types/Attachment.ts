@@ -23,43 +23,10 @@
  */
 
 /**
- * Type definitions for chat application
+ * Re-export of the canonical `Attachment` type from the RocketRide TypeScript
+ * client SDK, so chat-ui code can import it via `@apptypes/Attachment` /
+ * `../types/Attachment` without depending on SDK internals.
+ *
+ * See TDD §6.1.
  */
-
-/**
- * Represents a single chat message in the conversation
- */
-export interface Message {
-	id: number;
-	text: string;
-	sender: 'user' | 'bot' | 'system' | 'status';
-	timestamp: string;
-	resultKey?: string | undefined;
-	sseType?: string;
-	/**
-	 * Optional attachments on a user turn (Slice C of multimodal chat
-	 * sessions). Populated by the chat container when the user submits a
-	 * message with files; rendered as pills on the user bubble. See
-	 * TDD §12.1.
-	 */
-	attachments?: import('./Attachment').Attachment[];
-}
-
-/**
- * Configuration for API connection mode
- */
-export interface ChatConfig {
-	devMode: boolean;
-	host?: string;
-	apiKey?: string;
-}
-
-/**
- * Connection state and control interface
- */
-export interface ConnectionState {
-	isConnected: boolean;
-	connectionError: string | null;
-	client: any | null;
-	pipelineToken: string | null;
-}
+export type { Attachment } from 'rocketride';
