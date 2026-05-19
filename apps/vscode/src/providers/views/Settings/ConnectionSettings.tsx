@@ -19,18 +19,30 @@ import type { ServiceStatus, DockerStatus, VersionOption } from '../components/p
 // TYPES
 // ============================================================================
 
+/** Props for the Development Mode connection settings card. */
 interface ConnectionSettingsProps {
+	/** Full settings object — group fields are read from `settings.development`. */
 	settings: SettingsData;
+	/** Partial-merge callback for settings changes. */
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
+	/** Persist all settings to extension storage. */
 	onSave: () => void;
+	/** Revert to last-saved settings. */
 	onCancel?: () => void;
+	/** True when the user has unsaved edits. */
 	dirty?: boolean;
+	/** True briefly after a successful save (shows "Saved" badge). */
 	saved?: boolean;
+	/** Remove stored API key from secret storage. */
 	onClearCredentials: () => void;
-	onTestConnection: (hostUrl: string, apiKey: string) => void;
+	/** Test connection via ioControl — mode + optional params (hostUrl, apiKey for onprem). */
+	onTestConnection: (mode: string, params?: Record<string, unknown>) => void;
+	/** Inline test result banner (success/error), shown below the active panel. */
 	testMessage: MessageData | null;
+	/** Available engine versions fetched from GitHub releases. */
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
+	/** Server capabilities from probe (e.g. ['saas']) — controls which modes are available. */
 	serverCapabilities: string[];
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
@@ -38,9 +50,10 @@ interface ConnectionSettingsProps {
 	onCloudSignOut?: () => void;
 	onProbeCloudServer?: () => void;
 	onFetchTeams?: () => void;
+	/** Whether the probed server supports SaaS/OAuth. */
 	isSaas?: boolean;
 	teams?: Array<{ id: string; name: string }>;
-	// Docker panel props
+	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
 	dockerError: string | null;
@@ -54,7 +67,7 @@ interface ConnectionSettingsProps {
 	onDockerRemove: () => void;
 	onDockerStart: () => void;
 	onDockerStop: () => void;
-	// Service panel props
+	// -- Service panel props --
 	serviceStatus: ServiceStatus;
 	serviceProgress: string | null;
 	serviceError: string | null;
@@ -68,6 +81,7 @@ interface ConnectionSettingsProps {
 	onServiceRemove: () => void;
 	onServiceStart: () => void;
 	onServiceStop: () => void;
+	/** Whether the sudo password prompt overlay is visible (Linux/macOS service installs). */
 	sudoPromptVisible: boolean;
 	sudoPasswordInput: string;
 	onSudoPasswordChange: (pw: string) => void;
@@ -81,6 +95,7 @@ interface ConnectionSettingsProps {
 export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => {
 	const { settings, onSettingsChange, onSave } = props;
 
+	/** When switching to onprem, clear the hostUrl if it still holds a cloud or localhost value. */
 	const handleConnectionModeChange = (mode: ConnectionMode) => {
 		const groupUpdates: Partial<SettingsData['development']> = { connectionMode: mode };
 
@@ -117,6 +132,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 						simplified={false}
 						idPrefix="dev"
 						group="development"
+						otherGroupMode={settings.deployment.connectionMode}
 						serverCapabilities={props.serverCapabilities}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}

@@ -29,12 +29,13 @@
  * the active connection mode (Cloud sign-in, On-prem API key, etc.).
  *
  * After the user fixes their credentials, "Save & Connect" persists them
- * and triggers an immediate reconnect via connectionManager.settingsApplied().
+ * and triggers an EngineRegistry.reconcile() which restarts affected
+ * engines and reconnects the ConnectionManagers with fresh credentials.
  */
 
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config';
-import { getConnectionManager } from '../extension';
+import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
@@ -42,6 +43,14 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 // PROVIDER
 // =============================================================================
 
+/**
+ * Authentication recovery page provider.
+ *
+ * Creates a webview panel that lets the user fix credentials after an
+ * AuthenticationException. Supports Cloud OAuth (PKCE), On-prem API keys,
+ * and Docker/Service default keys. After saving, triggers an engine
+ * reconcile to restart and reconnect with the new credentials.
+ */
 export class AuthProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager: ConfigManager;
@@ -59,6 +68,7 @@ export class AuthProvider {
 		this.connHandler = new ConnectionMessageHandler({
 			extensionFsPath: extensionUri.fsPath,
 			getActiveWebviews: () => (this.panel ? [this.panel.webview] : []),
+			getConnectionManager,
 		});
 		this.registerCommands();
 	}
@@ -139,18 +149,9 @@ export class AuthProvider {
 			try {
 				const signedIn = await cloudAuth.isSignedIn();
 				if (signedIn) {
-					// Reconnect the correct connection group
-					const group = this.pendingGroup || 'development';
-					if (group === 'deployment') {
-						const { DeployManager } = require('../connection/deploy-manager');
-						const deployManager = DeployManager.getDeployInstance();
-						await deployManager.settingsApplied();
-					} else {
-						const connectionManager = getConnectionManager();
-						if (connectionManager) {
-							await connectionManager.settingsApplied();
-						}
-					}
+					// Reconcile — cloud token changed, engine restarts, CM reconnects
+					const registry = getEngineRegistry();
+					if (registry) await registry.reconcile();
 					this.panel?.dispose();
 				}
 			} catch (error) {
@@ -203,14 +204,20 @@ export class AuthProvider {
 	// =========================================================================
 
 	/**
-	 * Persist new credentials and trigger a reconnect.
-	 * On success, close the auth panel.
+	 * Persist new credentials and trigger a reconnect via engine reconcile.
+	 * On success, closes the auth panel. On failure, shows an error in the panel.
+	 *
+	 * Unlike SettingsProvider.saveAllSettings(), this only writes the credentials
+	 * that changed (API key and/or host URL) rather than the full settings snapshot,
+	 * since the user is only fixing auth — not changing other settings.
+	 *
+	 * @param message - The webview message containing group, apiKey, and/or hostUrl.
 	 */
 	private async saveAndConnect(message: Record<string, unknown>): Promise<void> {
 		try {
 			const group = (message.group as 'development' | 'deployment') || (this.pendingGroup as 'development' | 'deployment') || 'development';
 
-			// Persist API key if provided (on-prem, docker, service)
+			// Persist API key if provided (on-prem, docker, service modes)
 			if (typeof message.apiKey === 'string') {
 				if (message.apiKey.trim() !== '') {
 					await this.configManager.setApiKey(group, message.apiKey.trim());
@@ -219,22 +226,15 @@ export class AuthProvider {
 				}
 			}
 
-			// Persist host URL if provided (on-prem)
+			// Persist host URL if provided (on-prem mode)
 			if (typeof message.hostUrl === 'string') {
 				await this.configManager.updateHostUrl(group, message.hostUrl);
 			}
 
-			// Trigger reconnect for the correct connection
-			if (group === 'deployment') {
-				const { DeployManager } = require('../connection/deploy-manager');
-				const deployManager = DeployManager.getDeployInstance();
-				await deployManager.settingsApplied();
-			} else {
-				const connectionManager = getConnectionManager();
-				if (connectionManager) {
-					await connectionManager.settingsApplied();
-				}
-			}
+			// Reconcile triggers the full sequence: config checksum change detected
+			// -> engine restart -> 'ready' event -> CM reconnects with new credentials
+			const registry = getEngineRegistry();
+			if (registry) await registry.reconcile();
 
 			// Close the panel only after successful reconnect
 			this.panel?.dispose();

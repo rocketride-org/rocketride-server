@@ -37,6 +37,13 @@ export interface ConnectionConfigProps {
 	/** When true, only auth-relevant fields are shown (sign-in, API key). Used by Auth page for re-authentication. */
 	authOnly?: boolean;
 
+	/**
+	 * The other group's connection mode (dev's mode when rendering deploy,
+	 * deploy's mode when rendering dev). Used to filter out incompatible
+	 * mode combinations (service + docker port conflict).
+	 */
+	otherGroupMode?: ConnectionMode | null;
+
 	// Server capabilities (from probe) — controls which modes are shown
 	serverCapabilities: string[];
 
@@ -59,7 +66,9 @@ export interface ConnectionConfigProps {
 
 	// On-prem
 	onClearCredentials: () => void;
-	onTestConnection: (hostUrl: string, apiKey: string) => void;
+
+	// Test connection (via ioControl) — all modes use the same callback
+	onTestConnection: (mode: string, params?: Record<string, unknown>) => void;
 	testMessage: MessageData | null;
 
 	// Local engine
@@ -120,6 +129,58 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 		onConnectionModeChange(e.target.value as ConnectionMode);
 	};
 
+
+	/**
+	 * Determines which mode options to show in the dropdown.
+	 *
+	 * Filtering rules (applied to both dev and deploy groups):
+	 *   - Service + Docker → incompatible (port conflict on 5565)
+	 *   - Cloud + Cloud → shared OAuth token, only one can use cloud
+	 *
+	 * Additionally, for the deploy group only:
+	 *   - Same mode as dev → hidden (it's implicitly shared)
+	 */
+	const getModeOptions = (): Array<{ value: string; label: string }> => {
+		const capabilities = props.serverCapabilities ?? [];
+		const allModes = [
+			{ value: 'cloud', label: 'RocketRide Cloud' },
+			{ value: 'docker', label: 'Docker' },
+			{ value: 'service', label: 'Service' },
+			{ value: 'onprem', label: 'Direct Connect' },
+			{ value: 'local', label: 'Local' },
+		];
+
+		const otherMode = props.otherGroupMode;
+
+		return allModes.filter(({ value }) => {
+			// Hide cloud if server doesn't have SaaS capability
+			if (value === 'cloud' && !capabilities.includes('saas')) return false;
+
+			if (!otherMode) return true;
+
+			// Service + Docker conflict on port 5565 (both directions)
+			if (value === 'service' && otherMode === 'docker') return false;
+			if (value === 'docker' && otherMode === 'service') return false;
+
+			// Cloud uses shared OAuth token — can't have both independently
+			if (value === 'cloud' && otherMode === 'cloud') return false;
+
+			// Deploy only: same mode as dev is implicit sharing, hide it
+			if (group === 'deployment' && value === otherMode) return false;
+
+			return true;
+		});
+	};
+
+	const modeOptions = getModeOptions();
+
+	// True when the current mode was filtered out by getModeOptions()
+	// (e.g. user had 'docker' selected, then the other group switched to 'service').
+	// Forces the dropdown to show a "Select a mode..." placeholder.
+	const modeConflict = connectionMode
+		? !modeOptions.some((opt) => opt.value === connectionMode)
+		: false;
+
 	// authOnly: only show auth-relevant fields for re-authentication
 	if (authOnly) {
 		return (
@@ -138,28 +199,33 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 				<label htmlFor={`${idPrefix}-connectionMode`} style={S.label}>
 					Connection mode
 				</label>
-				<select id={`${idPrefix}-connectionMode`} value={connectionMode ?? ''} onChange={handleModeChange}>
-					<option value="cloud">RocketRide Cloud</option>
-					<option value="docker">Docker</option>
-					<option value="service">Service</option>
-					<option value="onprem">Direct Connect</option>
-					<option value="local">Local</option>
+				<select id={`${idPrefix}-connectionMode`} value={modeConflict ? '' : (connectionMode ?? '')} onChange={handleModeChange}>
+					{(modeConflict || !connectionMode) && <option value="" disabled>Select a mode...</option>}
+					{modeOptions.map((opt) => (
+						<option key={opt.value} value={opt.value}>{opt.label}</option>
+					))}
 				</select>
-				<div style={S.helpText}>Choose where your server runs for development and deployment</div>
+				{modeConflict ? (
+					<div style={{ ...S.helpText, color: 'var(--vscode-editorWarning-foreground)' }}>
+						The previous mode is no longer available. Please select a different mode.
+					</div>
+				) : (
+					<div style={S.helpText}>Choose where your server runs for development and deployment</div>
+				)}
 			</div>
 
-			{/* Mode-specific panel */}
-			<div style={{ ...S.modeConfigBox, marginTop: 8 }}>
+			{/* Mode-specific panel — hidden when no mode selected or mode has a conflict */}
+			{connectionMode && !modeConflict && <div style={{ ...S.modeConfigBox, marginTop: 8 }}>
 				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} />}
 
-				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={groupSettings.local.debugOutput} onDebugOutputChange={(c) => changeGroup({ local: { debugOutput: c } })} onTestConnection={onTestConnection} testMessage={testMessage} simplified={simplified} />}
+				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={groupSettings.local.debugOutput} onDebugOutputChange={(c) => changeGroup({ local: { debugOutput: c } })} onTestConnection={(hostUrl, apiKey) => onTestConnection('onprem', { hostUrl, apiKey })} testMessage={testMessage} simplified={simplified} />}
 
 				{connectionMode === 'local' && <LocalPanel idPrefix={idPrefix} engineVersion={groupSettings.local.engineVersion} onVersionChange={(v) => changeGroup({ local: { engineVersion: v } })} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} debugOutput={groupSettings.local.debugOutput} onDebugOutputChange={(c) => changeGroup({ local: { debugOutput: c } })} engineArgs={groupSettings.local.engineArgs} onEngineArgsChange={(a) => changeGroup({ local: { engineArgs: a } })} simplified={simplified} />}
 
-				{connectionMode === 'docker' && <DockerPanel idPrefix={idPrefix} status={props.dockerStatus} progress={props.dockerProgress} error={props.dockerError} busy={props.dockerBusy} action={props.dockerAction} versions={props.dockerVersions} selectedVersion={props.dockerSelectedVersion} onVersionChange={props.onDockerVersionChange} onInstall={props.onDockerInstall} onUpdate={props.onDockerUpdate} onRemove={props.onDockerRemove} onStart={props.onDockerStart} onStop={props.onDockerStop} simplified={simplified} />}
+				{connectionMode === 'docker' && <DockerPanel idPrefix={idPrefix} status={props.dockerStatus} progress={props.dockerProgress} error={props.dockerError} busy={props.dockerBusy} action={props.dockerAction} versions={props.dockerVersions} selectedVersion={props.dockerSelectedVersion} onVersionChange={props.onDockerVersionChange} onInstall={props.onDockerInstall} onUpdate={props.onDockerUpdate} onRemove={props.onDockerRemove} onStart={props.onDockerStart} onStop={props.onDockerStop} onTestConnection={() => onTestConnection('docker')} testMessage={testMessage} simplified={simplified} />}
 
-				{connectionMode === 'service' && <ServicePanel idPrefix={idPrefix} status={props.serviceStatus} progress={props.serviceProgress} error={props.serviceError} busy={props.serviceBusy} action={props.serviceAction} versions={props.serviceVersions} selectedVersion={props.serviceSelectedVersion} onVersionChange={props.onServiceVersionChange} onInstall={props.onServiceInstall} onUpdate={props.onServiceUpdate} onRemove={props.onServiceRemove} onStart={props.onServiceStart} onStop={props.onServiceStop} sudoPromptVisible={props.sudoPromptVisible} sudoPasswordInput={props.sudoPasswordInput} onSudoPasswordChange={props.onSudoPasswordChange} onSudoSubmit={props.onSudoSubmit} simplified={simplified} />}
-			</div>
+				{connectionMode === 'service' && <ServicePanel idPrefix={idPrefix} status={props.serviceStatus} progress={props.serviceProgress} error={props.serviceError} busy={props.serviceBusy} action={props.serviceAction} versions={props.serviceVersions} selectedVersion={props.serviceSelectedVersion} onVersionChange={props.onServiceVersionChange} onInstall={props.onServiceInstall} onUpdate={props.onServiceUpdate} onRemove={props.onServiceRemove} onStart={props.onServiceStart} onStop={props.onServiceStop} sudoPromptVisible={props.sudoPromptVisible} sudoPasswordInput={props.sudoPasswordInput} onSudoPasswordChange={props.onSudoPasswordChange} onSudoSubmit={props.onSudoSubmit} onTestConnection={() => onTestConnection('service')} testMessage={testMessage} simplified={simplified} />}
+			</div>}
 		</>
 	);
 };
