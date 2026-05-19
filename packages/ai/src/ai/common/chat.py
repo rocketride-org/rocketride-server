@@ -465,26 +465,48 @@ class ChatBase:
         Unsupported MIMEs drop+warn per TDD §7.3; FileStore IO errors
         propagate per Q-E1.
         """
-        from ai.common.llm_translate import translate_openai_shape
+        from ai.common.llm_translate import (
+            translate_anthropic_shape,
+            translate_bedrock_shape,
+            translate_gemini_shape,
+            translate_openai_shape,
+        )
 
         prompt_text = question.getPrompt()
         shape = getattr(self, 'provider_shape', 'openai')
 
-        if shape == 'openai':
-            file_store = self._get_file_store()
-            blocks, dropped = translate_openai_shape(prompt_text, attachments, file_store, self._provider)
+        def _log_drops(dropped):
             for d in dropped:
                 # TODO(slice-J): emit metrics.counter('attachment.dropped_unsupported', 1,
                 # tags={'provider': d.provider, 'mime': d.mime}) once the per-pipe metrics
                 # surface is reachable from ChatBase. Logging already happened inside the
                 # translator.
                 debug(f'attachment.dropped_unsupported provider={d.provider} mime={d.mime}')
+
+        if shape == 'openai':
+            file_store = self._get_file_store()
+            blocks, dropped = translate_openai_shape(prompt_text, attachments, file_store, self._provider)
+            _log_drops(dropped)
+            return self._chat_blocks(blocks)
+        elif shape == 'anthropic':
+            file_store = self._get_file_store()
+            blocks, dropped = translate_anthropic_shape(prompt_text, attachments, file_store, self._provider)
+            _log_drops(dropped)
+            return self._chat_blocks(blocks)
+        elif shape == 'gemini':
+            file_store = self._get_file_store()
+            parts, dropped = translate_gemini_shape(prompt_text, attachments, file_store, self._provider)
+            _log_drops(dropped)
+            return self._chat_blocks(parts)
+        elif shape == 'bedrock':
+            file_store = self._get_file_store()
+            blocks, dropped = translate_bedrock_shape(prompt_text, attachments, file_store, self._provider)
+            _log_drops(dropped)
             return self._chat_blocks(blocks)
 
-        # Other shapes ('anthropic', 'gemini', 'bedrock') ship in Slice F.
-        # Fall back to text-only so the existing pipeline keeps working until
-        # the rest of the dispatch tree lands.
-        debug(f'provider_shape={shape!r} not yet implemented; falling back to text-only for provider {self._provider}')
+        # Unknown shape: log warning and fall back to text-only so the
+        # existing pipeline keeps working until per-node shapes land.
+        debug(f'provider_shape={shape!r} not recognized; falling back to text-only for provider {self._provider}')
         return self.chat_string(prompt_text)
 
     def chat(self, question: Question) -> Answer:
