@@ -694,14 +694,16 @@ class TestIInstance:
             {'index': 0, 'relevance_score': 0.9, 'document': 'doc content'},
         ]
         inst = self._make_instance(iinst_mod, rerank_results=rerank_results)
-        metadata = {'objectId': 'obj-123', 'source': 'test-file.txt'}
+        metadata = {'objectId': 'obj-123', 'chunkId': 0, 'source': 'test-file.txt'}
         question = self._make_question(
             'query',
             docs=[self._make_doc(page_content='doc content', metadata=metadata)],
         )
         inst.writeQuestions(question)
         docs = inst.instance.writeDocuments.call_args[0][0]
-        assert docs[0].metadata == metadata
+        assert docs[0].metadata.objectId == 'obj-123'
+        assert docs[0].metadata.chunkId == 0
+        assert docs[0].metadata.source == 'test-file.txt'
 
     def test_write_questions_metadata_alignment_after_filter(self, rerank_pkg):
         """Regression: rerank index refers to filtered list, not original."""
@@ -711,10 +713,10 @@ class TestIInstance:
         ]
         inst = self._make_instance(iinst_mod, rerank_results=rerank_results)
 
-        meta_a = {'objectId': 'A'}
-        meta_b = {'objectId': 'B'}
-        meta_c = {'objectId': 'C'}
-        meta_d = {'objectId': 'D'}
+        meta_a = {'objectId': 'A', 'chunkId': 0}
+        meta_b = {'objectId': 'B', 'chunkId': 0}
+        meta_c = {'objectId': 'C', 'chunkId': 0}
+        meta_d = {'objectId': 'D', 'chunkId': 0}
 
         question = self._make_question(
             'find C',
@@ -734,8 +736,8 @@ class TestIInstance:
 
         docs = inst.instance.writeDocuments.call_args[0][0]
         assert len(docs) == 1
-        assert docs[0].metadata == meta_c
-        assert docs[0].metadata['objectId'] != 'B'
+        assert docs[0].metadata.objectId == 'C'
+        assert docs[0].metadata.objectId != 'B'
 
     def test_write_questions_empty_rerank_results(self, rerank_pkg):
         _, iinst_mod = rerank_pkg
@@ -752,7 +754,10 @@ class TestIInstance:
         ]
         inst = self._make_instance(iinst_mod, rerank_results=rerank_results)
 
-        original_doc = self._make_doc(page_content='doc A', metadata={'source': 'test'})
+        original_doc = self._make_doc(
+            page_content='doc A',
+            metadata={'objectId': 'orig', 'chunkId': 0, 'source': 'test'},
+        )
         question = self._make_question('What is AI?', docs=[original_doc])
         original_documents = list(question.documents)
 
