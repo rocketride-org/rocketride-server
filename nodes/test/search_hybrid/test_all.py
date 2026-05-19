@@ -450,3 +450,389 @@ class TestIGlobalAlphaClamp:
         assert any('alpha' in m for m in warnings_seen), warnings_seen
         assert ig.engine is not None
         assert ig.engine.alpha == 1.0
+
+
+# ===========================================================================
+# IInstance integration (writeQuestions contract)
+# ===========================================================================
+#
+# Restored from the original test/nodes/test_search_hybrid.py
+# TestIInstanceIntegration class that was dropped during the relocation to
+# nodes/test/search_hybrid/. These tests pin the post-fix IInstance contract:
+#
+#   - writeAnswers takes a SINGLE Answer (commit c7994358),
+#   - hasListener('documents') / hasListener('answers') gate emission,
+#   - engine is None raises RuntimeError,
+#   - the input Question is deep-copied (no caller-side mutation),
+#   - empty query / empty documents short-circuit cleanly,
+#   - the structured answer text uses the [Document N] (score: …) shape.
+#
+# The build interpreter (`builder nodes:test`) ships rocketlib / ai.* / depends;
+# under plain `pytest` those are stubbed by the search_hybrid_pkg fixture so
+# the same tests still run end-to-end. If IInstance ever picks up an import we
+# can't stub, the fixture skips rather than failing — same pattern as the
+# rerank_cohere `rerank_pkg` fixture.
+
+
+@pytest.fixture
+def search_hybrid_pkg():
+    """Load search_hybrid.IInstance with framework stubs installed.
+
+    Yields a SimpleNamespace exposing the loaded ``IInstance`` class plus the
+    stubbed schema types (``Doc``, ``Question``, ``Answer``, ``SubQuestion``)
+    so each test can build inputs without re-defining them. On teardown the
+    fixture restores any modules it shadowed in ``sys.modules``.
+    """
+    from unittest.mock import MagicMock
+
+    stub_names = [
+        'rocketlib',
+        'ai',
+        'ai.common',
+        'ai.common.config',
+        'ai.common.schema',
+        'depends',
+    ]
+    saved = {name: sys.modules.get(name) for name in stub_names}
+
+    # --- rocketlib -------------------------------------------------------
+    rocketlib_stub = types.ModuleType('rocketlib')
+
+    class IGlobalBase:
+        pass
+
+    class IInstanceBase:
+        pass
+
+    class OPEN_MODE:
+        CONFIG = 'config'
+        RUN = 'run'
+
+    rocketlib_stub.IGlobalBase = IGlobalBase
+    rocketlib_stub.IInstanceBase = IInstanceBase
+    rocketlib_stub.OPEN_MODE = OPEN_MODE
+    rocketlib_stub.warning = lambda *a, **kw: None
+    rocketlib_stub.debug = lambda *a, **kw: None
+    sys.modules['rocketlib'] = rocketlib_stub
+
+    # --- ai.common.{config,schema} ---------------------------------------
+    ai_pkg = types.ModuleType('ai')
+    ai_pkg.__path__ = []
+    ai_common = types.ModuleType('ai.common')
+    ai_common.__path__ = []
+
+    config_mod = types.ModuleType('ai.common.config')
+
+    class Config:
+        @staticmethod
+        def getNodeConfig(logicalType, connConfig):
+            return connConfig or {}
+
+    config_mod.Config = Config
+
+    schema_mod = types.ModuleType('ai.common.schema')
+
+    class Doc:
+        def __init__(self, **kwargs):
+            self.page_content = kwargs.get('page_content')
+            self.metadata = kwargs.get('metadata')
+            self.score = kwargs.get('score')
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    class Question:
+        def __init__(self, **kwargs):
+            self.questions = kwargs.get('questions', [])
+            self.documents = kwargs.get('documents', [])
+
+    class SubQuestion:
+        def __init__(self, text=''):
+            self.text = text
+
+    class Answer:
+        def __init__(self):
+            self._answer = None
+
+        def setAnswer(self, text):
+            self._answer = text
+
+        def getAnswer(self):
+            return self._answer
+
+    schema_mod.Doc = Doc
+    schema_mod.Question = Question
+    schema_mod.Answer = Answer
+
+    depends_mod = types.ModuleType('depends')
+    depends_mod.depends = lambda *a, **kw: None
+
+    sys.modules['ai'] = ai_pkg
+    sys.modules['ai.common'] = ai_common
+    sys.modules['ai.common.config'] = config_mod
+    sys.modules['ai.common.schema'] = schema_mod
+    sys.modules['depends'] = depends_mod
+
+    # Drop any cached search_hybrid module loaded under a non-stubbed
+    # environment so the fresh import below resolves the stubbed types.
+    for mod_name in list(sys.modules.keys()):
+        if 'search_hybrid' in mod_name and 'test' not in mod_name:
+            del sys.modules[mod_name]
+
+    # Load the search_hybrid package + IInstance directly by file path so the
+    # tests do not depend on `nodes` being importable as a top-level package
+    # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
+    # build interpreter (`builder nodes:test`) makes the same import work via
+    # PYTHONPATH wiring; here we explicitly anchor on the source tree.
+    try:
+        pkg_init = _SEARCH_HYBRID_DIR / '__init__.py'
+        pkg_spec = importlib.util.spec_from_file_location(
+            'search_hybrid_test_pkg',
+            str(pkg_init),
+            submodule_search_locations=[str(_SEARCH_HYBRID_DIR)],
+        )
+        assert pkg_spec is not None and pkg_spec.loader is not None
+        pkg_mod = importlib.util.module_from_spec(pkg_spec)
+        sys.modules['search_hybrid_test_pkg'] = pkg_mod
+        pkg_spec.loader.exec_module(pkg_mod)
+
+        # IGlobal is referenced via `from .IGlobal import IGlobal` in IInstance
+        iglobal_spec = importlib.util.spec_from_file_location(
+            'search_hybrid_test_pkg.IGlobal',
+            str(_SEARCH_HYBRID_DIR / 'IGlobal.py'),
+        )
+        assert iglobal_spec is not None and iglobal_spec.loader is not None
+        iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
+        sys.modules['search_hybrid_test_pkg.IGlobal'] = iglobal_mod
+        iglobal_spec.loader.exec_module(iglobal_mod)
+
+        iinst_spec = importlib.util.spec_from_file_location(
+            'search_hybrid_test_pkg.IInstance',
+            str(_SEARCH_HYBRID_DIR / 'IInstance.py'),
+        )
+        assert iinst_spec is not None and iinst_spec.loader is not None
+        iinst_mod = importlib.util.module_from_spec(iinst_spec)
+        sys.modules['search_hybrid_test_pkg.IInstance'] = iinst_mod
+        iinst_spec.loader.exec_module(iinst_mod)
+        IInstance = iinst_mod.IInstance
+    except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
+        pytest.skip(f'search_hybrid.IInstance not importable: {exc}')
+    except TypeError as exc:  # pragma: no cover - py<3.10 hits PEP 604 syntax
+        # IGlobal uses `X | None` annotations evaluated at class-body time,
+        # which requires Python 3.10+. The build interpreter satisfies this;
+        # under older local pythons we skip rather than fail.
+        pytest.skip(f'search_hybrid.IInstance not importable (py<3.10?): {exc}')
+
+    def make_instance(engine, top_k=10, rrf_k=60):
+        """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
+        inst = IInstance.__new__(IInstance)
+        iglobal = MagicMock()
+        iglobal.engine = engine
+        iglobal.top_k = top_k
+        iglobal.rrf_k = rrf_k
+        inst.IGlobal = iglobal
+        mock_instance = MagicMock()
+        inst.instance = mock_instance
+        return inst, mock_instance
+
+    pkg = types.SimpleNamespace(
+        IInstance=IInstance,
+        Doc=Doc,
+        Question=Question,
+        Answer=Answer,
+        SubQuestion=SubQuestion,
+        make_instance=make_instance,
+    )
+
+    try:
+        yield pkg
+    finally:
+        for name in stub_names:
+            if saved[name] is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved[name]
+        # Drop the file-loaded copies so a later test that does NOT use this
+        # fixture (e.g. TestIGlobalAlphaClamp under the build interpreter)
+        # sees the real package, not our stubbed reload.
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith('search_hybrid_test_pkg'):
+                sys.modules.pop(mod_name, None)
+            elif 'search_hybrid' in mod_name and 'test' not in mod_name:
+                sys.modules.pop(mod_name, None)
+
+
+class TestIInstanceIntegration:
+    """writeQuestions contract for the search_hybrid IInstance."""
+
+    def test_raises_runtime_error_when_engine_is_none(self, search_hybrid_pkg):
+        """RuntimeError should be raised when engine is None."""
+        pkg = search_hybrid_pkg
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('test query')],
+            documents=[pkg.Doc(page_content='some text', score=0.9)],
+        )
+        inst, _ = pkg.make_instance(engine=None)
+        with pytest.raises(RuntimeError, match='Hybrid search engine not initialized'):
+            inst.writeQuestions(question)
+
+    def test_deep_copy_prevents_question_mutation(self, search_hybrid_pkg):
+        """Deep copy should prevent mutation of the original question object."""
+        pkg = search_hybrid_pkg
+        docs = [
+            pkg.Doc(page_content='Machine learning is great.', score=0.9, metadata=None),
+            pkg.Doc(page_content='Deep learning is powerful.', score=0.7, metadata=None),
+        ]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('machine learning')],
+            documents=docs,
+        )
+        original_doc_count = len(question.documents)
+        original_first_content = question.documents[0].page_content
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+        mock_instance.hasListener.return_value = False
+
+        inst.writeQuestions(question)
+
+        # Original question must not be mutated by the deepcopy inside IInstance
+        assert len(question.documents) == original_doc_count
+        assert question.documents[0].page_content == original_first_content
+
+    def test_structured_answer_output(self, search_hybrid_pkg):
+        """Answer text should use the structured [Document N] (score: …) shape.
+
+        CHANGED FROM ORIGINAL: the original asserted ``writeAnswers`` received a
+        ``list[Answer]`` and indexed ``answers[0]``. The post-fix contract
+        (commit c7994358) is that writeAnswers is invoked with a SINGLE Answer,
+        so we now assert on that shape directly. The textual structure
+        assertions are preserved verbatim.
+        """
+        pkg = search_hybrid_pkg
+        docs = [
+            pkg.Doc(page_content='Machine learning is a subset of AI.', score=0.9, metadata=None),
+            pkg.Doc(page_content='Deep learning uses neural networks.', score=0.7, metadata=None),
+        ]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('machine learning')],
+            documents=docs,
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+        mock_instance.hasListener.return_value = True
+
+        inst.writeQuestions(question)
+
+        assert mock_instance.writeAnswers.called
+        # writeAnswers takes a single Answer (NOT a list) — the previously-fixed
+        # bug. Pin the new contract so a regression to list-shape is caught.
+        call_args, call_kwargs = mock_instance.writeAnswers.call_args
+        assert call_kwargs == {}
+        assert len(call_args) == 1
+        ans = call_args[0]
+        assert isinstance(ans, pkg.Answer), f'expected single Answer, got {type(ans).__name__}'
+        answer_text = ans.getAnswer()
+
+        # Structured format — not raw concatenation
+        assert 'Hybrid search returned' in answer_text
+        assert 'results' in answer_text
+        assert '[Document 1]' in answer_text
+        # Score should contain actual numeric values, not 'N/A'
+        assert '(score:' in answer_text
+        assert 'N/A' not in answer_text
+
+    def test_emits_reranked_documents(self, search_hybrid_pkg):
+        """Emit reranked documents when the 'documents' listener exists."""
+        pkg = search_hybrid_pkg
+        docs = [
+            pkg.Doc(page_content='First document about ML.', score=0.5, metadata=None),
+            pkg.Doc(page_content='Second document about deep learning.', score=0.9, metadata=None),
+        ]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('deep learning')],
+            documents=docs,
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+        mock_instance.hasListener.return_value = True
+
+        inst.writeQuestions(question)
+
+        assert mock_instance.writeDocuments.called
+        emitted_docs = mock_instance.writeDocuments.call_args[0][0]
+        assert len(emitted_docs) > 0
+
+    def test_listener_gating_documents_only(self, search_hybrid_pkg):
+        """Only the listened lane should receive emissions.
+
+        With only `documents` listened, writeDocuments fires and writeAnswers
+        does NOT — pinning the per-lane hasListener gate.
+        """
+        pkg = search_hybrid_pkg
+        docs = [pkg.Doc(page_content='hello world', score=0.5, metadata=None)]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('hello')],
+            documents=docs,
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+        mock_instance.hasListener.side_effect = lambda lane: lane == 'documents'
+
+        inst.writeQuestions(question)
+
+        assert mock_instance.writeDocuments.called
+        assert not mock_instance.writeAnswers.called
+
+    def test_listener_gating_answers_only(self, search_hybrid_pkg):
+        """With only the 'answers' lane listened, writeDocuments stays silent."""
+        pkg = search_hybrid_pkg
+        docs = [pkg.Doc(page_content='hello world', score=0.5, metadata=None)]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('hello')],
+            documents=docs,
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+        mock_instance.hasListener.side_effect = lambda lane: lane == 'answers'
+
+        inst.writeQuestions(question)
+
+        assert not mock_instance.writeDocuments.called
+        assert mock_instance.writeAnswers.called
+
+    def test_skips_empty_query(self, search_hybrid_pkg):
+        """Should skip hybrid search when query text is empty."""
+        pkg = search_hybrid_pkg
+        docs = [pkg.Doc(page_content='Some doc.', score=0.5, metadata=None)]
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('')],
+            documents=docs,
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+
+        inst.writeQuestions(question)
+
+        assert not mock_instance.writeDocuments.called
+        assert not mock_instance.writeAnswers.called
+
+    def test_skips_empty_documents(self, search_hybrid_pkg):
+        """Should skip hybrid search when no documents are attached."""
+        pkg = search_hybrid_pkg
+        question = pkg.Question(
+            questions=[pkg.SubQuestion('test query')],
+            documents=[],
+        )
+
+        engine = HybridSearchEngine(alpha=0.5)
+        inst, mock_instance = pkg.make_instance(engine=engine)
+
+        inst.writeQuestions(question)
+
+        assert not mock_instance.writeDocuments.called
+        assert not mock_instance.writeAnswers.called
