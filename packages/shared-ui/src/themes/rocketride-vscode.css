@@ -192,17 +192,19 @@
  * VS Code sets data-vscode-theme-kind on <body> to one of:
  *   vscode-light | vscode-dark | vscode-high-contrast | vscode-high-contrast-light
  *
- * We use this to set --icon-filter in pure CSS — no JS required.
- * This is the most reliable approach because it works even before
- * getMuiTheme() runs and survives theme switches without a re-render.
+ * We use this to set --icon-color in pure CSS — no JS required.
+ * Monochrome SVG icons are auto-rewritten by the build pipeline to use
+ * `fill="currentColor"`; setting `color: var(--icon-color)` on each
+ * `<Icon>` element lets the SVG inherit the appropriate per-theme color.
+ * Multicolor brand logos ignore `color` because their fills are hardcoded.
  * ====================================================================== */
 
 body[data-vscode-theme-kind='vscode-dark'],
 body[data-vscode-theme-kind='vscode-high-contrast'] {
-	--icon-filter: brightness(0) invert(1);
+	--icon-color: #ffffff;
 }
 
 body[data-vscode-theme-kind='vscode-light'],
 body[data-vscode-theme-kind='vscode-high-contrast-light'] {
-	--icon-filter: none;
+	--icon-color: #1f1f1f;
 }

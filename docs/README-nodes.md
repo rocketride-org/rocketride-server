@@ -129,9 +129,25 @@ class MyNode:
         return output_data
 ```
 
-3. Add `services.json` for the node definition
-4. Add `requirements.txt` for dependencies
-5. Optionally add a `test` section to `services.json` for automated testing (see [README-node-testing.md](README-node-testing.md))
+3. Add `services.json` for the node definition.
+4. Drop the node icon SVG next to `services.json` and reference it by filename:
+
+```json
+{
+  "icon": "my_node.svg",
+  ...
+}
+```
+
+The build pipeline auto-discovers every `nodes/src/nodes/<node>/*.svg` — no central registry to update. It also inspects each SVG and:
+
+- If the SVG is **monochrome** (one distinct fill/stroke color), it auto-rewrites the color to `currentColor` so the icon inherits the active light/dark theme color. Author the SVG in whichever single color you like (commonly `#000`); the theme handles re-tinting.
+- If the SVG is **multicolor** (two or more distinct colors, a gradient, or a pattern), it passes through unchanged and renders in its authored colors. Use this for brand logos.
+
+No theme flag, no manifest list to maintain.
+
+5. Add `requirements.txt` for dependencies.
+6. Optionally add a `test` section to `services.json` for automated testing (see [README-node-testing.md](README-node-testing.md)).
 
 ---
 

@@ -33,10 +33,22 @@ declare module 'd3';
 /** Allows importing `.css` files as side-effect modules (handled by the bundler). */
 declare module '*.css' {}
 
-/** Allows importing `.svg` files as string URLs (handled by the bundler). */
+/**
+ * SVG imports default to React components via SVGR (see
+ * `packages/shared-ui/build/rsbuild-plugin-icons.mjs`). The
+ * `auto-currentcolor` svgo plugin auto-rewrites monochrome SVGs to use
+ * `currentColor` so they inherit the theme color when rendered inline.
+ */
 declare module '*.svg' {
-	const content: string;
-	export default content;
+	import type * as React from 'react';
+	const Component: React.FC<React.SVGProps<SVGSVGElement>>;
+	export default Component;
+}
+
+/** Append `?url` to import an SVG as a plain asset URL string instead of a component. */
+declare module '*.svg?url' {
+	const url: string;
+	export default url;
 }
 
 /** Allows importing `.png` files as string URLs (handled by the bundler). */
@@ -67,4 +79,33 @@ declare module '*.gif' {
 declare module 'shared/assets/*' {
 	const content: unknown;
 	export default content;
+}
+
+/**
+ * Webpack 5 / Rspack provide `import.meta.webpackContext` for build-time
+ * directory scans (the modern equivalent of `require.context`). The bundler
+ * statically replaces the call with a context object whose `.keys()` lists
+ * the matched files and whose call form resolves each one.
+ *
+ * Rsbuild does NOT support Vite's `import.meta.glob` — using it produces a
+ * runtime `{}.glob is not a function` error.
+ */
+interface WebpackContext {
+	keys(): string[];
+	<T = unknown>(id: string): T;
+	resolve(id: string): string;
+	id: string;
+}
+
+interface ImportMeta {
+	webpackContext(
+		directory: string,
+		options?: {
+			recursive?: boolean;
+			regExp?: RegExp;
+			mode?: 'sync' | 'eager' | 'weak' | 'lazy' | 'lazy-once';
+			exclude?: RegExp;
+			include?: RegExp;
+		},
+	): WebpackContext;
 }
