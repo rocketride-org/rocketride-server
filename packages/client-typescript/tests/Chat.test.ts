@@ -109,6 +109,26 @@ describe('Chat persistence', () => {
 		expect(reopened.history.map((t) => t.seq)).toEqual([1, 2]);
 	});
 
+	test('send persists Question.attachments verbatim; open() rehydrates them on the turn line', async () => {
+		const fs = new MockFsClient();
+		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });
+		const att = {
+			attachment_id: '11111111-1111-1111-1111-111111111111',
+			mime: 'application/pdf',
+			filename: 'report.pdf',
+			size_bytes: 482113,
+			path: `.chats/${chat.id}/11111111-1111-1111-1111-111111111111.pdf`,
+		};
+		await chat.send('summarize this', { attachments: [att] });
+
+		const lines = fs.files.get(`.chats/${chat.id}/chat.jsonl`)!.trim().split('\n');
+		const turn = JSON.parse(lines[1]);
+		expect(turn.question.attachments).toEqual([att]);
+
+		const reopened = await Chat.open({ client: fs, token: TOKEN, chatId: chat.id });
+		expect((reopened.history[0].question as any).attachments).toEqual([att]);
+	});
+
 	test('open() throws ChatNotFoundError when chat file is missing', async () => {
 		const fs = new MockFsClient();
 		await expect(Chat.open({ client: fs, token: TOKEN, chatId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' })).rejects.toBeInstanceOf(ChatNotFoundError);
