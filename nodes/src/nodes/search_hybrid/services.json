@@ -2,7 +2,7 @@
 	"title": "Hybrid Search",
 	"protocol": "search_hybrid://",
 	"classType": ["search"],
-	"capabilities": [],
+	"capabilities": ["experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.search_hybrid",
@@ -12,6 +12,30 @@
 	"tile": ["Alpha: ${parameters.search_hybrid.${profile}.alpha}", "Top K: ${parameters.search_hybrid.${profile}.top_k}"],
 	"lanes": {
 		"questions": ["documents", "answers"]
+	},
+	"test": {
+		"profiles": ["balanced"],
+		"cases": [
+			{
+				"name": "Hybrid rerank returns documents",
+				"questions": {
+					"questions": [
+						{ "text": "machine learning" }
+					],
+					"documents": [
+						{ "page_content": "Machine learning is a subset of artificial intelligence.", "score": 0.9 },
+						{ "page_content": "Deep learning uses neural networks with many layers.", "score": 0.7 },
+						{ "page_content": "Natural language processing handles text and speech.", "score": 0.5 }
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "machine learning"
+					}
+				}
+			}
+		]
 	},
 	"input": [
 		{
