@@ -1164,6 +1164,13 @@ class IInstanceBase:
             descriptors = self._build_tool_descriptors(methods)
             descriptors.extend(self._tool_query_dynamic())
 
+            # Cache by name for invoke-time schema walks (TDD §10.3, Q-H1).
+            # We need the per-tool inputSchema at tool.invoke time to know
+            # which top-level properties are declared as
+            # ``format: 'rocketride-attachment'`` and therefore need their
+            # string path swapped for a ``{path, mime, bytes}`` dict.
+            self._rr_tool_descriptors = {d['name']: d for d in descriptors if 'name' in d}
+
             # Add our descriptors to the shared param.tools list.
             # The engine walks every tool node in the chain — each one
             # appends here, building the full catalog.
@@ -1184,6 +1191,11 @@ class IInstanceBase:
                 raise ValueError('tool_name must be a non-empty string')
             tool_name = tool_name.strip()
 
+            # Pre-resolve any format: 'rocketride-attachment' string paths
+            # to {path, mime, bytes} dicts before the tool method sees them
+            # (TDD §10.3, Q-H2 — top-level properties only).
+            self._resolve_attachment_inputs(tool_name, input_obj)
+
             # Try static @tool_function methods first
             if tool_name in methods:
                 output = methods[tool_name](input_obj)
@@ -1202,6 +1214,97 @@ class IInstanceBase:
             return param
 
         raise ValueError(f'tools: invoke operation {op} is not defined')
+
+    # ------------------------------------------------------------------
+    # Attachment input resolution
+    #
+    # Tools whose @tool_function input_schema declares a top-level
+    # property as ``{type: 'string', format: 'rocketride-attachment'}``
+    # accept a FileStore path string from the agent. The dispatcher
+    # transparently reads the bytes and rewrites that property to
+    # ``{path, mime, bytes}`` before the tool method runs, so tool
+    # authors never write FileStore boilerplate.
+    #
+    # Q-H2: only top-level properties are walked. Nested objects,
+    # arrays of attachments, oneOf/anyOf/$ref are silently NOT
+    # resolved — keep the surface narrow until we have real demand.
+    # ------------------------------------------------------------------
+
+    def _resolve_attachment_inputs(self, tool_name: str, input_obj: Any) -> None:
+        """In-place: swap top-level attachment paths for {path, mime, bytes}.
+
+        Looks up the cached descriptor for ``tool_name`` (populated at
+        ``tool.query``), walks ``inputSchema.properties`` at depth 1, and
+        for every string property declared ``format: 'rocketride-attachment'``
+        replaces the path string in ``input_obj`` with the resolved dict.
+
+        No-ops if the descriptor cache is missing (tool.invoke arrived
+        without a preceding tool.query — legal for some control flows),
+        if the schema isn't a top-level object schema, or if the value
+        in ``input_obj`` isn't a string (already resolved / null / wrong
+        shape — let the tool method validate).
+        """
+        descriptors = getattr(self, '_rr_tool_descriptors', None) or {}
+        descriptor = descriptors.get(tool_name)
+        if not descriptor or not isinstance(input_obj, dict):
+            return
+
+        input_schema = descriptor.get('inputSchema') or {}
+        props = input_schema.get('properties') or {}
+        if not isinstance(props, dict):
+            return
+
+        file_store = None
+        for prop_name, prop_schema in props.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            if prop_schema.get('type') != 'string':
+                continue
+            if prop_schema.get('format') != 'rocketride-attachment':
+                continue
+            path = input_obj.get(prop_name)
+            if not isinstance(path, str):
+                continue
+
+            # Lazy-resolve the FileStore on first matching property.
+            if file_store is None:
+                file_store = self._get_attachment_file_store()
+                if file_store is None:
+                    # No file store available — leave the raw path in
+                    # place so the tool method can surface a clear error
+                    # (rather than us masking it as a missing-key).
+                    return
+
+            data = file_store.read_bytes(path)
+            mimes = prop_schema.get('x-rocketride-mimes') or []
+            mime = mimes[0] if mimes else None
+            input_obj[prop_name] = {'path': path, 'mime': mime, 'bytes': data}
+
+    def _get_attachment_file_store(self) -> Any:
+        """Return a sync FileStore-like object exposing ``read_bytes(path)``.
+
+        Resolution order:
+
+        1. ``self._file_store`` — explicitly injected by the wiring layer
+           (LLM/agent nodes in Slice G; the engine instance in production).
+        2. ``self.instance.fileStore`` — engine-provided handle, if any.
+        3. ``None`` — caller must handle gracefully; see
+           ``_resolve_attachment_inputs`` for the contract.
+
+        We deliberately do NOT auto-construct a per-account FileStore here
+        (no env-var sniffing). Tool nodes that need attachments must be
+        wired by their host; this keeps the rocketlib base dependency-free
+        and lets the IInstance harness control the lifecycle.
+        """
+        injected = getattr(self, '_file_store', None)
+        if injected is not None:
+            return injected
+        instance = getattr(self, 'instance', None)
+        if instance is not None:
+            fs = getattr(instance, 'fileStore', None) or getattr(instance, '_file_store', None)
+            if fs is not None:
+                return fs
+        return None
 
     # ------------------------------------------------------------------
     # Dynamic tool overrides
