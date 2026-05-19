@@ -335,3 +335,21 @@
 	/** Default annotation sticky-note background colour. */
 	--rr-annotation-bg-default: #fff9c4;
 }
+
+/* ===================================================================== */
+/* Dark-theme overrides                                                  */
+/* ===================================================================== */
+/*
+ * Activated by `[data-theme="dark"]` on `<html>` (see file header). Only
+ * tokens whose value differs in dark mode need an entry here; the rest
+ * inherit from `:root`. New dark-mode overrides should land in this block
+ * rather than via runtime JS so the theme contract stays the single source
+ * of truth.
+ */
+:root[data-theme='dark'] {
+	/** Monochrome icon colour — flips to near-white so icons stay legible
+	 * on a dark background. Multicolor brand logos ignore this because
+	 * their fills are hardcoded.
+	 */
+	--rr-icon-color: #ffffff;
+}

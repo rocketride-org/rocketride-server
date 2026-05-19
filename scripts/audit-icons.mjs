@@ -190,9 +190,9 @@ for (const svg of allNodeSvgs) {
 // ---------------------------------------------------------------------------
 
 if (existsSync(LEGACY_ICONS_DIR)) {
-	const legacy = (await readdir(LEGACY_ICONS_DIR)).filter((f) =>
-		/\.svg$/i.test(f),
-	);
+	// Recursive — catches SVGs even if a contributor accidentally creates
+	// a subdirectory under the legacy location.
+	const legacy = await findFiles(LEGACY_ICONS_DIR, (f) => /\.svg$/i.test(f));
 	if (legacy.length > 0) {
 		errors.push(
 			`legacy icon dir still has ${legacy.length} SVG(s) at ${rel(LEGACY_ICONS_DIR)} — they should be moved to nodes/src/nodes/<node>/`,

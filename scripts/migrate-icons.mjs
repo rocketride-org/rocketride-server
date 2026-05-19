@@ -150,19 +150,24 @@ for (const [key, set] of iconTargets) {
 
 for (const sourceSvg of legacySvgs) {
 	const name = path.basename(sourceSvg);
+
+	// `unknown.svg` is the universal fallback. It must always end up at
+	// nodes/src/nodes/core/unknown.svg, regardless of whether some service
+	// JSON happens to reference it explicitly. Handle it first so the
+	// fallback target is guaranteed to receive the file.
+	if (name.toLowerCase() === FALLBACK_NAME.toLowerCase()) {
+		if (!existsSync(FALLBACK_TARGET)) await mkdir(FALLBACK_TARGET, { recursive: true });
+		const dest = path.join(FALLBACK_TARGET, FALLBACK_NAME);
+		await writeFile(dest, await readFile(sourceSvg));
+		console.log(`  fallback → ${rel(dest)}`);
+		totalCopies += 1;
+		movedSources.add(sourceSvg);
+		continue;
+	}
+
 	const lookup = iconTargetsLower.get(name.toLowerCase());
 
 	if (!lookup) {
-		if (name.toLowerCase() === FALLBACK_NAME.toLowerCase()) {
-			// Fallback icon: ship under nodes/src/nodes/core/
-			if (!existsSync(FALLBACK_TARGET)) await mkdir(FALLBACK_TARGET, { recursive: true });
-			const dest = path.join(FALLBACK_TARGET, FALLBACK_NAME);
-			await writeFile(dest, await readFile(sourceSvg));
-			console.log(`  fallback → ${rel(dest)}`);
-			totalCopies += 1;
-			movedSources.add(sourceSvg);
-			continue;
-		}
 		orphans.push(sourceSvg);
 		continue;
 	}
@@ -202,10 +207,13 @@ if (orphans.length) {
 }
 
 // Flag any service-referenced icons that had no source SVG in the legacy dir.
-const legacyByName = new Set(legacySvgs.map((p) => path.basename(p)));
+// Match case-insensitively to align with the relocation logic above
+// (`iconTargetsLower`), otherwise we emit false-positive missing entries for
+// icons that exist in the legacy dir under a different casing.
+const legacyByNameLower = new Set(legacySvgs.map((p) => path.basename(p).toLowerCase()));
 const missing = [];
 for (const name of iconTargets.keys()) {
-	if (!legacyByName.has(name)) missing.push(name);
+	if (!legacyByNameLower.has(name.toLowerCase())) missing.push(name);
 }
 if (missing.length) {
 	console.log(`\nReferenced-but-missing icons (no source SVG in legacy dir):`);

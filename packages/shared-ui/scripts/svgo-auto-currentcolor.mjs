@@ -57,9 +57,15 @@ const SKIP_VALUES = new Set([
 
 const isUrlRef = (value) => /^url\s*\(/i.test(value);
 
+// CSS declarations may end with `!important`. We strip it before classification
+// (so `none !important` still matches SKIP_VALUES) and re-append it when
+// rewriting (so cascade priority is preserved).
+const IMPORTANT_SUFFIX_RE = /\s*!important\s*$/i;
+const stripImportant = (value) => value.replace(IMPORTANT_SUFFIX_RE, '').trim();
+
 const shouldCount = (value) => {
 	if (!value) return false;
-	const lower = value.trim().toLowerCase();
+	const lower = stripImportant(value).toLowerCase();
 	if (SKIP_VALUES.has(lower)) return false;
 	if (isUrlRef(lower)) return false;
 	return true;
@@ -68,7 +74,7 @@ const shouldCount = (value) => {
 // Normalize so equivalent values land in the same Set bucket
 // (e.g. `#FFF` and `#ffffff` both → `#ffffff`).
 const normalizeColor = (value) => {
-	const v = value.trim().toLowerCase();
+	const v = stripImportant(value).toLowerCase();
 	const shortHex = v.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
 	if (shortHex) {
 		const [, r, g, b] = shortHex;
@@ -91,7 +97,10 @@ const extractColorsFromCss = (cssText) => {
 
 const replaceColorsInCss = (cssText) => {
 	return cssText.replace(COLOR_DECL_RE, (_full, prop, value) => {
-		if (shouldCount(value)) return `${prop}: currentColor`;
+		if (shouldCount(value)) {
+			const important = IMPORTANT_SUFFIX_RE.test(value) ? ' !important' : '';
+			return `${prop}: currentColor${important}`;
+		}
 		return `${prop}: ${value}`;
 	});
 };
