@@ -33,6 +33,7 @@ from rocketlib import ToolDescriptor, error
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
+from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
 
 
@@ -171,6 +172,22 @@ def _build_deepagent_tools(
 
         def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
             tool_name = _safe_str(getattr(self, 'name', ''))
+
+            # TDD §6.5 / §10.3 — fill any unset attachment-typed slot with a
+            # path-by-reference picked from AgentContext.attachments. The
+            # dispatcher (Slice H) resolves the path to bytes before invoking
+            # the tool method. LLM-decided args win via setdefault semantics.
+            try:
+                input_schema = getattr(self, '_rr_input_schema', None) or {}
+                picker_kwargs = pick_for_tool_call(
+                    input_schema=input_schema if isinstance(input_schema, dict) else {},
+                    candidates=getattr(context, 'attachments', ()) or (),
+                )
+                for _k, _v in picker_kwargs.items():
+                    framework_args.setdefault(_k, _v)
+            except Exception:
+                # Picker is best-effort; never block a tool call on it.
+                pass
 
             try:
                 out = agent_base.call_tool(context, tool_name, framework_args)
