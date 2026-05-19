@@ -4,11 +4,9 @@
 # =============================================================================
 """flow.pyeval per-pipeline instance.
 
-Concrete subclass of `flow.base.FlowBaseIInstance` that overrides
-`checkCondition` with a sandboxed Python expression evaluator. The
-condition is parsed via ``ast.parse(mode='eval')`` and evaluated with a
-restricted set of builtins; user expressions can reference the active
-lane's payload by name (`text`, `image`, `obj`, etc.).
+`checkCondition` parses the condition with ``ast.parse(mode='eval')``
+and evaluates it under restricted builtins; user expressions reference
+the active lane's payload by name (`text`, `image`, `obj`, ...).
 """
 
 from __future__ import annotations
@@ -18,15 +16,13 @@ import logging
 from typing import Any
 
 from ..flow_base import FlowBaseIInstance
-from ..flow_base.IInstance import _flow_log, _flow_log_exc
 from .IGlobal import IGlobal
 
 _logger = logging.getLogger('rocketride.flow')
 
 
-# Audited safe builtins — small, audited surface that user expressions
-# can reach. Anything not in this dict (including __import__, eval, exec,
-# open) is unavailable inside the sandbox.
+# Audited builtins available inside the sandbox. Anything not listed
+# (including __import__, eval, exec, open) is unreachable.
 _SAFE_BUILTINS: dict = {
     'abs': abs,
     'all': all,
@@ -58,8 +54,7 @@ _SAFE_BUILTINS: dict = {
 }
 
 
-# AST nodes that mutate state, invoke imports, or escape the sandbox.
-# The walk before compile rejects expressions containing any of these.
+# AST nodes that mutate state, import, or escape the sandbox — rejected before compile.
 _FORBIDDEN_NODES: tuple = (
     ast.Import,
     ast.ImportFrom,
@@ -89,20 +84,11 @@ class IInstance(FlowBaseIInstance):
     IGlobal: IGlobal
 
     def checkCondition(self, condition: str, **kwargs: Any) -> bool:
-        """Parse and evaluate ``condition`` against the active payload.
-
-        ``kwargs`` carries the bound lane payload (e.g. ``text='...'``).
-        ``obj`` is added as an alias for the current entry's metadata so
-        expressions can reference attributes like ``obj.size``.
-
-        On any sandbox / evaluation error the method returns False
-        (fail-closed to ELSE) — never raises.
-        """
+        """Evaluate ``condition`` against the active payload; fail-closed to ELSE."""
         if not isinstance(condition, str) or not condition.strip():
             return False
 
-        # Strip leading/trailing whitespace — `ast.parse(mode='eval')` is
-        # strict about leading whitespace and treats it as indentation.
+        # ast.parse(mode='eval') treats leading whitespace as indentation.
         expression = condition.strip()
 
         try:
@@ -119,8 +105,7 @@ class IInstance(FlowBaseIInstance):
                     expression,
                 )
                 return False
-            # Block dunder attribute access (__class__, __globals__, etc.)
-            # to prevent escapes via bound objects.
+            # Block dunder attribute access (__class__, __globals__) to prevent escapes.
             if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
                 _logger.error(
                     'flow.pyeval rejected access to dunder %r in condition %r',
@@ -135,31 +120,13 @@ class IInstance(FlowBaseIInstance):
             _logger.error('flow.pyeval failed to compile condition %r: %s', expression, exc)
             return False
 
-        # Build evaluation namespace: safe builtins + the active lane
-        # bindings + `obj` referencing the current entry.
+        # Namespace: safe builtins + lane bindings + `obj` (current entry).
         namespace: dict = {'__builtins__': _SAFE_BUILTINS}
         namespace.update(kwargs)
         namespace['obj'] = getattr(self.instance, 'currentObject', None)
 
         try:
-            result = bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
-            _flow_log(
-                'warn',
-                'flow_pyeval evaluated condition=%r kwargs_keys=%r → %s',
-                expression,
-                list(kwargs.keys()),
-                result,
-            )
-            return result
-        except Exception as exc:
-            _flow_log_exc(
-                'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',
-                expression,
-                exc,
-            )
-            _logger.error(
-                'flow.pyeval evaluation failed for condition %r: %s — fail-closed to ELSE',
-                expression,
-                exc,
-            )
+            return bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
+        except Exception:
+            _logger.exception('flow.pyeval evaluation failed for condition %r — fail-closed to ELSE', expression)
             return False

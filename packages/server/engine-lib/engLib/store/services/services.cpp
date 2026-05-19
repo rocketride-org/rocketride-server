@@ -1850,7 +1850,7 @@ Error IServices::init() noexcept {
                 // Iterate through each lane
                 for (const auto &laneId : lanes.getMemberNames()) {
                     // Get the lane
-                    auto lane = lanes[laneId];
+                    const auto &lane = lanes[laneId];
 
                     // Get the lane's source
                     std::string fmt = "";

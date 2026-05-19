@@ -392,7 +392,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			lastSentVersion.current = nextVersion;
 			onContentChanged(project);
 		}, 50);
-	}, [onContentChanged, patchToolchainState]);
+	}, [onContentChanged, patchToolchainState, servicesJson]);
 
 	// =====================================================================
 	// ReactFlow event handlers (guarded by isLocked)
@@ -625,7 +625,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			onContentUpdated();
 		},
-		[isLocked, edges, setNodes, setEdges, onEdgesChangeInternal, onContentUpdated]
+		[isLocked, edges, setNodes, setEdges, onEdgesChangeInternal, onContentUpdated, servicesJson]
 	);
 
 	const onEdgeConnect = useCallback(
@@ -678,7 +678,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			onContentUpdated();
 		},
-		[isLocked, setNodes, setEdges, onContentUpdated]
+		[isLocked, setNodes, setEdges, onContentUpdated, servicesJson]
 	);
 
 	// =====================================================================
@@ -992,7 +992,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				pendingViewportRef.current = null;
 			}
 		},
-		[loadCanvas, updateProjectLayout]
+		[loadCanvas, updateProjectLayout, servicesJson]
 	);
 
 	// --- Detect when ReactFlow has measured all nodes -----------------------
