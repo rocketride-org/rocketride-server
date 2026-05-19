@@ -34,6 +34,23 @@ Usage from an LLM node's ``IInstance``::
     handler = StreamingHandler(self, config)
     answer = handler.stream_response(chat_fn, question)
 
+Activation contract (ADR 0003 — LLM Token Streaming)
+----------------------------------------------------
+``stream_response`` only enters the streaming path when **all** of the
+following are true:
+
+1. The node opts in — either ``config['streaming']`` / ``config['stream']``
+   is truthy, **or** the caller passes ``streaming_enabled=True`` to the
+   constructor.
+2. The provider adapter is listed as streaming-capable in
+   :mod:`streaming_config`.
+3. The wrapped engine instance exposes a callable ``sendSSE`` transport.
+
+When any gate fails the handler silently falls back to a normal
+non-streaming call and still returns a complete ``Answer``.  Missing SSE
+transports are not an error so pipelines remain runnable from CLI,
+tests, and other non-interactive clients.
+
 The handler is intentionally **not** wired into ``IInstanceGenericLLM``
 so that adoption is incremental and per-provider.
 """
@@ -43,7 +60,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, Optional, Protocol
 
-from .streaming_config import get_provider_name, is_provider_streaming_capable
+from .streaming_config import (
+    get_provider_name,
+    is_provider_streaming_capable,
+    is_streaming_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +124,25 @@ class StreamingHandler:
         *,
         provider: Optional[str] = None,
         logical_type: Optional[str] = None,
+        streaming_enabled: Optional[bool] = None,
     ) -> None:
-        """Initialise with an IInstance reference for SSE access."""
+        """Initialise with an IInstance reference for SSE access.
+
+        Parameters
+        ----------
+        streaming_enabled:
+            Optional explicit override for the activation gate.  When
+            ``True`` the handler treats streaming as opted-in even if the
+            node config does not carry a ``streaming``/``stream`` flag;
+            when ``False`` streaming is force-disabled regardless of
+            config.  When ``None`` (default) the gate is driven purely
+            by ``is_streaming_enabled(config)``.  This lets a provider
+            node attach a listener programmatically without round-
+            tripping through the YAML config.
+        """
         self._instance = instance
         self._config = config or {}
+        self._streaming_enabled_override = streaming_enabled
 
         # Resolve provider
         if provider:
@@ -159,8 +195,22 @@ class StreamingHandler:
         prompt = question.getPrompt() if hasattr(question, 'getPrompt') else str(question)
         expect_json = getattr(question, 'expectJson', False)
 
-        # Guard: fall back if provider is not streaming-capable
+        # Activation gate (ADR 0003). Streaming requires ALL of:
+        #   1. Node config opts in via ``streaming``/``stream`` flag, OR an
+        #      SSE listener is explicitly attached to the handler.
+        #   2. Provider is streaming-capable.
+        #   3. Engine instance exposes a callable ``sendSSE`` transport.
+        # When any condition fails we fall back to a normal non-streaming
+        # call.  This keeps existing nodes backward-compatible and lets
+        # pipelines run unchanged from CLI / tests / non-interactive
+        # clients that have no SSE consumer attached.
+        if not self._streaming_opted_in():
+            return self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
+
         if not is_provider_streaming_capable(self._provider):
+            return self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
+
+        if not self._has_sse_transport():
             return self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
 
         try:
@@ -207,6 +257,36 @@ class StreamingHandler:
                 raise fallback_exc from exc
             self._emit_stream_end({'input_tokens': 0, 'output_tokens': 0})
             return result
+
+    # ------------------------------------------------------------------
+    # Activation gate helpers
+    # ------------------------------------------------------------------
+
+    def _streaming_opted_in(self) -> bool:
+        """Return ``True`` if the caller has explicitly opted into streaming.
+
+        Per ADR 0003 (LLM Token Streaming Activation Contract), streaming
+        is opt-in.  The explicit ``streaming_enabled`` constructor flag
+        wins over the config dict so that provider nodes can attach a
+        listener programmatically.  When the override is ``None`` we
+        fall back to the config-driven check via
+        :func:`is_streaming_enabled`.
+        """
+        if self._streaming_enabled_override is not None:
+            return bool(self._streaming_enabled_override)
+        return is_streaming_enabled(self._config)
+
+    def _has_sse_transport(self) -> bool:
+        """Return ``True`` if the wrapped instance exposes a callable SSE sink.
+
+        The ADR requires a working SSE transport for streaming to start;
+        when the transport is missing the handler must fall back to a
+        non-streaming call so CLI / test / non-interactive runs continue
+        to work.
+        """
+        inner = getattr(self._instance, 'instance', None)
+        send = getattr(inner, 'sendSSE', None) if inner is not None else None
+        return callable(send)
 
     # ------------------------------------------------------------------
     # Chunk text extraction

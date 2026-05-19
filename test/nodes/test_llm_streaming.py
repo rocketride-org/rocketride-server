@@ -403,7 +403,7 @@ class TestStreamResponse:
     def test_full_streaming_flow(self):
         """Tokens are emitted via SSE and the full text is accumulated."""
         inst, mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         chunks = self._openai_chunks(['Hello', ' ', 'world'])
@@ -423,7 +423,7 @@ class TestStreamResponse:
 
     def test_empty_chunks_produce_empty_answer(self):
         inst, _mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         chat_fn = MagicMock(return_value=iter([]))
@@ -436,7 +436,7 @@ class TestStreamResponse:
     def test_none_content_chunks_skipped(self):
         """Chunks with None content should not emit tokens."""
         inst, mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         # Mix of real and None-content chunks
@@ -458,7 +458,8 @@ class TestStreamResponse:
     def test_fallback_on_non_capable_provider(self):
         """Non-streaming-capable provider triggers the fallback path."""
         inst, mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='unknown_provider')
+        # Opted in via flag, but provider is not capable -> fallback.
+        h = StreamingHandler(inst, provider='unknown_provider', streaming_enabled=True)
         question = _make_question('test')
 
         result_obj = SimpleNamespace(content='fallback_text')
@@ -476,7 +477,7 @@ class TestStreamResponse:
     def test_fallback_on_streaming_error(self):
         """If streaming raises, fall back to non-streaming."""
         inst, mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         # First call (streaming) raises; second call (fallback) succeeds
@@ -495,7 +496,7 @@ class TestStreamResponse:
     def test_stream_error_emitted_when_fallback_also_fails(self):
         """If both streaming and fallback fail, stream_error must be emitted."""
         inst, mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         chat_fn = MagicMock(side_effect=[RuntimeError('stream broke'), RuntimeError('fallback broke')])
@@ -510,7 +511,7 @@ class TestStreamResponse:
     def test_fallback_returns_existing_answer_unchanged(self):
         """When chat_fn already returns an Answer, don't re-wrap it."""
         inst, _ = _make_instance()
-        h = StreamingHandler(inst, provider='unknown_provider')
+        h = StreamingHandler(inst, provider='unknown_provider', streaming_enabled=True)
         question = _make_question('test')
 
         fake_mod = _fake_schema_module()
@@ -527,7 +528,7 @@ class TestStreamResponse:
     def test_expect_json_propagated(self):
         """The ``expectJson`` flag from the question is carried to the Answer."""
         inst, _ = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test', expect_json=True)
 
         chunks = self._openai_chunks(['{"key": "val"}'])
@@ -541,7 +542,7 @@ class TestStreamResponse:
     def test_kwargs_forwarded(self):
         """Extra kwargs are forwarded to chat_fn."""
         inst, _ = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         chat_fn = MagicMock(return_value=iter([]))
@@ -554,7 +555,7 @@ class TestStreamResponse:
     def test_question_without_getPrompt(self):
         """A plain string question should still work via str()."""
         inst, _ = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
 
         chat_fn = MagicMock(return_value=iter([]))
 
@@ -620,7 +621,7 @@ class TestStreamInterruption:
     def test_generator_raises_mid_stream(self):
         """If the generator raises mid-stream, fall back and recover."""
         inst, _mock_sse = _make_instance()
-        h = StreamingHandler(inst, provider='openai')
+        h = StreamingHandler(inst, provider='openai', streaming_enabled=True)
         question = _make_question('test')
 
         def _broken_gen(*a, **kw):
@@ -636,6 +637,144 @@ class TestStreamInterruption:
 
         # Should have fallen back
         assert answer.getText() == 'recovered after interrupt'
+
+
+# ===========================================================================
+# Activation gate (ADR 0003 opt-in contract)
+# ===========================================================================
+
+
+class TestActivationGate:
+    """Tests for the explicit opt-in gate enforced by ``stream_response``.
+
+    ADR 0003 requires that streaming only fires when (1) the node config
+    opts in OR an explicit listener flag is set, (2) the provider is
+    streaming-capable, AND (3) the engine instance exposes an SSE
+    transport.  These tests verify each gate independently.
+    """
+
+    def test_no_opt_in_falls_back(self):
+        """Default (no config flag, no override) -> fallback even for capable provider."""
+        inst, mock_sse = _make_instance()
+        # provider is capable, SSE transport is present, BUT no opt-in.
+        h = StreamingHandler(inst, provider='openai')
+        question = _make_question('hi')
+
+        result_obj = SimpleNamespace(content='plain')
+        chat_fn = MagicMock(return_value=result_obj)
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            answer = h.stream_response(chat_fn, question)
+
+        # No stream kwarg, no SSE events emitted.
+        chat_fn.assert_called_once_with('hi')
+        mock_sse.assert_not_called()
+        assert answer.getText() == 'plain'
+
+    def test_config_flag_streaming_opts_in(self):
+        """`config={'streaming': True}` enables the streaming path."""
+        inst, mock_sse = _make_instance()
+        h = StreamingHandler(inst, config={'streaming': True}, provider='openai')
+        question = _make_question('hi')
+
+        delta = SimpleNamespace(content='ok')
+        chunk = SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None, message=None)
+        chat_fn = MagicMock(return_value=iter([chunk]))
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            answer = h.stream_response(chat_fn, question)
+
+        chat_fn.assert_called_once_with('hi', stream=True)
+        assert answer.getText() == 'ok'
+        types = [c.args[0] for c in mock_sse.call_args_list]
+        assert 'stream_start' in types
+
+    def test_config_flag_stream_alias_opts_in(self):
+        """`config={'stream': True}` is the alias accepted by is_streaming_enabled."""
+        inst, _ = _make_instance()
+        h = StreamingHandler(inst, config={'stream': True}, provider='openai')
+        question = _make_question('hi')
+
+        chat_fn = MagicMock(return_value=iter([]))
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            h.stream_response(chat_fn, question)
+
+        chat_fn.assert_called_once_with('hi', stream=True)
+
+    def test_listener_override_true_opts_in_without_config(self):
+        """`streaming_enabled=True` overrides a config that does not opt in."""
+        inst, _ = _make_instance()
+        h = StreamingHandler(inst, config={}, provider='openai', streaming_enabled=True)
+        question = _make_question('hi')
+
+        chat_fn = MagicMock(return_value=iter([]))
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            h.stream_response(chat_fn, question)
+
+        chat_fn.assert_called_once_with('hi', stream=True)
+
+    def test_listener_override_false_forces_opt_out(self):
+        """`streaming_enabled=False` disables streaming even if config opts in."""
+        inst, mock_sse = _make_instance()
+        h = StreamingHandler(
+            inst,
+            config={'streaming': True},
+            provider='openai',
+            streaming_enabled=False,
+        )
+        question = _make_question('hi')
+
+        result_obj = SimpleNamespace(content='plain')
+        chat_fn = MagicMock(return_value=result_obj)
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            answer = h.stream_response(chat_fn, question)
+
+        chat_fn.assert_called_once_with('hi')
+        mock_sse.assert_not_called()
+        assert answer.getText() == 'plain'
+
+    def test_missing_sse_transport_falls_back(self):
+        """When instance has no `sendSSE` we must fall back, not error."""
+        # Build an instance that lacks a callable sendSSE.
+        inst = SimpleNamespace(instance=SimpleNamespace())
+        h = StreamingHandler(
+            inst,
+            config={'streaming': True},
+            provider='openai',
+        )
+        question = _make_question('hi')
+
+        result_obj = SimpleNamespace(content='cli-mode')
+        chat_fn = MagicMock(return_value=result_obj)
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            answer = h.stream_response(chat_fn, question)
+
+        # Falls back to non-streaming when no transport is available.
+        chat_fn.assert_called_once_with('hi')
+        assert answer.getText() == 'cli-mode'
+
+    def test_non_callable_send_sse_falls_back(self):
+        """A `sendSSE` attribute that is not callable must not be invoked."""
+        inst = SimpleNamespace(instance=SimpleNamespace(sendSSE='not-a-callable'))
+        h = StreamingHandler(
+            inst,
+            config={'streaming': True},
+            provider='openai',
+        )
+        question = _make_question('hi')
+
+        result_obj = SimpleNamespace(content='cli-mode')
+        chat_fn = MagicMock(return_value=result_obj)
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            answer = h.stream_response(chat_fn, question)
+
+        chat_fn.assert_called_once_with('hi')
+        assert answer.getText() == 'cli-mode'
 
 
 # ===========================================================================
