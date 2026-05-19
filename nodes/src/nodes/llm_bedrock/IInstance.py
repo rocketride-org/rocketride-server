@@ -25,4 +25,7 @@ from ai.common.llm_base import LLMBase
 
 
 class IInstance(LLMBase):
-    pass
+    # TODO Bedrock-on-Claude path: if model_id starts with 'anthropic.',
+    # use anthropic shape — defer to follow-up.
+    provider_shape = 'bedrock'
+    provider_name = 'bedrock-nova'
