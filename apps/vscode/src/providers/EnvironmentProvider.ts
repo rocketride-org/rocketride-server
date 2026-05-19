@@ -46,7 +46,7 @@ import { DeployManager } from '../connection/deploy-manager';
 import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
-import type { EnvironmentSlotState, EnvironmentWebviewToHost } from './views/types';
+import type { EnvironmentSlotState, EnvironmentWebviewToHost } from './views/environmentTypes';
 
 // =============================================================================
 // PROVIDER
@@ -358,10 +358,12 @@ export class EnvironmentProvider {
 		if (!EnvironmentProvider.panel) return;
 
 		const slotState = this.buildSlotState(slot);
-		EnvironmentProvider.panel.webview.postMessage({
-			type: 'env:slotUpdate',
-			slot: slotState,
-		}).catch((err) => {
+		Promise.resolve(
+			EnvironmentProvider.panel.webview.postMessage({
+				type: 'env:slotUpdate',
+				slot: slotState,
+			})
+		).catch((err: unknown) => {
 			console.error(`[EnvironmentProvider] Failed to push slot update for ${slot}: ${err}`);
 		});
 	}
