@@ -160,6 +160,9 @@
 	/** Border on hover state. */
 	--rr-border-hover: #aaaaaa;
 
+	/** Sash (resize handle) highlight on hover — matches VS Code splitter bars. */
+	--rr-sash-hover: #007fd4;
+
 	/** Border on focus / selection state. */
 	--rr-border-focus: #0078d4;
 

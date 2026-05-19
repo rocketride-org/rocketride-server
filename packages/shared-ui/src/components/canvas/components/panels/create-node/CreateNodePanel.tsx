@@ -80,9 +80,9 @@ const styles = {
 		position: 'absolute' as const,
 		left: 0,
 		top: 0,
-		width: 2,
+		width: 4,
 		height: '100%',
-		background: 'var(--rr-brand)',
+		background: 'var(--rr-sash-hover)',
 	},
 	panel: {
 		position: 'relative' as const,
