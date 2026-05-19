@@ -60,10 +60,8 @@ _HYBRID_PATH = _SEARCH_HYBRID_DIR / 'hybrid_search.py'
 # ---------------------------------------------------------------------------
 
 
-def _install_bm25_stub():
-    if 'rank_bm25' in sys.modules:
-        return
-
+def _build_bm25_stub():
+    """Return a ``rank_bm25`` stand-in module with a TF-IDF-ish BM25Okapi."""
     rank_bm25 = types.ModuleType('rank_bm25')
 
     class BM25Okapi:
@@ -94,10 +92,53 @@ def _install_bm25_stub():
             return scores
 
     rank_bm25.BM25Okapi = BM25Okapi
-    sys.modules['rank_bm25'] = rank_bm25
+    return rank_bm25
 
 
-_install_bm25_stub()
+# Track our stub so the session-scoped teardown below can distinguish a
+# stub we installed from a real ``rank_bm25`` that was already present.
+_RANK_BM25_STUB_TOKEN = object()
+
+
+def _install_bm25_stub_for_session():
+    """Install a fake ``rank_bm25`` only when the real package is missing.
+
+    Returns ``True`` if this call installed the stub (and therefore owns
+    its removal), ``False`` if the real package was already importable.
+    """
+    if 'rank_bm25' in sys.modules:
+        return False
+    stub = _build_bm25_stub()
+    stub.__rank_bm25_test_stub__ = _RANK_BM25_STUB_TOKEN
+    sys.modules['rank_bm25'] = stub
+    return True
+
+
+@pytest.fixture(scope='module', autouse=True)
+def _rank_bm25_stub_module():
+    """Ensure the stub we install gets removed when this module finishes.
+
+    ``hybrid_search.py`` does ``from rank_bm25 import BM25Okapi`` lazily
+    inside ``bm25_search``, so the stub must remain installed for the
+    duration of the engine tests in this file. Using module scope (rather
+    than session scope) means the stub is removed as soon as this test
+    file is done, so unrelated test modules later in the same pytest run
+    do not see our stand-in.
+    """
+    owns_stub = _install_bm25_stub_for_session()
+    try:
+        yield
+    finally:
+        if owns_stub:
+            mod = sys.modules.get('rank_bm25')
+            if getattr(mod, '__rank_bm25_test_stub__', None) is _RANK_BM25_STUB_TOKEN:
+                sys.modules.pop('rank_bm25', None)
+
+
+# The engine module needs to be importable at module-load time so individual
+# test classes can reference ``HybridSearchEngine`` directly. Install the
+# stub eagerly (the session-scoped fixture above guarantees teardown).
+_install_bm25_stub_for_session()
 
 
 def _load_hybrid_search():
@@ -467,6 +508,39 @@ class TestIGlobalAlphaClamp:
         finally:
             iglobal_mod.warning = original
 
+    @pytest.mark.parametrize(
+        'bad_cfg, fragment',
+        [
+            ({'top_k': 0}, 'top_k'),
+            ({'top_k': -1}, 'top_k'),
+            ({'rrf_k': -1}, 'rrf_k'),
+        ],
+    )
+    def test_invalid_bounds_raise_value_error(self, bad_cfg, fragment):
+        """Out-of-range top_k / rrf_k should fail fast in beginGlobal."""
+        import importlib
+
+        try:
+            iglobal_mod = importlib.import_module('nodes.search_hybrid.IGlobal')
+        except Exception as e:  # pragma: no cover - env-dependent
+            pytest.skip(f'IGlobal not importable under this interpreter: {e}')
+
+        from rocketlib import OPEN_MODE  # type: ignore
+
+        IGlobal = iglobal_mod.IGlobal
+        ig = IGlobal.__new__(IGlobal)
+
+        class _Endpoint:
+            class endpoint:
+                openMode = OPEN_MODE.RUN if hasattr(OPEN_MODE, 'RUN') else 'run'
+
+        ig.IEndpoint = _Endpoint
+        ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig=bad_cfg)
+
+        with pytest.raises(ValueError) as exc:
+            ig.beginGlobal()
+        assert fragment in str(exc.value)
+
 
 # ===========================================================================
 # IInstance integration (writeQuestions contract)
@@ -511,157 +585,7 @@ def search_hybrid_pkg():
     ]
     saved = {name: sys.modules.get(name) for name in stub_names}
 
-    # --- rocketlib -------------------------------------------------------
-    rocketlib_stub = types.ModuleType('rocketlib')
-
-    class IGlobalBase:
-        pass
-
-    class IInstanceBase:
-        pass
-
-    class OPEN_MODE:
-        CONFIG = 'config'
-        RUN = 'run'
-
-    rocketlib_stub.IGlobalBase = IGlobalBase
-    rocketlib_stub.IInstanceBase = IInstanceBase
-    rocketlib_stub.OPEN_MODE = OPEN_MODE
-    rocketlib_stub.warning = lambda *a, **kw: None
-    rocketlib_stub.debug = lambda *a, **kw: None
-    sys.modules['rocketlib'] = rocketlib_stub
-
-    # --- ai.common.{config,schema} ---------------------------------------
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    ai_common = types.ModuleType('ai.common')
-    ai_common.__path__ = []
-
-    config_mod = types.ModuleType('ai.common.config')
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(logicalType, connConfig):
-            return connConfig or {}
-
-    config_mod.Config = Config
-
-    schema_mod = types.ModuleType('ai.common.schema')
-
-    class Doc:
-        def __init__(self, **kwargs):
-            self.page_content = kwargs.get('page_content')
-            self.metadata = kwargs.get('metadata')
-            self.score = kwargs.get('score')
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-    class Question:
-        def __init__(self, **kwargs):
-            self.questions = kwargs.get('questions', [])
-            self.documents = kwargs.get('documents', [])
-
-    class SubQuestion:
-        def __init__(self, text=''):
-            self.text = text
-
-    class Answer:
-        def __init__(self):
-            self._answer = None
-
-        def setAnswer(self, text):
-            self._answer = text
-
-        def getAnswer(self):
-            return self._answer
-
-    schema_mod.Doc = Doc
-    schema_mod.Question = Question
-    schema_mod.Answer = Answer
-
-    depends_mod = types.ModuleType('depends')
-    depends_mod.depends = lambda *a, **kw: None
-
-    sys.modules['ai'] = ai_pkg
-    sys.modules['ai.common'] = ai_common
-    sys.modules['ai.common.config'] = config_mod
-    sys.modules['ai.common.schema'] = schema_mod
-    sys.modules['depends'] = depends_mod
-
-    # Drop any cached search_hybrid module loaded under a non-stubbed
-    # environment so the fresh import below resolves the stubbed types.
-    for mod_name in list(sys.modules.keys()):
-        if 'search_hybrid' in mod_name and 'test' not in mod_name:
-            del sys.modules[mod_name]
-
-    # Load the search_hybrid package + IInstance directly by file path so the
-    # tests do not depend on `nodes` being importable as a top-level package
-    # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
-    # build interpreter (`builder nodes:test`) makes the same import work via
-    # PYTHONPATH wiring; here we explicitly anchor on the source tree.
-    try:
-        pkg_init = _SEARCH_HYBRID_DIR / '__init__.py'
-        pkg_spec = importlib.util.spec_from_file_location(
-            'search_hybrid_test_pkg',
-            str(pkg_init),
-            submodule_search_locations=[str(_SEARCH_HYBRID_DIR)],
-        )
-        assert pkg_spec is not None and pkg_spec.loader is not None
-        pkg_mod = importlib.util.module_from_spec(pkg_spec)
-        sys.modules['search_hybrid_test_pkg'] = pkg_mod
-        pkg_spec.loader.exec_module(pkg_mod)
-
-        # IGlobal is referenced via `from .IGlobal import IGlobal` in IInstance
-        iglobal_spec = importlib.util.spec_from_file_location(
-            'search_hybrid_test_pkg.IGlobal',
-            str(_SEARCH_HYBRID_DIR / 'IGlobal.py'),
-        )
-        assert iglobal_spec is not None and iglobal_spec.loader is not None
-        iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
-        sys.modules['search_hybrid_test_pkg.IGlobal'] = iglobal_mod
-        iglobal_spec.loader.exec_module(iglobal_mod)
-
-        iinst_spec = importlib.util.spec_from_file_location(
-            'search_hybrid_test_pkg.IInstance',
-            str(_SEARCH_HYBRID_DIR / 'IInstance.py'),
-        )
-        assert iinst_spec is not None and iinst_spec.loader is not None
-        iinst_mod = importlib.util.module_from_spec(iinst_spec)
-        sys.modules['search_hybrid_test_pkg.IInstance'] = iinst_mod
-        iinst_spec.loader.exec_module(iinst_mod)
-        IInstance = iinst_mod.IInstance
-    except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
-        pytest.skip(f'search_hybrid.IInstance not importable: {exc}')
-    except TypeError as exc:  # pragma: no cover - py<3.10 hits PEP 604 syntax
-        # IGlobal uses `X | None` annotations evaluated at class-body time,
-        # which requires Python 3.10+. The build interpreter satisfies this;
-        # under older local pythons we skip rather than fail.
-        pytest.skip(f'search_hybrid.IInstance not importable (py<3.10?): {exc}')
-
-    def make_instance(engine, top_k=10, rrf_k=60):
-        """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
-        inst = IInstance.__new__(IInstance)
-        iglobal = MagicMock()
-        iglobal.engine = engine
-        iglobal.top_k = top_k
-        iglobal.rrf_k = rrf_k
-        inst.IGlobal = iglobal
-        mock_instance = MagicMock()
-        inst.instance = mock_instance
-        return inst, mock_instance
-
-    pkg = types.SimpleNamespace(
-        IInstance=IInstance,
-        Doc=Doc,
-        Question=Question,
-        Answer=Answer,
-        SubQuestion=SubQuestion,
-        make_instance=make_instance,
-    )
-
-    try:
-        yield pkg
-    finally:
+    def _restore_sys_modules():
         for name in stub_names:
             if saved[name] is None:
                 sys.modules.pop(name, None)
@@ -675,6 +599,163 @@ def search_hybrid_pkg():
                 sys.modules.pop(mod_name, None)
             elif 'search_hybrid' in mod_name and 'test' not in mod_name:
                 sys.modules.pop(mod_name, None)
+
+    # Outer try/finally guarantees sys.modules restoration even if pytest.skip()
+    # is raised below before we reach the inner ``yield`` (e.g. on Python < 3.10
+    # the IGlobal PEP-604 annotations raise TypeError and we skip without
+    # reaching teardown otherwise).
+    try:
+        # --- rocketlib -------------------------------------------------------
+        rocketlib_stub = types.ModuleType('rocketlib')
+
+        class IGlobalBase:
+            pass
+
+        class IInstanceBase:
+            pass
+
+        class OPEN_MODE:
+            CONFIG = 'config'
+            RUN = 'run'
+
+        rocketlib_stub.IGlobalBase = IGlobalBase
+        rocketlib_stub.IInstanceBase = IInstanceBase
+        rocketlib_stub.OPEN_MODE = OPEN_MODE
+        rocketlib_stub.warning = lambda *a, **kw: None
+        rocketlib_stub.debug = lambda *a, **kw: None
+        sys.modules['rocketlib'] = rocketlib_stub
+
+        # --- ai.common.{config,schema} ---------------------------------------
+        ai_pkg = types.ModuleType('ai')
+        ai_pkg.__path__ = []
+        ai_common = types.ModuleType('ai.common')
+        ai_common.__path__ = []
+
+        config_mod = types.ModuleType('ai.common.config')
+
+        class Config:
+            @staticmethod
+            def getNodeConfig(logicalType, connConfig):
+                return connConfig or {}
+
+        config_mod.Config = Config
+
+        schema_mod = types.ModuleType('ai.common.schema')
+
+        class Doc:
+            def __init__(self, **kwargs):
+                self.page_content = kwargs.get('page_content')
+                self.metadata = kwargs.get('metadata')
+                self.score = kwargs.get('score')
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+
+        class Question:
+            def __init__(self, **kwargs):
+                self.questions = kwargs.get('questions', [])
+                self.documents = kwargs.get('documents', [])
+
+        class SubQuestion:
+            def __init__(self, text=''):
+                self.text = text
+
+        class Answer:
+            def __init__(self):
+                self._answer = None
+
+            def setAnswer(self, text):
+                self._answer = text
+
+            def getAnswer(self):
+                return self._answer
+
+        schema_mod.Doc = Doc
+        schema_mod.Question = Question
+        schema_mod.Answer = Answer
+
+        depends_mod = types.ModuleType('depends')
+        depends_mod.depends = lambda *a, **kw: None
+
+        sys.modules['ai'] = ai_pkg
+        sys.modules['ai.common'] = ai_common
+        sys.modules['ai.common.config'] = config_mod
+        sys.modules['ai.common.schema'] = schema_mod
+        sys.modules['depends'] = depends_mod
+
+        # Drop any cached search_hybrid module loaded under a non-stubbed
+        # environment so the fresh import below resolves the stubbed types.
+        for mod_name in list(sys.modules.keys()):
+            if 'search_hybrid' in mod_name and 'test' not in mod_name:
+                del sys.modules[mod_name]
+
+        # Load the search_hybrid package + IInstance directly by file path so the
+        # tests do not depend on `nodes` being importable as a top-level package
+        # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
+        # build interpreter (`builder nodes:test`) makes the same import work via
+        # PYTHONPATH wiring; here we explicitly anchor on the source tree.
+        try:
+            pkg_init = _SEARCH_HYBRID_DIR / '__init__.py'
+            pkg_spec = importlib.util.spec_from_file_location(
+                'search_hybrid_test_pkg',
+                str(pkg_init),
+                submodule_search_locations=[str(_SEARCH_HYBRID_DIR)],
+            )
+            assert pkg_spec is not None and pkg_spec.loader is not None
+            pkg_mod = importlib.util.module_from_spec(pkg_spec)
+            sys.modules['search_hybrid_test_pkg'] = pkg_mod
+            pkg_spec.loader.exec_module(pkg_mod)
+
+            # IGlobal is referenced via `from .IGlobal import IGlobal` in IInstance
+            iglobal_spec = importlib.util.spec_from_file_location(
+                'search_hybrid_test_pkg.IGlobal',
+                str(_SEARCH_HYBRID_DIR / 'IGlobal.py'),
+            )
+            assert iglobal_spec is not None and iglobal_spec.loader is not None
+            iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
+            sys.modules['search_hybrid_test_pkg.IGlobal'] = iglobal_mod
+            iglobal_spec.loader.exec_module(iglobal_mod)
+
+            iinst_spec = importlib.util.spec_from_file_location(
+                'search_hybrid_test_pkg.IInstance',
+                str(_SEARCH_HYBRID_DIR / 'IInstance.py'),
+            )
+            assert iinst_spec is not None and iinst_spec.loader is not None
+            iinst_mod = importlib.util.module_from_spec(iinst_spec)
+            sys.modules['search_hybrid_test_pkg.IInstance'] = iinst_mod
+            iinst_spec.loader.exec_module(iinst_mod)
+            IInstance = iinst_mod.IInstance
+        except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
+            pytest.skip(f'search_hybrid.IInstance not importable: {exc}')
+        except TypeError as exc:  # pragma: no cover - py<3.10 hits PEP 604 syntax
+            # IGlobal uses `X | None` annotations evaluated at class-body time,
+            # which requires Python 3.10+. The build interpreter satisfies this;
+            # under older local pythons we skip rather than fail.
+            pytest.skip(f'search_hybrid.IInstance not importable (py<3.10?): {exc}')
+
+        def make_instance(engine, top_k=10, rrf_k=60):
+            """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
+            inst = IInstance.__new__(IInstance)
+            iglobal = MagicMock()
+            iglobal.engine = engine
+            iglobal.top_k = top_k
+            iglobal.rrf_k = rrf_k
+            inst.IGlobal = iglobal
+            mock_instance = MagicMock()
+            inst.instance = mock_instance
+            return inst, mock_instance
+
+        pkg = types.SimpleNamespace(
+            IInstance=IInstance,
+            Doc=Doc,
+            Question=Question,
+            Answer=Answer,
+            SubQuestion=SubQuestion,
+            make_instance=make_instance,
+        )
+
+        yield pkg
+    finally:
+        _restore_sys_modules()
 
 
 class TestIInstanceIntegration:
