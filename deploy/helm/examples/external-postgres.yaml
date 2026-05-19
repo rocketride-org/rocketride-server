@@ -1,0 +1,27 @@
+# Example: Connecting RocketRide to an external PostgreSQL (pgvector) instance
+#
+# Use this with: helm install rocketride deploy/helm/rocketride -f deploy/helm/examples/external-postgres.yaml
+#
+# Recommended managed services:
+#   - AWS RDS for PostgreSQL (with pgvector extension)
+#   - Google Cloud SQL for PostgreSQL
+#   - Azure Database for PostgreSQL Flexible Server
+#   - Aiven for PostgreSQL
+#
+# Prerequisites:
+#   1. Create a PostgreSQL instance with the pgvector extension enabled
+#   2. Create a database and user for RocketRide
+#   3. Store credentials in a Kubernetes Secret:
+#
+#      kubectl create secret generic rocketride-postgres \
+#        --from-literal=POSTGRES_PASSWORD='your-password-here'
+#
+engine:
+  env:
+    POSTGRES_HOST: 'your-postgres-host.example.com'
+    POSTGRES_PORT: '5432'
+    POSTGRES_USER: 'rocketride'
+    POSTGRES_DB: 'rocketride'
+
+  # Reference the secret containing POSTGRES_PASSWORD
+  existingSecret: 'rocketride-postgres'
