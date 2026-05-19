@@ -81,11 +81,17 @@ export type IconProps = React.SVGProps<SVGSVGElement> & {
  * so they re-tint automatically with the theme. Multicolor brand icons
  * render in their authored colors.
  */
-// Default `color` resolves to the theme-controlled `--icon-color` variable.
-// Monochrome SVGs (auto-rewritten to `currentColor` at build time) pick it
-// up. Multicolor brand SVGs ignore it because their fills are hardcoded.
-// Callers can override by passing `style={{ color: ... }}`.
-const DEFAULT_STYLE: React.CSSProperties = { color: 'var(--icon-color)' };
+// Default `color` resolves to the theme contract token `--rr-icon-color`,
+// falling back to the legacy view variable `--icon-color` if the token is
+// not defined in the current document (e.g. the VS Code webview, which
+// sets `--icon-color` directly via `body[data-vscode-theme-kind=...]`).
+// Monochrome SVGs (auto-rewritten to `currentColor` at build time) pick
+// up whichever value resolves first. Multicolor brand SVGs ignore it
+// because their fills are hardcoded. Callers can override by passing
+// `style={{ color: ... }}`.
+const DEFAULT_STYLE: React.CSSProperties = {
+	color: 'var(--rr-icon-color, var(--icon-color))',
+};
 
 export const Icon: React.FC<IconProps> = ({ name, alt = '', style, ...svgProps }) => {
 	const mergedStyle: React.CSSProperties = { ...DEFAULT_STYLE, ...style };

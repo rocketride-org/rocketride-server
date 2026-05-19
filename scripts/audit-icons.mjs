@@ -149,6 +149,16 @@ for (const jsonFile of serviceJsonFiles) {
 		// Skip remote URLs — those are resolved at runtime, not by the build.
 		if (/^(https?|ftp):\/\//i.test(iconValue)) continue;
 
+		// Reject non-basename icon values. Without this, a malformed service
+		// JSON (e.g. `"icon": "../../foo.svg"`) could resolve to a file
+		// outside the owning node directory and falsely pass the audit.
+		if (iconValue !== path.basename(iconValue)) {
+			warnings.push(
+				`invalid icon path: ${rel(jsonFile)} uses non-local icon "${iconValue}" (must be a basename, no separators or "..")`,
+			);
+			continue;
+		}
+
 		const iconPath = path.join(dir, iconValue);
 		if (!existsSync(iconPath)) {
 			// Warning, not an error: the <Icon> component falls back to
