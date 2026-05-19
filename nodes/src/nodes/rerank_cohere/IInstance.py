@@ -59,7 +59,8 @@ class IInstance(IInstanceBase):
             elif isinstance(first_question, dict):
                 query_text = first_question.get('text', '')
 
-        if not query_text:
+        # Reject whitespace-only payloads, not just empty strings
+        if not isinstance(query_text, str) or not query_text.strip():
             raise ValueError('No query text found in question')
 
         # Extract document texts from the question's documents
@@ -69,11 +70,17 @@ class IInstance(IInstanceBase):
         doc_texts = []
         original_indices = []
         for idx, doc in enumerate(question.documents):
-            if hasattr(doc, 'page_content') and doc.page_content:
-                doc_texts.append(doc.page_content)
-                original_indices.append(idx)
-            elif isinstance(doc, dict) and doc.get('page_content'):
-                doc_texts.append(doc['page_content'])
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+            elif isinstance(doc, dict):
+                content = doc.get('page_content')
+            else:
+                content = None
+
+            # Skip documents whose content is missing, non-string, or
+            # whitespace-only. Cohere rejects whitespace-only documents.
+            if isinstance(content, str) and content.strip():
+                doc_texts.append(content)
                 original_indices.append(idx)
 
         if not doc_texts:

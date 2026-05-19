@@ -68,6 +68,35 @@ class RerankServerError(RerankError):
     pass
 
 
+def _coerce_top_n(value: Any) -> int:
+    """Validate top_n and coerce numeric values to int.
+
+    Accepts int or float (excluding bool, which is an int subclass) and
+    rejects floats that are not whole numbers (e.g. 2.5). This lets JSON
+    callers pass ``5.0`` while still rejecting fractional values.
+    """
+    # bool is a subclass of int; reject it explicitly so True/False don't
+    # silently coerce to 1/0.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'top_n must be an integer >= 1, got {value!r}')
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f'top_n must be an integer >= 1, got {value!r}')
+        value = int(value)
+    if value < 1:
+        raise ValueError(f'top_n must be an integer >= 1, got {value!r}')
+    return value
+
+
+def _validate_min_score(value: Any) -> float:
+    """Validate min_score is a number in [0.0, 1.0], excluding bool."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {value!r}')
+    if not (0.0 <= value <= 1.0):
+        raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {value!r}')
+    return float(value)
+
+
 class RerankClient:
     """
     Wraps the Cohere Rerank API for use in RocketRide pipelines.
@@ -86,17 +115,16 @@ class RerankClient:
             bag: Shared bag for cross-node communication.
         """
         self._logicalType = logicalType
-        self._model = config.get('model', 'rerank-v3.5')
+        self._model = config.get('model', 'rerank-english-v3.0')
         if not isinstance(self._model, str) or not self._model.strip():
             raise ValueError('Cohere model name is required')
         self._model = self._model.strip()
-        self._top_n = config.get('top_n', 5)
-        self._min_score = config.get('min_score', 0.0)
 
-        if not isinstance(self._top_n, int) or self._top_n < 1:
-            raise ValueError(f'top_n must be an integer >= 1, got {self._top_n}')
-        if not isinstance(self._min_score, (int, float)) or not (0.0 <= self._min_score <= 1.0):
-            raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {self._min_score}')
+        raw_top_n = config.get('top_n', 5)
+        self._top_n = _coerce_top_n(raw_top_n)
+
+        raw_min_score = config.get('min_score', 0.0)
+        self._min_score = _validate_min_score(raw_min_score)
 
         apikey = config.get('apikey', '')
         if not isinstance(apikey, str) or not apikey.strip():
@@ -129,11 +157,8 @@ class RerankClient:
         if not documents:
             raise ValueError('Documents list must not be empty')
 
-        effective_top_n = top_n if top_n is not None else self._top_n
+        effective_top_n = _coerce_top_n(top_n) if top_n is not None else self._top_n
         effective_model = model or self._model
-
-        if not isinstance(effective_top_n, int) or effective_top_n < 1:
-            raise ValueError(f'top_n must be an integer >= 1, got {effective_top_n}')
 
         try:
             response = self._client.rerank(
@@ -183,10 +208,7 @@ class RerankClient:
         Returns:
             List of dicts above the min_score threshold, sorted by relevance.
         """
-        effective_min_score = min_score if min_score is not None else self._min_score
-
-        if not isinstance(effective_min_score, (int, float)) or not (0.0 <= effective_min_score <= 1.0):
-            raise ValueError(f'min_score must be a number between 0.0 and 1.0, got {effective_min_score}')
+        effective_min_score = _validate_min_score(min_score) if min_score is not None else self._min_score
 
         results = self.rerank(query=query, documents=documents, top_n=top_n, model=model)
 

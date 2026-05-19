@@ -19,7 +19,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [],
+	"capabilities": ["experimental"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["A reranking component powered by Cohere's Rerank API that improves ", "search quality by reordering retrieved documents based on their ", "relevance to a given query. Supports the latest rerank-v3.5 model ", "with configurable top-K selection and minimum score thresholds."],
+	"description": ["A reranking component powered by Cohere's Rerank API that improves ", "search quality by reordering retrieved documents based on their ", "relevance to a given query. Supports the rerank-english-v3.0 and rerank-v3.5 models ", "with configurable top-K selection and minimum score thresholds."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -94,7 +94,7 @@
 	//		itself
 	//
 	"preconfig": {
-		"default": "rerank-v3.5",
+		"default": "rerank-english-v3.0",
 		"profiles": {
 			"rerank-v3.5": {
 				"title": "Rerank v3.5",
@@ -130,7 +130,7 @@
 			"type": "string",
 			"title": "Model",
 			"description": "Cohere rerank model name",
-			"default": "rerank-v3.5"
+			"default": "rerank-english-v3.0"
 		},
 		"top_n": {
 			"type": "number",
@@ -161,7 +161,7 @@
 			"title": "Model",
 			"description": "Rerank model",
 			"type": "string",
-			"default": "rerank-v3.5",
+			"default": "rerank-english-v3.0",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
@@ -192,8 +192,9 @@
 		}
 	],
 	"test": {
-		"profiles": ["rerank-v3.5"],
+		"profiles": ["rerank-english-v3.0"],
 		"outputs": ["documents"],
+		"requires": ["ROCKETRIDE_RERANK_COHERE_KEY"],
 		"cases": [
 			{
 				"name": "Rerank returns scored documents",

@@ -56,13 +56,13 @@ class IGlobal(IGlobalBase):
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             apikey = config.get('apikey')
-            model = config.get('model', 'rerank-v3.5')
+            model = config.get('model', 'rerank-english-v3.0')
 
-            if not apikey:
+            if not isinstance(apikey, str) or not apikey.strip():
                 warning('Cohere API key is required')
                 return
 
-            if not model or not model.strip():
+            if not isinstance(model, str) or not model.strip():
                 warning('Cohere model name must not be empty')
                 return
 
