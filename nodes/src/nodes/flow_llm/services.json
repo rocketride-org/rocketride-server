@@ -11,10 +11,13 @@
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org",
 	"tile": ["Question: flow_llm.condition"],
+	// Wildcard lane: accepts and emits any content type; renders as a single `any` handle on the canvas.
 	"lanes": {
 		"*": ["*"]
 	},
+	// Named output branches for two-branch routing. The engine gives this node one output port per branch and dispatches each chunk only to the branch the condition picked. Order is canvas port order: THEN first, ELSE second.
 	"branches": ["then", "else"],
+	// Control-plane invoke channels this node consults to decide. Each channel resolves to its wired target node(s) by classType; min: 0 means wiring is optional (a missing channel fails closed to ELSE).
 	"invoke": {
 		"llm": {
 			"description": "Text LLM that evaluates the natural-language condition for text-family lanes (text, documents, questions, answers, ...). Connect any llm_* node. Required when routing text lanes; ignored for image lanes.",

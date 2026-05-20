@@ -11,9 +11,11 @@
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org",
 	"tile": ["Condition: flow_pyeval.condition"],
+	// Wildcard lane: accepts and emits any content type; renders as a single `any` handle on the canvas.
 	"lanes": {
 		"*": ["*"]
 	},
+	// Named output branches for two-branch routing. The engine gives this node one output port per branch and dispatches each chunk only to the branch the condition picked. Order is canvas port order: THEN first, ELSE second.
 	"branches": ["then", "else"],
 	"preconfig": {
 		"default": "passthrough",
