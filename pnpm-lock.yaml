@@ -35,6 +35,7 @@ overrides:
   svgo@4: '>=4.0.1 <5'
   underscore: '>=1.13.8 <2'
   undici: '>=7.24.0 <8'
+  ws: '>=8.20.1 <9'
   yaml@1: '>=1.10.3 <2'
 
 importers:
@@ -153,7 +154,7 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0
       ws:
-        specifier: ^8.20.1
+        specifier: '>=8.20.1 <9'
         version: 8.20.1
     devDependencies:
       '@rsbuild/core':
@@ -241,7 +242,7 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0
       ws:
-        specifier: ^8.20.1
+        specifier: '>=8.20.1 <9'
         version: 8.20.1
     devDependencies:
       '@rsbuild/core':
@@ -586,7 +587,7 @@ importers:
         version: 5.9.3
     optionalDependencies:
       ws:
-        specifier: ^8.20.1
+        specifier: '>=8.20.1 <9'
         version: 8.20.1
 
   packages/shared-ui:
@@ -5400,7 +5401,7 @@ packages:
   isomorphic-ws@5.0.0:
     resolution: {integrity: sha512-muId7Zzn9ywDsyXgTIafTry2sV3nySZeUDe6YedVd1Hvuuep5AsIlqK+XefWpYTyJG5e503F2xIuT2lcU6rCSw==}
     peerDependencies:
-      ws: '*'
+      ws: '>=8.20.1 <9'
 
   istanbul-lib-coverage@3.2.2:
     resolution: {integrity: sha512-O8dpsF+r0WV/8MNRKfnmrtCWhuKjxrq2w+jpzBL5UZKTi2LeVWnWOmWRxFlesJONmc+wLAGvKQZEOanko0LFTg==}
@@ -8473,18 +8474,6 @@ packages:
     resolution: {integrity: sha512-+QU2zd6OTD8XWIJCbffaiQeH9U73qIqafo1x6V1snCWYGJf6cVE0cDR4D8xRzcEnfI21IFrUPzPGtcPf8AC+Rw==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
 
-  ws@8.18.0:
-    resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.20.1:
     resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
     engines: {node: '>=10.0.0'}
@@ -9780,14 +9769,14 @@ snapshots:
       axios: 1.16.0
       chalk: 3.0.0
       fs-extra: 9.1.0
-      isomorphic-ws: 5.0.0(ws@8.18.0)
+      isomorphic-ws: 5.0.0(ws@8.20.1)
       koa: 2.16.4
       lodash.clonedeepwith: 4.5.0
       log4js: 6.9.1
       node-schedule: 2.1.1
       rambda: 9.4.2
       typescript: 5.9.3
-      ws: 8.18.0
+      ws: 8.20.1
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -13856,9 +13845,9 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  isomorphic-ws@5.0.0(ws@8.18.0):
+  isomorphic-ws@5.0.0(ws@8.20.1):
     dependencies:
-      ws: 8.18.0
+      ws: 8.20.1
 
   istanbul-lib-coverage@3.2.2: {}
 
@@ -17756,8 +17745,6 @@ snapshots:
     dependencies:
       imurmurhash: 0.1.4
       signal-exit: 4.1.0
-
-  ws@8.18.0: {}
 
   ws@8.20.1: {}
 
