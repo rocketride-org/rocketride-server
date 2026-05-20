@@ -65,9 +65,20 @@ const SENSITIVE_KEY_PATTERN = new RegExp(
 	'i'
 );
 
+/** Prefixes that indicate a secret value regardless of key name. */
+const SENSITIVE_VALUE_PREFIXES = ['sk-', 'pk_', 'tk_', 'rr_'];
+
+/**
+ * Returns true if a string value looks like a secret based on its prefix.
+ */
+function isSensitiveValue(value: string): boolean {
+	return SENSITIVE_VALUE_PREFIXES.some(p => value.startsWith(p));
+}
+
 /**
  * Recursively redacts sensitive fields in an object.
  * Modifies the object in place, replacing values of sensitive keys with "*****".
+ * Also redacts string values that match known secret prefixes (sk-, pk_, tk_, rr_).
  *
  * @param obj The object to redact (will be modified in place)
  */
@@ -89,12 +100,16 @@ function redactSensitiveFields(obj: unknown): void {
 		const record = obj as Record<string, unknown>;
 		for (const key in record) {
 			if (Object.prototype.hasOwnProperty.call(record, key)) {
+				const value = record[key];
 				// Check if key contains any sensitive pattern (case-insensitive)
 				if (SENSITIVE_KEY_PATTERN.test(key)) {
 					record[key] = '*****';
+				} else if (typeof value === 'string' && isSensitiveValue(value)) {
+					// Redact values that look like secrets by their prefix
+					record[key] = value.slice(0, 4) + '*****';
 				} else {
 					// Recursively process nested objects/arrays
-					redactSensitiveFields(record[key]);
+					redactSensitiveFields(value);
 				}
 			}
 		}
@@ -119,8 +134,8 @@ export function safeJSONStringify(obj: unknown): string {
 	// Stringify first - we need to do this anyway
 	const jsonString = JSON.stringify(obj);
 
-	// Quick check: does the serialized string contain any sensitive field names?
-	if (SENSITIVE_KEY_PATTERN.test(jsonString)) {
+	// Quick check: does the serialized string contain any sensitive field names or value prefixes?
+	if (SENSITIVE_KEY_PATTERN.test(jsonString) || SENSITIVE_VALUE_PREFIXES.some(p => jsonString.includes(p))) {
 		// Yes - parse (creating a deep clone), redact, and re-stringify
 		const parsed = JSON.parse(jsonString);
 		redactSensitiveFields(parsed);

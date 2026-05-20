@@ -181,16 +181,22 @@ export class DeployManager extends ConnectionManager {
 	// =========================================================================
 
 	/**
-	 * Override to prevent engine status events from opening a WebSocket
-	 * connection when in shared mode. The dev ConnectionManager owns the
-	 * engine lifecycle and connection in that case.
+	 * In shared mode the dev ConnectionManager owns the engine lifecycle
+	 * and WebSocket connection — the deploy manager must not react to
+	 * engine status events or it will open a second connection with
+	 * potentially stale deploy credentials.
+	 */
+	protected override shouldHandleEngineStatus(): boolean {
+		return !this.isSharedMode();
+	}
+
+	/**
+	 * Always register the engine status listener, even in shared mode.
+	 * When the user switches from shared → independent, the listener
+	 * must already be in place to receive the 'ready' event from the
+	 * newly started engine.
 	 */
 	public override setEngineRegistry(registry: import('../engine').EngineRegistry): void {
-		// Always register the engine status listener, even in shared mode.
-		// When the user switches from shared → independent, the listener
-		// must already be in place to receive the 'ready' event from the
-		// newly started engine. Mode filtering in handleEngineStatus()
-		// ensures we only connect to the engine matching our target mode.
 		super.setEngineRegistry(registry);
 	}
 

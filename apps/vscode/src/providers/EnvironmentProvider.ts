@@ -82,11 +82,14 @@ export class EnvironmentProvider {
 
 	/** Registers the `rocketride.page.environment.open` command. */
 	private registerCommands(): void {
-		const cmd = vscode.commands.registerCommand('rocketride.page.environment.open', () => {
+		const openCmd = vscode.commands.registerCommand('rocketride.page.environment.open', () => {
 			this.show();
 		});
-		this.disposables.push(cmd);
-		this.context.subscriptions.push(cmd);
+		const refreshCmd = vscode.commands.registerCommand('rocketride.page.environment.refreshUser', () => {
+			this.refreshUserScope();
+		});
+		this.disposables.push(openCmd, refreshCmd);
+		this.context.subscriptions.push(openCmd, refreshCmd);
 	}
 
 	// =========================================================================
@@ -127,6 +130,28 @@ export class EnvironmentProvider {
 		panel.onDidDispose(() => {
 			EnvironmentProvider.panel = null;
 		});
+	}
+
+	/**
+	 * Pushes fresh user-scope env data to the open Environment webview.
+	 * Called after prefilling missing env vars so the panel reflects the
+	 * newly added keys without requiring a manual reload.
+	 */
+	private refreshUserScope(): void {
+		const panel = EnvironmentProvider.panel;
+		if (!panel) return;
+
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+
+		client.account
+			.getEnv('user')
+			.then((env) => {
+				return panel.webview.postMessage({ type: 'env:data', slot: 'development', scope: 'user', env });
+			})
+			.catch((err: unknown) => {
+				console.error(`[EnvironmentProvider] Failed to refresh user env: ${err}`);
+			});
 	}
 
 	// =========================================================================

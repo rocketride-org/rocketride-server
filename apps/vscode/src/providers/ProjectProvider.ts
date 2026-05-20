@@ -24,6 +24,7 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { prefillMissingEnvVars } from '../shared/util/envVarCheck';
 
 // =============================================================================
 // CONSTANTS
@@ -412,6 +413,18 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				// Missing env vars — webview detected ROCKETRIDE_* refs not in envKeys
+				case 'status:missingEnvVars': {
+					const keys = data.keys as string[];
+					if (keys?.length) {
+						const client = this.connectionManager.getClient();
+						if (client) {
+							await prefillMissingEnvVars(client, keys);
+						}
+					}
+					break;
+				}
+
 				// Link opening
 				case 'project:openLink': {
 					if (data.url) {
@@ -653,6 +666,8 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 		}
 	}
+
+
 
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {
