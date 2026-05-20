@@ -108,15 +108,18 @@ class FlowBaseIInstance(IInstanceBase):
         if not target_ids:
             return self.preventDefault()
         for target_id in target_ids:
-            peer = self.instance.getInstance(target_id)
-            if peer is None:
-                _logger.error('classifications: target %r not found', target_id)
-                continue
-            peer.acceptClassifications(
-                classifications,
-                classificationPolicy,
-                classificationRules,
-            )
+            try:  # fail-closed per target, like _route
+                peer = self.instance.getInstance(target_id)
+                if peer is None:
+                    _logger.error('classifications: target %r not found', target_id)
+                    continue
+                peer.acceptClassifications(
+                    classifications,
+                    classificationPolicy,
+                    classificationRules,
+                )
+            except Exception:
+                _logger.exception('classifications dispatch to %r raised', target_id)
         self.preventDefault()
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes) -> None:
