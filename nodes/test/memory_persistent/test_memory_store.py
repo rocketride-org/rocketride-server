@@ -19,7 +19,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from redis_fake import FakeRedis
+from test.mocks.redis_fake import FakeRedis
 from nodes.memory_persistent.memory_store import (
     InMemoryBackend,
     PersistentMemoryStore,
