@@ -13,6 +13,22 @@ const { BUILD_ROOT } = require('./paths');
 
 const STATE_FILE = path.join(BUILD_ROOT, 'state.json');
 
+// Block dot-notation keys that would land on Object.prototype or its
+// accessor properties. setState/updateState walk `parts` and create
+// nested objects as needed; without this guard a caller passing
+// `setState('__proto__.polluted', 'x')` would set Object.prototype.polluted
+// for the entire process. Callers in this codebase are all in-repo build
+// scripts (not network input), but the guard is defense-in-depth and
+// closes CodeQL js/prototype-pollution-utility alert #274.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+function assertSafePath(parts) {
+    for (const part of parts) {
+        if (FORBIDDEN_KEYS.has(part)) {
+            throw new Error(`state: forbidden key segment "${part}" in path`);
+        }
+    }
+}
+
 // ============================================================================
 // In-Memory Cache
 // ============================================================================
@@ -178,6 +194,7 @@ async function setState(key, value) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
         const parts = Array.isArray(key) ? key : key.split('.');
+        assertSafePath(parts);
         if (value === null) {
             deleteKeyAndPrune(state, parts);
         } else {
@@ -207,6 +224,7 @@ async function updateState(updates) {
 
         for (const [key, value] of Object.entries(updates)) {
             const parts = key.split('.');
+            assertSafePath(parts);
             if (value === null) {
                 deleteKeyAndPrune(state, parts);
             } else {
