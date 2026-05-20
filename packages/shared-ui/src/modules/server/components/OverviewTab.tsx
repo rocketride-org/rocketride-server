@@ -99,9 +99,7 @@ const S = {
 		borderCollapse: 'collapse',
 		fontSize: 13,
 	} as CSSProperties,
-	clickableRow: {
-		cursor: 'pointer',
-	} as CSSProperties,
+	clickableRow: {} as CSSProperties,
 	completedRow: {
 		opacity: 0.6,
 	} as CSSProperties,

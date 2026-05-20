@@ -62,5 +62,7 @@ export async function checkMissingEnvVars(client: RocketRideClient, pipeline: Re
  * Used by the ProjectProvider host when the webview reports missing vars.
  */
 export async function handleMissingEnvVars(missingKeys: string[]): Promise<void> {
-	await openWithMissingKeys(missingKeys);
+	const safeKeys = missingKeys.filter((k) => /^ROCKETRIDE_[A-Z0-9_]+$/.test(k));
+	if (safeKeys.length === 0) return;
+	await openWithMissingKeys(safeKeys);
 }

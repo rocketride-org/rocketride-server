@@ -141,13 +141,13 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				disabled={disabled}
 				fullWidth
 				variant="outlined"
-				aria-readonly={maskApiKey ?? readonly}
+				aria-readonly={maskApiKey || readonly}
 				error={!!rawErrors}
 				helperText={rawErrors}
 				slotProps={{
 					input: {
-						readOnly: maskApiKey,
-						endAdornment: maskApiKey && (
+						readOnly: maskApiKey || readonly,
+						endAdornment: maskApiKey && !readonly && (
 							<InputAdornment position="end">
 								<Tooltip title={t('form.apiKeyRemoveTooltip')}>
 									<Delete

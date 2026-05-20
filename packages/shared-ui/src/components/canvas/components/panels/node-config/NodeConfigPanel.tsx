@@ -188,7 +188,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
-	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, envKeys } = useFlowProject();
+	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, envKeys = [] } = useFlowProject();
 	const { getPreference, setPreference, isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------

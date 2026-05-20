@@ -268,9 +268,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
 				welcome = new WelcomeProvider(context, context.extensionUri);
-				new AccountProvider(context);
-				new EnvironmentProvider(context);
-				new AuthProvider(context, context.extensionUri);
+				const account = new AccountProvider(context);
+				const environment = new EnvironmentProvider(context);
+				const auth = new AuthProvider(context, context.extensionUri);
+				context.subscriptions.push(account, environment, auth);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);

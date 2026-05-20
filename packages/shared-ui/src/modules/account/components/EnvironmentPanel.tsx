@@ -163,8 +163,8 @@ export const EnvScopeCard: React.FC<{
 	// Check if any required keys still have empty values
 	const hasUnfilledRequired = useMemo(() => {
 		if (!requiredKeys?.length) return false;
-		const draftMap = new Map(draft.map(([k, v]) => [k.trim(), v]));
-		return requiredKeys.some((key) => !draftMap.get(key));
+		const draftMap = new Map(draft.map(([k, v]) => [k.trim(), v.trim()]));
+		return requiredKeys.some((key) => (draftMap.get(key) ?? '').length === 0);
 	}, [requiredKeys, draft]);
 
 	/** Saves the draft as a dict. */

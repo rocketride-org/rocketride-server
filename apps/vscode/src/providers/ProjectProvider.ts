@@ -344,7 +344,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
 					const cached = this.connectionManager.getCachedServices();
 					const client = this.connectionManager.getClient();
-					const envKeys = await client?.account?.getEnvironmentKeys().catch(() => []) ?? [];
+					let envKeys: string[] | undefined;
+					try {
+						envKeys = await client?.account?.getEnvironmentKeys();
+					} catch {
+						envKeys = undefined;
+					}
 
 					// Send everything in one message
 					webview.postMessage({

@@ -69,7 +69,7 @@ interface EnvVarSuggestionsProps {
  * Anchored below the input field via MUI Popper. Supports mouse selection
  * and keyboard navigation (handled by the parent via the hook).
  */
-export default function EnvVarSuggestions({ open, anchorEl, suggestions, highlightedIndex, onSelect, onDismiss }: EnvVarSuggestionsProps): ReactElement | null {
+export default function EnvVarSuggestions({ open, anchorEl, suggestions, highlightedIndex, onSelect, onDismiss: _onDismiss }: EnvVarSuggestionsProps): ReactElement | null {
 	const listRef = useRef<HTMLUListElement>(null);
 
 	// Scroll the highlighted item into view

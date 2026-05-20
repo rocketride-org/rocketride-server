@@ -320,8 +320,8 @@ const EnvironmentWebview: React.FC = () => {
 			case 'env:data': {
 				const cacheKey = `${message.slot}:${message.scope}:${message.scopeId ?? ''}`;
 				let env = message.env;
-				// Always merge required keys into any user-scope response
-				if (requiredKeysRef.current.length > 0) {
+				// Only merge required keys into the development user scope
+				if (message.slot === 'development' && message.scope === 'user' && requiredKeysRef.current.length > 0) {
 					env = { ...env };
 					for (const key of requiredKeysRef.current) {
 						if (!(key in env)) {
