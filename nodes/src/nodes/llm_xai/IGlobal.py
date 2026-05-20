@@ -49,10 +49,9 @@ class IGlobal(IGlobalBase):
         depends(requirements)
 
         try:
-            # xAI client
-            from langchain_xai import ChatXAI
+            # xAI speaks OpenAI-compatible Chat Completions on api.x.ai/v1
+            from openai import OpenAI
 
-            # Provider HTTP exceptions (used by langchain_xai under the hood)
             try:
                 import httpx  # type: ignore
             except Exception:  # pragma: no cover
@@ -71,8 +70,12 @@ class IGlobal(IGlobalBase):
 
             # Minimal probe; UI handles required fields
             try:
-                client = ChatXAI(model=model, api_key=apikey, temperature=0)
-                client.invoke(self.VALIDATION_PROMPT)
+                client = OpenAI(api_key=apikey, base_url='https://api.x.ai/v1')
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{'role': 'user', 'content': self.VALIDATION_PROMPT}],
+                    max_tokens=1,
+                )
             except Exception as e:
                 # SDK-first: HTTP status errors carry response and status code
                 if httpx is not None and isinstance(e, getattr(httpx, 'HTTPStatusError', ())):

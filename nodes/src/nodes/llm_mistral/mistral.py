@@ -29,7 +29,6 @@ supporting a wide range of models from large (128K context) to small (32K contex
 """
 
 import os
-import time
 from depends import depends  # type: ignore
 from rocketlib import debug
 
@@ -37,11 +36,9 @@ from rocketlib import debug
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import Any, Dict, Tuple
-from ai.common.schema import Answer, Question
+from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.validation import validate_prompt
 
 try:
     from mistralai.client import Mistral  # 2.x layout
@@ -97,6 +94,9 @@ class Chat(ChatBase):
         # Save our chat class into the bag
         bag['chat'] = self
 
+        # Route token streaming through llm_native_stream (no LangChain _llm here).
+        self._native_stream_provider = 'mistral'
+
         # Output some debug information
         debug(f'    Chat model        : {self._model}')
         debug(f'    Chat total tokens : {self._modelTotalTokens}')
@@ -131,19 +131,6 @@ class Chat(ChatBase):
 
         # Otherwise use model-specific default, falling back to 32K if model unknown
         return model_tokens.get(self._model, 32768)
-
-    def _getModelTimeout(self, model: str) -> int:
-        """
-        Get the appropriate timeout for the specified model.
-
-        Some models require longer processing times.
-        """
-        if 'large' in model:
-            return 120  # 2 minutes for large models
-        elif 'medium' in model or 'magistral' in model:
-            return 90  # 1.5 minutes for medium/magistral models
-        else:
-            return 60  # 1 minute for small models
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""
@@ -227,72 +214,36 @@ class Chat(ChatBase):
         # Generic fallback
         return f'Mistral AI API error: {error_msg}'
 
-    def _shouldRetry(self, error: Exception) -> bool:
-        """Determine if an error is retryable."""
-        error_msg = str(error).lower()
+    def map_exception(self, error: Exception) -> Exception:
+        """Map Mistral SDK errors to clearer operator-facing messages."""
+        mapped = ValueError(self._format_user_error(str(error)))
+        mapped.__cause__ = error
+        return mapped
 
-        retryable_errors = [
-            'timeout',
-            'timed out',
-            'connection',
-            'network',
-            '500',
-            '502',
-            '503',
-            '504',
-            'internal server error',
-            'service unavailable',
-            'bad gateway',
-            'rate limit',
-        ]
-
-        return any(phrase in error_msg for phrase in retryable_errors)
-
-    def _getRetryConfig(self, model: str) -> Tuple[int, float]:
-        """Get retry configuration based on model type."""
-        if 'large' in model:
-            return (3, 2.0)  # 3 retries, 2 second base delay for large models
-        elif 'medium' in model or 'magistral' in model:
-            return (2, 1.5)  # 2 retries, 1.5 second base delay for medium models
-        else:
-            return (2, 1.0)  # 2 retries, 1 second base delay for small models
-
-    def chat(self, question: Question) -> Answer:
-        """Send a chat message to Mistral AI and get the response."""
-        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
-        max_retries, base_delay = self._getRetryConfig(self._model)
-        last_error = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                # Create the chat message
-                messages = [{'role': 'user', 'content': prompt}]
-
-                # Make the API call
-                chat_response = self._client.chat.complete(
-                    model=self._model,
-                    messages=messages,
-                    temperature=0.0,  # Using 0 for more deterministic responses
-                    max_tokens=None,  # Let model decide based on content
-                    random_seed=None,  # No fixed seed for variety
-                )
-
-                # Create and return the answer
-                answer = Answer(expectJson=question.expectJson)
-                answer.setAnswer(chat_response.choices[0].message.content)
-                return answer
-
-            except Exception as e:
-                last_error = e
-
-                if attempt < max_retries and self._shouldRetry(e):
-                    # Calculate delay with exponential backoff
-                    delay = base_delay * (2**attempt)
-                    time.sleep(delay)
-                    continue
+    def _chat(self, prompt: str) -> str:
+        """Non-streaming completion; retries are handled by :meth:`ChatBase._chat_with_retries`."""
+        messages = [{'role': 'user', 'content': prompt}]
+        chat_response = self._client.chat.complete(
+            model=self._model,
+            messages=messages,
+            temperature=0.0,
+            max_tokens=self._modelOutputTokens,
+            random_seed=None,
+        )
+        content = chat_response.choices[0].message.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # Multimodal / structured content: concatenate text parts
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get('type') == 'text' and block.get('text'):
+                        parts.append(str(block['text']))
                 else:
-                    break
-
-        # All retries failed or non-retryable error
-        user_friendly_error = self._format_user_error(str(last_error))
-        raise Exception(user_friendly_error)
+                    t = getattr(block, 'type', None)
+                    txt = getattr(block, 'text', None)
+                    if (t is None or str(t).lower() == 'text') and txt:
+                        parts.append(str(txt))
+            return ''.join(parts) if parts else str(content)
+        return str(content or '')

@@ -208,7 +208,7 @@ class Chat(ChatBase):
         else:
             return (3, 1.0)
 
-    def chat(self, question: Question) -> Answer:
+    def chat(self, question: Question, on_chunk=None, on_finish=None, on_reasoning_chunk=None) -> Answer:
         """Send a vision request to Mistral AI and get the response."""
         # Get retry configuration for this model
         max_retries, base_delay = self._getRetryConfig(self._model)
@@ -248,6 +248,8 @@ class Chat(ChatBase):
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)
                 answer.setAnswer(chat_response.choices[0].message.content)
+                if on_finish is not None:
+                    on_finish(getattr(chat_response.choices[0], 'finish_reason', None) or 'stop')
                 return answer
             except Exception as e:
                 last_error = e

@@ -92,7 +92,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"claude-opus-4-6": {
 				"title": "Claude Opus 4.6",
@@ -100,7 +103,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"claude-haiku-4-5": {
 				"title": "Claude Haiku 4.5",
@@ -108,7 +114,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 64000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"claude-sonnet-4-5": {
 				"title": "Claude Sonnet 4.5",
@@ -116,7 +125,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 64000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"claude-opus-4-5": {
 				"title": "Claude Opus 4.5",
@@ -124,7 +136,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 64000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"claude-opus-4-7": {
 				"title": "Anthropic: Claude Opus 4.7",
@@ -132,7 +147,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			}
 		}
 	},

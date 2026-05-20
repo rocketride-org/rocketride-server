@@ -25,6 +25,10 @@ export interface ChatMessage {
 	resultKey?: string;
 	/** SSE event type — used to identify thinking-group status messages. */
 	sseType?: string;
+	/** Streamed reasoning / chain-of-thought (OpenAI Responses API, Anthropic extended thinking). */
+	reasoning?: string;
+	/** True while reasoning deltas are still arriving for this bubble. */
+	reasoningStreaming?: boolean;
 }
 
 // =============================================================================

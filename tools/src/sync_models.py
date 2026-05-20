@@ -241,6 +241,11 @@ def main() -> int:
     Returns:
         Exit code (0 = success, 1 = one or more errors)
     """
+    # The bundled engine runtime ships stdout as ASCII; force UTF-8 so we can print ✓/✗.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
     parser = argparse.ArgumentParser(
         description='Sync LLM model lists from provider APIs into services.json files.',
     )
@@ -308,8 +313,12 @@ def main() -> int:
     args = parser.parse_args()
 
     # --- Validate / normalise --model-source ---
-    if args.model_sources is None:
-        args.model_sources = ['provider', 'openrouter', 'litellm']
+    explicit_sources = args.model_sources is not None
+    if not explicit_sources:
+        # Defaults degrade gracefully when litellm isn't bundled (engine runtime).
+        args.model_sources = ['provider', 'openrouter']
+        if _LITELLM_AVAILABLE:
+            args.model_sources.append('litellm')
     if len(args.model_sources) != len(set(args.model_sources)):
         print(
             'ERROR: --model-source values must not be repeated.',

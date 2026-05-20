@@ -22,13 +22,45 @@
  * SOFTWARE.
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Message as MessageType } from '../types/chat.types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MessageProps {
 	message: MessageType;
 }
+
+// Collapsible "Thinking" panel for streamed reasoning; auto-collapses when the answer starts.
+const ReasoningPanel: React.FC<{ reasoning: string; streaming?: boolean; hasContent: boolean }> = ({
+	reasoning,
+	streaming,
+	hasContent,
+}) => {
+	const [isOpen, setIsOpen] = useState(true);
+	const [userToggled, setUserToggled] = useState(false);
+
+	useEffect(() => {
+		if (userToggled) return;
+		if (!streaming && hasContent) setIsOpen(false);
+	}, [streaming, hasContent, userToggled]);
+
+	return (
+		<div className="thinking-group reasoning-panel">
+			<button
+				className="thinking-header"
+				onClick={() => { setUserToggled(true); setIsOpen(o => !o); }}
+			>
+				<span className={`thinking-chevron${isOpen ? ' open' : ''}`} />
+				<span className="thinking-label">{streaming ? 'Thinking…' : 'Thought process'}</span>
+			</button>
+			{isOpen && (
+				<div className="thinking-messages reasoning-content">
+					<MarkdownRenderer content={reasoning} />
+				</div>
+			)}
+		</div>
+	);
+};
 
 /**
  * Individual message bubble component
@@ -50,9 +82,17 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 
 	if (message.sender === 'bot' || message.sender === 'system') {
 		const hasChart = message.text.includes('```chartjs');
+		const hasReasoning = !!(message.reasoning && message.reasoning.length > 0);
 		return (
 			<div className="message-wrapper bot">
 				<div className={`message-bubble bot${hasChart ? ' has-chart' : ''}`}>
+					{hasReasoning && (
+						<ReasoningPanel
+							reasoning={message.reasoning!}
+							streaming={!!message.reasoningStreaming}
+							hasContent={message.text.length > 0}
+						/>
+					)}
 					<div className="markdown-content">
 						<MarkdownRenderer content={message.text} />
 					</div>

@@ -29,6 +29,7 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 
 
 class Chat(ChatBase):
@@ -64,10 +65,22 @@ class Chat(ChatBase):
         if 'api.deepseek' in serverbase and not apikey.startswith('sk-'):
             raise ValueError('Invalid DeepSeek API key format, please check your API key.')
 
-        # Get the llm
-        self._llm = ChatOpenAI(
-            model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
-        )
+        # DeepSeek reasoning models reject `temperature`; route through raw SDK
+        # so `reasoning_content` survives (langchain-openai drops it).
+        is_reasoner = bool((config.get('capabilities') or {}).get('reasoning'))
+        kwargs: Dict[str, Any] = {
+            'model': self._model,
+            'base_url': serverbase,
+            'api_key': apikey,
+            'max_tokens': self._modelOutputTokens,
+        }
+        if not is_reasoner:
+            kwargs['temperature'] = 0
+        self._llm = ChatOpenAI(**kwargs)
+
+        if is_reasoner:
+            self._raw_openai_client = OpenAI(api_key=apikey, base_url=serverbase)
+            self._native_stream_provider = 'openai_compat_reasoning'
 
         # Save our chat class into the bag
         bag['chat'] = self

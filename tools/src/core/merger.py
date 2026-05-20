@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 from typing import Dict, Any, List, NamedTuple, Tuple, Optional
 
 try:
@@ -31,7 +32,7 @@ except ImportError:
 
 # Module-level cache — populated on first use, once per process.
 # None = not yet fetched; {} = fetch attempted but failed (no retry).
-_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]]] = None
+_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str], bool]]] = None
 _OPENROUTER_AVAILABLE: bool = False
 
 
@@ -62,7 +63,7 @@ def _load_openrouter_cache() -> None:
         with _urllib.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read())
 
-        cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]] = {}
+        cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str], bool]] = {}
         for model in data.get('data', []):
             raw_id = model.get('id', '')
             bare = raw_id.split('/', 1)[1] if '/' in raw_id else raw_id
@@ -73,13 +74,45 @@ def _load_openrouter_cache() -> None:
             exp = model.get('expiration_date') or None
             ctx = int(ctx) if ctx is not None else None
             out = int(out) if out is not None else None
+            sp = model.get('supported_parameters') or []
+            reasoning = 'reasoning' in sp or 'include_reasoning' in sp
             if bare not in cache:  # keep first occurrence per bare ID
-                cache[bare] = (ctx, out, name, exp)
+                cache[bare] = (ctx, out, name, exp, reasoning)
 
         _OPENROUTER_CACHE = cache
         _OPENROUTER_AVAILABLE = True
     except Exception:
         _OPENROUTER_CACHE = {}  # empty sentinel — no retry on subsequent calls
+
+
+# Stable family/product roots whose variants inherit reasoning (covers distills,
+# quantizations, Qwen hybrid-thinking DashScope aliases, and explicit `-thinking` snapshots).
+_REASONING_FAMILIES = (
+    'deepseek-r1',
+    'qwen3',
+    'qwq',
+    'magistral',
+    'qwen-plus',
+    'qwen-flash',
+    'qwen-turbo',
+    'qwen-max',
+    '-thinking',
+)
+
+
+def _is_reasoning_model(bare_id: str) -> bool:
+    """True if the model is in OpenRouter as reasoning, or matches a known family root."""
+    cache = get_openrouter_cache()
+    entry = cache.get(bare_id)
+    if entry is None:
+        # Anthropic profiles store hyphens (claude-opus-4-7) while OR uses dots (claude-opus-4.7).
+        dotted = re.sub(r'(\d)-(\d)', r'\1.\2', bare_id)
+        if dotted != bare_id:
+            entry = cache.get(dotted)
+    if entry is not None and entry[4]:
+        return True
+    low = bare_id.lower()
+    return any(fam in low for fam in _REASONING_FAMILIES)
 
 
 def _source_is_authoritative(source: str, model_source: str) -> bool:
@@ -104,7 +137,7 @@ def _source_is_authoritative(source: str, model_source: str) -> bool:
     return False
 
 
-def get_openrouter_cache() -> Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]]:
+def get_openrouter_cache() -> Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str], bool]]:
     """
     Return the OpenRouter model cache, loading it on first call.
 
@@ -144,7 +177,8 @@ def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int], Optio
         expiration_date is non-None when OpenRouter has marked the model as deprecated.
     """
     _load_openrouter_cache()
-    return (_OPENROUTER_CACHE or {}).get(model_id, (None, None, None, None))
+    entry = (_OPENROUTER_CACHE or {}).get(model_id)
+    return entry[:4] if entry else (None, None, None, None)
 
 
 def _litellm_info(model_id: str) -> Tuple[Optional[int], Optional[int]]:
@@ -330,6 +364,8 @@ def build_new_profile(
         profile['modelOutputTokens'] = output_tokens
         if output_tokens_source:
             profile['_src_modelOutputTokens'] = output_tokens_source
+    if _is_reasoning_model(model_id):
+        profile['capabilities'] = {'reasoning': True}
     if extra_fields:
         profile.update(extra_fields)
     return profile
@@ -626,6 +662,15 @@ def merge(
             # Existing model — only update token limits when we have authoritative data
             existing = updated_profiles[profile_key]
             changed = False
+
+            # Enrich capabilities.reasoning so the flag tracks OpenRouter over time.
+            existing_cap = existing.get('capabilities') if isinstance(existing.get('capabilities'), dict) else {}
+            should_reason = _is_reasoning_model(model_id)
+            if should_reason and not existing_cap.get('reasoning'):
+                merged_cap = {**existing_cap, 'reasoning': True}
+                updated_profiles[profile_key]['capabilities'] = merged_cap
+                updated_fields.append((profile_key, 'capabilities.reasoning', False, True))
+                changed = True
 
             if authoritative_total_tokens is not None:
                 if existing.get('modelTotalTokens') != authoritative_total_tokens:

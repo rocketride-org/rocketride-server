@@ -97,149 +97,170 @@
 			"llama-4-scout": {
 				"title": "Llama 4 Scout",
 				"model": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+				"modelTotalTokens": 1048576,
 				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 1048576
+				"apikey": ""
 			},
 			"llama-4-maverick": {
 				"title": "Llama 4 Maverick",
 				"model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+				"modelTotalTokens": 1048576,
 				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 1048576
+				"apikey": ""
 			},
 			"qwen3-235b": {
 				"title": "Qwen3 235B",
 				"model": "Qwen/Qwen3-235B-A22B-FP8",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen3-32b": {
 				"title": "Qwen3 32B",
 				"model": "Qwen/Qwen3-32B-FP8",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen3-30b": {
 				"title": "Qwen3 30B",
 				"model": "Qwen/Qwen3-30B-A3B",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen3-coder-480b": {
 				"title": "Qwen3 Coder 480B",
 				"model": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"deepseek-v3-2": {
 				"title": "DeepSeek V3.2",
 				"model": "deepseek-ai/DeepSeek-V3.2",
+				"modelTotalTokens": 163840,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 163840
+				"apikey": ""
 			},
 			"deepseek-v3": {
 				"title": "DeepSeek V3",
 				"model": "deepseek-ai/DeepSeek-V3-0324",
+				"modelTotalTokens": 163840,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 163840
+				"apikey": ""
 			},
 			"deepseek-r1": {
 				"title": "DeepSeek R1",
 				"model": "deepseek-ai/DeepSeek-R1",
+				"modelTotalTokens": 131072,
 				"serverbase": "https://api.gmi-serving.com/v1",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"deepseek-r1-distill-32b": {
 				"title": "DeepSeek R1 Distill 32B",
 				"model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"deepseek-r1-distill-1-5b": {
 				"title": "DeepSeek R1 Distill 1.5B",
 				"model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+				"modelTotalTokens": 131072,
 				"serverbase": "",
 				"apikey": "",
-				"modelTotalTokens": 131072
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"deepseek-prover-v2": {
 				"title": "DeepSeek Prover V2",
 				"model": "deepseek-ai/DeepSeek-Prover-V2-671B",
+				"modelTotalTokens": 131072,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 131072
+				"apikey": ""
 			},
 			"gpt-5-2": {
 				"title": "GPT-5.2",
 				"model": "openai/gpt-5.2",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"gpt-5-1": {
 				"title": "GPT-5.1",
 				"model": "openai/gpt-5.1",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"gpt-5": {
 				"title": "GPT-5",
 				"model": "openai/gpt-5",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"gpt-4o": {
 				"title": "GPT-4o",
 				"model": "openai/gpt-4o",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"claude-opus-4-5": {
 				"title": "Claude Opus 4.5",
 				"model": "anthropic/claude-opus-4.5",
+				"modelTotalTokens": 200000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 200000
+				"apikey": ""
 			},
 			"claude-sonnet-4-5": {
 				"title": "Claude Sonnet 4.5",
 				"model": "anthropic/claude-sonnet-4.5",
+				"modelTotalTokens": 200000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 200000
+				"apikey": ""
 			},
 			"gemini-3-pro": {
 				"title": "Gemini 3.1 Pro",
 				"model": "google/gemini-3.1-pro-preview",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"gemini-3-flash": {
 				"title": "Gemini 3 Flash",
 				"model": "google/gemini-3-flash-preview",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			},
 			"gemini-3-1-flash-lite": {
 				"title": "Gemini 3.1 Flash Lite",
 				"model": "google/gemini-3.1-flash-lite-preview",
+				"modelTotalTokens": 128000,
 				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
+				"apikey": ""
 			}
 		}
 	},
@@ -268,186 +289,309 @@
 		},
 		"gmi_cloud.custom": {
 			"object": "custom",
-			"properties": ["gmi_cloud.serverbase", "model", "modelTotalTokens", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.llama-4-scout": {
 			"object": "llama-4-scout",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.llama-4-maverick": {
 			"object": "llama-4-maverick",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.qwen3-235b": {
 			"object": "qwen3-235b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.qwen3-32b": {
 			"object": "qwen3-32b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.qwen3-30b": {
 			"object": "qwen3-30b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.qwen3-coder-480b": {
 			"object": "qwen3-coder-480b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-v3-2": {
 			"object": "deepseek-v3-2",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-v3": {
 			"object": "deepseek-v3",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-r1": {
 			"object": "deepseek-r1",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-r1-distill-32b": {
 			"object": "deepseek-r1-distill-32b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-r1-distill-1-5b": {
 			"object": "deepseek-r1-distill-1-5b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
+			"properties": [
+				"gmi_cloud.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.deepseek-prover-v2": {
 			"object": "deepseek-prover-v2",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gpt-5-2": {
 			"object": "gpt-5-2",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gpt-5-1": {
 			"object": "gpt-5-1",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gpt-5": {
 			"object": "gpt-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gpt-4o": {
 			"object": "gpt-4o",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.claude-sonnet-4-5": {
 			"object": "claude-sonnet-4-5",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gemini-3-pro": {
 			"object": "gemini-3-pro",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gemini-3-flash": {
 			"object": "gemini-3-flash",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.gemini-3-1-flash-lite": {
 			"object": "gemini-3-1-flash-lite",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"gmi_cloud.profile": {
 			"title": "Model",
 			"description": "GMI Cloud LLM model",
 			"type": "string",
 			"default": "deepseek-v3",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": ["gmi_cloud.custom"]
+					"properties": [
+						"gmi_cloud.custom"
+					]
 				},
 				{
 					"value": "llama-4-scout",
-					"properties": ["gmi_cloud.llama-4-scout"]
+					"properties": [
+						"gmi_cloud.llama-4-scout"
+					]
 				},
 				{
 					"value": "llama-4-maverick",
-					"properties": ["gmi_cloud.llama-4-maverick"]
+					"properties": [
+						"gmi_cloud.llama-4-maverick"
+					]
 				},
 				{
 					"value": "qwen3-235b",
-					"properties": ["gmi_cloud.qwen3-235b"]
+					"properties": [
+						"gmi_cloud.qwen3-235b"
+					]
 				},
 				{
 					"value": "qwen3-32b",
-					"properties": ["gmi_cloud.qwen3-32b"]
+					"properties": [
+						"gmi_cloud.qwen3-32b"
+					]
 				},
 				{
 					"value": "qwen3-30b",
-					"properties": ["gmi_cloud.qwen3-30b"]
+					"properties": [
+						"gmi_cloud.qwen3-30b"
+					]
 				},
 				{
 					"value": "qwen3-coder-480b",
-					"properties": ["gmi_cloud.qwen3-coder-480b"]
+					"properties": [
+						"gmi_cloud.qwen3-coder-480b"
+					]
 				},
 				{
 					"value": "deepseek-v3-2",
-					"properties": ["gmi_cloud.deepseek-v3-2"]
+					"properties": [
+						"gmi_cloud.deepseek-v3-2"
+					]
 				},
 				{
 					"value": "deepseek-v3",
-					"properties": ["gmi_cloud.deepseek-v3"]
+					"properties": [
+						"gmi_cloud.deepseek-v3"
+					]
 				},
 				{
 					"value": "deepseek-r1",
-					"properties": ["gmi_cloud.deepseek-r1"]
+					"properties": [
+						"gmi_cloud.deepseek-r1"
+					]
 				},
 				{
 					"value": "deepseek-r1-distill-32b",
-					"properties": ["gmi_cloud.deepseek-r1-distill-32b"]
+					"properties": [
+						"gmi_cloud.deepseek-r1-distill-32b"
+					]
 				},
 				{
 					"value": "deepseek-r1-distill-1-5b",
-					"properties": ["gmi_cloud.deepseek-r1-distill-1-5b"]
+					"properties": [
+						"gmi_cloud.deepseek-r1-distill-1-5b"
+					]
 				},
 				{
 					"value": "deepseek-prover-v2",
-					"properties": ["gmi_cloud.deepseek-prover-v2"]
+					"properties": [
+						"gmi_cloud.deepseek-prover-v2"
+					]
 				},
 				{
 					"value": "gpt-5-2",
-					"properties": ["gmi_cloud.gpt-5-2"]
+					"properties": [
+						"gmi_cloud.gpt-5-2"
+					]
 				},
 				{
 					"value": "gpt-5-1",
-					"properties": ["gmi_cloud.gpt-5-1"]
+					"properties": [
+						"gmi_cloud.gpt-5-1"
+					]
 				},
 				{
 					"value": "gpt-5",
-					"properties": ["gmi_cloud.gpt-5"]
+					"properties": [
+						"gmi_cloud.gpt-5"
+					]
 				},
 				{
 					"value": "gpt-4o",
-					"properties": ["gmi_cloud.gpt-4o"]
+					"properties": [
+						"gmi_cloud.gpt-4o"
+					]
 				},
 				{
 					"value": "claude-opus-4-5",
-					"properties": ["gmi_cloud.claude-opus-4-5"]
+					"properties": [
+						"gmi_cloud.claude-opus-4-5"
+					]
 				},
 				{
 					"value": "claude-sonnet-4-5",
-					"properties": ["gmi_cloud.claude-sonnet-4-5"]
+					"properties": [
+						"gmi_cloud.claude-sonnet-4-5"
+					]
 				},
 				{
 					"value": "gemini-3-pro",
-					"properties": ["gmi_cloud.gemini-3-pro"]
+					"properties": [
+						"gmi_cloud.gemini-3-pro"
+					]
 				},
 				{
 					"value": "gemini-3-flash",
-					"properties": ["gmi_cloud.gemini-3-flash"]
+					"properties": [
+						"gmi_cloud.gemini-3-flash"
+					]
 				},
 				{
 					"value": "gemini-3-1-flash-lite",
-					"properties": ["gmi_cloud.gemini-3-1-flash-lite"]
+					"properties": [
+						"gmi_cloud.gemini-3-1-flash-lite"
+					]
 				}
 			]
 		}

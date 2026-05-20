@@ -98,10 +98,83 @@ export function useChatMessages({ welcomeMessage }: UseChatMessagesOptions = {})
 					})
 				);
 
+			// SSE streaming contract: chunk / reasoning_chunk / chunk_end (#752).
+			let streamingId: number | null = null;
+			const lastSeq = new Map<string, number>();
+			const lastReasoningSeq = new Map<string, number>();
+
+			const acceptSeq = (m: Map<string, number>, data: Record<string, unknown>): boolean => {
+				const seq = typeof data.seq === 'number' ? data.seq : undefined;
+				if (seq === undefined) return true;
+				const key = `${String(data.runId ?? '')}:${String(data.nodeId ?? '')}`;
+				const prev = m.get(key);
+				if (prev !== undefined && seq <= prev) return false;
+				m.set(key, seq);
+				return true;
+			};
+
+			const ensureBubble = (initial: Partial<ChatMessage> = {}): { id: number; created: boolean } => {
+				if (streamingId !== null) return { id: streamingId, created: false };
+				streamingId = nextId();
+				const id = streamingId;
+				updateMessages((prev) => [
+					...prev,
+					{ id, text: '', sender: 'bot', timestamp: ts(), ...initial },
+				]);
+				return { id, created: true };
+			};
+
 			const result: PIPELINE_RESULT = await client.chat({
 				token: authToken,
 				question,
 				onSSE: async (type: string, data: Record<string, unknown>) => {
+					if (type === 'chunk') {
+						const delta = data.text as string | undefined;
+						if (!delta || !acceptSeq(lastSeq, data)) return;
+						const { id, created } = ensureBubble({ text: delta });
+						if (created) return;  // bubble was just seeded with this delta
+						updateMessages((prev) =>
+							prev.map((m) => (m.id === id ? { ...m, text: m.text + delta } : m))
+						);
+						return;
+					}
+					if (type === 'reasoning_chunk') {
+						const delta = data.text as string | undefined;
+						if (!delta || !acceptSeq(lastReasoningSeq, data)) return;
+						const { id, created } = ensureBubble({ reasoning: delta, reasoningStreaming: true });
+						if (created) return;  // bubble was just seeded with this reasoning delta
+						updateMessages((prev) =>
+							prev.map((m) =>
+								m.id === id
+									? { ...m, reasoning: (m.reasoning ?? '') + delta, reasoningStreaming: true }
+									: m
+							)
+						);
+						return;
+					}
+					if (type === 'reasoning_end') {
+						if (streamingId !== null) {
+							const id = streamingId;
+							updateMessages((prev) =>
+								prev.map((m) => (m.id === id ? { ...m, reasoningStreaming: false } : m))
+							);
+						}
+						return;
+					}
+					if (type === 'chunk_end') {
+						const reason = data.finishReason as string | null | undefined;
+						if (reason && reason !== 'stop' && streamingId !== null) {
+							const id = streamingId;
+							const note =
+								reason === 'length'
+									? '\n\n_[response truncated by max_tokens]_'
+									: `\n\n_[stream ended: ${reason}]_`;
+							updateMessages((prev) =>
+								prev.map((m) => (m.id === id ? { ...m, text: m.text + note } : m))
+							);
+						}
+						return;
+					}
 					const text = typeof data.message === 'string' ? data.message : undefined;
 					if (text) {
 						updateMessages((prev) => [
@@ -117,6 +190,8 @@ export function useChatMessages({ welcomeMessage }: UseChatMessagesOptions = {})
 					}
 				},
 			});
+
+			if (streamingId !== null) return [];
 
 			const responses = extractTextFromResult(result);
 			return responses.length > 0 ? responses : [{ text: 'No valid response received', key: '' }];

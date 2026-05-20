@@ -29,7 +29,7 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
-from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
+from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
 DASHSCOPE_REGIONS = {
     'us': 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
@@ -66,13 +66,20 @@ class Chat(ChatBase):
         base_url = DASHSCOPE_REGIONS.get(region, DASHSCOPE_REGIONS['us'])
 
         # Get the llm using OpenAI-compatible endpoint
-        self._llm = ChatOpenAI(
-            model=self._model,
-            api_key=apikey,
-            base_url=base_url,
-            temperature=0,
-            max_tokens=self._modelOutputTokens,
-        )
+        kwargs: Dict[str, Any] = {
+            'model': self._model,
+            'api_key': apikey,
+            'base_url': base_url,
+            'temperature': 0,
+            'max_tokens': self._modelOutputTokens,
+        }
+        if (config.get('capabilities') or {}).get('reasoning'):
+            kwargs['model_kwargs'] = {'extra_body': {'enable_thinking': True}}
+            self._raw_openai_client = OpenAI(api_key=apikey, base_url=base_url)
+            self._reasoning_kwargs = {'extra_body': {'enable_thinking': True}}
+            self._native_stream_provider = 'openai_compat_reasoning'
+
+        self._llm = ChatOpenAI(**kwargs)
 
         # Save our chat class into the bag
         bag['chat'] = self

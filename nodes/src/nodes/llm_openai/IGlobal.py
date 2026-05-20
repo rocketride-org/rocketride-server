@@ -68,9 +68,15 @@ class IGlobal(IGlobalBase):
             try:
                 client = OpenAI(api_key=apikey)
 
-                # Newer models use max_completion_tokens instead of max_tokens
-                newer_models = ['gpt-5', 'gpt-5.1', 'gpt-5-mini', 'gpt-5-nano']
-                uses_max_completion_tokens = any(model.startswith(m) for m in newer_models)
+                # Newer models use max_completion_tokens instead of max_tokens.
+                # Covers the gpt-5 family AND the reasoning o-series (o1/o3/o4)
+                # — keep in sync with openai_client.Chat.__init__.
+                model_lc = (model or '').lower()
+                _completion_token_prefixes = ('o1', 'o3', 'o4', 'gpt-5')
+                uses_max_completion_tokens = any(
+                    model_lc == p or model_lc.startswith(f'{p}-') or model_lc.startswith(f'{p}.')
+                    for p in _completion_token_prefixes
+                )
 
                 # Make sure model is using the correct parameters
                 if uses_max_completion_tokens:

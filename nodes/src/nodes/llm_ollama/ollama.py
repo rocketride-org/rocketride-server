@@ -29,6 +29,7 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 
 
 class Chat(ChatBase):
@@ -61,6 +62,11 @@ class Chat(ChatBase):
         self._llm = ChatOpenAI(
             model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
         )
+
+        if (config.get('capabilities') or {}).get('reasoning'):
+            self._raw_openai_client = OpenAI(api_key=apikey, base_url=serverbase)
+            self._reasoning_kwargs = {'reasoning_effort': 'high'}
+            self._native_stream_provider = 'openai_compat_reasoning'
 
         # Save our chat class into the bag
         bag['chat'] = self

@@ -35,7 +35,7 @@ import { pluginReact } from '@rsbuild/plugin-react';
 export default defineConfig({
 	source: {
 		entry: {
-			index: './index.tsx',
+			index: './index.ts',
 		},
 	},
 	output: {
