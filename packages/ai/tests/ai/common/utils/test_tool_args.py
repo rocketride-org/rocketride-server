@@ -30,6 +30,7 @@ from ai.common.utils import (
     optional_bool,
     optional_int,
     optional_str,
+    require_bool,
     require_dict,
     require_int,
     require_str,
@@ -69,6 +70,36 @@ class TestNormalizeToolInput:
                 return {'should': 'not appear'}
 
         assert normalize_tool_input(Fake(), unwrap_pydantic=False) == {}
+
+    def test_pydantic_model_dump_raises_falls_through(self, monkeypatch):
+        # If a buggy pydantic model raises from model_dump(), the helper must
+        # not propagate the exception. Falls through to the "unexpected type"
+        # branch and returns {} (best-effort contract).
+        class FakeBuggy:
+            def model_dump(self):
+                raise RuntimeError('boom')
+
+        from ai.common.utils import tool_args as tool_args_module
+
+        captured: list[str] = []
+        monkeypatch.setattr(tool_args_module, 'warning', lambda msg: captured.append(msg))
+
+        assert normalize_tool_input(FakeBuggy(), tool_name='svc') == {}
+        assert any('model_dump' in m for m in captured)
+
+    def test_pydantic_dict_raises_falls_through(self, monkeypatch):
+        # Same contract for pydantic v1 .dict() — must not propagate.
+        class FakeBuggyV1:
+            def dict(self):
+                raise RuntimeError('boom')
+
+        from ai.common.utils import tool_args as tool_args_module
+
+        captured: list[str] = []
+        monkeypatch.setattr(tool_args_module, 'warning', lambda msg: captured.append(msg))
+
+        assert normalize_tool_input(FakeBuggyV1(), tool_name='svc') == {}
+        assert any('dict' in m for m in captured)
 
     def test_json_string_parsed(self):
         assert normalize_tool_input('{"q": "hello"}') == {'q': 'hello'}
@@ -300,6 +331,77 @@ class TestRequireInt:
     def test_tool_name_prefixes_error(self):
         with pytest.raises(ValueError, match='issue_get: "issue_number" is required'):
             require_int({}, 'issue_number', tool_name='issue_get')
+
+
+# ---------------------------------------------------------------------------
+# require_bool
+# ---------------------------------------------------------------------------
+
+
+class TestRequireBool:
+    """Strict bool typing. Same safety-net rationale as the rest of the
+    require_* family — a coerced string ('true', '1', 'yes') from an LLM
+    means hallucinated typing, not a legitimate bool. Surface it as a
+    ValueError so the agent self-corrects on the next turn.
+    """
+
+    def test_true_passes_through(self):
+        assert require_bool({'staged': True}, 'staged') is True
+
+    def test_false_passes_through(self):
+        assert require_bool({'staged': False}, 'staged') is False
+
+    def test_missing_key_raises(self):
+        with pytest.raises(ValueError, match='"staged" is required'):
+            require_bool({}, 'staged')
+
+    def test_none_value_raises(self):
+        with pytest.raises(ValueError, match='"staged" is required'):
+            require_bool({'staged': None}, 'staged')
+
+    def test_int_rejected(self):
+        # No truthy coercion: 1/0 are common LLM hallucinations of bool but
+        # strict typing surfaces them as errors so the agent self-corrects.
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': 1}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': 0}, 'staged')
+
+    def test_string_rejected(self):
+        # "true"/"false"/"yes"/"1" strings from an LLM are hallucinations.
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': 'true'}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': 'false'}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': '1'}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': ''}, 'staged')
+
+    def test_unsupported_type_rejected(self):
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': [True]}, 'staged')
+        with pytest.raises(ValueError, match='"staged" must be a boolean'):
+            require_bool({'staged': {'x': 1}}, 'staged')
+
+    def test_tool_name_prefixes_required_error(self):
+        with pytest.raises(ValueError, match='diff: "staged" is required'):
+            require_bool({}, 'staged', tool_name='diff')
+
+    def test_tool_name_prefixes_type_error(self):
+        with pytest.raises(ValueError, match='diff: "staged" must be a boolean'):
+            require_bool({'staged': 'yes'}, 'staged', tool_name='diff')
+
+    def test_no_tool_name_no_prefix(self):
+        with pytest.raises(ValueError) as exc:
+            require_bool({'staged': 'yes'}, 'staged')
+        assert str(exc.value).startswith('"staged"'), f'expected no prefix, got: {exc.value!r}'
+
+    def test_does_not_mutate_args(self):
+        args = {'staged': True}
+        snapshot = dict(args)
+        require_bool(args, 'staged')
+        assert args == snapshot
 
 
 # ---------------------------------------------------------------------------

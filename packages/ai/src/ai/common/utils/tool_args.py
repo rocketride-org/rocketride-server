@@ -114,13 +114,23 @@ def normalize_tool_input(
         return {}
 
     if unwrap_pydantic:
+        # Best-effort unwrap. A buggy pydantic model whose ``model_dump`` /
+        # ``dict`` raises must not break tool invocation — warn and continue
+        # with the original object; the next branch will fall through to
+        # the "unexpected type" warning + ``{}`` return path.
         model_dump = getattr(input_obj, 'model_dump', None)
         if callable(model_dump):
-            input_obj = model_dump()
+            try:
+                input_obj = model_dump()
+            except Exception:
+                warning(f'{tool_name}: model_dump() raised during input normalisation')
         else:
             as_dict = getattr(input_obj, 'dict', None)
             if callable(as_dict):
-                input_obj = as_dict()
+                try:
+                    input_obj = as_dict()
+                except Exception:
+                    warning(f'{tool_name}: dict() raised during input normalisation')
 
     if parse_json_strings and isinstance(input_obj, str):
         try:
