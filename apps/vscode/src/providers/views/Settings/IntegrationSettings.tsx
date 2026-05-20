@@ -21,7 +21,8 @@
 // SOFTWARE.
 // =============================================================================
 
-import React from 'react';
+import React, { CSSProperties } from 'react';
+import { commonStyles } from 'shared/themes/styles';
 import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
@@ -75,6 +76,12 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 		description: 'Install RocketRide instructions to AGENTS.md at the repo root',
 	},
 ];
+
+const clearSecretButtonStyle: CSSProperties = {
+	...commonStyles.buttonSecondarySmall,
+	alignSelf: 'flex-start',
+	marginTop: 6,
+};
 
 // ============================================================================
 // COMPONENT
@@ -134,12 +141,22 @@ export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settin
 								Deepgram API Key
 							</label>
 							<input id="voiceBuilderDeepgramApiKey" type="password" value={settings.voiceBuilder.deepgramApiKey} placeholder={settings.voiceBuilder.hasDeepgramApiKey ? 'Stored key' : 'Enter Deepgram API key'} onChange={(e) => updateVoiceBuilder({ deepgramApiKey: e.target.value, hasDeepgramApiKey: e.target.value.trim().length > 0 })} />
+							{settings.voiceBuilder.hasDeepgramApiKey && !settings.voiceBuilder.deepgramApiKey && (
+								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored Deepgram API key" onClick={() => updateVoiceBuilder({ deepgramApiKey: '', hasDeepgramApiKey: false })}>
+									Clear stored key
+								</button>
+							)}
 						</div>
 						<div style={S.formGroup}>
 							<label htmlFor="voiceBuilderPlannerApiKey" style={S.label}>
 								Planner API Key
 							</label>
 							<input id="voiceBuilderPlannerApiKey" type="password" value={settings.voiceBuilder.plannerApiKey} placeholder={settings.voiceBuilder.hasPlannerApiKey ? 'Stored key' : 'Enter planner API key'} onChange={(e) => updateVoiceBuilder({ plannerApiKey: e.target.value, hasPlannerApiKey: e.target.value.trim().length > 0 })} />
+							{settings.voiceBuilder.hasPlannerApiKey && !settings.voiceBuilder.plannerApiKey && (
+								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored planner API key" onClick={() => updateVoiceBuilder({ plannerApiKey: '', hasPlannerApiKey: false })}>
+									Clear stored key
+								</button>
+							)}
 						</div>
 						<div style={S.formGroup}>
 							<label htmlFor="voiceBuilderPlannerBaseUrl" style={S.label}>

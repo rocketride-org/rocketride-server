@@ -57,6 +57,7 @@ type FetchLike = typeof fetch;
 
 const DEFAULT_AUDIO_MIME_TYPE = 'audio/webm';
 const DEEPGRAM_PRERECORDED_URL = 'https://api.deepgram.com/v1/listen';
+const VOICE_PROVIDER_TIMEOUT_MS = 20000;
 
 function trimTrailingSlash(value: string): string {
 	return value.replace(/\/+$/, '');
@@ -76,6 +77,16 @@ function summarizeServices(services: Record<string, unknown>): Array<Record<stri
 			lanes: service.lanes,
 		};
 	});
+}
+
+function createTimeoutController(): { controller: AbortController; clear: () => void } {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), VOICE_PROVIDER_TIMEOUT_MS);
+	return { controller, clear: () => clearTimeout(timeoutId) };
+}
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof Error && error.name === 'AbortError';
 }
 
 export function getVoiceBuilderStatus(config: IVoiceBuilderConfig, secrets: Partial<IVoiceBuilderSecrets>): IVoiceBuilderStatus {
@@ -103,13 +114,29 @@ export function extractJsonObject(content: string): Record<string, unknown> {
 	if (start === -1) throw new Error('LLM response did not contain JSON');
 
 	let depth = 0;
+	let inString = false;
+	let escape = false;
 	for (let i = start; i < raw.length; i++) {
 		const ch = raw[i];
-		if (ch === '{') depth++;
-		if (ch === '}') {
-			depth--;
-			if (depth === 0) {
-				return JSON.parse(raw.slice(start, i + 1)) as Record<string, unknown>;
+		if (escape) {
+			escape = false;
+			continue;
+		}
+		if (inString && ch === '\\') {
+			escape = true;
+			continue;
+		}
+		if (ch === '"') {
+			inString = !inString;
+			continue;
+		}
+		if (!inString) {
+			if (ch === '{') depth++;
+			if (ch === '}') {
+				depth--;
+				if (depth === 0) {
+					return JSON.parse(raw.slice(start, i + 1)) as Record<string, unknown>;
+				}
 			}
 		}
 	}
@@ -174,14 +201,24 @@ export async function transcribeVoiceRecording(request: IVoiceRecordingRequest, 
 	url.searchParams.set('model', 'nova-2');
 	url.searchParams.set('smart_format', 'true');
 
-	const res = await fetchImpl(url.toString(), {
-		method: 'POST',
-		headers: {
-			Authorization: `Token ${secrets.deepgramApiKey}`,
-			'Content-Type': request.mimeType || DEFAULT_AUDIO_MIME_TYPE,
-		},
-		body: audio as any,
-	});
+	const { controller, clear } = createTimeoutController();
+	let res: Response;
+	try {
+		res = await fetchImpl(url.toString(), {
+			method: 'POST',
+			headers: {
+				Authorization: `Token ${secrets.deepgramApiKey}`,
+				'Content-Type': request.mimeType || DEFAULT_AUDIO_MIME_TYPE,
+			},
+			body: audio as any,
+			signal: controller.signal,
+		});
+	} catch (error) {
+		if (isAbortError(error)) throw new Error('Voice transcription timed out');
+		throw error;
+	} finally {
+		clear();
+	}
 
 	if (!res.ok) {
 		throw new Error(`Voice transcription failed: ${await res.text()}`);
@@ -205,19 +242,29 @@ export async function generateVoiceProjectEdit(request: IVoiceProjectEditRequest
 	if (!config.plannerBaseUrl) throw new Error('Planner base URL not configured');
 	if (!config.plannerModel) throw new Error('Planner model not configured');
 
-	const res = await fetchImpl(`${trimTrailingSlash(config.plannerBaseUrl)}/chat/completions`, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${secrets.plannerApiKey}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			model: config.plannerModel,
-			messages: buildVoicePlannerMessages(request),
-			temperature: 0.2,
-			max_tokens: 3000,
-		}),
-	});
+	const { controller, clear } = createTimeoutController();
+	let res: Response;
+	try {
+		res = await fetchImpl(`${trimTrailingSlash(config.plannerBaseUrl)}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${secrets.plannerApiKey}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				model: config.plannerModel,
+				messages: buildVoicePlannerMessages(request),
+				temperature: 0.2,
+				max_tokens: 3000,
+			}),
+			signal: controller.signal,
+		});
+	} catch (error) {
+		if (isAbortError(error)) throw new Error('Voice planner timed out');
+		throw error;
+	} finally {
+		clear();
+	}
 
 	if (!res.ok) {
 		throw new Error(`Voice planner failed: ${await res.text()}`);

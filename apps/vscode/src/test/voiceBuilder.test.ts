@@ -21,6 +21,14 @@ test('extractJsonObject parses a fenced JSON object', () => {
 	});
 });
 
+test('extractJsonObject ignores braces inside string values', () => {
+	const content = '{"project":{"components":[]},"summary":"Added {Gemini} node"} trailing text';
+	assert.deepEqual(extractJsonObject(content), {
+		project: { components: [] },
+		summary: 'Added {Gemini} node',
+	});
+});
+
 test('sanitizeVoiceProjectEdit strips viewport and increments document revision', () => {
 	const currentProject = {
 		project_id: 'project-1',
