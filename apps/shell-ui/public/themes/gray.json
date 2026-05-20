@@ -29,6 +29,7 @@
 	"--rr-color-success": "#229954",
 	"--rr-border": "#5a5a5a",
 	"--rr-border-hover": "#777777",
+	"--rr-sash-hover": "#6ca0cc",
 	"--rr-border-focus": "#6ca0cc",
 	"--rr-border-input": "#6a6a6a",
 	"--rr-border-paper": "none",

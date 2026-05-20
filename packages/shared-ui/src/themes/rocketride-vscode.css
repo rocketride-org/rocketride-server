@@ -86,6 +86,7 @@
 
 	--rr-border: var(--vscode-widget-border, #dcdcdc);
 	--rr-border-hover: var(--vscode-widget-border, #aaaaaa);
+	--rr-sash-hover: var(--vscode-sash-hoverBorder, #007fd4);
 	--rr-border-focus: var(--vscode-focusBorder, #0078d4);
 	--rr-border-input: var(--vscode-input-border, #858585);
 	--rr-border-paper: none;

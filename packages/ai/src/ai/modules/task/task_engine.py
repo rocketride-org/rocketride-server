@@ -38,7 +38,6 @@ import socket
 import hashlib
 import shlex
 import shutil
-import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -57,6 +56,7 @@ from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
+from .pipeline import resolve_pipeline_env
 from .types import LAUNCH_TYPE
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -308,45 +308,12 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    # Only environment variables with this prefix are permitted to resolve in pipelines.
-    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
-    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
-
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using the merged environment dict.
+
+        Delegates to :func:`pipeline.resolve_pipeline_env`.
         """
-        Replace ${KEY} placeholders in a pipeline dictionary with environment values.
-
-        Uses the merged environment dict (self._env) which was built by the
-        command handler from: .env → org secrets → team secrets → user secrets
-        → caller-supplied env overrides.
-
-        Only variables whose names start with ALLOWED_ENV_PREFIX are resolved.
-        All other references are replaced with a redacted placeholder to prevent
-        secret exfiltration.
-
-        Args:
-            pipeline: Dictionary containing the pipeline configuration.
-
-        Returns:
-            New dictionary with resolved environment variables.
-        """
-        # Convert dict to JSON string
-        pipeline_str = json.dumps(pipeline)
-
-        # Replace ${VAR_NAME} with value from the merged env dict
-        def replacer(match):
-            env_var = match.group(1)
-            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                value = self._env.get(env_var, match.group(0))
-                if value == match.group(0):
-                    return value  # placeholder not found
-                return json.dumps(value)[1:-1]  # escape but strip outer quotes
-            return '<REDACTED>'
-
-        resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
-
-        # Parse back to dict and return
-        return json.loads(resolved_str)
+        return resolve_pipeline_env(pipeline, self._env)
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """

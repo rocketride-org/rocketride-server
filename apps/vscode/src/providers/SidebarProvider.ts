@@ -29,6 +29,7 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getProjectProvider } from '../extension';
 
 // =============================================================================
@@ -517,6 +518,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
+
+			// Gate: check for missing ROCKETRIDE_* env vars
+			const missing = await checkMissingEnvVars(client, pipelineJson);
+			if (missing.length > 0) return;
 
 			const pipeName = path.basename(fsPath).replace(/\.pipe(?:\.json)?$/, '');
 			await client.use({

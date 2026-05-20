@@ -443,6 +443,50 @@
 				{
 					"command": "rocketride.page.settings.setupCredentials",
 					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.connection.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.files.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.connect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.disconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.reconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.clearApiKey",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.createFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.deploy.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.install",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.uninstall",
+					"when": "false"
 				}
 			],
 			"view/title": [
