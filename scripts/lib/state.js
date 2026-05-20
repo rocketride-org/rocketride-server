@@ -22,7 +22,14 @@ const STATE_FILE = path.join(BUILD_ROOT, 'state.json');
 // closes CodeQL js/prototype-pollution-utility alert #274.
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 function assertSafePath(parts) {
-    for (const part of parts) {
+    // Coerce each segment with String() before the Set check. Bracket access
+    // (obj[part]) coerces its operand to a string property key, so passing
+    // `new String('__proto__')` (a wrapper object, not a primitive) would
+    // bypass FORBIDDEN_KEYS.has() — identity equality in Set — while still
+    // resolving to '__proto__' at the actual write site. String() normalizes
+    // wrappers, numbers, etc. to the same key form the property access uses.
+    for (const rawPart of parts) {
+        const part = String(rawPart);
         if (FORBIDDEN_KEYS.has(part)) {
             throw new Error(`state: forbidden key segment "${part}" in path`);
         }
