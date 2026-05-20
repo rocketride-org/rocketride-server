@@ -130,6 +130,9 @@ const ProjectWebview: React.FC = () => {
 				}
 				break;
 			}
+			case 'project:envKeysUpdate':
+				setEnvKeys(msg.envKeys);
+				break;
 			case 'shell:connectionChange':
 				if (msg.isConnected) {
 					setStatusMap({});

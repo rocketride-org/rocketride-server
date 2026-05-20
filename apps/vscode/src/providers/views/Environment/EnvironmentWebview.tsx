@@ -122,6 +122,9 @@ interface SlotPanelProps {
 	 * Stored in a ref so callbacks don't go stale.
 	 */
 	sendMessage: (msg: EnvironmentWebviewToHost) => void;
+
+	/** Keys that must have non-empty values before save is allowed (user scope only). */
+	requiredKeys?: string[];
 }
 
 /**
@@ -133,7 +136,7 @@ interface SlotPanelProps {
  * - If the server is SaaS, shows up to three cards (Organization, Team, User)
  *   gated by the user's permissions.
  */
-const EnvironmentSlotPanel: React.FC<SlotPanelProps> = ({ slot, shared: isShared, state, envs, sendMessage }) => {
+const EnvironmentSlotPanel: React.FC<SlotPanelProps> = ({ slot, shared: isShared, state, envs, sendMessage, requiredKeys }) => {
 	/** Pick the right content padding based on whether we're inside a TabPanel. */
 	const contentStyle = isShared ? styles.contentShared : styles.content;
 	/**
@@ -170,6 +173,7 @@ const EnvironmentSlotPanel: React.FC<SlotPanelProps> = ({ slot, shared: isShared
 					onSave={async (env) => {
 						sendMessage({ type: 'env:saveEnv', slot, scope: 'user', env });
 					}}
+					requiredKeys={requiredKeys}
 				/>
 			</div>
 		);
@@ -210,6 +214,7 @@ const EnvironmentSlotPanel: React.FC<SlotPanelProps> = ({ slot, shared: isShared
 				onSave={async (env) => {
 					sendMessage({ type: 'env:saveEnv', slot, scope: 'user', env });
 				}}
+				requiredKeys={requiredKeys}
 			/>
 		</div>
 	);
@@ -258,6 +263,10 @@ const EnvironmentWebview: React.FC = () => {
 
 	/** Page-level error message (cleared on next successful operation). */
 	const [error, setError] = useState<string | null>(null);
+
+	/** Keys that must have non-empty values before save is allowed. */
+	const [requiredKeys, setRequiredKeys] = useState<string[]>([]);
+	const requiredKeysRef = useRef<string[]>([]);
 
 	/** Ref to the latest sendMessage so callbacks don't go stale. */
 	const sendMessageRef = useRef<(msg: EnvironmentWebviewToHost) => void>(() => {});
@@ -309,10 +318,19 @@ const EnvironmentWebview: React.FC = () => {
 
 			// -- Env data response (from getEnv or refreshed after saveEnv) --------
 			case 'env:data': {
-				// Build the cache key matching our envKey() helper
 				const cacheKey = `${message.slot}:${message.scope}:${message.scopeId ?? ''}`;
-				setEnvs((prev) => ({ ...prev, [cacheKey]: message.env }));
-				setError(null); // clear any previous error on success
+				let env = message.env;
+				// Always merge required keys into any user-scope response
+				if (requiredKeysRef.current.length > 0) {
+					env = { ...env };
+					for (const key of requiredKeysRef.current) {
+						if (!(key in env)) {
+							env[key] = '';
+						}
+					}
+				}
+				setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
+				setError(null);
 				break;
 			}
 
@@ -320,6 +338,25 @@ const EnvironmentWebview: React.FC = () => {
 			case 'env:error':
 				setError(message.error);
 				break;
+
+			// -- Pre-fill missing env var keys into the user scope card ----------
+			case 'env:prefill': {
+				// Merge missing keys (with empty values) into the development user-scope env
+				const userKey = 'development:user:';
+				setEnvs((prev) => {
+					const existing = prev[userKey] ?? {};
+					const merged = { ...existing };
+					for (const key of message.keys) {
+						if (!(key in merged)) {
+							merged[key] = '';
+						}
+					}
+					return { ...prev, [userKey]: merged };
+				});
+				setRequiredKeys(message.keys);
+				requiredKeysRef.current = message.keys;
+				break;
+			}
 		}
 	}, []);
 
@@ -361,6 +398,7 @@ const EnvironmentWebview: React.FC = () => {
 					state={slots['development']}
 					envs={envs}
 					sendMessage={stableSendMessage}
+					requiredKeys={requiredKeys}
 				/>
 			),
 		},
@@ -396,6 +434,7 @@ const EnvironmentWebview: React.FC = () => {
 					state={slots['development']}
 					envs={envs}
 					sendMessage={stableSendMessage}
+					requiredKeys={requiredKeys}
 				/>
 			) : (
 				// ── Independent mode — dev/deploy pill bar ───────────────────

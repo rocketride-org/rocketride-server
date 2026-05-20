@@ -80,6 +80,12 @@ export type EnvironmentHostToWebview =
 			type: 'env:error';
 			/** Human-readable error description. */
 			error: string;
+	  }
+	| {
+			/** Pre-fill missing env var keys as empty entries in the user scope card. */
+			type: 'env:prefill';
+			/** Key names to add (with empty values) if not already present. */
+			keys: string[];
 	  };
 
 /** All messages the EnvironmentWebview can send to the extension host. */

@@ -131,19 +131,8 @@ const styles = {
 		minHeight: 0,
 		paddingTop: '8px',
 	},
-	footer: { flexShrink: 0, paddingTop: '8px', display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end' },
-	saveButton: {
-		padding: '6px 20px',
-		fontSize: '13px',
-		fontFamily: 'var(--rr-font-family-widget)',
-		fontWeight: 500,
-		color: 'var(--rr-fg-button)',
-		backgroundColor: 'var(--rr-bg-button)',
-		border: 'none',
-		borderRadius: '3px',
-		cursor: 'pointer',
-	},
-	saveButtonDisabled: { opacity: 0.5, cursor: 'not-allowed' },
+	footer: { flexShrink: 0, paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' },
+	footerHint: { fontSize: '11px', color: 'var(--rr-text-disabled)', marginRight: 'auto' },
 	errorBox: {
 		width: '100%',
 		padding: '10px 14px',
@@ -581,8 +570,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 						{/* Footer */}
 						<div style={styles.footer}>
 							{validationError && <div style={styles.errorBox}>{validationError}</div>}
+							{envKeys.length > 0 && <span style={styles.footerHint}>Type $&#123; in a field to pick from your variables</span>}
 							<button
-								style={{ ...styles.saveButton, ...(disableSave ? styles.saveButtonDisabled : {}) }}
+								style={{ ...commonStyles.buttonPrimary, ...(disableSave ? commonStyles.buttonDisabled : {}) }}
 								disabled={disableSave}
 								onClick={() => {
 									if (schema) {
@@ -592,7 +582,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 									}
 								}}
 							>
-								{isSubmitting ? 'Validating...' : 'Save Changes'}
+								{isSubmitting ? 'Validating...' : 'Save'}
 							</button>
 						</div>
 					</div>

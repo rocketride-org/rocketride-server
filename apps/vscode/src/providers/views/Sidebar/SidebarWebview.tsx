@@ -306,8 +306,6 @@ const SidebarViewWebview: React.FC = () => {
 			const commands: Record<string, string> = {
 				new: 'rocketride.sidebar.files.createFile',
 				monitor: 'rocketride.page.monitor.open',
-				deploy: 'rocketride.page.deploy.open',
-				templates: 'rocketride.page.templates.open',
 			};
 			const cmd = commands[target];
 			if (cmd) sendMessage({ type: 'command', command: cmd });

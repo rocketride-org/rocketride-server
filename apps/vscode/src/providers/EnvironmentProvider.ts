@@ -56,6 +56,9 @@ export class EnvironmentProvider {
 	/** Singleton webview panel — only one Environment page can be open. */
 	private static panel: vscode.WebviewPanel | null = null;
 
+	/** Missing env var keys to pre-fill in the webview (cleared after delivery). */
+	private pendingPrefillKeys: string[] | null = null;
+
 	/** Subscriptions and listeners to clean up on dispose. */
 	private disposables: vscode.Disposable[] = [];
 
@@ -82,25 +85,28 @@ export class EnvironmentProvider {
 
 	/** Registers the `rocketride.page.environment.open` command. */
 	private registerCommands(): void {
-		const openCmd = vscode.commands.registerCommand('rocketride.page.environment.open', () => {
-			this.show();
+		const cmd = vscode.commands.registerCommand('rocketride.page.environment.open', (missingKeys?: string[]) => {
+			this.show(missingKeys);
 		});
-		const refreshCmd = vscode.commands.registerCommand('rocketride.page.environment.refreshUser', () => {
-			this.refreshUserScope();
-		});
-		this.disposables.push(openCmd, refreshCmd);
-		this.context.subscriptions.push(openCmd, refreshCmd);
+		this.disposables.push(cmd);
+		this.context.subscriptions.push(cmd);
 	}
 
 	// =========================================================================
 	// SHOW / REVEAL
 	// =========================================================================
 
-	/** Opens (or reveals) the Environment webview panel. */
-	public show(): void {
+	/** Opens (or reveals) the Environment webview panel, optionally pre-filling missing keys. */
+	public show(missingKeys?: string[]): void {
+		if (missingKeys?.length) {
+			this.pendingPrefillKeys = missingKeys;
+		}
+
 		// Step 1: reveal existing panel if one is already open.
 		if (EnvironmentProvider.panel) {
 			EnvironmentProvider.panel.reveal(vscode.ViewColumn.One);
+			// Panel is already initialized — send prefill immediately
+			this.flushPrefillKeys(EnvironmentProvider.panel);
 			return;
 		}
 
@@ -133,25 +139,18 @@ export class EnvironmentProvider {
 	}
 
 	/**
-	 * Pushes fresh user-scope env data to the open Environment webview.
-	 * Called after prefilling missing env vars so the panel reflects the
-	 * newly added keys without requiring a manual reload.
+	 * Sends any pending prefill keys to the webview and clears the stash.
 	 */
-	private refreshUserScope(): void {
-		const panel = EnvironmentProvider.panel;
-		if (!panel) return;
+	private flushPrefillKeys(panel: vscode.WebviewPanel): void {
+		const keys = this.pendingPrefillKeys;
+		if (!keys?.length) return;
+		this.pendingPrefillKeys = null;
 
-		const client = this.connectionManager.getClient();
-		if (!client) return;
-
-		client.account
-			.getEnv('user')
-			.then((env) => {
-				return panel.webview.postMessage({ type: 'env:data', slot: 'development', scope: 'user', env });
-			})
-			.catch((err: unknown) => {
-				console.error(`[EnvironmentProvider] Failed to refresh user env: ${err}`);
-			});
+		Promise.resolve(
+			panel.webview.postMessage({ type: 'env:prefill', keys })
+		).catch((err: unknown) => {
+			console.error(`[EnvironmentProvider] Failed to send prefill keys: ${err}`);
+		});
 	}
 
 	// =========================================================================
@@ -169,6 +168,7 @@ export class EnvironmentProvider {
 			// -- Lifecycle --------------------------------------------------------
 			case 'view:ready':
 				await this.sendInitialData(panel);
+				this.flushPrefillKeys(panel);
 				break;
 
 			// -- Load env for a specific slot + scope ----------------------------
@@ -217,6 +217,10 @@ export class EnvironmentProvider {
 						scopeId: message.scopeId,
 						env: freshEnv,
 					});
+
+					// Notify other views (e.g. canvas config panel) that env keys changed
+					const manager = message.slot === 'development' ? this.connectionManager : this.deployManager;
+					manager.emit('shell:envKeysChanged');
 				} catch (err: unknown) {
 					this.postError(panel, err instanceof Error ? err.message : String(err));
 				}

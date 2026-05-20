@@ -24,7 +24,7 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
-import { prefillMissingEnvVars } from '../shared/util/envVarCheck';
+import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 
 // =============================================================================
 // CONSTANTS
@@ -98,6 +98,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.broadcastSubscriptionStatus();
 		});
 
+		const envKeysChangedListener = this.connectionManager.on('shell:envKeysChanged', () => {
+			this.broadcastEnvKeys();
+		});
+
 		const connectionStateListener = this.connectionManager.on('shell:statusChange', async (connectionStatus) => {
 			try {
 				if (connectionStatus.state === ConnectionState.CONNECTED) {
@@ -113,7 +117,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.broadcastServicesToAllEditors(payload);
 		});
 
-		this.disposables.push(eventListener, accountUpdateListener, connectionStateListener, servicesUpdatedListener);
+		this.disposables.push(eventListener, accountUpdateListener, envKeysChangedListener, connectionStateListener, servicesUpdatedListener);
 	}
 
 	// =========================================================================
@@ -170,6 +174,31 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected, isSubscribed: subscribed }).then(undefined, (err: unknown) => {
 					this.logger.error(`Failed to post connectionState to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	/**
+	 * Re-fetches env key names from the server and broadcasts them to all
+	 * open editor webviews so the autocomplete list stays in sync after
+	 * variables are added or removed on the Environment page.
+	 */
+	private async broadcastEnvKeys(): Promise<void> {
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+
+		let envKeys: string[];
+		try {
+			envKeys = await client.account.getEnvironmentKeys();
+		} catch {
+			return;
+		}
+
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview.postMessage({ type: 'project:envKeysUpdate', envKeys }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post envKeysUpdate to webview: ${err}`);
 				});
 			}
 		}
@@ -417,10 +446,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:missingEnvVars': {
 					const keys = data.keys as string[];
 					if (keys?.length) {
-						const client = this.connectionManager.getClient();
-						if (client) {
-							await prefillMissingEnvVars(client, keys);
-						}
+						await handleMissingEnvVars(keys);
 					}
 					break;
 				}
