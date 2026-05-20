@@ -1,5 +1,6 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,41 +22,36 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Prepare the timeout for http request, in case of server related issues."""
+"""
+Small string utilities.
+
+This is the single home of ``safe_str``. Both node-side agent drivers and
+``ai.common.agent`` internals import from here — there is no duplicate
+copy anywhere else in the codebase.
+"""
+
+from __future__ import annotations
 
 from typing import Any
 
-from requests.adapters import HTTPAdapter  # type: ignore
-from requests.models import Request, Response  # type: ignore
 
-from ..constants.defaults import DEFAULT_TIMEOUT
-from ..constants.general import TIMEOUT
+def safe_str(value: Any) -> str:
+    """Convert any value to a string without raising.
 
+    Returns an empty string for ``None``. For anything else, calls
+    ``str(value)``; if ``str()`` itself raises (an object whose ``__str__``
+    blows up), returns an empty string. Never propagates an exception.
 
-class TimeoutHTTPAdapter(HTTPAdapter):  # pylint: disable=too-few-public-methods
-    """Transport Adapter with default timeouts for http request.
+    Args:
+        value: The value to convert. Any type is accepted, including
+            objects whose ``__str__`` is malformed.
 
-    :param HTTPAdapter: The built-in HTTP Adapter for urllib3.
-    :type HTTPAdapter: HTTPAdapter
+    Returns:
+        The stringified value, or ``''`` for ``None`` / a failing ``__str__``.
     """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Initialise Timeout http adapter."""
-        self.timeout = DEFAULT_TIMEOUT
-        if TIMEOUT in kwargs:
-            self.timeout = kwargs[TIMEOUT]
-            del kwargs[TIMEOUT]
-        super().__init__(*args, **kwargs)
-
-    def send(self, request: Request, **kwargs: Any) -> Response:
-        """Http request send method.
-
-        :param request: Request object
-        :type request: Any
-        :return: Http request's response.
-        :rtype: Response
-        """
-        timeout = kwargs.get(TIMEOUT)
-        if timeout is None:
-            kwargs[TIMEOUT] = self.timeout
-        return super().send(request, **kwargs)
+    if value is None:
+        return ''
+    try:
+        return str(value)
+    except Exception:
+        return ''

@@ -4,7 +4,6 @@ Internal helpers for agent framework drivers.
 This module contains small, framework-agnostic utilities used by `AgentBase` and
 the agent-as-tool adapter:
 - run id / timestamp helpers
-- tool invocation payload normalization across frameworks
 - transcript and text extraction helpers for host LLM responses
 """
 
@@ -12,7 +11,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
+
+from ai.common.utils import safe_str  # re-imported so the helpers below can use it
 
 
 def new_run_id() -> str:
@@ -23,94 +24,6 @@ def new_run_id() -> str:
 def now_iso() -> str:
     """Return current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
-
-
-def safe_str(value: Any) -> str:
-    """Convert `value` to a string (never raises an exception)."""
-    if value is None:
-        return ''
-    try:
-        return str(value)
-    except Exception:
-        return ''
-
-
-# ---------------------------------------------------------------------------
-# Tool invocation payload normalization
-# ---------------------------------------------------------------------------
-def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:
-    """
-    Normalize tool invocation payload shapes across frameworks.
-
-    Supported input forms:
-    - Direct dict payload
-    - Pydantic-ish model payloads (best-effort to dict)
-    - `{ "input": X }` wrapper (unwrapped)
-    - `{ "input": { ... }, ...extras }` wrapper (extras merged into inner dict; extras override)
-    - `input=<payload>, **kwargs` (kwargs merged into payload dict when possible)
-    - kwargs-only invocations (payload becomes kwargs)
-
-    Args:
-        input: Framework tool input value, often passed as a single `input=...` param.
-        kwargs: Extra keyword args captured by framework wrappers.
-
-    Returns:
-        A normalized payload object to pass to `host.tools.invoke(...)`.
-    """
-
-    def _best_effort_pydantic_dump(value: Any) -> Any:
-        """
-        Unwrap pydantic-ish models to dict.
-
-        - Pydantic v2: model_dump()
-        - Pydantic v1: dict()
-        """
-        if value is None:
-            return None
-        if isinstance(value, (dict, list, tuple, str, int, float, bool)):
-            return value
-
-        if hasattr(value, 'model_dump') and callable(getattr(value, 'model_dump')):
-            try:
-                return value.model_dump()
-            except Exception:
-                return value
-
-        if hasattr(value, 'dict') and callable(getattr(value, 'dict')):
-            try:
-                return value.dict()
-            except Exception:
-                return value
-
-        return value
-
-    kw = kwargs or {}
-
-    payload: Any
-    if input is not None:
-        payload = _best_effort_pydantic_dump(input)
-        if kw:
-            if isinstance(payload, dict):
-                payload = {**payload, **kw}
-            else:
-                payload = {'input': payload, **kw}
-    elif kw:
-        payload = kw
-    else:
-        payload = {}
-
-    payload = _best_effort_pydantic_dump(payload)
-
-    if isinstance(payload, dict) and 'input' in payload:
-        if len(payload) == 1:
-            return _best_effort_pydantic_dump(payload.get('input'))
-
-        inner = _best_effort_pydantic_dump(payload.get('input'))
-        if isinstance(inner, dict):
-            extras = {k: v for k, v in payload.items() if k != 'input'}
-            return {**inner, **extras}
-
-    return payload
 
 
 # ---------------------------------------------------------------------------

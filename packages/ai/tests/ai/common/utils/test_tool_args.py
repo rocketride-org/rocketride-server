@@ -4,10 +4,12 @@
 # =============================================================================
 
 """
-Unit tests for the tool-input helpers in ``rocketlib.filters``:
+Unit tests for the tool-input helpers in ``ai.common.utils.tool_args``:
 
 * ``normalize_tool_input`` — envelope-strip / input-coercion.
-* ``require_str`` / ``require_int`` / ``optional_str`` — argument validators.
+* ``require_str`` / ``require_int`` / ``require_bool`` — argument validators.
+* ``optional_str`` / ``optional_int`` / ``optional_bool`` — optional variants.
+* ``validate_tool_input_schema`` — unknown-key rejection.
 
 These were previously copy-pasted across tool nodes (tool_github,
 tool_firecrawl, tool_exa_search, tool_pipe, tool_filesystem); pinning the
@@ -16,23 +18,19 @@ in one place.
 
 Run with::
 
-    ./builder rocketlib:test
-
-The ``rocketlib:test`` builder action invokes ``dist/server/engine`` (the
-built engine binary) as the Python interpreter, so ``rocketlib`` and its
-``engLib`` C extension are importable directly. Tests assume the engine
-has been built (``./builder server:build`` runs as a dependency).
+    pytest packages/ai/tests/ai/common/utils/test_tool_args.py -v
 """
 
 from __future__ import annotations
 
 import pytest
 
-from rocketlib import (
+from ai.common.utils import (
     normalize_tool_input,
     optional_bool,
     optional_int,
     optional_str,
+    require_dict,
     require_int,
     require_str,
     validate_tool_input_schema,
@@ -187,13 +185,13 @@ class TestNormalizeToolInput:
         assert inner == {'q': 'hi'}
 
     def test_warning_emitted_for_unexpected_type(self, monkeypatch):
-        # The helper does a lazy ``from .engine import warning`` to avoid a
-        # circular import at module load. Patch the engine module so we can
-        # observe what gets emitted.
-        from rocketlib import engine as engine_module
+        # ``warning`` is imported at module load — patch the local
+        # reference in ai.common.utils.tool_args so we can observe what
+        # gets emitted.
+        from ai.common.utils import tool_args as tool_args_module
 
         captured: list[str] = []
-        monkeypatch.setattr(engine_module, 'warning', lambda msg: captured.append(msg))
+        monkeypatch.setattr(tool_args_module, 'warning', lambda msg: captured.append(msg))
 
         result = normalize_tool_input(42, tool_name='exa_search')
 
@@ -534,6 +532,35 @@ class TestOptionalBool:
         # default=True, we return False. The "absent" path is None / missing,
         # not False.
         assert optional_bool({'staged': False}, 'staged', default=True) is False
+
+
+# ---------------------------------------------------------------------------
+# require_dict
+# ---------------------------------------------------------------------------
+
+
+class TestRequireDict:
+    def test_dict_passes_through(self):
+        d = {'a': 1}
+        assert require_dict(d) is d
+
+    def test_empty_dict_accepted(self):
+        d: dict = {}
+        assert require_dict(d) is d
+
+    def test_non_dict_raises(self):
+        with pytest.raises(ValueError, match='Tool input must be a JSON object'):
+            require_dict('hello')
+        with pytest.raises(ValueError, match='Tool input must be a JSON object'):
+            require_dict(42)
+        with pytest.raises(ValueError, match='Tool input must be a JSON object'):
+            require_dict([1, 2])
+        with pytest.raises(ValueError, match='Tool input must be a JSON object'):
+            require_dict(None)
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='read_file: Tool input must be a JSON object'):
+            require_dict('hello', tool_name='read_file')
 
 
 # ---------------------------------------------------------------------------

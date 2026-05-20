@@ -159,6 +159,16 @@ class IGlobal(IGlobalTransform):
 
 
 def _format_error(e: Exception) -> str:
+    """Concise error string for weaviate's httpx-based exceptions.
+
+    Behaviour:
+    - ``httpx.HTTPStatusError`` → ``"Error <status>: <body>"`` where the body
+      is the response's ``message`` / ``error`` JSON field if parseable,
+      otherwise the raw response text, otherwise ``reason_phrase``.
+    - ``httpx.RequestError`` / ``socket.timeout`` → ``str(e).strip()``.
+    - Anything else (including the case where ``httpx`` is not installed) →
+      ``str(e).strip()``.
+    """
     try:
         import httpx  # type: ignore
         import socket  # type: ignore
@@ -170,17 +180,14 @@ def _format_error(e: Exception) -> str:
         resp = e.response
         status = getattr(resp, 'status_code', None)
         text = (getattr(resp, 'text', '') or '').strip()
-
         if text and text.lstrip().startswith(('{', '[')):
             try:
                 data = json.loads(text)
                 text = (data.get('message') or data.get('error') or text).strip()
             except Exception:
                 pass
-
         if not text:
             text = (getattr(resp, 'reason_phrase', '') or '').strip()
-
         return f'Error {status}: {text}' if status else (text or str(e).strip())
 
     if isinstance(e, (httpx.RequestError, socket.timeout)):

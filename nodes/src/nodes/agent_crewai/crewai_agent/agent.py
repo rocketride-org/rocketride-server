@@ -39,6 +39,8 @@ from ai.common.agent import AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
+from ai.common.utils import safe_str
+
 from ..crewai_base import CrewBase
 
 
@@ -112,7 +114,7 @@ class CrewAgent(CrewBase):
         # the prompt is appended as additional user context.  Without this, the
         # LLM never sees what the user typed and the agent responds with
         # "I haven't been told what the task is."
-        prompt = self._safe_str(question.getPrompt())
+        prompt = safe_str(question.getPrompt())
         task_text = self._task_description or ''
         if not task_text:
             task_text = prompt or 'Complete the user request.'
@@ -143,8 +145,8 @@ class CrewAgent(CrewBase):
         # CrewStreamingOutput (final answer at .result.raw).  Verified in
         # CrewAI 1.14.1 source.
         final_text = (
-            self._safe_str(getattr(result, 'raw', None))
-            or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None))
-            or self._safe_str(result)
+            safe_str(getattr(result, 'raw', None))
+            or safe_str(getattr(getattr(result, 'result', None), 'raw', None))
+            or safe_str(result)
         )
         return final_text, result
