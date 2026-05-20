@@ -82,6 +82,7 @@
 			"svgo@4": ">=4.0.1 <5",
 			"underscore": ">=1.13.8 <2",
 			"undici": ">=7.24.0 <8",
+			"ws": ">=8.20.1 <9",
 			"yaml@1": ">=1.10.3 <2"
 		},
 		"supportedArchitectures": {
