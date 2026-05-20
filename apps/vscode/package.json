@@ -207,6 +207,22 @@
 					"default": false,
 					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
 				},
+				"rocketride.voiceBuilder.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable push-to-talk Voice Builder in the pipeline editor"
+				},
+				"rocketride.voiceBuilder.plannerBaseUrl": {
+					"type": "string",
+					"default": "https://api.openai.com/v1",
+					"description": "OpenAI-compatible base URL used by Voice Builder for project edits",
+					"format": "uri"
+				},
+				"rocketride.voiceBuilder.plannerModel": {
+					"type": "string",
+					"default": "gpt-4o-mini",
+					"description": "OpenAI-compatible model used by Voice Builder for project edits"
+				},
 				"rocketride.connectionMode": {
 					"type": "string",
 					"default": "local",

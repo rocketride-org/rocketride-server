@@ -71,6 +71,9 @@ export interface ConfigManagerInfo {
 
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+
+	/** Voice Builder settings and provider credentials. */
+	voiceBuilder: VoiceBuilderConfig;
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -96,6 +99,7 @@ export interface SettingsSnapshot {
 	deployment: ConnectionGroupSnapshot;
 	defaultPipelinePath: string;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	voiceBuilder: VoiceBuilderSnapshot;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
@@ -103,6 +107,19 @@ export interface SettingsSnapshot {
 	integrationWindsurf: boolean;
 	integrationClaudeMd: boolean;
 	integrationAgentsMd: boolean;
+}
+
+export interface VoiceBuilderConfig {
+	enabled: boolean;
+	plannerBaseUrl: string;
+	plannerModel: string;
+	deepgramApiKey: string;
+	plannerApiKey: string;
+}
+
+export interface VoiceBuilderSnapshot extends VoiceBuilderConfig {
+	hasDeepgramApiKey?: boolean;
+	hasPlannerApiKey?: boolean;
 }
 
 /**
@@ -127,12 +144,21 @@ export class ConfigManager {
 		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
 	};
 
+	private static readonly DEFAULT_VOICE_BUILDER: VoiceBuilderConfig = {
+		enabled: false,
+		plannerBaseUrl: 'https://api.openai.com/v1',
+		plannerModel: 'gpt-4o-mini',
+		deepgramApiKey: '',
+		plannerApiKey: '',
+	};
+
 	// Cached configuration
 	private config: ConfigManagerInfo = {
 		development: { ...ConfigManager.DEFAULT_GROUP, connectionMode: 'local' },
 		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
 		defaultPipelinePath: '',
 		pipelineRestartBehavior: 'prompt',
+		voiceBuilder: { ...ConfigManager.DEFAULT_VOICE_BUILDER },
 	};
 
 	private constructor() {}
@@ -168,7 +194,7 @@ export class ConfigManager {
 		this.disposables.push(
 			context.secrets.onDidChange(async (event) => {
 				if (this.isBatchApplying) return;
-				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey') {
+				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey' || event.key === 'rocketride.voiceBuilder.deepgramApiKey' || event.key === 'rocketride.voiceBuilder.plannerApiKey') {
 					await this.refreshConfig();
 				}
 			})
@@ -232,6 +258,18 @@ export class ConfigManager {
 			deployment: await this.refreshGroupConfig('deployment'),
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
+			voiceBuilder: await this.refreshVoiceBuilderConfig(),
+		};
+	}
+
+	private async refreshVoiceBuilderConfig(): Promise<VoiceBuilderConfig> {
+		const vc = vscode.workspace.getConfiguration(`${this.configSection}.voiceBuilder`);
+		return {
+			enabled: vc.get<boolean>('enabled', ConfigManager.DEFAULT_VOICE_BUILDER.enabled),
+			plannerBaseUrl: vc.get<string>('plannerBaseUrl', ConfigManager.DEFAULT_VOICE_BUILDER.plannerBaseUrl),
+			plannerModel: vc.get<string>('plannerModel', ConfigManager.DEFAULT_VOICE_BUILDER.plannerModel),
+			deepgramApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.deepgramApiKey'),
+			plannerApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.plannerApiKey'),
 		};
 	}
 
@@ -239,17 +277,20 @@ export class ConfigManager {
 	 * Gets the API key from secure storage for the given group.
 	 */
 	private async getApiKeyFromStorage(group: ConnectionGroup): Promise<string> {
+		return this.getSecretFromStorage(`rocketride.${group}.apiKey`);
+	}
+
+	private async getSecretFromStorage(key: string): Promise<string> {
 		if (this.isDisposing) return '';
 		if (!this.context) {
 			console.warn('ConfigManager not initialized with context - cannot access secure storage');
 			return '';
 		}
 		try {
-			const key = `rocketride.${group}.apiKey`;
 			return (await this.context.secrets.get(key)) || '';
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return '';
-			console.error(`Failed to retrieve ${group} API key from secure storage:`, error);
+			console.error(`Failed to retrieve ${key} from secure storage:`, error);
 			return '';
 		}
 	}
@@ -264,6 +305,7 @@ export class ConfigManager {
 			deployment: { ...this.config.deployment, local: { ...this.config.deployment.local } },
 			defaultPipelinePath: this.config.defaultPipelinePath,
 			pipelineRestartBehavior: this.config.pipelineRestartBehavior,
+			voiceBuilder: { ...this.config.voiceBuilder },
 		};
 	}
 
@@ -369,26 +411,35 @@ export class ConfigManager {
 	 * Stores the API key in secure storage for the given group.
 	 */
 	public async setApiKey(group: ConnectionGroup, apiKey: string): Promise<void> {
+		await this.setSecret(`rocketride.${group}.apiKey`, apiKey);
+		if (this.config) {
+			this.config[group].apiKey = apiKey.trim();
+		}
+	}
+
+	public async setVoiceBuilderSecret(key: 'deepgramApiKey' | 'plannerApiKey', apiKey: string): Promise<void> {
+		await this.setSecret(`rocketride.voiceBuilder.${key}`, apiKey);
+		if (this.config) {
+			this.config.voiceBuilder[key] = apiKey.trim();
+		}
+	}
+
+	private async setSecret(key: string, value: string): Promise<void> {
 		if (this.isDisposing) return;
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context - cannot access secure storage');
 		}
 
-		const key = `rocketride.${group}.apiKey`;
 		try {
-			if (apiKey.trim()) {
-				await this.context.secrets.store(key, apiKey.trim());
+			if (value.trim()) {
+				await this.context.secrets.store(key, value.trim());
 			} else {
 				await this.context.secrets.delete(key);
 			}
-			// Update cache immediately
-			if (this.config) {
-				this.config[group].apiKey = apiKey.trim();
-			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return;
-			console.error(`Failed to store ${group} API key in secure storage:`, error);
-			throw new Error(`Failed to store ${group} API key securely`);
+			console.error(`Failed to store ${key} in secure storage:`, error);
+			throw new Error(`Failed to store secret securely`);
 		}
 	}
 
@@ -458,6 +509,11 @@ export class ConfigManager {
 			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
 			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
 
+			// --- Voice Builder settings ---
+			await wc.update('voiceBuilder.enabled', s.voiceBuilder.enabled, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.plannerBaseUrl', s.voiceBuilder.plannerBaseUrl, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.plannerModel', s.voiceBuilder.plannerModel, vscode.ConfigurationTarget.Global);
+
 			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
 			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
@@ -470,6 +526,12 @@ export class ConfigManager {
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
 			await this.setApiKey('deployment', s.deployment.apiKey);
+			if (s.voiceBuilder.deepgramApiKey.trim() || s.voiceBuilder.hasDeepgramApiKey === false) {
+				await this.setVoiceBuilderSecret('deepgramApiKey', s.voiceBuilder.deepgramApiKey);
+			}
+			if (s.voiceBuilder.plannerApiKey.trim() || s.voiceBuilder.hasPlannerApiKey === false) {
+				await this.setVoiceBuilderSecret('plannerApiKey', s.voiceBuilder.plannerApiKey);
+			}
 
 			// --- Single cache refresh from final state ---
 			await this.refreshConfig();

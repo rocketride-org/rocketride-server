@@ -24,6 +24,7 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { getVoiceBuilderStatus, processVoiceBuilderRecording, type IVoiceBuilderConfig, type IVoiceBuilderSecrets } from './voice/voiceBuilder';
 
 // =============================================================================
 // CONSTANTS
@@ -76,6 +77,20 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 		}
 		return undefined;
+	}
+
+	private getVoiceBuilderRuntime(): { config: IVoiceBuilderConfig; secrets: IVoiceBuilderSecrets; status: ReturnType<typeof getVoiceBuilderStatus> } {
+		const voiceBuilder = ConfigManager.getInstance().getConfig().voiceBuilder;
+		const config = {
+			enabled: voiceBuilder.enabled,
+			plannerBaseUrl: voiceBuilder.plannerBaseUrl,
+			plannerModel: voiceBuilder.plannerModel,
+		};
+		const secrets = {
+			deepgramApiKey: voiceBuilder.deepgramApiKey,
+			plannerApiKey: voiceBuilder.plannerApiKey,
+		};
+		return { config, secrets, status: getVoiceBuilderStatus(config, secrets) };
 	}
 
 	// =========================================================================
@@ -326,6 +341,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
+						voiceStatus: this.getVoiceBuilderRuntime().status,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 
@@ -370,6 +386,27 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 				case 'project:requestSave': {
 					await document.save();
+					break;
+				}
+
+				case 'voice:process': {
+					try {
+						const { config, secrets } = this.getVoiceBuilderRuntime();
+						const result = await processVoiceBuilderRecording(
+							{
+								audioBase64: data.audioBase64 as string,
+								mimeType: data.mimeType as string | undefined,
+								currentProject: data.currentProject as Record<string, any>,
+								services: data.services as Record<string, unknown>,
+							},
+							config,
+							secrets
+						);
+						webview.postMessage({ type: 'voice:processResponse', requestId: data.requestId, ...result });
+					} catch (error: unknown) {
+						const msg = error instanceof Error ? error.message : String(error);
+						webview.postMessage({ type: 'voice:processResponse', requestId: data.requestId, error: msg });
+					}
 					break;
 				}
 

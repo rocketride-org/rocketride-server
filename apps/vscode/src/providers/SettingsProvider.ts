@@ -243,6 +243,15 @@ export class SettingsProvider {
 			// Top-level settings
 			defaultPipelinePath: config.defaultPipelinePath,
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
+			voiceBuilder: {
+				enabled: config.voiceBuilder.enabled,
+				plannerBaseUrl: config.voiceBuilder.plannerBaseUrl,
+				plannerModel: config.voiceBuilder.plannerModel,
+				hasDeepgramApiKey: !!config.voiceBuilder.deepgramApiKey,
+				deepgramApiKey: '',
+				hasPlannerApiKey: !!config.voiceBuilder.plannerApiKey,
+				plannerApiKey: '',
+			},
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),

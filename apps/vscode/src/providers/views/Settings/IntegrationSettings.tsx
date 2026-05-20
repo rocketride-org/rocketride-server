@@ -81,37 +81,81 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 // ============================================================================
 
 export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange, onSave, onCancel, dirty, saved }) => {
-	return (
-		<div style={S.card}>
-			<SettingsCardHeader title="Integrations" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
-			<div style={S.cardBody}>
-				<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
-				<div style={S.formGrid}>
-					<div style={S.formGroup}>
-						<div style={S.checkboxGroup}>
-							<label style={S.checkboxLabel}>
-								<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" style={S.checkboxInput} />
-								<span style={S.checkboxSpan}>Automatic Agent Integration</span>
-							</label>
-							<div id="autoAgentIntegration-help" style={S.checkboxHelpText}>
-								Automatically detect and install RocketRide documentation for coding agents on startup
-							</div>
+	const updateVoiceBuilder = (voiceBuilder: Partial<SettingsData['voiceBuilder']>) => {
+		onSettingsChange({ voiceBuilder } as Partial<SettingsData>);
+	};
 
-							{INTEGRATIONS.map(({ key, label, description }) => (
-								<React.Fragment key={key}>
-									<label style={S.checkboxLabel}>
-										<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} style={S.checkboxInput} />
-										<span style={S.checkboxSpan}>{label}</span>
-									</label>
-									<div id={`${key}-help`} style={S.checkboxHelpText}>
-										{description}
-									</div>
-								</React.Fragment>
-							))}
+	return (
+		<>
+			<div style={S.card}>
+				<SettingsCardHeader title="Integrations" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
+				<div style={S.cardBody}>
+					<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
+					<div style={S.formGrid}>
+						<div style={S.formGroup}>
+							<div style={S.checkboxGroup}>
+								<label style={S.checkboxLabel}>
+									<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" style={S.checkboxInput} />
+									<span style={S.checkboxSpan}>Automatic Agent Integration</span>
+								</label>
+								<div id="autoAgentIntegration-help" style={S.checkboxHelpText}>
+									Automatically detect and install RocketRide documentation for coding agents on startup
+								</div>
+
+								{INTEGRATIONS.map(({ key, label, description }) => (
+									<React.Fragment key={key}>
+										<label style={S.checkboxLabel}>
+											<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} style={S.checkboxInput} />
+											<span style={S.checkboxSpan}>{label}</span>
+										</label>
+										<div id={`${key}-help`} style={S.checkboxHelpText}>
+											{description}
+										</div>
+									</React.Fragment>
+								))}
+							</div>
 						</div>
 					</div>
 				</div>
 			</div>
-		</div>
+			<div style={S.card}>
+				<SettingsCardHeader title="Voice Builder" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
+				<div style={S.cardBody}>
+					<div style={S.sectionDescription}>Configure push-to-talk pipeline editing from the canvas toolbar</div>
+					<div style={S.formGrid}>
+						<div style={S.checkboxGroup}>
+							<label style={S.checkboxLabel}>
+								<input type="checkbox" checked={settings.voiceBuilder.enabled} onChange={(e) => updateVoiceBuilder({ enabled: e.target.checked })} style={S.checkboxInput} />
+								<span style={S.checkboxSpan}>Enable Voice Builder</span>
+							</label>
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderDeepgramApiKey" style={S.label}>
+								Deepgram API Key
+							</label>
+							<input id="voiceBuilderDeepgramApiKey" type="password" value={settings.voiceBuilder.deepgramApiKey} placeholder={settings.voiceBuilder.hasDeepgramApiKey ? 'Stored key' : 'Enter Deepgram API key'} onChange={(e) => updateVoiceBuilder({ deepgramApiKey: e.target.value, hasDeepgramApiKey: e.target.value.trim().length > 0 })} />
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderPlannerApiKey" style={S.label}>
+								Planner API Key
+							</label>
+							<input id="voiceBuilderPlannerApiKey" type="password" value={settings.voiceBuilder.plannerApiKey} placeholder={settings.voiceBuilder.hasPlannerApiKey ? 'Stored key' : 'Enter planner API key'} onChange={(e) => updateVoiceBuilder({ plannerApiKey: e.target.value, hasPlannerApiKey: e.target.value.trim().length > 0 })} />
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderPlannerBaseUrl" style={S.label}>
+								Planner Base URL
+							</label>
+							<input id="voiceBuilderPlannerBaseUrl" type="url" value={settings.voiceBuilder.plannerBaseUrl} onChange={(e) => updateVoiceBuilder({ plannerBaseUrl: e.target.value })} />
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderPlannerModel" style={S.label}>
+								Planner Model
+							</label>
+							<input id="voiceBuilderPlannerModel" type="text" value={settings.voiceBuilder.plannerModel} onChange={(e) => updateVoiceBuilder({ plannerModel: e.target.value })} />
+						</div>
+					</div>
+				</div>
+			</div>
+		</>
 	);
 };

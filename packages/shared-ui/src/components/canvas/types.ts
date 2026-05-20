@@ -44,6 +44,23 @@ export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../..
 /** Pipeline schema version. Must match the server's IServices::VERSION (engine-lib). */
 export const PIPELINE_SCHEMA_VERSION = 1;
 
+export interface IVoiceBuilderStatus {
+	enabled: boolean;
+	errors: string[];
+	model?: string;
+}
+
+export interface IVoiceBuilderProcessResult {
+	transcript: string;
+	project: import('../../types/project').IProject;
+	summary?: string;
+}
+
+export interface IVoiceBuilderAdapter {
+	status: IVoiceBuilderStatus;
+	processRecording: (audioBase64: string, mimeType: string | undefined, currentProject: import('../../types/project').IProject) => Promise<IVoiceBuilderProcessResult>;
+}
+
 // ============================================================================
 // Node Type Discriminator
 // ============================================================================

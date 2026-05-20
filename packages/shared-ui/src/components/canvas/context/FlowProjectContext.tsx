@@ -41,7 +41,7 @@
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
 
-import { IProject, IToolchainState, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
+import { IProject, IToolchainState, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE, IVoiceBuilderAdapter } from '../types';
 
 // =============================================================================
 // Context shape
@@ -159,6 +159,9 @@ export interface IFlowProjectContext {
 
 	/** Called when the user requests a save from within the canvas. */
 	onSave?: () => void;
+
+	/** Host-provided Voice Builder bridge. */
+	voiceBuilder?: IVoiceBuilderAdapter;
 }
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
@@ -214,6 +217,9 @@ export interface IFlowProjectProviderProps {
 	isNew?: boolean;
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+
+	/** Host-provided Voice Builder bridge. */
+	voiceBuilder?: IVoiceBuilderAdapter;
 }
 
 // =============================================================================
@@ -227,7 +233,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, voiceBuilder }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -283,6 +289,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		isDirty,
 		isNew,
 		onSave,
+		voiceBuilder,
 	};
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;
