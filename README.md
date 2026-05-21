@@ -11,7 +11,7 @@
 </p>
 
 <p>
-  Your IDE is evolving. AIDE starts where you already work, in VSCode and Cursor, and extends to the AI stack that runs in production.
+  Your IDE is evolving. AIDE starts where you already work, in VS Code and Cursor, and extends to the AI stack that runs in production.
 </p>
 
 <p>
