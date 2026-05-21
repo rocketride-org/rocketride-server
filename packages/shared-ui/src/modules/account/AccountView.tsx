@@ -25,7 +25,7 @@ import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/Ta
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, CreditPack } from '../billing/types';
 import { ProfilePanel } from './components/ProfilePanel';
-import { EnvScopeCard } from './components/EnvironmentPanel';
+// EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
@@ -195,29 +195,9 @@ export interface IAccountViewProps {
 	/** Requests the host to load full detail for a specific team. */
 	onLoadTeamDetail: (teamId: string) => void;
 
-	// -- Environment secrets (on-demand loading) --------------------------------
-	/**
-	 * Fetches env variables for a given scope from the server.
-	 * Called on demand when an env panel mounts (not pre-fetched).
-	 *
-	 * @param scope   - 'org' | 'team' | 'user'
-	 * @param scopeId - Required for org (orgId) and team (teamId), omitted for user.
-	 * @returns The env dict for the requested scope.
-	 */
-	onLoadEnv: (scope: 'org' | 'team' | 'user', scopeId?: string) => Promise<Record<string, string>>;
-	/**
-	 * Saves the full env dict for a given scope to the server.
-	 *
-	 * @param scope   - 'org' | 'team' | 'user'
-	 * @param env     - The full env dict to persist.
-	 * @param scopeId - Required for org (orgId) and team (teamId), omitted for user.
-	 */
-	onSaveEnv: (scope: 'org' | 'team' | 'user', env: Record<string, string>, scopeId?: string) => Promise<void>;
-	/**
-	 * Incremented by the parent when a `shell:accountUpdate` event arrives.
-	 * Triggers a re-fetch of all currently loaded env scopes.
-	 */
-	refreshSignal?: number;
+	// Environment secrets are now managed by the standalone Environment page
+	// (EnvironmentProvider / EnvironmentWebview). The onLoadEnv, onSaveEnv,
+	// and refreshSignal props have been removed.
 }
 
 // =============================================================================
@@ -232,7 +212,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail, onLoadEnv, onSaveEnv, refreshSignal } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -272,49 +252,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 
 	/** True when the user has team.admin on the currently viewed team detail. */
 	const isActiveTeamAdmin = activeTeamId ? isTeamAdmin(activeTeamId) : false;
-
-	// =========================================================================
-	// ENV STATE — on-demand loading with scope:scopeId keyed map
-	// =========================================================================
-
-	/**
-	 * Flat map of loaded env dicts keyed by `scope` or `scope:scopeId`.
-	 * A key present = that scope has been loaded. Key absent = not yet requested.
-	 * Examples: { user: {...}, 'org:abc': {...}, 'team:xyz': {...}, 'team:def': {...} }
-	 */
-	const [envs, setEnvs] = useState<Record<string, Record<string, string>>>({});
-
-	/** Builds the envs map key for a given scope and optional scopeId. */
-	const envKey = useCallback((scope: string, scopeId?: string) => (scopeId ? `${scope}:${scopeId}` : scope), []);
-
-	/**
-	 * Fetches a scope's env from the server and stores it in the envs map.
-	 * Called by EnvScopeCard's onRequestLoad when the panel mounts.
-	 */
-	const loadEnv = useCallback(
-		(scope: 'org' | 'team' | 'user', scopeId?: string) => {
-			const key = envKey(scope, scopeId);
-			onLoadEnv(scope, scopeId)
-				.then((env) => setEnvs((prev) => ({ ...prev, [key]: env })))
-				.catch(() => setEnvs((prev) => ({ ...prev, [key]: {} })));
-		},
-		[onLoadEnv, envKey]
-	);
-
-	// Re-fetch all loaded scopes when the parent signals an account update
-	useEffect(() => {
-		if (!refreshSignal) return;
-		for (const key of Object.keys(envs)) {
-			// Parse 'team:abc123' → scope='team', scopeId='abc123'
-			// Parse 'user' → scope='user', scopeId=undefined
-			const colonIdx = key.indexOf(':');
-			const scope = (colonIdx >= 0 ? key.slice(0, colonIdx) : key) as 'org' | 'team' | 'user';
-			const scopeId = colonIdx >= 0 ? key.slice(colonIdx + 1) : undefined;
-			onLoadEnv(scope, scopeId)
-				.then((env) => setEnvs((prev) => ({ ...prev, [key]: env })))
-				.catch(() => {});
-		}
-	}, [refreshSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// =========================================================================
 	// MODAL STATE
@@ -733,7 +670,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
-						<EnvScopeCard label="User" env={envs['user']} onRequestLoad={() => loadEnv('user')} onSave={(env) => onSaveEnv('user', env)} />
 					</div>
 				),
 			},
@@ -757,7 +693,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
-						{isOrgAdmin && orgId && <EnvScopeCard label="Organization" env={envs[envKey('org', orgId)]} onRequestLoad={() => loadEnv('org', orgId)} onSave={(env) => onSaveEnv('org', env, orgId)} />}
 					</div>
 				),
 			},
@@ -791,7 +726,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							isOrgAdmin={isOrgAdmin}
 							isTeamAdmin={isActiveTeamAdmin}
 						/>
-						{activeTeamId && isActiveTeamAdmin && <EnvScopeCard label="Team" env={envs[envKey('team', activeTeamId)]} onRequestLoad={() => loadEnv('team', activeTeamId)} onSave={(env) => onSaveEnv('team', env, activeTeamId)} />}
 					</div>
 				),
 			},
@@ -804,7 +738,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks, envs]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
 	);
 
 	// =========================================================================

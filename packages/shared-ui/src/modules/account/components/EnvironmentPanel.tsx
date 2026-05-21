@@ -15,7 +15,7 @@
  * cards based on the `isOrgAdmin` / `isTeamAdmin` props.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 
@@ -105,7 +105,9 @@ export const EnvScopeCard: React.FC<{
 	onRequestLoad?: () => void;
 	/** Saves the full dict. */
 	onSave: (env: Record<string, string>) => Promise<void>;
-}> = ({ label, env, onRequestLoad, onSave }) => {
+	/** Keys that must have non-empty values before save is allowed. */
+	requiredKeys?: string[];
+}> = ({ label, env, onRequestLoad, onSave, requiredKeys }) => {
 	// Local draft state — clone from prop on load
 	const [draft, setDraft] = useState<[string, string][]>([]);
 	const [dirty, setDirty] = useState(false);
@@ -158,6 +160,13 @@ export const EnvScopeCard: React.FC<{
 		});
 	}, []);
 
+	// Check if any required keys still have empty values
+	const hasUnfilledRequired = useMemo(() => {
+		if (!requiredKeys?.length) return false;
+		const draftMap = new Map(draft.map(([k, v]) => [k.trim(), v.trim()]));
+		return requiredKeys.some((key) => (draftMap.get(key) ?? '').length === 0);
+	}, [requiredKeys, draft]);
+
 	/** Saves the draft as a dict. */
 	const handleSave = useCallback(async () => {
 		setSaving(true);
@@ -183,7 +192,7 @@ export const EnvScopeCard: React.FC<{
 	return (
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 			<div style={{ ...commonStyles.cardHeader, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-				<span style={commonStyles.labelUppercase}>{label} Environment</span>
+				<span style={commonStyles.labelUppercase}>{label} Variables</span>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 					{error && <span style={{ fontSize: 11, color: 'var(--rr-color-error)' }}>{error}</span>}
 					{saved && <span style={{ fontSize: 11, color: 'var(--rr-color-success)' }}>Saved</span>}
@@ -202,14 +211,15 @@ export const EnvScopeCard: React.FC<{
 							</button>
 							<button
 								onClick={handleSave}
-								disabled={saving}
+								disabled={saving || hasUnfilledRequired}
 								style={
 									{
 										...commonStyles.buttonPrimary,
 										...commonStyles.cardHeaderButton,
-										...(saving ? commonStyles.buttonDisabled : {}),
+										...(saving || hasUnfilledRequired ? commonStyles.buttonDisabled : {}),
 									} as CSSProperties
 								}
+								title={hasUnfilledRequired ? 'Fill in all required variable values before saving' : undefined}
 							>
 								{saving ? 'Saving…' : 'Save'}
 							</button>

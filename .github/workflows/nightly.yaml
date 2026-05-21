@@ -9,10 +9,11 @@ concurrency:
   group: nightly
   cancel-in-progress: true
 
+# Top-level least-privilege. Individual jobs below raise to write only
+# where they actually need it (image push, tag/release publish, prerelease
+# cleanup). Closes Scorecard TokenPermissionsID #566 and #567.
 permissions:
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
 
 # Triggered when develop's CI run completes successfully — this is the
 # gate. A red CI on develop (whether from a bad merge, a flaky test, or
@@ -83,6 +84,9 @@ jobs:
     name: Build
     needs: init
     uses: ./.github/workflows/_build.yaml
+    permissions:
+      contents: read
+      packages: write
     with:
       ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       full_version: ${{ needs.init.outputs.full_server_version }}
@@ -97,6 +101,8 @@ jobs:
     name: Clean up prereleases
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -130,6 +136,9 @@ jobs:
     name: Prerelease
     needs: [init, build, cleanup-prereleases]
     uses: ./.github/workflows/_release.yaml
+    permissions:
+      contents: write
+      id-token: write
     with:
       ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       prerelease: true
@@ -144,6 +153,15 @@ jobs:
     name: Docker
     needs: [init, build]
     uses: ./.github/workflows/_docker.yaml
+    permissions:
+      contents: read
+      packages: write
+      # _docker.yaml's docker job declares id-token: write for cosign
+      # keyless Sigstore signing. GitHub validates at workflow-start that
+      # the caller covers every permission the reusable job declares;
+      # omitting id-token: write here is what produced the workflow-level
+      # `startup_failure` on every nightly run after PR #929 merged.
+      id-token: write
     with:
       ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       server_version: ${{ needs.init.outputs.server_version }}

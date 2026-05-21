@@ -22,6 +22,12 @@ import type { ServiceStatus, DockerStatus, VersionOption } from '../components/p
 // TYPES
 // =============================================================================
 
+/**
+ * Props for the Deployment Target settings card.
+ *
+ * When `settings.deployment.connectionMode` is null the deploy target is
+ * "shared" with the development group and the ConnectionConfig is hidden.
+ */
 interface DeploySettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
@@ -30,8 +36,9 @@ interface DeploySettingsProps {
 	dirty?: boolean;
 	saved?: boolean;
 	onClearCredentials: () => void;
-	onTestConnection: (hostUrl: string, apiKey: string) => void;
+	onTestConnection: (mode: string, params?: Record<string, unknown>) => void;
 	testMessage: MessageData | null;
+	/** Available teams for cloud mode (fetched after OAuth sign-in). */
 	teams: Array<{ id: string; name: string }>;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
@@ -43,7 +50,7 @@ interface DeploySettingsProps {
 	onProbeCloudServer?: () => void;
 	onFetchTeams?: () => void;
 	isSaas?: boolean;
-	// Docker panel props
+	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
 	dockerError: string | null;
@@ -57,7 +64,7 @@ interface DeploySettingsProps {
 	onDockerRemove: () => void;
 	onDockerStart: () => void;
 	onDockerStop: () => void;
-	// Service panel props
+	// -- Service panel props --
 	serviceStatus: ServiceStatus;
 	serviceProgress: string | null;
 	serviceError: string | null;
@@ -85,10 +92,17 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 	const { settings, onSettingsChange, onSave, cloudSignedIn } = props;
 	const hasDeployTarget = settings.deployment.connectionMode !== null;
 
+	/**
+	 * Toggle a separate deploy target on/off.
+	 * When enabled, defaults to cloud (if signed in + SaaS) or local.
+	 * When disabled, resets to shared mode (connectionMode = null).
+	 */
 	const handleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.checked) {
 			const isSaas = (props.serverCapabilities ?? []).includes('saas');
-			const defaultMode: ConnectionMode = cloudSignedIn && isSaas ? 'cloud' : 'local';
+			const devMode = settings.development.connectionMode;
+			const canUseCloud = cloudSignedIn && isSaas && devMode !== 'cloud';
+			const defaultMode: ConnectionMode = canUseCloud ? 'cloud' : 'local';
 			onSettingsChange({ deployment: { connectionMode: defaultMode } } as Partial<SettingsData>);
 		} else {
 			onSettingsChange({ deployment: { connectionMode: null, teamId: '' } } as Partial<SettingsData>);
@@ -121,6 +135,7 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 							simplified={false}
 							idPrefix="deploy"
 							group="deployment"
+							otherGroupMode={settings.development.connectionMode}
 							serverCapabilities={props.serverCapabilities}
 							onConnectionModeChange={handleModeChange}
 							settings={settings}

@@ -47,9 +47,8 @@ import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
-import { BaseManager } from './base-manager';
-import { LocalManager } from './local-manager';
-import { RemoteManager } from './remote-manager';
+import { EngineRegistry, EngineManager, type EngineStatusEvent } from '../engine';
+import { getUserConfigDir, getSystemInstallDir } from '../engine/config/config-migration';
 import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
@@ -60,10 +59,13 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
 
-	// Core connection components — client is created once, manager is swapped on mode change
+	// Core connection components
 	protected client!: RocketRideClient;
-	protected manager?: BaseManager;
-	protected enginesRoot?: string;
+	protected engineRegistry?: EngineRegistry;
+	/** URI provided by engine when ready. */
+	protected engineUri?: string;
+	/** The engine mode we're currently connected to (set on connect, cleared on disconnect). */
+	protected connectedMode?: ConnectionMode;
 	protected configManager = ConfigManager.getInstance();
 	protected logger = getLogger();
 
@@ -78,12 +80,7 @@ export class ConnectionManager extends EventEmitter {
 
 	// Debounce timer for configuration changes
 	private configChangeTimeout?: NodeJS.Timeout;
-
-	// Engine install cancellation
-	protected engineCts?: vscode.CancellationTokenSource;
-
-	// In-flight connect guard — prevents concurrent connect() calls
-	private connectPromise?: Promise<void>;
+	private engineStatusHandler?: (event: EngineStatusEvent & { mode?: ConnectionMode }) => void;
 
 	// Resource cleanup tracking
 	protected disposables: vscode.Disposable[] = [];
@@ -111,8 +108,152 @@ export class ConnectionManager extends EventEmitter {
 		return ConnectionManager.instance;
 	}
 
-	public setEnginesRoot(enginesRoot: string): void {
-		this.enginesRoot = enginesRoot;
+	/**
+	 * Sets the shared engine registry. Called by extension activation.
+	 */
+	public setEngineRegistry(registry: EngineRegistry): void {
+		this.engineRegistry = registry;
+		// Listen for engine status events from any engine in the registry
+		this.engineStatusHandler = (event: EngineStatusEvent & { mode?: ConnectionMode }) => {
+			this.handleEngineStatus(event);
+		};
+		this.engineRegistry.on('status', this.engineStatusHandler);
+	}
+
+
+	/**
+	 * Tears down and disconnects. Called on extension deactivation.
+	 */
+	public async stop(): Promise<void> {
+		await this.disconnect();
+		// Registry disposal is handled by extension.ts, not here
+	}
+
+	/** Returns the engine registry. */
+	public getEngineRegistry(): EngineRegistry | undefined {
+		return this.engineRegistry;
+	}
+
+	/**
+	 * Whether this manager should react to engine status events.
+	 * Overridden by DeployManager to return false in shared mode.
+	 */
+	protected shouldHandleEngineStatus(): boolean {
+		return true;
+	}
+
+	/**
+	 * Handles status events from EngineManager.
+	 * When engine is 'ready', initiates WebSocket connection.
+	 * When engine errors or goes idle, updates connection status.
+	 */
+	private handleEngineStatus(event: EngineStatusEvent & { mode?: ConnectionMode }): void {
+		if (this.isDisposing) return;
+		if (!this.shouldHandleEngineStatus()) return;
+
+		switch (event.phase) {
+			case 'working': {
+				// Show engine progress (downloading, extracting, starting) in connection status.
+				// Only for events targeting this CM's configured mode.
+				const targetMode = this.getGroupConfig().connectionMode
+					?? this.configManager.getConfig().development.connectionMode
+					?? 'local';
+				if (event.mode === targetMode) {
+					this.updateConnectionStatus({
+						state: ConnectionState.CONNECTING,
+						progressMessage: event.message,
+					});
+				}
+				break;
+			}
+
+			case 'idle':
+			case 'error':
+				// Only act if this event is for the engine we're currently connected to.
+				// Ignore events from other modes (e.g., docker event while connected to local).
+				if (!this.connectedMode || event.mode !== this.connectedMode) return;
+
+				this.connectedMode = undefined;
+				this.engineUri = undefined;
+				if (this.client?.isConnected()) {
+					this.client.disconnect().catch(() => { /* best effort */ });
+				}
+				if (event.phase === 'error') {
+					this.updateConnectionStatus({
+						state: ConnectionState.DISCONNECTED,
+						lastError: event.error ?? event.message,
+					});
+				} else {
+					this.updateConnectionStatus({
+						state: ConnectionState.DISCONNECTED,
+					});
+				}
+				break;
+
+			case 'ready': {
+				// Only connect if this 'ready' event is for the engine mode we're
+				// configured to use. The registry may manage multiple engines but
+				// each CM only cares about its own group's active mode.
+				const rawMode = this.getGroupConfig().connectionMode;
+				const effectiveMode = rawMode
+					?? this.configManager.getConfig().development.connectionMode
+					?? 'local';
+
+				if (event.mode !== effectiveMode) return;
+				if (!event.uri) return;
+
+				// Already connected to this URI — no-op
+				if (this.engineUri === event.uri && this.client?.isConnected()) return;
+
+				this.connectedMode = event.mode;
+				this.engineUri = event.uri;
+				this.connectToEngine(event.uri).catch((err) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					this.logger.output(`${icons.error} Failed to connect to engine: ${msg}`);
+					this.connectedMode = undefined;
+					this.updateConnectionStatus({
+						state: ConnectionState.DISCONNECTED,
+						lastError: msg,
+					});
+				});
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Connects the WebSocket client to the engine at the given URI.
+	 *
+	 * Auth resolution strategy (in priority order):
+	 *   1. Cloud mode -> OAuth token from CloudAuthProvider
+	 *   2. On-prem mode -> API key from secure storage
+	 *   3. Local/docker/service -> default key (self-hosted, no real auth)
+	 *
+	 * @param uri - The WebSocket URI to connect to (from EngineManager 'ready' event).
+	 * @throws If cloud mode and no token is available (user must sign in).
+	 */
+	private async connectToEngine(uri: string): Promise<void> {
+		this.updateConnectionStatus({ state: ConnectionState.CONNECTING, progressMessage: 'Connecting...' });
+
+		const groupConfig = this.getGroupConfig();
+		const mode = groupConfig.connectionMode ?? 'local';
+
+		// Resolve auth credential — each mode has different auth requirements
+		let auth: string;
+		if (connectionModeUsesOAuth(mode)) {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			const token = await cloudAuth.getToken();
+			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
+			auth = token;
+		} else if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
+			auth = groupConfig.apiKey;
+		} else {
+			// Local, service, docker: use default key
+			auth = groupConfig.apiKey || 'MYAPIKEY';
+		}
+
+		await this.client.connect(auth, { uri });
+		// onConnected callback in createClient() handles state update
 	}
 
 	// =========================================================================
@@ -147,24 +288,31 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
 		await this.updateCredentialsStatus();
 
-		// Full cycle: disconnect old manager → create new for new mode → connect
+		// Full cycle: disconnect old manager → validate config → reconcile
 		await this.disconnect();
 		await this.initialize();
+
+		// Ask the registry to reconcile — for config-only changes (e.g.,
+		// rotating credentials) the engine may already be 'ready' and will
+		// re-emit its status, triggering handleEngineStatus → connectToEngine.
+		if (this.engineRegistry) {
+			await this.engineRegistry.reconcile();
+		}
 	}
 
 	/**
-	 * Called by the Settings UI after applyAllSettings() to explicitly drive
-	 * this connection into its new desired state.  Same logic as the debounced
-	 * config-change handler, but invoked deterministically after all settings
-	 * have been written.
+	 * Cancels any pending debounced config-change handler.
+	 *
+	 * Called by SettingsProvider and WelcomeProvider after applyAllSettings()
+	 * but before reconcile, so the debounced handler (which fires from the
+	 * welcomeDismissed write) doesn't race with the reconciler's engine
+	 * restart and CM reconnection sequence.
 	 */
-	public async settingsApplied(): Promise<void> {
-		// Cancel any pending debounced handler — we're taking over
+	public cancelPendingConfigChange(): void {
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
 			this.configChangeTimeout = undefined;
 		}
-		await this.handleConfigurationChanged();
 	}
 
 	// =========================================================================
@@ -195,10 +343,14 @@ export class ConnectionManager extends EventEmitter {
 	// INITIALIZATION
 	// =========================================================================
 
+	/**
+	 * Validates config and updates credential status.
+	 * Does NOT start engines or connect — the EngineRegistry reconciler
+	 * handles engine lifecycle, and handleEngineStatus() connects the
+	 * WebSocket when an engine emits 'ready'.
+	 */
 	public async initialize(): Promise<void> {
-		if (this.isDisposing) {
-			return;
-		}
+		if (this.isDisposing) return;
 
 		await this.updateCredentialsStatus();
 
@@ -215,10 +367,6 @@ export class ConnectionManager extends EventEmitter {
 		this.updateConnectionStatus({
 			connectionMode: this.getConnectionMode() ?? 'local',
 		});
-
-		if (this.connectionStatus.hasCredentials) {
-			await this.connect();
-		}
 	}
 
 	// =========================================================================
@@ -233,9 +381,9 @@ export class ConnectionManager extends EventEmitter {
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
 			onTrace: (traceType: number, message: any) => {
 				if (traceType === TraceType.Request) {
-					this.logger.output(`${icons.send} ${message.command} ${JSON.stringify(message.arguments ?? {})}`);
+					this.logger.output(`${icons.send} ${message.command} ${safeJSONStringify(message.arguments ?? {})}`);
 				} else if (traceType === TraceType.Success) {
-					this.logger.output(`${icons.receive} ${message.command} ${JSON.stringify(message.body ?? {})}`);
+					this.logger.output(`${icons.receive} ${message.command} ${safeJSONStringify(message.body ?? {})}`);
 				} else {
 					this.logger.output(`${icons.error} ${message.command} ${message.message ?? 'failed'}`);
 				}
@@ -251,7 +399,7 @@ export class ConnectionManager extends EventEmitter {
 						}
 					}
 				} else if (message.event?.startsWith('apaevt_')) {
-					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
+					this.logger.output(`${icons.info} ${message.event}: ${safeJSONStringify(message.body)}`);
 				}
 
 				// Transform apaext_account into a dedicated shell:accountUpdate
@@ -324,107 +472,33 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	// =========================================================================
-	// MANAGER (swapped on mode change)
-	// =========================================================================
-
-	protected createManagerForMode(connectionMode: string): BaseManager {
-		if (connectionMode === 'local') {
-			if (!this.enginesRoot) {
-				throw new Error('Engines root path not set. Cannot create LocalManager.');
-			}
-			return new LocalManager(this.enginesRoot);
-		}
-		return new RemoteManager();
-	}
-
-	protected wireManagerEvents(manager: BaseManager): void {
-		manager.on('status', (msg: string) => {
-			this.updateConnectionStatus({ progressMessage: msg });
-		});
-		manager.on('terminated', (details: { code: number | null; signal: string | null }) => {
-			this.logger.output(`${icons.warning} Local server terminated (code=${details.code}, signal=${details.signal})`);
-		});
-	}
-
-	// =========================================================================
 	// CONNECT / DISCONNECT
 	// =========================================================================
 
-	public connect(): Promise<void> {
-		// Deduplicate: if a connect is already in flight, return the same promise
-		if (this.connectPromise) {
-			return this.connectPromise;
-		}
-		const promise = this._connect().finally(() => {
-			// Only clear if we're still the active promise — disconnect() may
-			// have cleared it to allow a new connect() with different config.
-			if (this.connectPromise === promise) {
-				this.connectPromise = undefined;
-			}
-		});
-		this.connectPromise = promise;
-		return promise;
-	}
-
-	private async _connect(): Promise<void> {
-		if (this.isDisposing) {
-			return;
-		}
-
-		this.logger.output(`${icons.connecting} Connecting...`);
-		this.updateConnectionStatus({
-			state: ConnectionState.CONNECTING,
-			lastError: undefined,
-		});
-
-		const groupConfig = this.getGroupConfig();
-		const connectionMode = groupConfig.connectionMode ?? 'local';
-
-		try {
-			// Create manager for current mode (if we don't already have one)
-			if (!this.manager) {
-				this.manager = this.createManagerForMode(connectionMode);
-				this.wireManagerEvents(this.manager);
-			}
-
-			// Cancel any in-flight engine download
-			this.engineCts?.cancel();
-			this.engineCts?.dispose();
-			this.engineCts = new vscode.CancellationTokenSource();
-
-			// Manager handles everything: install/start engine, validate creds, connect client
-			await this.manager.connect(this.client, groupConfig, this.engineCts.token);
-
-			// onConnected callback handles state update and 'connected' emit
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.logger.output(`${icons.error} ${errorMessage}`);
-			this.updateConnectionStatus({
-				state: ConnectionState.DISCONNECTED,
-				lastError: errorMessage,
-			});
-			this.emit('shell:error', error);
+	/**
+	 * Connects the WebSocket to the engine if a URI is available.
+	 * Does NOT start engines — that's the EngineRegistry's responsibility.
+	 * If no engine URI is set, this is a no-op; handleEngineStatus() will
+	 * call connectToEngine() automatically when it receives a 'ready' event.
+	 */
+	public async connect(): Promise<void> {
+		if (this.engineUri && !this.client?.isConnected()) {
+			await this.connectToEngine(this.engineUri);
 		}
 	}
 
+	/**
+	 * Disconnects the WebSocket client. Does NOT stop engines.
+	 * Does NOT clear the engine URI — the engine is still running,
+	 * so connect() or handleEngineStatus() can reconnect to it.
+	 */
 	public async disconnect(): Promise<void> {
-		this.logger.output(`${icons.warning} Disconnected from RocketRide by request`);
+		this.logger.output(`${icons.warning} Disconnecting WebSocket...`);
 
-		// Clear in-flight connect guard so the next connect() starts fresh
-		// rather than returning a stale promise from the old mode.
-		this.connectPromise = undefined;
-
-		// Cancel any in-flight engine download
-		this.engineCts?.cancel();
-		this.engineCts?.dispose();
-		this.engineCts = undefined;
-
-		// Manager handles everything: disconnect client, stop engine if running
-		if (this.manager) {
-			await this.manager.disconnect(this.client);
-			this.manager.removeAllListeners();
-			this.manager = undefined;
+		if (this.client?.isConnected()) {
+			await this.client.disconnect();
 		}
+
 		this.clearServicesCache();
 
 		this.updateConnectionStatus({
@@ -433,10 +507,29 @@ export class ConnectionManager extends EventEmitter {
 		});
 	}
 
-	public async reconnect(): Promise<void> {
-		await this.disconnect();
-		await this.connect();
+	// =========================================================================
+	// STATIC ENGINE STATUS — queries state without needing a connection
+	// =========================================================================
+
+	/**
+	 * Queries the actual state of the specified engine mode.
+	 * Static — no instance or active connection needed. Directly checks
+	 * the OS service manager, Docker daemon, filesystem, or probes a remote server.
+	 *
+	 * @param mode - Which engine mode to query.
+	 * @param hostUrl - Host URL for cloud/onprem probe (optional).
+	 */
+	static async getEngineStatus(mode: ConnectionMode, hostUrl?: string): Promise<import('../engine/engine-backend').EngineBackendStatus> {
+		return EngineManager.getEngineStatus(mode, {
+			localParentDir: getUserConfigDir(),
+			serviceInstallDir: getSystemInstallDir(),
+		}, hostUrl);
 	}
+
+	// Engine lifecycle operations (install, start, stop, remove) are managed
+	// by the EngineRegistry directly — ConnectionManager doesn't start or stop
+	// engines. It only connects/disconnects the WebSocket when the registry
+	// emits 'ready' or 'idle' events.
 
 	// =========================================================================
 	// PUBLIC ACCESSORS
@@ -471,13 +564,18 @@ export class ConnectionManager extends EventEmitter {
 	 * Local mode uses the actual engine port; remote modes derive
 	 * the URL from the group's configured hostUrl.
 	 */
+	/**
+	 * Returns the HTTP/HTTPS URL for this connection's server.
+	 * Uses the engine URI provided by EngineManager when available,
+	 * otherwise derives from the group's configured hostUrl.
+	 */
 	public getHttpUrl(): string {
-		// Local mode: engine runs on a dynamic port
-		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
-			const port = this.manager.getActualPort();
-			if (port) return `http://localhost:${port}`;
+		if (this.engineUri) {
+			const normalized = RocketRideClient.normalizeUri(this.engineUri);
+			const url = new URL(normalized);
+			const httpProtocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
+			return `${httpProtocol}//${url.hostname}:${url.port || (httpProtocol === 'https:' ? '443' : '80')}`;
 		}
-		// Remote modes: normalize the group's hostUrl into a clean origin
 		const hostUrl = this.getGroupConfig().hostUrl;
 		if (!hostUrl) return 'http://localhost:5565';
 		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
@@ -487,16 +585,15 @@ export class ConnectionManager extends EventEmitter {
 
 	/**
 	 * Returns the WebSocket URL for this connection's DAP service.
-	 * Local mode uses the actual engine port; remote modes derive
-	 * the URL from the group's configured hostUrl.
+	 * Derives from the engine URI or the group's configured hostUrl.
 	 */
 	public getWebSocketUrl(): string {
-		// Local mode: engine runs on a dynamic port
-		if (this.connectionStatus.connectionMode === 'local' && this.manager instanceof LocalManager) {
-			const port = this.manager.getActualPort();
-			if (port) return `ws://localhost:${port}/task/service`;
+		if (this.engineUri) {
+			const url = new URL(this.engineUri);
+			const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+			return `${wsProtocol}//${url.hostname}:${port}/task/service`;
 		}
-		// Remote modes: normalize the group's hostUrl and upgrade to ws/wss
 		const hostUrl = this.getGroupConfig().hostUrl;
 		if (!hostUrl) return 'ws://localhost:5565/task/service';
 		const url = new URL(RocketRideClient.normalizeUri(hostUrl));
@@ -505,8 +602,12 @@ export class ConnectionManager extends EventEmitter {
 		return `${wsProtocol}//${url.hostname}:${port}/task/service`;
 	}
 
+	/** Returns engine version info from the EngineManager, or null. */
+	/** Returns engine version info for the current connection mode. */
 	public getEngineInfo(): { version: string | null; publishedAt: string | null } {
-		const info = this.manager?.getInfo();
+		const mode = this.getGroupConfig().connectionMode ?? 'local';
+		const engine = this.engineRegistry?.getEngine(mode);
+		const info = engine?.getInfo();
 		return {
 			version: info?.version ?? null,
 			publishedAt: info?.publishedAt ?? null,
@@ -618,10 +719,16 @@ export class ConnectionManager extends EventEmitter {
 			this.configChangeTimeout = undefined;
 		}
 
-		if (this.manager) {
-			await this.manager.disconnect(this.client);
-			this.manager.removeAllListeners();
-			this.manager = undefined;
+		if (this.engineRegistry && this.engineStatusHandler) {
+			this.engineRegistry.removeListener('status', this.engineStatusHandler);
+			this.engineStatusHandler = undefined;
+		}
+
+		if (this.client?.isConnected()) {
+			await this.client.disconnect();
+		}
+		if (this.engineRegistry) {
+			await this.engineRegistry.disposeAll();
 		}
 		this.clearServicesCache();
 

@@ -124,7 +124,7 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 			overview: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<OverviewTab data={data} />
+						<OverviewTab data={data} events={events} onRefresh={onRefresh} />
 					</div>
 				),
 			},

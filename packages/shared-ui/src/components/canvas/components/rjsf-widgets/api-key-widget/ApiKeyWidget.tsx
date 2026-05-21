@@ -21,11 +21,14 @@
 // SOFTWARE.
 // =============================================================================
 
-import { useEffect, useRef, useState, FC } from 'react';
+import { useEffect, useRef, useState, useCallback, KeyboardEvent, FC } from 'react';
 import { WidgetProps } from '@rjsf/utils';
 import { InputAdornment, TextField, Tooltip } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+
+import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
+import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
 
 // =============================================================================
 // Helpers
@@ -63,7 +66,7 @@ const getMaskedValue = (val: string): string => {
  * becomes editable for entering a new key. This prevents accidental modification
  * of existing keys while still allowing replacement.
  */
-const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange }) => {
+const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext }) => {
 	const { t } = useTranslation();
 
 	// If a value already exists, start in masked (read-only) mode to prevent accidental edits
@@ -73,6 +76,40 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 
 	const inputRef = useRef<HTMLInputElement>(null);
 
+	// --- Env var autocomplete ------------------------------------------------
+	const envKeys: string[] = Array.isArray(formContext?.envKeys) ? formContext.envKeys : [];
+	const autocomplete = useEnvVarAutocomplete(envKeys);
+
+	const onEnvVarSelect = useCallback(
+		(key: string) => {
+			const newValue = autocomplete.handleSelect(key, String(tempValue ?? ''), inputRef.current);
+			setTempValue(newValue);
+			onChange(newValue);
+		},
+		[autocomplete, tempValue, onChange],
+	);
+
+	const handleKeyDown = useCallback(
+		(e: KeyboardEvent<HTMLInputElement>) => {
+			if (!autocomplete.isOpen) return;
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				autocomplete.moveHighlight('down');
+			} else if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				autocomplete.moveHighlight('up');
+			} else if (e.key === 'Enter') {
+				e.preventDefault();
+				if (autocomplete.suggestions[autocomplete.highlightedIndex]) {
+					onEnvVarSelect(autocomplete.suggestions[autocomplete.highlightedIndex]);
+				}
+			} else if (e.key === 'Escape') {
+				autocomplete.handleDismiss();
+			}
+		},
+		[autocomplete, onEnvVarSelect],
+	);
+
 	// When in masked mode, scroll the input to the end so the visible trailing characters are shown
 	useEffect(() => {
 		if (inputRef.current && maskApiKey) {
@@ -81,54 +118,63 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 	}, [maskApiKey]);
 
 	return (
-		<TextField
-			id={id}
-			name={id}
-			required={required}
-			type={'text'}
-			label={label}
-			inputRef={inputRef}
-			size="small"
-			value={tempValue}
-			onChange={(e) => {
-				// Sync both the local display value and the form value on every keystroke
-				setTempValue(e.target.value);
-				onChange(e.target.value);
-			}}
-			autoFocus={autofocus}
-			disabled={disabled}
-			fullWidth
-			variant="outlined"
-			aria-readonly={maskApiKey ?? readonly}
-			error={!!rawErrors}
-			helperText={rawErrors}
-			slotProps={{
-				input: {
-					readOnly: maskApiKey,
-					endAdornment: maskApiKey && (
-						<InputAdornment position="end">
-							<Tooltip title={t('form.apiKeyRemoveTooltip')}>
-								<Delete
-									sx={{
-										cursor: 'pointer',
-										color: 'var(--rr-color-error-light)',
-										'&:hover': {
-											color: 'var(--rr-color-error)',
-										},
-									}}
-									onClick={() => {
-										// Clear the stored key and exit masked mode so user can type a new one
-										setTempValue('');
-										onChange('');
-										setMaskApiKey(false);
-									}}
-								/>
-							</Tooltip>
-						</InputAdornment>
-					),
-				},
-			}}
-		/>
+		<>
+			<TextField
+				id={id}
+				name={id}
+				required={required}
+				type={'text'}
+				label={label}
+				inputRef={inputRef}
+				size="small"
+				value={tempValue}
+				onChange={(e) => {
+					const val = e.target.value;
+					const cursor = e.target.selectionStart ?? val.length;
+					// Sync both the local display value and the form value on every keystroke
+					setTempValue(val);
+					onChange(val);
+					autocomplete.handleInputChange(val, cursor, e.target);
+				}}
+				onKeyDown={handleKeyDown}
+				autoFocus={autofocus}
+				disabled={disabled}
+				fullWidth
+				variant="outlined"
+				aria-readonly={maskApiKey || readonly}
+				error={!!rawErrors}
+				helperText={rawErrors}
+				slotProps={{
+					input: {
+						readOnly: maskApiKey || readonly,
+						endAdornment: maskApiKey && !readonly && (
+							<InputAdornment position="end">
+								<Tooltip title={t('form.apiKeyRemoveTooltip')}>
+									<Delete
+										sx={{
+											cursor: 'pointer',
+											color: 'var(--rr-color-error-light)',
+											'&:hover': {
+												color: 'var(--rr-color-error)',
+											},
+										}}
+										onClick={() => {
+											// Clear the stored key and exit masked mode so user can type a new one
+											setTempValue('');
+											onChange('');
+											setMaskApiKey(false);
+										}}
+									/>
+								</Tooltip>
+							</InputAdornment>
+						),
+					},
+				}}
+			/>
+			{envKeys.length > 0 && (
+				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
+			)}
+		</>
 	);
 };
 

@@ -21,9 +21,12 @@
 // SOFTWARE.
 // =============================================================================
 
-import { ChangeEvent, FocusEvent, useState, useEffect } from 'react';
+import { ChangeEvent, FocusEvent, useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, BaseInputTemplateProps, examplesId, getInputProps, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
+
+import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
+import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
 
 // =============================================================================
 // Helpers
@@ -87,6 +90,41 @@ export default function BaseInputTemplate<
 	// Ensure `0` is treated as a valid value but `undefined`/`null`/empty are normalized to empty string
 	const validatedPropValue = value || value === 0 ? value : '';
 
+	// --- Env var autocomplete ------------------------------------------------
+	const inputRef = useRef<HTMLInputElement>(null);
+	const envKeys: string[] = Array.isArray(formContext?.envKeys) ? formContext.envKeys : [];
+	const autocomplete = useEnvVarAutocomplete(envKeys);
+
+	const onEnvVarSelect = useCallback(
+		(key: string) => {
+			const newValue = autocomplete.handleSelect(key, String(controlledValue ?? ''), inputRef.current);
+			setControlledValue(newValue);
+			onChange(newValue === '' ? options.emptyValue : newValue);
+		},
+		[autocomplete, controlledValue, onChange, options.emptyValue],
+	);
+
+	const handleKeyDown = useCallback(
+		(e: KeyboardEvent<HTMLInputElement>) => {
+			if (!autocomplete.isOpen) return;
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				autocomplete.moveHighlight('down');
+			} else if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				autocomplete.moveHighlight('up');
+			} else if (e.key === 'Enter') {
+				e.preventDefault();
+				if (autocomplete.suggestions[autocomplete.highlightedIndex]) {
+					onEnvVarSelect(autocomplete.suggestions[autocomplete.highlightedIndex]);
+				}
+			} else if (e.key === 'Escape') {
+				autocomplete.handleDismiss();
+			}
+		},
+		[autocomplete, onEnvVarSelect],
+	);
+
 	// Sync controlled value when the form re-renders with a new prop value (e.g., reset or external update)
 	useEffect(() => {
 		if (value !== undefined && value !== null) {
@@ -115,10 +153,14 @@ export default function BaseInputTemplate<
 		required = false;
 	}
 
-	const _onChange = ({ target: { value } }: ChangeEvent<HTMLInputElement>) => {
-		setControlledValue(value);
+	const _onChange = ({ target }: ChangeEvent<HTMLInputElement>) => {
+		const val = target.value;
+		const cursor = target.selectionStart ?? val.length;
+		setControlledValue(val);
 		// Map empty string back to the schema's configured emptyValue (e.g., undefined for optional fields)
-		onChange(value === '' ? options.emptyValue : value);
+		onChange(val === '' ? options.emptyValue : val);
+		// Trigger env var autocomplete detection — cursor position captured synchronously from the event target
+		autocomplete.handleInputChange(val, cursor, target);
 	};
 	const _onBlur = ({ target }: FocusEvent<HTMLInputElement>) => onBlur(id, target && target.value);
 	const _onFocus = ({ target }: FocusEvent<HTMLInputElement>) => onFocus(id, target && target.value);
@@ -149,6 +191,8 @@ export default function BaseInputTemplate<
 				onChange={onChangeOverride || _onChange}
 				onBlur={_onBlur}
 				onFocus={_onFocus}
+				onKeyDown={handleKeyDown}
+				inputRef={inputRef}
 				InputLabelProps={DisplayInputLabelProps}
 				{...(textFieldProps as TextFieldProps)}
 				sx={{
@@ -170,6 +214,9 @@ export default function BaseInputTemplate<
 						return <option key={example} value={example} />;
 					})}
 				</datalist>
+			)}
+			{envKeys.length > 0 && (
+				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
 			)}
 		</>
 	);

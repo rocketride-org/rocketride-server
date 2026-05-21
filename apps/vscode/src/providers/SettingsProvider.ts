@@ -35,7 +35,7 @@
 
 import * as vscode from 'vscode';
 import { ConfigManager, SettingsSnapshot } from '../config';
-import { getConnectionManager } from '../extension';
+import { getConnectionManager, getEngineRegistry } from '../extension';
 import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
@@ -58,6 +58,8 @@ export class SettingsProvider {
 		this.connHandler = new ConnectionMessageHandler({
 			extensionFsPath: extensionUri.fsPath,
 			getActiveWebviews: () => this.activeWebviews,
+			getConnectionManager,
+			getEngineRegistry,
 		});
 		this.registerCommands();
 	}
@@ -261,14 +263,13 @@ export class SettingsProvider {
 	}
 
 	/**
-	 * Saves all settings atomically, then drives each connection manager
-	 * into its new desired state in sequence.
+	 * Saves all settings atomically, then reconciles engines.
 	 *
 	 * Flow:
-	 *   1. ConfigManager.applyAllSettings() — writes everything, suppresses
-	 *      intermediate change events, refreshes cache once.
-	 *   2. Dev connection — settingsApplied() → disconnect old → initialize new.
-	 *   3. Deploy connection — settingsApplied() → transition shared/independent.
+	 *   1. ConfigManager.applyAllSettings() — writes everything atomically.
+	 *   2. Cancel debounced config-change handlers on CMs (prevents race).
+	 *   3. Reconcile engines — checksums detect config changes, restarts
+	 *      affected engines, CMs reconnect with fresh credentials.
 	 *   4. Reload webview with the authoritative cached config.
 	 */
 	private async saveAllSettings(settings: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
@@ -287,26 +288,31 @@ export class SettingsProvider {
 				return;
 			}
 
-			// 1. Write everything atomically — no listeners fire during this
+			// Step 1: Write everything atomically — ConfigManager suppresses all
+			// intermediate config-change listeners during the batch so no CM reacts
+			// to half-written state (e.g., new API key without new host URL).
 			await this.configManager.applyAllSettings(snapshot);
 
 			// Mark welcome as dismissed — user has configured settings
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
-			// 2. Dev connection: disconnect old mode, connect with new config
-			const connectionManager = getConnectionManager();
-			if (connectionManager) {
-				await connectionManager.settingsApplied();
-			}
-
-			// 3. Deploy connection: transition shared↔independent as needed
-			const deployManager = DeployManager.getDeployInstance();
-			await deployManager.settingsApplied();
-
-			// 4. Reload webview from authoritative cache
-			this.showMessage(webview, 'success', 'Settings saved successfully!');
+			// Step 2: Confirm save to the user immediately — don't wait for engine ops
+			this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
+			}
+
+			// Step 3: Cancel any pending debounced config-change handlers so they
+			// don't race with the reconcile triggered by the explicit save.
+			const cm = getConnectionManager();
+			cm?.cancelPendingConfigChange();
+
+			// Reconcile engines — compares config checksums to detect changes
+			// (API key, host URL, connection mode, etc.) and restarts affected engines.
+			// Runs after the UI has updated so downloads don't block the "Saved" feedback.
+			const registry = getEngineRegistry();
+			if (registry) {
+				await registry.reconcile();
 			}
 
 			// Install agent stubs for any newly checked integrations
@@ -352,7 +358,7 @@ export class SettingsProvider {
 	 * Sends a message to the webview.
 	 * @param context When 'development', the message is shown inside that section's box; otherwise shown in the global message area.
 	 */
-	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development'): void {
+	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development' | 'save'): void {
 		webview.postMessage({
 			type: 'showMessage',
 			level: level,

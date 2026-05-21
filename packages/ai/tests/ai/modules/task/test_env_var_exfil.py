@@ -1,5 +1,5 @@
 """
-Tests for environment variable exfiltration fix in _resolve_pipeline.
+Tests for environment variable exfiltration fix in resolve_pipeline_env.
 
 Validates that the allowlist-based restriction on ${VAR} expansion in
 pipeline configs prevents sensitive env vars (AWS keys, DB URLs, tokens)
@@ -9,34 +9,20 @@ variables.
 
 import json
 import os
-import re
 import pytest
 from unittest.mock import patch
+
+from ai.modules.task.pipeline import resolve_pipeline_env
 
 
 class _FakeTask:
     """
-    Minimal stand-in that carries only _resolve_pipeline and ALLOWED_ENV_PREFIX
-    from the real Task class, avoiding heavyweight __init__ dependencies.
+    Minimal stand-in that delegates to the shared resolve_pipeline_env,
+    using os.environ as the env dict (tests patch os.environ).
     """
 
-    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
-
     def _resolve_pipeline(self, pipeline):
-        pipeline_str = json.dumps(pipeline)
-
-        def replacer(match):
-            env_var = match.group(1)
-            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
-                if value == match.group(0):
-                    return value  # placeholder not found
-                return json.dumps(value)[1:-1]  # escape but strip outer quotes
-            return '<REDACTED>'
-
-        resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
-        return json.loads(resolved_str)
+        return resolve_pipeline_env(pipeline, dict(os.environ))
 
 
 @pytest.fixture

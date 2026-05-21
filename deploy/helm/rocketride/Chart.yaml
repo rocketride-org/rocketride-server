@@ -1,0 +1,16 @@
+apiVersion: v2
+name: rocketride
+description: A Helm chart for deploying RocketRide data processing engine (community/self-hosted)
+type: application
+version: 0.1.0
+appVersion: '3.1.2'
+keywords:
+  - ai
+  - ml
+  - pipeline
+  - data-processing
+# For architecture details and SaaS vs community comparison, see deploy/helm/ARCHITECTURE.md
+home: https://github.com/rocketride-org/rocketride-server
+maintainers:
+  - name: RocketRide Team
+    email: team@rocketride.org
