@@ -23,6 +23,9 @@ module.exports = {
 	// Execution utilities (exec.js)
 	...require('./exec'),
 
+	// Pytest runner with empty-dir skip (pytest.js)
+	...require('./pytest'),
+
 	// Path constants (paths.js)
 	...require('./paths'),
 
