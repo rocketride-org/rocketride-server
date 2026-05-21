@@ -53,62 +53,40 @@ _HYBRID_PATH = _SEARCH_HYBRID_DIR / 'hybrid_search.py'
 
 # ---------------------------------------------------------------------------
 # rank_bm25 is a PyPI dependency resolved at runtime by `depends()` on the
-# build interpreter. For unit-testing the engine in isolation we provide a
-# minimal stand-in that produces a TF-IDF-ish score order. This is the only
-# stub the test installs — rocketlib / ai.* / depends are intentionally NOT
-# stubbed because the engine module does not import them.
+# build interpreter. For unit-testing the engine in isolation we load the
+# project's third-party mock from nodes/test/mocks/rank_bm25/ (the same
+# directory the integration runner puts on sys.path via ROCKETRIDE_MOCK) and
+# install it as `rank_bm25`. This is the only stub the test installs —
+# rocketlib / ai.* / depends are provided by the build interpreter and are
+# NOT stubbed here.
 # ---------------------------------------------------------------------------
 
-
-def _build_bm25_stub():
-    """Return a ``rank_bm25`` stand-in module with a TF-IDF-ish BM25Okapi."""
-    rank_bm25 = types.ModuleType('rank_bm25')
-
-    class BM25Okapi:
-        """Minimal stand-in for rank_bm25.BM25Okapi used only in tests."""
-
-        def __init__(self, corpus):
-            self.corpus = corpus
-            self.doc_count = len(corpus)
-            self.doc_freqs: dict = {}
-            for doc_tokens in corpus:
-                for token in set(doc_tokens):
-                    self.doc_freqs[token] = self.doc_freqs.get(token, 0) + 1
-
-        def get_scores(self, query_tokens):
-            scores = []
-            for doc_tokens in self.corpus:
-                token_counts: dict = {}
-                for t in doc_tokens:
-                    token_counts[t] = token_counts.get(t, 0) + 1
-                score = 0.0
-                for qt in query_tokens:
-                    if qt in token_counts:
-                        tf = token_counts[qt]
-                        df = self.doc_freqs.get(qt, 1)
-                        idf = max(0.1, (self.doc_count - df + 0.5) / (df + 0.5))
-                        score += tf * idf
-                scores.append(score)
-            return scores
-
-    rank_bm25.BM25Okapi = BM25Okapi
-    return rank_bm25
+_MOCKS_DIR = _HERE.parent / 'mocks'
 
 
-# Track our stub so the session-scoped teardown below can distinguish a
+def _load_rank_bm25_mock():
+    """Load the rank_bm25 mock module from nodes/test/mocks/rank_bm25/."""
+    spec = importlib.util.spec_from_file_location('rank_bm25', str(_MOCKS_DIR / 'rank_bm25' / '__init__.py'))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Track our stub so the module-scoped teardown below can distinguish a
 # stub we installed from a real ``rank_bm25`` that was already present.
 _RANK_BM25_STUB_TOKEN = object()
 
 
 def _install_bm25_stub_for_session():
-    """Install a fake ``rank_bm25`` only when the real package is missing.
+    """Install the rank_bm25 mock only when the real package is missing.
 
-    Returns ``True`` if this call installed the stub (and therefore owns
+    Returns ``True`` if this call installed the mock (and therefore owns
     its removal), ``False`` if the real package was already importable.
     """
     if 'rank_bm25' in sys.modules:
         return False
-    stub = _build_bm25_stub()
+    stub = _load_rank_bm25_mock()
     stub.__rank_bm25_test_stub__ = _RANK_BM25_STUB_TOKEN
     sys.modules['rank_bm25'] = stub
     return True
@@ -116,12 +94,12 @@ def _install_bm25_stub_for_session():
 
 @pytest.fixture(scope='module', autouse=True)
 def _rank_bm25_stub_module():
-    """Ensure the stub we install gets removed when this module finishes.
+    """Ensure the mock we install gets removed when this module finishes.
 
     ``hybrid_search.py`` does ``from rank_bm25 import BM25Okapi`` lazily
-    inside ``bm25_search``, so the stub must remain installed for the
+    inside ``bm25_search``, so the mock must remain installed for the
     duration of the engine tests in this file. Using module scope (rather
-    than session scope) means the stub is removed as soon as this test
+    than session scope) means the mock is removed as soon as this test
     file is done, so unrelated test modules later in the same pytest run
     do not see our stand-in.
     """
@@ -137,7 +115,7 @@ def _rank_bm25_stub_module():
 
 # The engine module needs to be importable at module-load time so individual
 # test classes can reference ``HybridSearchEngine`` directly. Install the
-# stub eagerly (the session-scoped fixture above guarantees teardown).
+# mock eagerly (the module-scoped fixture above guarantees teardown).
 _install_bm25_stub_for_session()
 
 
@@ -557,142 +535,67 @@ class TestIGlobalAlphaClamp:
 #   - empty query / empty documents short-circuit cleanly,
 #   - the structured answer text uses the [Document N] (score: …) shape.
 #
-# The build interpreter (`builder nodes:test`) ships rocketlib / ai.* / depends;
-# under plain `pytest` those are stubbed by the search_hybrid_pkg fixture so
-# the same tests still run end-to-end. If IInstance ever picks up an import we
-# can't stub, the fixture skips rather than failing — same pattern as the
-# rerank_cohere `rerank_pkg` fixture.
+# The build interpreter (`builder nodes:test`) ships rocketlib / ai.* / depends.
+# Those are provided modules and are NOT stubbed — the fixture imports them for
+# real. When this file runs under plain `pytest` outside the build interpreter
+# they are absent, so the fixture skips rather than mocking the framework.
+
+# ``ai.common.schema`` has no public ``SubQuestion``; build a lightweight one so
+# tests can construct sub-questions without depending on internal layout.
+_SubQuestion = type('SubQuestion', (), {'__init__': lambda self, text='': setattr(self, 'text', text)})
+
+
+def _has_ai_schema() -> bool:
+    """Whether the build-interpreter ``ai.common.schema`` is importable.
+
+    ``find_spec`` raises ``ModuleNotFoundError`` when the parent ``ai`` package
+    is absent (plain pytest), so guard it rather than letting collection fail.
+    """
+    try:
+        return importlib.util.find_spec('ai.common.schema') is not None
+    except ModuleNotFoundError:
+        return False
+
+
+_HAS_AI_SCHEMA = _has_ai_schema()
 
 
 @pytest.fixture
 def search_hybrid_pkg():
-    """Load search_hybrid.IInstance with framework stubs installed.
+    """Load search_hybrid.IInstance against the real rocketlib / ai modules.
 
     Yields a SimpleNamespace exposing the loaded ``IInstance`` class plus the
-    stubbed schema types (``Doc``, ``Question``, ``Answer``, ``SubQuestion``)
-    so each test can build inputs without re-defining them. On teardown the
-    fixture restores any modules it shadowed in ``sys.modules``.
+    real schema types (``Doc``, ``Question``, ``Answer``) and a lightweight
+    ``SubQuestion`` so each test can build inputs without re-defining them. The
+    framework modules (``rocketlib``, ``ai.*``, ``depends``) come from the build
+    interpreter and are imported, not stubbed; the fixture skips when they are
+    unavailable.
     """
     from unittest.mock import MagicMock
 
-    stub_names = [
-        'rocketlib',
-        'ai',
-        'ai.common',
-        'ai.common.config',
-        'ai.common.schema',
-        'depends',
-    ]
-    saved = {name: sys.modules.get(name) for name in stub_names}
+    if not (_HAS_ROCKETLIB and _HAS_AI_SCHEMA):
+        pytest.skip('rocketlib / ai.common.schema not available outside build interpreter')
+
+    schema_mod = importlib.import_module('ai.common.schema')
+    Doc = schema_mod.Doc
+    Question = schema_mod.Question
+    Answer = schema_mod.Answer
+    # `Question.questions` holds QuestionText entries (each exposing `.text`).
+    # Prefer the real type; fall back to the duck-typed stand-in if absent.
+    SubQuestion = getattr(schema_mod, 'QuestionText', _SubQuestion)
+
+    # Load the search_hybrid package + IInstance directly by file path so the
+    # tests do not depend on `nodes` being importable as a top-level package
+    # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
+    # build interpreter (`builder nodes:test`) makes the same import work via
+    # PYTHONPATH wiring; here we explicitly anchor on the source tree.
+    loaded_names: list[str] = []
 
     def _restore_sys_modules():
-        for name in stub_names:
-            if saved[name] is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved[name]
-        # Drop the file-loaded copies so a later test that does NOT use this
-        # fixture (e.g. TestIGlobalAlphaClamp under the build interpreter)
-        # sees the real package, not our stubbed reload.
-        for mod_name in list(sys.modules.keys()):
-            if mod_name.startswith('search_hybrid_test_pkg'):
-                sys.modules.pop(mod_name, None)
-            elif 'search_hybrid' in mod_name and 'test' not in mod_name:
-                sys.modules.pop(mod_name, None)
+        for name in loaded_names:
+            sys.modules.pop(name, None)
 
-    # Outer try/finally guarantees sys.modules restoration even if pytest.skip()
-    # is raised below before we reach the inner ``yield`` (e.g. on Python < 3.10
-    # the IGlobal PEP-604 annotations raise TypeError and we skip without
-    # reaching teardown otherwise).
     try:
-        # --- rocketlib -------------------------------------------------------
-        rocketlib_stub = types.ModuleType('rocketlib')
-
-        class IGlobalBase:
-            pass
-
-        class IInstanceBase:
-            pass
-
-        class OPEN_MODE:
-            CONFIG = 'config'
-            RUN = 'run'
-
-        rocketlib_stub.IGlobalBase = IGlobalBase
-        rocketlib_stub.IInstanceBase = IInstanceBase
-        rocketlib_stub.OPEN_MODE = OPEN_MODE
-        rocketlib_stub.warning = lambda *a, **kw: None
-        rocketlib_stub.debug = lambda *a, **kw: None
-        sys.modules['rocketlib'] = rocketlib_stub
-
-        # --- ai.common.{config,schema} ---------------------------------------
-        ai_pkg = types.ModuleType('ai')
-        ai_pkg.__path__ = []
-        ai_common = types.ModuleType('ai.common')
-        ai_common.__path__ = []
-
-        config_mod = types.ModuleType('ai.common.config')
-
-        class Config:
-            @staticmethod
-            def getNodeConfig(logicalType, connConfig):
-                return connConfig or {}
-
-        config_mod.Config = Config
-
-        schema_mod = types.ModuleType('ai.common.schema')
-
-        class Doc:
-            def __init__(self, **kwargs):
-                self.page_content = kwargs.get('page_content')
-                self.metadata = kwargs.get('metadata')
-                self.score = kwargs.get('score')
-                for k, v in kwargs.items():
-                    setattr(self, k, v)
-
-        class Question:
-            def __init__(self, **kwargs):
-                self.questions = kwargs.get('questions', [])
-                self.documents = kwargs.get('documents', [])
-
-        class SubQuestion:
-            def __init__(self, text=''):
-                self.text = text
-
-        class Answer:
-            def __init__(self):
-                self._answer = None
-
-            def setAnswer(self, text):
-                self._answer = text
-
-            def getAnswer(self):
-                return self._answer
-
-        schema_mod.Doc = Doc
-        schema_mod.Question = Question
-        schema_mod.Answer = Answer
-
-        depends_mod = types.ModuleType('depends')
-        depends_mod.depends = lambda *a, **kw: None
-
-        sys.modules['ai'] = ai_pkg
-        sys.modules['ai.common'] = ai_common
-        sys.modules['ai.common.config'] = config_mod
-        sys.modules['ai.common.schema'] = schema_mod
-        sys.modules['depends'] = depends_mod
-
-        # Drop any cached search_hybrid module loaded under a non-stubbed
-        # environment so the fresh import below resolves the stubbed types.
-        for mod_name in list(sys.modules.keys()):
-            if 'search_hybrid' in mod_name and 'test' not in mod_name:
-                del sys.modules[mod_name]
-
-        # Load the search_hybrid package + IInstance directly by file path so the
-        # tests do not depend on `nodes` being importable as a top-level package
-        # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
-        # build interpreter (`builder nodes:test`) makes the same import work via
-        # PYTHONPATH wiring; here we explicitly anchor on the source tree.
         try:
             pkg_init = _SEARCH_HYBRID_DIR / '__init__.py'
             pkg_spec = importlib.util.spec_from_file_location(
@@ -703,6 +606,7 @@ def search_hybrid_pkg():
             assert pkg_spec is not None and pkg_spec.loader is not None
             pkg_mod = importlib.util.module_from_spec(pkg_spec)
             sys.modules['search_hybrid_test_pkg'] = pkg_mod
+            loaded_names.append('search_hybrid_test_pkg')
             pkg_spec.loader.exec_module(pkg_mod)
 
             # IGlobal is referenced via `from .IGlobal import IGlobal` in IInstance
@@ -713,6 +617,7 @@ def search_hybrid_pkg():
             assert iglobal_spec is not None and iglobal_spec.loader is not None
             iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
             sys.modules['search_hybrid_test_pkg.IGlobal'] = iglobal_mod
+            loaded_names.append('search_hybrid_test_pkg.IGlobal')
             iglobal_spec.loader.exec_module(iglobal_mod)
 
             iinst_spec = importlib.util.spec_from_file_location(
@@ -722,6 +627,7 @@ def search_hybrid_pkg():
             assert iinst_spec is not None and iinst_spec.loader is not None
             iinst_mod = importlib.util.module_from_spec(iinst_spec)
             sys.modules['search_hybrid_test_pkg.IInstance'] = iinst_mod
+            loaded_names.append('search_hybrid_test_pkg.IInstance')
             iinst_spec.loader.exec_module(iinst_mod)
             IInstance = iinst_mod.IInstance
         except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
