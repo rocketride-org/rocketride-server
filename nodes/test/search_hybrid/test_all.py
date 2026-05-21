@@ -735,7 +735,10 @@ class TestIInstanceIntegration:
         assert len(call_args) == 1
         ans = call_args[0]
         assert isinstance(ans, pkg.Answer), f'expected single Answer, got {type(ans).__name__}'
-        answer_text = ans.getAnswer()
+        # The node sets a plain-text answer via ``Answer.setAnswer(...)`` (the
+        # real model has no ``getAnswer``); read it back from the ``answer``
+        # field, mirroring how the framework persists the response.
+        answer_text = ans.answer
 
         # Structured format — not raw concatenation
         assert 'Hybrid search returned' in answer_text
