@@ -21,6 +21,7 @@
  */
 
 const fs = require('fs').promises;
+const path = require('path');
 const { glob } = require('glob');
 const { execCommand } = require('./exec');
 const { exists } = require('./fs');
@@ -43,6 +44,14 @@ async function runPytest({ engine, testsDir, extraArgs = [], execOpts = {} }) {
 	if (!testsDir) throw new TypeError('runPytest: testsDir is required');
 
 	if (!(await exists(testsDir))) {
+		// Single-file targets (paths with an extension, e.g. ``test_contracts.py``)
+		// must fail loudly when missing — renaming or moving the file is a real
+		// regression that we must not silently mask. Directory targets are
+		// treated as optional: a refactor may legitimately remove the last test
+		// in a directory without breaking the build.
+		if (path.extname(testsDir) !== '') {
+			throw new Error(`pytest: target file ${testsDir} not found`);
+		}
 		if (execOpts.task) {
 			execOpts.task.output = `pytest: ${testsDir} not found, skipping`;
 		}
