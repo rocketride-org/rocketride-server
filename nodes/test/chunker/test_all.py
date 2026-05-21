@@ -5,30 +5,20 @@
 
 """Tests for the chunker node: chunking strategies and IInstance behavior.
 
-The build interpreter provides ``rocketlib``, ``ai.common.schema`` and
-``depends`` at runtime, so this module imports the node package by name
-(``chunker.*``) after putting ``nodes/src/nodes`` on ``sys.path`` — matching
-the convention used by ``nodes/test/local_text_output/test_instance.py``.
+The build interpreter is mandatory: it provides ``rocketlib``,
+``ai.common.schema`` and ``depends`` and configures import paths, so this
+module imports the node package by name (``chunker.*``) directly. Outside the
+build interpreter those modules are absent and collection fails with a
+ModuleNotFoundError -- by design; there is no vanilla-pytest fallback.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-_NODES_SRC = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes'
-if str(_NODES_SRC) not in sys.path:
-    sys.path.insert(0, str(_NODES_SRC))
-
-# Importing ``chunker`` triggers ``chunker.__init__`` which loads IGlobal/IInstance
-# (and therefore ``rocketlib``/``ai.common.schema``). Skip collection cleanly
-# when the build interpreter is not active.
-_chunker_pkg = pytest.importorskip('chunker', reason='chunker package requires rocketlib (build interpreter)')
-
-from chunker.chunker_strategies import (  # noqa: E402
+from chunker.chunker_strategies import (
     RecursiveCharacterChunker,
     SentenceChunker,
     TokenChunker,
@@ -381,25 +371,16 @@ class TestTokenChunker:
 
 
 def _import_node_classes():
-    """Import the IInstance/IGlobal classes; skip the test if rocketlib is missing.
+    """Import the IInstance/IGlobal classes (provided by the build interpreter)."""
+    from chunker.IGlobal import IGlobal
+    from chunker.IInstance import IInstance
 
-    In the build interpreter ``rocketlib``/``ai.common.schema``/``depends``
-    resolve to real modules; in a vanilla pytest run they are absent and the
-    test is skipped. The maintainer convention is to NOT mock these built-ins.
-    """
-    try:
-        from chunker.IGlobal import IGlobal
-        from chunker.IInstance import IInstance
-    except ModuleNotFoundError as exc:
-        pytest.skip(f'build-interpreter modules not available: {exc.name}')
     return IGlobal, IInstance
 
 
 def _import_schema():
-    try:
-        from ai.common.schema import Doc, DocMetadata
-    except ModuleNotFoundError as exc:
-        pytest.skip(f'build-interpreter modules not available: {exc.name}')
+    from ai.common.schema import Doc, DocMetadata
+
     return Doc, DocMetadata
 
 
