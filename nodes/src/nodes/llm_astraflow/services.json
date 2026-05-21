@@ -1,0 +1,175 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Astraflow",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_astraflow://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_astraflow",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A component that connects to Astraflow by UCloud — an OpenAI-compatible AI model ", "aggregation platform supporting 200+ models. Offers both a global endpoint ", "(api-us-ca.umodelverse.ai) and a China endpoint (api.modelverse.cn). ", "Sign up at https://astraflow.ucloud-global.com (global) or ", "https://astraflow.ucloud.cn (China)."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "astraflow.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
+	//		on the tile box
+	//
+	"tile": ["Model: ${parameters.llm_astraflow.profile}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	// Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "custom",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 131072,
+				"serverbase": "https://api-us-ca.umodelverse.ai/v1",
+				"apikey": ""
+			},
+			"custom-cn": {
+				"title": "Custom (China)",
+				"model": "",
+				"modelTotalTokens": 131072,
+				"serverbase": "https://api.modelverse.cn/v1",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Astraflow model identifier. Astraflow supports 200+ models — see the full list at https://astraflow.ucloud-global.com."
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"astraflow.serverbase": {
+			"type": "string",
+			"title": "Endpoint URL",
+			"description": "Astraflow API base URL. Use https://api-us-ca.umodelverse.ai/v1 for the global endpoint or https://api.modelverse.cn/v1 for the China endpoint.",
+			"optional": false
+		},
+		"astraflow.custom": {
+			"object": "custom",
+			"properties": ["astraflow.serverbase", "model", "modelTotalTokens", "llm.cloud.apikey"]
+		},
+		"astraflow.custom-cn": {
+			"object": "custom-cn",
+			"properties": ["astraflow.serverbase", "model", "modelTotalTokens", "llm.cloud.apikey"]
+		},
+		"astraflow.profile": {
+			"title": "Model",
+			"description": "Astraflow endpoint and model",
+			"type": "string",
+			"default": "custom",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": ["astraflow.custom"]
+				},
+				{
+					"value": "custom-cn",
+					"properties": ["astraflow.custom-cn"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Astraflow",
+			"properties": ["astraflow.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["custom"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}
