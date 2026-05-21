@@ -248,9 +248,20 @@ class Store(DocumentStoreBase):
         if docFilter.objectIds is not None:
             must.append(models.FieldCondition(key='meta.objectId', match=models.MatchAny(any=docFilter.objectIds)))
 
-        # If we are not going after deleted docs, add a condition
+        # If we are not going after deleted docs, add a condition.
+        # Match isDeleted=False OR isDeleted=null OR isDeleted field absent —
+        # all three mean "not explicitly deleted" since the Qdrant client strips
+        # None values via exclude_none, so old/edge-case docs may lack the field.
         if docFilter.isDeleted is None or not docFilter.isDeleted:
-            must.append(models.FieldCondition(key='meta.isDeleted', match=models.MatchValue(value=False)))
+            must.append(
+                models.Filter(
+                    should=[
+                        models.FieldCondition(key='meta.isDeleted', match=models.MatchValue(value=False)),
+                        models.IsNullCondition(is_null=models.PayloadField(key='meta.isDeleted')),
+                        models.IsEmptyCondition(is_empty=models.PayloadField(key='meta.isDeleted')),
+                    ]
+                )
+            )
 
         # If we are not going after chunks, add a condition
         if docFilter.chunkIds is not None:
@@ -294,7 +305,7 @@ class Store(DocumentStoreBase):
                     score = float(1.0 / (1.0 + np.exp(point.score / -100)))
 
                 # Ignore it if it doesn't have a high enough score
-                if score < 0.20:
+                if score < self.threshold_search:
                     continue
             else:
                 score = 0
@@ -388,6 +399,14 @@ class Store(DocumentStoreBase):
         if docFilter.offset:
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
+        # For Cosine similarity, Qdrant applies score_threshold against raw [-1,1]
+        # scores before our (score + 1) / 2 normalization. Inverse-transform the
+        # [0,1] config threshold back to the raw space so the API filter is correct.
+        if self.similarity == 'Cosine':
+            raw_threshold = (self.threshold_search * 2) - 1
+        else:
+            raw_threshold = self.threshold_search
+
         # Perform the search
         points = self.client.query_points(
             collection_name=self.collection,
@@ -396,7 +415,7 @@ class Store(DocumentStoreBase):
             with_vectors=False,
             with_payload=True,
             limit=docFilter.limit if docFilter.limit is not None else 25,
-            score_threshold=self.threshold_search,
+            score_threshold=raw_threshold,
             search_params=SearchParams(exact=True),
         ).points
 
