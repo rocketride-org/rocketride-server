@@ -10,17 +10,26 @@ summarization, document ranking, the full optimization pipeline, model
 limit lookup, edge cases, and IGlobal / IInstance lifecycle.
 
 The build interpreter provides ``rocketlib``, the ``ai`` package and
-``depends`` (plus the native ``engLib``) at runtime; ``tiktoken`` and
-``json5`` are installed in CI. The node source is not on the interpreter's
-import path by default, so -- like every other node suite -- we prepend
+``depends`` (plus the native ``engLib``) at runtime, so those are imported
+directly -- not stubbed. The node source is not on the interpreter's import
+path by default, so -- like every other node suite -- we prepend
 ``nodes/src/nodes`` to import the ``context_optimizer.*`` package by name.
-There is no skip fallback: outside the build interpreter the ``rocketlib``
-import fails and collection errors out, by design.
+There is no skip fallback for the framework modules: outside the build
+interpreter the ``rocketlib`` import fails and collection errors out, by design.
+
+``tiktoken`` / ``json5`` are node-specific third-party deps installed only at
+engine runtime (via ``depends``); they are absent from the unit-test
+interpreter, so a deterministic test-local stub is injected below ONLY when the
+real lib is missing. They are intentionally NOT placed under
+``nodes/test/mocks/`` -- the engine loads that dir engine-wide via
+ROCKETRIDE_MOCK, which would shadow the real libs during the dynamic run.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import sys
+import types
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
@@ -30,6 +39,84 @@ import pytest
 _NODES_SRC = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
+
+
+def _make_tiktoken_stub() -> types.ModuleType:
+    """Build a deterministic whitespace-splitting tiktoken stub.
+
+    Used only when real tiktoken is not installed. ``cl100k_base`` is
+    approximated by splitting on whitespace -- enough for the budget /
+    truncation assertions the suite makes.
+    """
+    module = types.ModuleType('tiktoken')
+
+    class Encoding:
+        def __init__(self, name: str = 'cl100k_base') -> None:
+            self.name = name
+
+        def encode(self, text: str):
+            return text.split() if text else []
+
+        def decode(self, tokens) -> str:
+            return ' '.join(tokens)
+
+    def get_encoding(name: str = 'cl100k_base') -> Encoding:
+        return Encoding(name)
+
+    module.Encoding = Encoding
+    module.get_encoding = get_encoding
+    return module
+
+
+def _make_json5_stub() -> types.ModuleType:
+    """Build a stdlib-json based json5 stub.
+
+    Used only when real json5 is not installed. ``ai.common.config`` imports
+    json5 at module load; the suite only triggers the import, it does not parse
+    JSON5-specific syntax.
+    """
+    import json
+
+    module = types.ModuleType('json5')
+
+    class JSONError(ValueError):
+        """Mirror of ``json5.JSONError`` (a ValueError subclass)."""
+
+    def loads(s: str, **_kwargs):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError as exc:
+            raise JSONError(str(exc)) from exc
+
+    def dumps(obj, **_kwargs) -> str:
+        return json.dumps(obj)
+
+    def load(fp, **_kwargs):
+        try:
+            return json.load(fp)
+        except json.JSONDecodeError as exc:
+            raise JSONError(str(exc)) from exc
+
+    def dump(obj, fp, **_kwargs) -> None:
+        json.dump(obj, fp)
+
+    module.JSONError = JSONError
+    module.loads = loads
+    module.dumps = dumps
+    module.load = load
+    module.dump = dump
+    return module
+
+
+# tiktoken / json5 are node-specific deps absent from the unit-test interpreter
+# (installed only at engine runtime via depends). Inject a test-local stub when
+# the real lib is missing; this only touches THIS process, so the engine's
+# separate dynamic-test subprocess still uses the real libraries.
+if importlib.util.find_spec('tiktoken') is None:
+    sys.modules['tiktoken'] = _make_tiktoken_stub()
+
+if importlib.util.find_spec('json5') is None:
+    sys.modules['json5'] = _make_json5_stub()
 
 from ai.common.schema import Question  # noqa: E402
 
