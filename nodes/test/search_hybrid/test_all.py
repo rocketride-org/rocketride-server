@@ -671,7 +671,7 @@ class TestIInstanceIntegration:
         """RuntimeError should be raised when engine is None."""
         pkg = search_hybrid_pkg
         question = pkg.Question(
-            questions=[pkg.SubQuestion('test query')],
+            questions=[pkg.SubQuestion(text='test query')],
             documents=[pkg.Doc(page_content='some text', score=0.9)],
         )
         inst, _ = pkg.make_instance(engine=None)
@@ -686,7 +686,7 @@ class TestIInstanceIntegration:
             pkg.Doc(page_content='Deep learning is powerful.', score=0.7, metadata=None),
         ]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('machine learning')],
+            questions=[pkg.SubQuestion(text='machine learning')],
             documents=docs,
         )
         original_doc_count = len(question.documents)
@@ -717,7 +717,7 @@ class TestIInstanceIntegration:
             pkg.Doc(page_content='Deep learning uses neural networks.', score=0.7, metadata=None),
         ]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('machine learning')],
+            questions=[pkg.SubQuestion(text='machine learning')],
             documents=docs,
         )
 
@@ -753,7 +753,7 @@ class TestIInstanceIntegration:
             pkg.Doc(page_content='Second document about deep learning.', score=0.9, metadata=None),
         ]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('deep learning')],
+            questions=[pkg.SubQuestion(text='deep learning')],
             documents=docs,
         )
 
@@ -776,7 +776,7 @@ class TestIInstanceIntegration:
         pkg = search_hybrid_pkg
         docs = [pkg.Doc(page_content='hello world', score=0.5, metadata=None)]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('hello')],
+            questions=[pkg.SubQuestion(text='hello')],
             documents=docs,
         )
 
@@ -794,7 +794,7 @@ class TestIInstanceIntegration:
         pkg = search_hybrid_pkg
         docs = [pkg.Doc(page_content='hello world', score=0.5, metadata=None)]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('hello')],
+            questions=[pkg.SubQuestion(text='hello')],
             documents=docs,
         )
 
@@ -812,7 +812,7 @@ class TestIInstanceIntegration:
         pkg = search_hybrid_pkg
         docs = [pkg.Doc(page_content='Some doc.', score=0.5, metadata=None)]
         question = pkg.Question(
-            questions=[pkg.SubQuestion('')],
+            questions=[pkg.SubQuestion(text='')],
             documents=docs,
         )
 
@@ -828,7 +828,7 @@ class TestIInstanceIntegration:
         """Should skip hybrid search when no documents are attached."""
         pkg = search_hybrid_pkg
         question = pkg.Question(
-            questions=[pkg.SubQuestion('test query')],
+            questions=[pkg.SubQuestion(text='test query')],
             documents=[],
         )
 
