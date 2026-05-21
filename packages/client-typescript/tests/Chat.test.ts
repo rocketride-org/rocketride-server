@@ -23,7 +23,7 @@
  */
 
 /**
- * Unit tests for the persistent Chat class — TDD §12.1 checklist.
+ * Unit tests for the persistent Chat class.
  *
  * All file IO goes through an in-memory `MockFsClient` so the tests do not
  * touch the network or a real FileStore. The client implements the structural
@@ -78,7 +78,7 @@ class MockFsClient implements RocketRideChatClient {
 const PIPELINE_ID = 'pipe-test';
 const TOKEN = 'test-token';
 
-describe('Chat persistence (TDD §12.1)', () => {
+describe('Chat persistence', () => {
 	test('create writes the header line exactly once and leaves catalog empty', async () => {
 		const fs = new MockFsClient();
 		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });
@@ -257,7 +257,7 @@ describe('Chat persistence (TDD §12.1)', () => {
 		expect(turns).toHaveLength(1);
 	});
 
-	test('parseChatFile skips unknown record types (forward-compat per TDD §5.4)', () => {
+	test('parseChatFile skips unknown record types (forward-compat)', () => {
 		const lines = [JSON.stringify({ type: 'header', schema_version: 1, guid: 'x', created: 't', pipeline_id: 'p' }), JSON.stringify({ type: 'future_record', schema_version: 7, payload: 'opaque' }), JSON.stringify({ type: 'turn', schema_version: 1, seq: 1, created: 't', question: {}, answer: {} })];
 		const { header, turns } = parseChatFile(lines.join('\n'));
 		expect(header).not.toBeNull();
@@ -265,7 +265,7 @@ describe('Chat persistence (TDD §12.1)', () => {
 	});
 });
 
-describe('optimistic-lock retry on catalog.json (TDD §8.1)', () => {
+describe('optimistic-lock retry on catalog.json', () => {
 	test('CatalogContentionError fires when interleaved writes exceed retry budget', async () => {
 		const fs = new MockFsClient();
 		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });

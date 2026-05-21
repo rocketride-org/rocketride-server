@@ -29,9 +29,6 @@ on-disk layout (``.chats/<chat_id>/chat.jsonl`` + per-user ``.chats/catalog.json
 and same optimistic-version retry on catalog writes. All persistence is owned
 by this client over existing ``fs_*`` primitives on ``RocketRideClient``; the
 engine/chat node is unchanged.
-
-See ``claude/research/multimodal-chat-sessions/TDD - chat sessions.md`` for the
-end-to-end design rationale.
 """
 
 from __future__ import annotations
@@ -194,7 +191,7 @@ def parse_chat_file(raw: str) -> tuple[Optional[ChatHeader], List[ChatTurn]]:
                 )
             )
             continue
-        # Unknown record type — forward-compat skip per TDD §5.4.
+        # Unknown record type — forward-compat skip.
     return header, turns
 
 

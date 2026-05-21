@@ -62,10 +62,10 @@ class IEndpoint(IEndpointBase):
         try:
             if self.endpoint.logicalType == 'chat':
                 # Read the per-node config so chat-ui can decide whether to
-                # persist (TDD §4 "Persist sessions" toggle, default OFF) and
-                # which pipeline to attribute new chats to.  Both are delivered
-                # via the embed URL — same channel as the existing ?auth=...
-                # token (see App.tsx URL-param boot path).
+                # persist ("Persist sessions" toggle, default OFF) and which
+                # pipeline to attribute new chats to.  Both are delivered via
+                # the embed URL — same channel as the existing ?auth=... token
+                # (see App.tsx URL-param boot path).
                 parameters = getattr(self.endpoint, 'parameters', None) or {}
                 persist_sessions = bool(parameters.get('persistSessions', False))
 

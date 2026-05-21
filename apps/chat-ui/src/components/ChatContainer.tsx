@@ -128,7 +128,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	);
 
 	const handleNewChat = useCallback(() => {
-		// Defer creating the on-disk chat until the first send (TDD §7.1).
+		// Defer creating the on-disk chat until the first send.
 		setCurrentChat(null);
 		setMessages([]);
 		hasWelcomedRef.current = false;

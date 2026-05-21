@@ -25,12 +25,11 @@
 /**
  * Persistent chat session, fully client-driven.
  *
- * See `claude/research/multimodal-chat-sessions/TDD - chat sessions.md` for the design.
  * The TS client owns all filestore reads and writes via existing `fs*` primitives;
  * the engine/chat node does no chat-aware writes. One `Chat` instance represents one
  * persistent conversation in the per-user filestore at `.chats/<chat_id>/`.
  *
- * On-disk layout (per TDD §5.1):
+ * On-disk layout:
  *   .chats/
  *     catalog.json               ← per-user mutable index (this file)
  *     <chat_id>/                 ← one directory per chat
@@ -149,7 +148,7 @@ export class Chat {
 	/**
 	 * Create a new persistent chat. Generates a fresh `chat_id`, makes the
 	 * directory, writes the header line. The catalog is NOT touched until the
-	 * first turn lands (TDD §7.1 — keeps abandoned-empty chats out of the list).
+	 * first turn lands — keeps abandoned-empty chats out of the list.
 	 */
 	static async create(opts: { client: RocketRideChatClient; token: string; pipelineId: string }): Promise<Chat> {
 		if (!opts.pipelineId) throw new Error('pipelineId is required');
@@ -225,7 +224,7 @@ export class Chat {
 	 * Returns the raw `PIPELINE_RESULT` from `client.chat()`.
 	 *
 	 * If step 3 throws (engine error, network drop) nothing is written to disk —
-	 * the chat file ends at the prior completed turn (TDD §8.4).
+	 * the chat file ends at the prior completed turn.
 	 *
 	 * `opts.history` is a caller-supplied list of prior turns to prime the
 	 * model with. The client SDK does not derive history from `chat.jsonl`
@@ -334,7 +333,7 @@ export class Chat {
 	}
 
 	/**
-	 * Optimistic-version mutate-and-write on `catalog.json` (TDD §8.1).
+	 * Optimistic-version mutate-and-write on `catalog.json`.
 	 * Read → mutate → write only if the on-disk `version` is still V; retry
 	 * a bounded number of times, then throw.
 	 */
@@ -347,7 +346,7 @@ export class Chat {
  * `client.chats` namespace surface for listing the user's catalog.
  *
  * Implementation note: chat-aware callers like the chat-list UI invoke
- * `client.chats.list({pipelineId})`. The TDD doesn't require sort order —
+ * `client.chats.list({pipelineId})`. Sort order is not guaranteed —
  * callers sort by `updated` descending themselves.
  */
 export function makeChatsNamespace(client: RocketRideChatClient): {
@@ -401,7 +400,7 @@ export function parseChatFile(raw: string): { header: ChatHeader | null; turns: 
 		try {
 			rec = JSON.parse(line) as ChatLine;
 		} catch {
-			// Partial write on the last line — tolerate (TDD §5.3 "at most loses the trailing line").
+			// Partial write on the last line — tolerate; at most we lose the trailing line.
 			continue;
 		}
 		if (rec.type === 'header') {
@@ -412,7 +411,7 @@ export function parseChatFile(raw: string): { header: ChatHeader | null; turns: 
 			turns.push(rec);
 			continue;
 		}
-		// Unknown record type — skip with no error (forward-compat per TDD §5.4).
+		// Unknown record type — skip with no error (forward-compat).
 	}
 	return { header, turns };
 }

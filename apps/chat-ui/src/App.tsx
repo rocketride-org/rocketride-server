@@ -109,9 +109,9 @@ const App: React.FC = () => {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
-		// Pull persistent-chat params from the URL alongside auth (TDD §6.3 + open-question
-		// resolution: same channel as authToken).  Sessionstorage them so they survive the
-		// query-string scrub above and reloads inside the iframe.
+		// Pull persistent-chat params from the URL alongside auth (same channel as authToken).
+		// Sessionstorage them so they survive the query-string scrub above and reloads inside
+		// the iframe.
 		let urlPipelineId = urlParams.get('pipelineId') || '';
 		let urlPersist = urlParams.get('persist') === '1';
 		if (!isVSCode) {
