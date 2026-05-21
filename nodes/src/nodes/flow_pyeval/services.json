@@ -1,22 +1,88 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Flow If/Else (Python)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "flow_pyeval://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["flow_control"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
 	"path": "nodes.flow_pyeval",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
 	"prefix": "flow_pyeval",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
 	"description": ["Two-branch conditional router. The condition is a sandboxed Python ", "expression evaluated against the active lane payload and the current ", "entry. Truthy → THEN, falsy → ELSE. Streaming lanes (image / audio / ", "video) are buffered until END so the condition sees the complete payload."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
+	//
 	"tile": ["Condition: flow_pyeval.condition"],
-	// Wildcard lane: accepts and emits any content type; renders as a single `any` handle on the canvas.
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces. `{"*": ["*"]}` is the wildcard contract:
+	//		this node accepts any content type and emits the same type
+	//		(passthrough). The canvas renders it as a single `any` handle.
+	//
 	"lanes": {
 		"*": ["*"]
 	},
-	// Named output branches for two-branch routing. The engine gives this node one output port per branch and dispatches each chunk only to the branch the condition picked. Order is canvas port order: THEN first, ELSE second.
+	//
+	//	Required (flow-control nodes):
+	//		Named output branches. The canvas renders one output port per
+	//		branch label; the engine dispatches each chunk only to the
+	//		branch the condition picked, bypassing the binder broadcast.
+	//		Order matches port order on the node: THEN first, ELSE second.
+	//
 	"branches": ["then", "else"],
+	//
+	//	Optional:
+	//		Profile sections are configuration options used by the driver
+	//		itself. Each profile is a named bundle of default field values.
+	//
 	"preconfig": {
 		"default": "passthrough",
 		"profiles": {
@@ -34,6 +100,12 @@
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
 	"fields": {
 		"flow_pyeval.condition": {
 			"type": "string",
@@ -63,6 +135,11 @@
 			"hidden": true
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
 	"shape": [
 		{
 			"section": "Pipe",
