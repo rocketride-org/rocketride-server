@@ -12,14 +12,20 @@ limit lookup, edge cases, and IGlobal / IInstance lifecycle.
 Runs without a live server. ``rocketlib`` and the ``ai`` package are provided
 by the engine runtime, so the real modules are imported here (their lib paths
 are added to ``sys.path``); only the opaque engine bootstrap modules
-(``engLib``, ``depends``) are stubbed. Third-party libraries that may be absent
-from a bare test environment (``tiktoken``, ``json5``) are shadowed from
-``nodes/test/mocks/`` -- the same directory the engine uses via ROCKETRIDE_MOCK.
+(``engLib``, ``depends``) are stubbed.
+
+Third-party compute/parse libraries (``tiktoken``, ``json5``) are NOT shadowed
+from ``nodes/test/mocks/``. Those mocks would be picked up engine-wide via
+ROCKETRIDE_MOCK during ``builder nodes:test-full`` and make the live node
+under-count tokens / mis-parse JSON5, breaking the dynamic ci_tiny truncation
+case. Instead, these libs are used REAL when installed; only when a bare test
+environment lacks them does this module inject a *test-local* stub into
+``sys.modules`` for THIS pytest process. The unit assertions pass identically
+with the real libraries or the stub.
 """
 
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import sys
 import types
@@ -44,7 +50,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_MOCKS_DIR = _REPO_ROOT / 'nodes' / 'test' / 'mocks'
 
 sys.modules.setdefault('engLib', MagicMock())
 if 'depends' not in sys.modules:
@@ -73,27 +78,95 @@ for _name in list(sys.modules):
             del sys.modules[_name]
 
 # ---------------------------------------------------------------------------
-# Shadow third-party libraries from nodes/test/mocks when the real ones are not
-# installed in the test environment. The mock modules live alongside every
-# other node's third-party mock (loaded by the engine via ROCKETRIDE_MOCK).
+# Inject TEST-LOCAL stubs for tiktoken / json5 ONLY when the real libraries are
+# absent from this bare pytest environment.
+#
+# These stubs are defined inline (not under nodes/test/mocks/) on purpose: the
+# engine loads everything in nodes/test/mocks/ engine-wide via ROCKETRIDE_MOCK,
+# so a tiktoken/json5 mock there would shadow the real libs during the live
+# ``builder nodes:test-full`` dynamic run -- the whitespace token stub would
+# under-count tokens and the ci_tiny truncation case would never fire. The live
+# node MUST use real tiktoken/json5 (both installed in CI). Injecting here only
+# touches THIS process's sys.modules, which the engine spawns in a separate
+# subprocess, so the dynamic test is unaffected.
+#
+# The unit assertions are calibrated to hold for either the real encoder or the
+# stub, so this is a pure availability fallback.
 # ---------------------------------------------------------------------------
 
 
-def _load_mock_module(name: str) -> types.ModuleType:
-    """Load a third-party mock package from nodes/test/mocks/<name>/."""
-    init_path = _MOCKS_DIR / name / '__init__.py'
-    spec = importlib.util.spec_from_file_location(name, str(init_path))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+def _make_tiktoken_stub() -> types.ModuleType:
+    """Build a deterministic whitespace-splitting tiktoken stub.
+
+    Used only when real tiktoken is not installed. ``cl100k_base`` is
+    approximated by splitting on whitespace -- enough for the budget /
+    truncation assertions the suite makes.
+    """
+    module = types.ModuleType('tiktoken')
+
+    class Encoding:
+        def __init__(self, name: str = 'cl100k_base') -> None:
+            self.name = name
+
+        def encode(self, text: str):
+            return text.split() if text else []
+
+        def decode(self, tokens) -> str:
+            return ' '.join(tokens)
+
+    def get_encoding(name: str = 'cl100k_base') -> Encoding:
+        return Encoding(name)
+
+    module.Encoding = Encoding
+    module.get_encoding = get_encoding
     return module
 
 
-_TIKTOKEN_AVAILABLE = importlib.util.find_spec('tiktoken') is not None
-if not _TIKTOKEN_AVAILABLE:
-    sys.modules['tiktoken'] = _load_mock_module('tiktoken')
+def _make_json5_stub() -> types.ModuleType:
+    """Build a stdlib-json based json5 stub.
+
+    Used only when real json5 is not installed. ``ai.common.config`` imports
+    json5 at module load; the suite only triggers the import, it does not parse
+    JSON5-specific syntax.
+    """
+    import json
+
+    module = types.ModuleType('json5')
+
+    class JSONError(ValueError):
+        """Mirror of ``json5.JSONError`` (a ValueError subclass)."""
+
+    def loads(s: str, **_kwargs):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError as exc:
+            raise JSONError(str(exc)) from exc
+
+    def dumps(obj, **_kwargs) -> str:
+        return json.dumps(obj)
+
+    def load(fp, **_kwargs):
+        try:
+            return json.load(fp)
+        except json.JSONDecodeError as exc:
+            raise JSONError(str(exc)) from exc
+
+    def dump(obj, fp, **_kwargs) -> None:
+        json.dump(obj, fp)
+
+    module.JSONError = JSONError
+    module.loads = loads
+    module.dumps = dumps
+    module.load = load
+    module.dump = dump
+    return module
+
+
+if importlib.util.find_spec('tiktoken') is None:
+    sys.modules['tiktoken'] = _make_tiktoken_stub()
 
 if importlib.util.find_spec('json5') is None:
-    sys.modules['json5'] = _load_mock_module('json5')
+    sys.modules['json5'] = _make_json5_stub()
 
 
 from ai.common.schema import Question  # noqa: E402
