@@ -33,5 +33,5 @@ export * from './DocFilter.js';
 export * from './DocGroup.js';
 export * from './DocMetadata.js';
 export * from './Question.js';
-export { Chat, CatalogContentionError, ChatNotFoundError, CATALOG_SCHEMA_VERSION, CHAT_SCHEMA_VERSION, EAGER_HISTORY_TURNS, parseChatFile, extractAnswerText, mutateCatalog } from '../Chat.js';
+export { Chat, CatalogContentionError, ChatNotFoundError, CATALOG_SCHEMA_VERSION, CHAT_SCHEMA_VERSION, parseChatFile, extractAnswerText, mutateCatalog } from '../Chat.js';
 export type { ChatCatalogEntry, ChatHeader, ChatLine, ChatTurn, RocketRideChatClient } from '../Chat.js';

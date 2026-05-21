@@ -44,11 +44,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence
 
-from .schema.question import Question, QuestionType
+from .schema.question import Question, QuestionHistory, QuestionType
 
 CHAT_SCHEMA_VERSION = 1
 CATALOG_SCHEMA_VERSION = 1
-EAGER_HISTORY_TURNS = 3
 CATALOG_PREVIEW_LEN = 80
 CATALOG_MAX_RETRY = 3
 CHATS_ROOT = '.chats'
@@ -151,6 +150,12 @@ def extract_answer_text(answer: Any) -> str:
         v = answer.get(k)
         if isinstance(v, str):
             return v
+    # Chat node returns {answers: list[str], name, result_types, ...}.
+    ans = answer.get('answers')
+    if isinstance(ans, list):
+        parts = [s for s in ans if isinstance(s, str)]
+        if parts:
+            return '\n'.join(parts)
     return ''
 
 
@@ -285,20 +290,13 @@ class Chat:
         *,
         attachments: Optional[Sequence[Any]] = None,  # parked for feature 2
         on_sse: Optional[Callable[[str, dict], Awaitable[None]]] = None,
+        history: Optional[Sequence[QuestionHistory]] = None,
     ) -> Any:
         question = Question(type=QuestionType.PROMPT, chat_id=self.id)
         question.addQuestion(text)
-        for turn in self.history[-EAGER_HISTORY_TURNS:]:
-            user_text = _extract_question_text(turn.question)
-            assistant_text = extract_answer_text(turn.answer)
-            if user_text:
-                from .schema.question import QuestionHistory
-
-                question.addHistory(QuestionHistory(role='user', content=user_text))
-            if assistant_text:
-                from .schema.question import QuestionHistory
-
-                question.addHistory(QuestionHistory(role='assistant', content=assistant_text))
+        if history:
+            for item in history:
+                question.addHistory(item)
 
         result = await self._client.chat(token=self._token, question=question, on_sse=on_sse)
 

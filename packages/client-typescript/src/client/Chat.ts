@@ -38,7 +38,7 @@
  *       <attachment-id>.<ext>    ← future: feature-2 attachments
  */
 
-import { Question, QuestionType } from './schema/Question.js';
+import { Question, QuestionType, type QuestionHistory } from './schema/Question.js';
 import type { PIPELINE_RESULT } from './types/index.js';
 
 // Allow the Chat class to talk to RocketRideClient via a structural interface
@@ -58,7 +58,6 @@ export interface RocketRideChatClient {
 
 export const CHAT_SCHEMA_VERSION = 1;
 export const CATALOG_SCHEMA_VERSION = 1;
-export const EAGER_HISTORY_TURNS = 3;
 export const CATALOG_PREVIEW_LEN = 80;
 export const CATALOG_MAX_RETRY = 3;
 const CHATS_ROOT = '.chats';
@@ -216,8 +215,8 @@ export class Chat {
 	/**
 	 * Send a new user message. Atomic per turn:
 	 *   1. (Attachments parked for feature 2 — accepted but no-op here.)
-	 *   2. Build a Question with `chat_id`, the new user turn, and the last
-	 *      `EAGER_HISTORY_TURNS` turns flattened into `Question.history`.
+	 *   2. Build a Question with `chat_id`, the new user turn, and any
+	 *      `opts.history` items pushed onto `Question.history` in order.
 	 *   3. Call `client.chat({token, question, onSSE})`, await the result.
 	 *   4. Append ONE turn line to `chat.jsonl` (read-then-rewrite — `fsWrite`
 	 *      is not append-native at the TS-client level today).
@@ -227,21 +226,25 @@ export class Chat {
 	 *
 	 * If step 3 throws (engine error, network drop) nothing is written to disk —
 	 * the chat file ends at the prior completed turn (TDD §8.4).
+	 *
+	 * `opts.history` is a caller-supplied list of prior turns to prime the
+	 * model with. The client SDK does not derive history from `chat.jsonl`
+	 * itself — callers (e.g. chat-ui) decide what to pass.
 	 */
 	async send(
 		text: string,
 		opts?: {
 			attachments?: unknown[];
 			onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
+			history?: QuestionHistory[];
 		}
 	): Promise<PIPELINE_RESULT> {
 		const question = new Question({ type: QuestionType.PROMPT, chat_id: this.id });
 		question.addQuestion(text);
-		for (const turn of this.history.slice(-EAGER_HISTORY_TURNS)) {
-			const userText = extractQuestionText(turn.question);
-			const assistantText = extractAnswerText(turn.answer);
-			if (userText) question.addHistory({ role: 'user', content: userText });
-			if (assistantText) question.addHistory({ role: 'assistant', content: assistantText });
+		if (opts?.history) {
+			for (const item of opts.history) {
+				question.addHistory(item);
+			}
 		}
 
 		const result = await this._client.chat({
@@ -443,6 +446,11 @@ export function extractAnswerText(answer: unknown): string {
 	}
 	if (typeof a.content === 'string') return a.content;
 	if (typeof a.text === 'string') return a.text;
+	// Chat node returns { answers: string[], name, result_types, ... } — flatten the array.
+	if (Array.isArray(a.answers)) {
+		const parts = (a.answers as unknown[]).filter((x): x is string => typeof x === 'string');
+		if (parts.length > 0) return parts.join('\n');
+	}
 	return '';
 }
 

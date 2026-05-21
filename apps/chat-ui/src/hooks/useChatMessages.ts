@@ -83,34 +83,28 @@ export const useChatMessages = () => {
 					}
 				};
 
+				// Eager history: last 6 non-system/status UI messages, mapped to
+				// the QuestionHistory shape. Used identically by both paths so
+				// persist-on and persist-off prime the model with the same
+				// context window.
+				const eagerHistory = messages
+					.filter((msg) => msg.sender !== 'system' && msg.sender !== 'status')
+					.slice(-6)
+					.map((msg) => ({
+						role: msg.sender === 'user' ? 'user' : 'assistant',
+						content: msg.text,
+					}));
+
 				let result: PIPELINE_RESULT;
 				if (chat) {
-					// Persist-on path: the Chat instance is the source of truth for
-					// history (read from .chats/<id>/chat.jsonl) and writes the turn
-					// line + catalog entry on its own. No need to flatten `messages`
-					// into Question.history — Chat.send slices the last-3 turns from
-					// chat.history itself.
-					result = await chat.send(userMessage, { onSSE });
+					result = await chat.send(userMessage, { onSSE, history: eagerHistory });
 				} else {
-					// Persist-off path: today's behavior.
 					const question = new Question({
 						type: QuestionType.PROMPT,
 						expectJson: false,
 					});
-
 					question.addQuestion(userMessage);
-
-					// Include last 6 messages for context - helps AI maintain conversation flow
-					// Filter out system/status messages (UI-only) to avoid priming the LLM
-					messages
-						.filter((msg) => msg.sender !== 'system' && msg.sender !== 'status')
-						.slice(-6)
-						.forEach((msg) => {
-							question.addHistory({
-								role: msg.sender === 'user' ? 'user' : 'assistant',
-								content: msg.text,
-							});
-						});
+					eagerHistory.forEach((h) => question.addHistory(h));
 
 					result = await client.chat({
 						token: authToken,

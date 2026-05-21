@@ -27,7 +27,6 @@ from rocketride.chat import (
     CATALOG_SCHEMA_VERSION,
     CatalogContentionError,
     ChatNotFoundError,
-    EAGER_HISTORY_TURNS,
     list_chats,
     parse_chat_file,
 )
@@ -157,7 +156,7 @@ async def test_engine_failure_leaves_no_partial_turn():
 
 
 @pytest.mark.asyncio
-async def test_send_threads_chat_id_and_eager_history_into_question():
+async def test_send_threads_chat_id_and_embeds_no_eager_history_by_default():
     fs = MockFsClient()
     chat = await Chat.create(client=fs, token=TOKEN, pipeline_id=PIPELINE_ID)
     await chat.send('t1')
@@ -167,10 +166,24 @@ async def test_send_threads_chat_id_and_eager_history_into_question():
 
     last_q: Question = fs.chat_calls[-1]['question']
     assert last_q.chat_id == chat.id
-    assert len(last_q.history) <= EAGER_HISTORY_TURNS * 2
-    # The oldest entry should be the user message of the oldest of the last-3 turns ("t1" — the very first send).
-    assert last_q.history[0].role == 'user'
-    assert last_q.history[0].content == 't1'
+    assert last_q.history == []
+
+
+@pytest.mark.asyncio
+async def test_send_passes_history_kwarg_onto_question_history_in_order():
+    from rocketride.schema.question import QuestionHistory
+
+    fs = MockFsClient()
+    chat = await Chat.create(client=fs, token=TOKEN, pipeline_id=PIPELINE_ID)
+    history = [
+        QuestionHistory(role='user', content='prior 1'),
+        QuestionHistory(role='assistant', content='reply 1'),
+        QuestionHistory(role='user', content='prior 2'),
+    ]
+    await chat.send('current', history=history)
+    last_q: Question = fs.chat_calls[-1]['question']
+    assert [h.role for h in last_q.history] == ['user', 'assistant', 'user']
+    assert [h.content for h in last_q.history] == ['prior 1', 'reply 1', 'prior 2']
 
 
 @pytest.mark.asyncio

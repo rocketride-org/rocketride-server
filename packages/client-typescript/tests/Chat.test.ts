@@ -31,7 +31,7 @@
  * write atomicity and sequencing.
  */
 
-import { Chat, CHAT_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, CatalogContentionError, ChatNotFoundError, EAGER_HISTORY_TURNS, makeChatsNamespace, parseChatFile, type RocketRideChatClient } from '../src/client/Chat';
+import { Chat, CHAT_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, CatalogContentionError, ChatNotFoundError, makeChatsNamespace, parseChatFile, type RocketRideChatClient } from '../src/client/Chat';
 import { Question } from '../src/client/schema/Question';
 
 class MockFsClient implements RocketRideChatClient {
@@ -205,7 +205,7 @@ describe('Chat persistence (TDD §12.1)', () => {
 		expect(fs.files.has(`.chats/${chat.id}/chat.jsonl`)).toBe(false);
 	});
 
-	test('send threads chat_id into outgoing Question and last-3 turns into history', async () => {
+	test('send threads chat_id into outgoing Question and embeds no eager history by default', async () => {
 		const fs = new MockFsClient();
 		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });
 		await chat.send('t1');
@@ -214,10 +214,20 @@ describe('Chat persistence (TDD §12.1)', () => {
 		await chat.send('t4');
 		const lastQ = fs.chatCalls[fs.chatCalls.length - 1].question;
 		expect(lastQ.chat_id).toBe(chat.id);
-		// EAGER_HISTORY_TURNS turns × 2 messages (user + assistant) = 6 entries.
-		expect(lastQ.history.length).toBeLessThanOrEqual(EAGER_HISTORY_TURNS * 2);
-		// First entry should be the oldest of the last-3 turns (i.e. t1's user line — the very first send).
-		expect(lastQ.history[0]).toEqual({ role: 'user', content: 't1' });
+		expect(lastQ.history).toEqual([]);
+	});
+
+	test('send passes opts.history through onto Question.history in order', async () => {
+		const fs = new MockFsClient();
+		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });
+		const history = [
+			{ role: 'user', content: 'prior 1' },
+			{ role: 'assistant', content: 'reply 1' },
+			{ role: 'user', content: 'prior 2' },
+		];
+		await chat.send('current', { history });
+		const lastQ = fs.chatCalls[fs.chatCalls.length - 1].question;
+		expect(lastQ.history).toEqual(history);
 	});
 
 	test('client.chats.list filters by pipelineId and returns [] when no catalog', async () => {

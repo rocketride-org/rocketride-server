@@ -96,7 +96,6 @@ from .chat import (
     parse_chat_file,
     CHAT_SCHEMA_VERSION,
     CATALOG_SCHEMA_VERSION,
-    EAGER_HISTORY_TURNS,
 )
 
 # Import type definitions, constants, and callback signatures used throughout the SDK
@@ -258,5 +257,4 @@ __all__ = [
     'parse_chat_file',
     'CHAT_SCHEMA_VERSION',
     'CATALOG_SCHEMA_VERSION',
-    'EAGER_HISTORY_TURNS',
 ]
