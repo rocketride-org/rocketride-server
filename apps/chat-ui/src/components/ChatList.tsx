@@ -107,15 +107,16 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 		<aside
 			style={{
 				width: '240px',
-				borderRight: '1px solid var(--rr-border, #e5e7eb)',
-				background: 'var(--rr-surface, #fafafa)',
+				borderRight: '1px solid var(--border-color)',
+				background: 'var(--bg-secondary)',
+				color: 'var(--text-primary)',
 				display: 'flex',
 				flexDirection: 'column',
 				height: '100%',
 				overflow: 'hidden',
 			}}
 		>
-			<div style={{ padding: '12px', borderBottom: '1px solid var(--rr-border, #e5e7eb)' }}>
+			<div style={{ padding: '12px', borderBottom: '1px solid var(--border-color)' }}>
 				<button
 					type="button"
 					onClick={onNewChat}
@@ -126,12 +127,13 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 						justifyContent: 'center',
 						gap: '6px',
 						padding: '8px 12px',
-						background: 'var(--rr-accent, #2563eb)',
-						color: 'white',
+						background: 'var(--accent-primary)',
+						color: '#ffffff',
 						border: 'none',
 						borderRadius: '6px',
 						cursor: 'pointer',
 						fontSize: '0.875rem',
+						fontWeight: 500,
 					}}
 					aria-label="New chat"
 				>
@@ -141,9 +143,9 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 			</div>
 			<div style={{ flex: 1, overflowY: 'auto' }}>
 				{loading && entries.length === 0 ? (
-					<div style={{ padding: '12px', fontSize: '0.85rem', color: 'var(--rr-text-secondary, #6b7280)' }}>Loading…</div>
+					<div style={{ padding: '12px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Loading…</div>
 				) : entries.length === 0 ? (
-					<div style={{ padding: '12px', fontSize: '0.85rem', color: 'var(--rr-text-secondary, #6b7280)' }}>No saved chats yet. Send a message to start one.</div>
+					<div style={{ padding: '12px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No saved chats yet. Send a message to start one.</div>
 				) : (
 					entries.map((entry) => {
 						const isActive = entry.guid === currentChatId;
@@ -155,8 +157,9 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 								style={{
 									padding: '10px 12px',
 									cursor: isEditing ? 'default' : 'pointer',
-									borderBottom: '1px solid var(--rr-border, #f0f0f0)',
-									background: isActive ? 'var(--rr-accent-bg, #eff6ff)' : 'transparent',
+									borderBottom: '1px solid var(--border-color)',
+									background: isActive ? 'var(--bg-tertiary)' : 'transparent',
+									color: 'var(--text-primary)',
 								}}
 							>
 								{isEditing ? (
@@ -178,8 +181,11 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 											width: '100%',
 											padding: '4px 6px',
 											fontSize: '0.875rem',
-											border: '1px solid var(--rr-border, #d1d5db)',
+											background: 'var(--input-bg, var(--bg-primary))',
+											color: 'var(--text-primary)',
+											border: '1px solid var(--input-border, var(--border-color))',
 											borderRadius: '4px',
+											outline: 'none',
 										}}
 									/>
 								) : (
@@ -192,7 +198,7 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 												gap: '6px',
 											}}
 										>
-											<div style={{ fontWeight: 500, fontSize: '0.875rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title || 'Untitled chat'}</div>
+											<div style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.title || 'Untitled chat'}</div>
 											<div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
 												<button
 													type="button"
@@ -205,7 +211,7 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 														border: 'none',
 														cursor: 'pointer',
 														padding: '2px',
-														color: 'var(--rr-text-secondary, #6b7280)',
+														color: 'var(--text-secondary)',
 													}}
 													aria-label={`Rename ${entry.title}`}
 													title="Rename"
@@ -219,12 +225,12 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 														void handleDeleteClick(entry);
 													}}
 													style={{
-														background: pendingDeleteId === entry.guid ? 'var(--rr-danger, #dc2626)' : 'transparent',
+														background: pendingDeleteId === entry.guid ? 'var(--error-color)' : 'transparent',
 														border: 'none',
 														cursor: 'pointer',
 														padding: '2px',
 														borderRadius: '4px',
-														color: pendingDeleteId === entry.guid ? 'white' : 'var(--rr-text-secondary, #6b7280)',
+														color: pendingDeleteId === entry.guid ? '#ffffff' : 'var(--text-secondary)',
 													}}
 													aria-label={pendingDeleteId === entry.guid ? `Confirm delete ${entry.title}` : `Delete ${entry.title}`}
 													title={pendingDeleteId === entry.guid ? 'Click again to confirm' : 'Delete'}
@@ -238,7 +244,7 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 												style={{
 													marginTop: '2px',
 													fontSize: '0.75rem',
-													color: 'var(--rr-text-secondary, #6b7280)',
+													color: 'var(--text-secondary)',
 													overflow: 'hidden',
 													textOverflow: 'ellipsis',
 													whiteSpace: 'nowrap',
