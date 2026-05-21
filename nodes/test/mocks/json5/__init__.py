@@ -17,9 +17,21 @@ import json
 from typing import Any
 
 
+class JSONError(ValueError):
+    """Mirror of ``json5.JSONError`` so ``except json5.JSONError`` clauses work.
+
+    Real json5 raises ``JSONError`` (a ``ValueError`` subclass) on parse
+    failure; some callers (e.g. ``rocketride.cli.utils.config``) catch it by
+    name. We re-raise stdlib parse errors as ``JSONError`` to match.
+    """
+
+
 def loads(s: str, **kwargs: Any) -> Any:
     """Parse a JSON document using the stdlib json parser."""
-    return json.loads(s)
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError as exc:
+        raise JSONError(str(exc)) from exc
 
 
 def dumps(obj: Any, **kwargs: Any) -> str:
@@ -29,7 +41,10 @@ def dumps(obj: Any, **kwargs: Any) -> str:
 
 def load(fp: Any, **kwargs: Any) -> Any:
     """Read and parse JSON from a file-like object."""
-    return json.load(fp)
+    try:
+        return json.load(fp)
+    except json.JSONDecodeError as exc:
+        raise JSONError(str(exc)) from exc
 
 
 def dump(obj: Any, fp: Any, **kwargs: Any) -> None:
