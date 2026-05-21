@@ -5,20 +5,27 @@
 
 """Tests for the chunker node: chunking strategies and IInstance behavior.
 
-The build interpreter is mandatory: it provides ``rocketlib``,
-``ai.common.schema`` and ``depends`` and configures import paths, so this
-module imports the node package by name (``chunker.*``) directly. Outside the
-build interpreter those modules are absent and collection fails with a
-ModuleNotFoundError -- by design; there is no vanilla-pytest fallback.
+The build interpreter provides ``rocketlib``, ``ai.common.schema`` and
+``depends``. The node source is not on the interpreter's import path by
+default, so -- like every other node suite (local_text_output, milvus,
+pinecone, tool_git, ...) -- we prepend ``nodes/src/nodes`` to import the
+``chunker.*`` package by name. There is no skip fallback: outside the build
+interpreter the ``rocketlib`` import fails and collection errors out, by design.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from chunker.chunker_strategies import (
+_NODES_SRC = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes'
+if str(_NODES_SRC) not in sys.path:
+    sys.path.insert(0, str(_NODES_SRC))
+
+from chunker.chunker_strategies import (  # noqa: E402
     RecursiveCharacterChunker,
     SentenceChunker,
     TokenChunker,
