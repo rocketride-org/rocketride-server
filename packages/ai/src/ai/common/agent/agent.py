@@ -55,14 +55,6 @@ class AgentBase(ABC):
     _AGENT_TOOL_NAME: str = 'run_agent'
     REQUIRES_MEMORY: bool = False
 
-    # Engine-built-in tool registry.  Built-ins are surfaced to the LLM
-    # via `host.tools.list` but their invocation is intercepted in
-    # `call_tool` and routed to the corresponding `_method` below.
-    _RECALL_HISTORY_TOOL_NAME: str = 'recall_history'
-    _RECALL_HISTORY_DEFAULT_LIMIT: int = 10
-    _RECALL_HISTORY_MAX_LIMIT: int = 50
-    _HISTORY_SCHEMA_VERSION: int = 1
-
     def __init__(
         self,
         iGlobal: Any,
@@ -125,11 +117,9 @@ class AgentBase(ABC):
         # Lazy host construction.  Built once per IInstance, cached on
         # the invoker via attribute assignment.  Tool discovery (one
         # engine invoke per connected tool node) happens at first
-        # question, not on every question.  Engine built-in tools (e.g.
-        # `recall_history`) are computed per-agent and folded into the
-        # Tools channel so frameworks surface them to the LLM.
+        # question, not on every question.
         if getattr(iInstance, '_agent_host', None) is None:
-            host = AgentHostServices(iInstance, builtin_tools=self._builtin_tools())
+            host = AgentHostServices(iInstance)
             if self.REQUIRES_MEMORY and host.memory is None:
                 raise ValueError(f'{self.FRAMEWORK} agent requires a memory node to be connected')
             iInstance._agent_host = host
@@ -161,10 +151,7 @@ class AgentBase(ABC):
                 task_id = None
 
             # Build the per-call context inline.  Channels come from the
-            # cached host; metadata is stamped fresh per call.  chat_id
-            # is pulled directly from the inbound Question so concurrent
-            # questions on the same IInstance route to their own chat
-            # files (covered by the chat-id-routing contract test).
+            # cached host; metadata is stamped fresh per call.
             context = AgentContext(
                 invoker=iInstance,
                 llm=host.llm,
@@ -174,7 +161,6 @@ class AgentBase(ABC):
                 pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
                 framework=self.FRAMEWORK,
                 started_at=started_at,
-                chat_id=getattr(question, 'chat_id', None),
             )
 
             # And execute
@@ -376,11 +362,6 @@ class AgentBase(ABC):
         Driver wrappers convert framework arg shapes to a clean dict before
         calling this — there is no normalization layer here.
 
-        Engine built-in tools (e.g. ``recall_history``) are intercepted
-        here and dispatched to the corresponding ``AgentBase`` method,
-        threading ``context.chat_id`` so the LLM never types a path and
-        cannot reach another chat or another user's data.
-
         Args:
             context: The current agent run context.
             tool_name: Tool name as published by `context.tools.list`.
@@ -389,13 +370,6 @@ class AgentBase(ABC):
         Returns:
             The raw tool output (whatever the tool returned).
         """
-        if tool_name == self._RECALL_HISTORY_TOOL_NAME:
-            safe_args = dict(args or {})
-            self._recall_history_metric(
-                context.pipe_id,
-                'invoked' if context.chat_id else 'invoked_no_chat',
-            )
-            return self._recall_history(chat_id=context.chat_id, **safe_args)
         return context.tools.invoke(tool_name, args)
 
     # =========================================================================
@@ -425,154 +399,3 @@ class AgentBase(ABC):
         except Exception:
             pass
         return self.__class__.__name__
-
-    # =========================================================================
-    # ENGINE BUILT-IN TOOLS
-    # =========================================================================
-    def _builtin_tools(self) -> List[Dict[str, Any]]:
-        """Engine-built-in tool descriptors prepended to ``host.tools.list``.
-
-        Built-ins are dispatched in ``call_tool`` before ever reaching
-        ``Tools.invoke``.  They never take a path argument — the LLM
-        cannot type a chat id; it is threaded from the inbound Question
-        via ``AgentContext.chat_id``.
-        """
-        return [
-            {
-                'name': self._RECALL_HISTORY_TOOL_NAME,
-                'description': ('Read older turns from this chat session beyond the eager last-3 context already in the prompt. Returns turn records (each with the full Question/Answer that produced it) in most-recent-first order.'),
-                'inputSchema': {
-                    'type': 'object',
-                    'properties': {
-                        'before_seq': {
-                            'type': 'integer',
-                            'description': 'Only return turns with seq < before_seq. Omit for the most recent turns.',
-                            'minimum': 1,
-                        },
-                        'limit': {
-                            'type': 'integer',
-                            'description': (f'Maximum turns to return (default {self._RECALL_HISTORY_DEFAULT_LIMIT}, max {self._RECALL_HISTORY_MAX_LIMIT}).'),
-                            'minimum': 1,
-                            'maximum': self._RECALL_HISTORY_MAX_LIMIT,
-                        },
-                    },
-                },
-            }
-        ]
-
-    def _recall_history_metric(self, pipe_id: int, tag: str) -> None:
-        """Fire a single counter on the MetricsManager seam (TDD §11.1 'recall_history reads').
-
-        Best-effort: silently swallow import/init failures so test contexts
-        without the metrics module still work. The signal is bookkeeping; the
-        chat history read itself does not depend on it.
-        """
-        try:
-            from ai.web.metrics.metrics import metrics as _metrics  # local to avoid mock-time cycles
-
-            _metrics.counter(int(pipe_id or 0), f'recall_history.{tag}', 1)
-        except Exception:
-            pass
-
-    def _recall_history(
-        self,
-        chat_id: Optional[str],
-        before_seq: Optional[int] = None,
-        limit: int = _RECALL_HISTORY_DEFAULT_LIMIT,
-    ) -> Dict[str, Any]:
-        """Read turn lines from ``.chats/<chat_id>/chat.jsonl``.
-
-        Returns ``{turns: [], note: 'persistence not enabled'}`` when
-        ``chat_id`` is None (no chat session on this Question).  Otherwise
-        streams the chat file via the per-account ``FileStore`` (same
-        ``client_id`` pattern as ``tool_filesystem`` — see
-        ``nodes/src/nodes/tool_filesystem/IGlobal.py:75-87``), filters by
-        ``seq < before_seq`` when supplied, and returns the most-recent
-        ``limit`` matching turns.
-
-        Lines with a higher per-line ``schema_version`` than this reader
-        understands are returned with a ``schema_version_warning`` flag
-        instead of being skipped — that lets the LLM be told to treat
-        them as opaque rather than dropping them silently.
-        """
-        if not chat_id:
-            return {'turns': [], 'note': 'persistence not enabled'}
-
-        try:
-            limit = max(1, min(int(limit), self._RECALL_HISTORY_MAX_LIMIT))
-        except (TypeError, ValueError):
-            limit = self._RECALL_HISTORY_DEFAULT_LIMIT
-
-        before_int: Optional[int] = None
-        if before_seq is not None:
-            try:
-                before_int = int(before_seq)
-            except (TypeError, ValueError):
-                before_int = None
-
-        try:
-            raw = self._read_chat_jsonl_bytes(chat_id)
-        except FileNotFoundError:
-            return {'turns': [], 'note': 'chat file not found', 'chat_id': chat_id}
-        except Exception as e:
-            error(f'_recall_history read failed chat_id={chat_id} type={type(e).__name__} message={e}')
-            return {'turns': [], 'note': f'read error: {type(e).__name__}', 'chat_id': chat_id}
-
-        turns: List[Dict[str, Any]] = []
-        warnings: List[str] = []
-        for raw_line in raw.splitlines():
-            if not raw_line.strip():
-                continue
-            try:
-                rec = json.loads(raw_line)
-            except json.JSONDecodeError as e:
-                warnings.append(f'line skipped: {e.msg}')
-                continue
-            if rec.get('type') != 'turn':
-                continue
-            line_ver = rec.get('schema_version', 1)
-            if isinstance(line_ver, int) and line_ver > self._HISTORY_SCHEMA_VERSION:
-                rec = dict(rec)
-                rec['schema_version_warning'] = f'line schema_version={line_ver} > reader={self._HISTORY_SCHEMA_VERSION}; treat as opaque'
-            if before_int is not None:
-                try:
-                    if int(rec.get('seq', 0)) >= before_int:
-                        continue
-                except (TypeError, ValueError):
-                    continue
-            turns.append(rec)
-
-        # Newest-first, clipped to limit.
-        turns.sort(key=lambda r: int(r.get('seq', 0)) if isinstance(r.get('seq', 0), int) else 0, reverse=True)
-        out: Dict[str, Any] = {'turns': turns[:limit], 'chat_id': chat_id}
-        if warnings:
-            out['warnings'] = warnings
-        return out
-
-    def _read_chat_jsonl_bytes(self, chat_id: str) -> bytes:
-        """Open the per-account ``FileStore`` and read the chat JSONL bytes.
-
-        Mirrors the env-driven client-id resolution used by
-        ``tool_filesystem`` (``IGlobal.beginGlobal``) so the engine
-        respects the same multi-tenant boundary.  Async ``FileStore.read``
-        is driven from this sync context via ``asyncio.run`` exactly as
-        ``tool_filesystem`` does in ``IInstance._run_async``.
-        """
-        import asyncio
-        import os
-
-        from ai.account.store import Store
-
-        client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
-        if not client_id:
-            raise RuntimeError('ROCKETRIDE_CLIENT_ID env var is missing; cannot resolve chat history store')
-        store = Store.create()
-        file_store = store.get_file_store(client_id)
-        path = f'.chats/{chat_id}/chat.jsonl'
-
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(file_store.read(path))
-        else:
-            raise RuntimeError('_recall_history cannot run inside an active event loop; AgentBase.call_tool is invoked synchronously by drivers.')
