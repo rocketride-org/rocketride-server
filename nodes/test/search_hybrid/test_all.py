@@ -21,12 +21,22 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Tests for the search_hybrid node.
+"""Tests for the search_hybrid node: the BM25/RRF engine and IInstance contract.
 
-These tests cover the pure-Python HybridSearchEngine (BM25, RRF, full hybrid).
-The IInstance integration path is exercised by the services.json `test` block
-through the dynamic test runner (see `nodes/test/test_dynamic.py`), so we keep
-this file focused on the engine and avoid stubbing the framework types.
+The build interpreter (``builder nodes:test``) provides ``rocketlib``,
+``ai.common.schema`` and ``depends``. The node source is not on the
+interpreter's import path by default, so -- like every other node suite
+(chunker, local_text_output, milvus, pinecone, tool_git, ...) -- we prepend
+``nodes/src/nodes`` and import the ``search_hybrid.*`` package by name. There is
+no skip fallback: outside the build interpreter the ``rocketlib`` import fails
+and collection errors out, by design.
+
+``rank_bm25`` is a third-party PyPI compute library (resolved at runtime by
+``depends()`` on the build interpreter), not a framework module. Like the
+openai / elasticsearch mocks, we install the project's faithful mock from
+``nodes/test/mocks/rank_bm25/`` when the real package is absent so the engine
+can be unit-tested in isolation. It is the only stub installed here --
+``rocketlib`` / ``ai.*`` / ``depends`` are provided and NOT stubbed.
 
 Usage:
     python -m pytest nodes/test/search_hybrid/ -v
@@ -37,18 +47,22 @@ from __future__ import annotations
 import copy
 import importlib.util
 import sys
-import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Locate hybrid_search.py
+# Put nodes/src/nodes on sys.path so the search_hybrid package imports by name
+# (file-path-based imports bypass interpreter path configuration). The node
+# package's IInstance/IGlobal pull in the real rocketlib / ai.* modules from
+# the build interpreter.
 # ---------------------------------------------------------------------------
 
 _HERE = Path(__file__).resolve().parent
-_SEARCH_HYBRID_DIR = _HERE.parent.parent / 'src' / 'nodes' / 'search_hybrid'
-_HYBRID_PATH = _SEARCH_HYBRID_DIR / 'hybrid_search.py'
+_NODES_SRC = _HERE.parent.parent / 'src' / 'nodes'
+if str(_NODES_SRC) not in sys.path:
+    sys.path.insert(0, str(_NODES_SRC))
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +70,7 @@ _HYBRID_PATH = _SEARCH_HYBRID_DIR / 'hybrid_search.py'
 # build interpreter. For unit-testing the engine in isolation we load the
 # project's third-party mock from nodes/test/mocks/rank_bm25/ (the same
 # directory the integration runner puts on sys.path via ROCKETRIDE_MOCK) and
-# install it as `rank_bm25`. This is the only stub the test installs —
+# install it as `rank_bm25`. This is the only stub the test installs --
 # rocketlib / ai.* / depends are provided by the build interpreter and are
 # NOT stubbed here.
 # ---------------------------------------------------------------------------
@@ -118,17 +132,7 @@ def _rank_bm25_stub_module():
 # mock eagerly (the module-scoped fixture above guarantees teardown).
 _install_bm25_stub_for_session()
 
-
-def _load_hybrid_search():
-    spec = importlib.util.spec_from_file_location('hybrid_search', _HYBRID_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-hybrid_mod = _load_hybrid_search()
-HybridSearchEngine = hybrid_mod.HybridSearchEngine
+from search_hybrid.hybrid_search import HybridSearchEngine  # noqa: E402
 
 
 # ===========================================================================
@@ -290,7 +294,7 @@ class TestReciprocalRankFusion:
         list1 = [{'something': 'one'}]  # rank 0, no id, no text
         list2 = [{'something': 'two'}]  # rank 0, no id, no text
         results = HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60)
-        # Both anonymous docs should survive — no accidental dedup
+        # Both anonymous docs should survive -- no accidental dedup
         assert len(results) == 2
         seen = {tuple(sorted(d.items())) for d in [{'something': 'one'}, {'something': 'two'}]}
         got = {tuple(sorted((k, v) for k, v in r.items() if k != 'rrf_score')) for r in results}
@@ -425,15 +429,12 @@ class TestTokenizer:
 # ===========================================================================
 # IGlobal alpha-clamp warning
 # ===========================================================================
+#
+# The build interpreter provides `rocketlib`, `ai.*`, and `depends`; the
+# search_hybrid package imports them for real. Import the node by package name
+# (file-path-based imports bypass interpreter path configuration).
 
 
-# The build interpreter provides `rocketlib`, `ai.*`, and `depends`. When this
-# test file is executed under plain pytest those modules are absent — skip the
-# IGlobal/IInstance tests rather than stubbing the framework.
-_HAS_ROCKETLIB = importlib.util.find_spec('rocketlib') is not None
-
-
-@pytest.mark.skipif(not _HAS_ROCKETLIB, reason='rocketlib not available outside build interpreter')
 class TestIGlobalAlphaClamp:
     """alpha out of range should be clamped AND warned (not silently coerced).
 
@@ -442,22 +443,22 @@ class TestIGlobalAlphaClamp:
     constructor args). This test additionally pins that the IGlobal
     out-of-range path clamps the value and emits a warning via rocketlib.
 
-    Implementation note: the warning is captured by re-importing the module
-    and patching its ``warning`` attribute via the module dict directly,
-    rather than monkeypatch.setattr — the build interpreter exposes the
-    IGlobal module under a path that monkeypatch resolves to the class
-    object, not the module.
+    Implementation note: the warning is captured by patching the IGlobal
+    module's ``warning`` attribute through the module dict directly, rather
+    than monkeypatch.setattr -- the build interpreter exposes the IGlobal
+    module under a path that monkeypatch resolves to the class object, not
+    the module.
     """
 
     def test_alpha_clamp_logs_warning(self):
         import importlib
+        import types
 
-        try:
-            iglobal_mod = importlib.import_module('nodes.search_hybrid.IGlobal')
-        except Exception as e:  # pragma: no cover - env-dependent
-            pytest.skip(f'IGlobal not importable under this interpreter: {e}')
-        if not hasattr(iglobal_mod, 'warning'):
-            pytest.skip('IGlobal module does not expose `warning` (build-runtime variant)')
+        # Import the IGlobal *module* (not the re-exported class) so we can patch
+        # its module-level ``warning`` symbol. ``search_hybrid.__init__`` binds
+        # ``IGlobal`` to the class, so ``importlib.import_module`` is used to get
+        # the submodule object reliably.
+        iglobal_mod = importlib.import_module('search_hybrid.IGlobal')
 
         warnings_seen: list = []
         original = iglobal_mod.warning
@@ -466,7 +467,7 @@ class TestIGlobalAlphaClamp:
             IGlobal = iglobal_mod.IGlobal
             ig = IGlobal.__new__(IGlobal)
 
-            from rocketlib import OPEN_MODE  # type: ignore
+            from rocketlib import OPEN_MODE
 
             class _Endpoint:
                 class endpoint:
@@ -475,10 +476,7 @@ class TestIGlobalAlphaClamp:
             ig.IEndpoint = _Endpoint
             ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'alpha': 2.5})
 
-            try:
-                ig.beginGlobal()
-            except Exception as e:  # pragma: no cover - env-dependent
-                pytest.skip(f'beginGlobal not directly invokable in this env: {e}')
+            ig.beginGlobal()
 
             assert any('alpha' in m for m in warnings_seen), warnings_seen
             assert ig.engine is not None
@@ -496,16 +494,10 @@ class TestIGlobalAlphaClamp:
     )
     def test_invalid_bounds_raise_value_error(self, bad_cfg, fragment):
         """Out-of-range top_k / rrf_k should fail fast in beginGlobal."""
-        import importlib
+        import types
 
-        try:
-            iglobal_mod = importlib.import_module('nodes.search_hybrid.IGlobal')
-        except Exception as e:  # pragma: no cover - env-dependent
-            pytest.skip(f'IGlobal not importable under this interpreter: {e}')
+        from rocketlib import OPEN_MODE
 
-        from rocketlib import OPEN_MODE  # type: ignore
-
-        IGlobal = iglobal_mod.IGlobal
         ig = IGlobal.__new__(IGlobal)
 
         class _Endpoint:
@@ -533,135 +525,52 @@ class TestIGlobalAlphaClamp:
 #   - engine is None raises RuntimeError,
 #   - the input Question is deep-copied (no caller-side mutation),
 #   - empty query / empty documents short-circuit cleanly,
-#   - the structured answer text uses the [Document N] (score: …) shape.
+#   - the structured answer text uses the [Document N] (score: ...) shape.
 #
 # The build interpreter (`builder nodes:test`) ships rocketlib / ai.* / depends.
-# Those are provided modules and are NOT stubbed — the fixture imports them for
-# real. When this file runs under plain `pytest` outside the build interpreter
-# they are absent, so the fixture skips rather than mocking the framework.
+# Those are provided modules and are NOT stubbed -- the node package imports
+# them for real. We import IInstance / IGlobal and the schema types by package
+# name; outside the build interpreter the import fails and collection errors
+# out, by design.
 
-# ``ai.common.schema`` has no public ``SubQuestion``; build a lightweight one so
-# tests can construct sub-questions without depending on internal layout.
-_SubQuestion = type('SubQuestion', (), {'__init__': lambda self, text='': setattr(self, 'text', text)})
-
-
-def _has_ai_schema() -> bool:
-    """Whether the build-interpreter ``ai.common.schema`` is importable.
-
-    ``find_spec`` raises ``ModuleNotFoundError`` when the parent ``ai`` package
-    is absent (plain pytest), so guard it rather than letting collection fail.
-    """
-    try:
-        return importlib.util.find_spec('ai.common.schema') is not None
-    except ModuleNotFoundError:
-        return False
-
-
-_HAS_AI_SCHEMA = _has_ai_schema()
+from search_hybrid.IGlobal import IGlobal  # noqa: E402
+from search_hybrid.IInstance import IInstance  # noqa: E402
+from ai.common.schema import Answer, Doc, Question, QuestionText  # noqa: E402
 
 
 @pytest.fixture
 def search_hybrid_pkg():
-    """Load search_hybrid.IInstance against the real rocketlib / ai modules.
+    """Expose the IInstance class plus the real schema types for the tests.
 
-    Yields a SimpleNamespace exposing the loaded ``IInstance`` class plus the
-    real schema types (``Doc``, ``Question``, ``Answer``) and a lightweight
-    ``SubQuestion`` so each test can build inputs without re-defining them. The
-    framework modules (``rocketlib``, ``ai.*``, ``depends``) come from the build
-    interpreter and are imported, not stubbed; the fixture skips when they are
-    unavailable.
+    Yields a SimpleNamespace exposing the node ``IInstance`` class, the real
+    schema types (``Doc``, ``Question``, ``Answer``, ``QuestionText``) and an
+    ``make_instance`` helper so each test can build inputs without re-defining
+    them. The framework modules (``rocketlib``, ``ai.*``, ``depends``) come from
+    the build interpreter and are imported, not stubbed.
     """
-    from unittest.mock import MagicMock
+    import types
 
-    if not (_HAS_ROCKETLIB and _HAS_AI_SCHEMA):
-        pytest.skip('rocketlib / ai.common.schema not available outside build interpreter')
+    def make_instance(engine, top_k=10, rrf_k=60):
+        """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
+        inst = IInstance.__new__(IInstance)
+        iglobal = MagicMock(spec=IGlobal)
+        iglobal.engine = engine
+        iglobal.top_k = top_k
+        iglobal.rrf_k = rrf_k
+        inst.IGlobal = iglobal
+        mock_instance = MagicMock()
+        inst.instance = mock_instance
+        return inst, mock_instance
 
-    schema_mod = importlib.import_module('ai.common.schema')
-    Doc = schema_mod.Doc
-    Question = schema_mod.Question
-    Answer = schema_mod.Answer
-    # `Question.questions` holds QuestionText entries (each exposing `.text`).
-    # Prefer the real type; fall back to the duck-typed stand-in if absent.
-    SubQuestion = getattr(schema_mod, 'QuestionText', _SubQuestion)
-
-    # Load the search_hybrid package + IInstance directly by file path so the
-    # tests do not depend on `nodes` being importable as a top-level package
-    # (it isn't — there is no nodes/__init__.py or nodes/src/__init__.py). The
-    # build interpreter (`builder nodes:test`) makes the same import work via
-    # PYTHONPATH wiring; here we explicitly anchor on the source tree.
-    loaded_names: list[str] = []
-
-    def _restore_sys_modules():
-        for name in loaded_names:
-            sys.modules.pop(name, None)
-
-    try:
-        try:
-            pkg_init = _SEARCH_HYBRID_DIR / '__init__.py'
-            pkg_spec = importlib.util.spec_from_file_location(
-                'search_hybrid_test_pkg',
-                str(pkg_init),
-                submodule_search_locations=[str(_SEARCH_HYBRID_DIR)],
-            )
-            assert pkg_spec is not None and pkg_spec.loader is not None
-            pkg_mod = importlib.util.module_from_spec(pkg_spec)
-            sys.modules['search_hybrid_test_pkg'] = pkg_mod
-            loaded_names.append('search_hybrid_test_pkg')
-            pkg_spec.loader.exec_module(pkg_mod)
-
-            # IGlobal is referenced via `from .IGlobal import IGlobal` in IInstance
-            iglobal_spec = importlib.util.spec_from_file_location(
-                'search_hybrid_test_pkg.IGlobal',
-                str(_SEARCH_HYBRID_DIR / 'IGlobal.py'),
-            )
-            assert iglobal_spec is not None and iglobal_spec.loader is not None
-            iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
-            sys.modules['search_hybrid_test_pkg.IGlobal'] = iglobal_mod
-            loaded_names.append('search_hybrid_test_pkg.IGlobal')
-            iglobal_spec.loader.exec_module(iglobal_mod)
-
-            iinst_spec = importlib.util.spec_from_file_location(
-                'search_hybrid_test_pkg.IInstance',
-                str(_SEARCH_HYBRID_DIR / 'IInstance.py'),
-            )
-            assert iinst_spec is not None and iinst_spec.loader is not None
-            iinst_mod = importlib.util.module_from_spec(iinst_spec)
-            sys.modules['search_hybrid_test_pkg.IInstance'] = iinst_mod
-            loaded_names.append('search_hybrid_test_pkg.IInstance')
-            iinst_spec.loader.exec_module(iinst_mod)
-            IInstance = iinst_mod.IInstance
-        except ModuleNotFoundError as exc:  # pragma: no cover - env-dependent
-            pytest.skip(f'search_hybrid.IInstance not importable: {exc}')
-        except TypeError as exc:  # pragma: no cover - py<3.10 hits PEP 604 syntax
-            # IGlobal uses `X | None` annotations evaluated at class-body time,
-            # which requires Python 3.10+. The build interpreter satisfies this;
-            # under older local pythons we skip rather than fail.
-            pytest.skip(f'search_hybrid.IInstance not importable (py<3.10?): {exc}')
-
-        def make_instance(engine, top_k=10, rrf_k=60):
-            """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
-            inst = IInstance.__new__(IInstance)
-            iglobal = MagicMock()
-            iglobal.engine = engine
-            iglobal.top_k = top_k
-            iglobal.rrf_k = rrf_k
-            inst.IGlobal = iglobal
-            mock_instance = MagicMock()
-            inst.instance = mock_instance
-            return inst, mock_instance
-
-        pkg = types.SimpleNamespace(
-            IInstance=IInstance,
-            Doc=Doc,
-            Question=Question,
-            Answer=Answer,
-            SubQuestion=SubQuestion,
-            make_instance=make_instance,
-        )
-
-        yield pkg
-    finally:
-        _restore_sys_modules()
+    return types.SimpleNamespace(
+        IInstance=IInstance,
+        Doc=Doc,
+        Question=Question,
+        Answer=Answer,
+        # `Question.questions` holds QuestionText entries (each exposing `.text`).
+        SubQuestion=QuestionText,
+        make_instance=make_instance,
+    )
 
 
 class TestIInstanceIntegration:
@@ -703,7 +612,7 @@ class TestIInstanceIntegration:
         assert question.documents[0].page_content == original_first_content
 
     def test_structured_answer_output(self, search_hybrid_pkg):
-        """Answer text should use the structured [Document N] (score: …) shape.
+        """Answer text should use the structured [Document N] (score: ...) shape.
 
         CHANGED FROM ORIGINAL: the original asserted ``writeAnswers`` received a
         ``list[Answer]`` and indexed ``answers[0]``. The post-fix contract
@@ -728,7 +637,7 @@ class TestIInstanceIntegration:
         inst.writeQuestions(question)
 
         assert mock_instance.writeAnswers.called
-        # writeAnswers takes a single Answer (NOT a list) — the previously-fixed
+        # writeAnswers takes a single Answer (NOT a list) -- the previously-fixed
         # bug. Pin the new contract so a regression to list-shape is caught.
         call_args, call_kwargs = mock_instance.writeAnswers.call_args
         assert call_kwargs == {}
@@ -740,7 +649,7 @@ class TestIInstanceIntegration:
         # field, mirroring how the framework persists the response.
         answer_text = ans.answer
 
-        # Structured format — not raw concatenation
+        # Structured format -- not raw concatenation
         assert 'Hybrid search returned' in answer_text
         assert 'results' in answer_text
         assert '[Document 1]' in answer_text
@@ -774,7 +683,7 @@ class TestIInstanceIntegration:
         """Only the listened lane should receive emissions.
 
         With only `documents` listened, writeDocuments fires and writeAnswers
-        does NOT — pinning the per-lane hasListener gate.
+        does NOT -- pinning the per-lane hasListener gate.
         """
         pkg = search_hybrid_pkg
         docs = [pkg.Doc(page_content='hello world', score=0.5, metadata=None)]
