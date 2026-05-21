@@ -41,7 +41,10 @@
 				"id": "embedding_transformer_1",
 				"provider": "embedding_transformer",
 				"position": { "x": 721, "y": -163 },
-				"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+				"input": [
+					{ "lane": "documents", "from": "preprocessor_langchain_1" },
+					{ "lane": "questions", "from": "chat_1" }
+				],
 				"control": []
 			},
 			{
@@ -50,7 +53,7 @@
 				"position": { "x": 948, "y": -79 },
 				"input": [
 					{ "lane": "documents", "from": "embedding_transformer_1" },
-					{ "lane": "questions", "from": "chat_1" }
+					{ "lane": "questions", "from": "embedding_transformer_1" }
 				],
 				"control": []
 			},
