@@ -316,14 +316,24 @@ class TestTokenChunker:
         assert chunker._encoder is None
 
     def test_start_char_incremental_tracking(self):
-        """Decode call count must scale linearly with the number of chunks."""
+        """Decode work must stay bounded: linear call count AND per-call size.
+
+        Two guards against the O(n^2) prefix-decode regression:
+          1. Call count scales linearly with the number of chunks.
+          2. Every decode operates on at most ``chunk_size`` tokens. A regression
+             that decodes growing ``tokens[:start]`` prefixes would inflate the
+             largest decode input past ``chunk_size`` even if the call count
+             stayed linear, so the call-count check alone is insufficient.
+        """
         chunker = TokenChunker(chunk_size=10, chunk_overlap=0)
 
         call_counts = {'decode': 0}
+        decoded_lengths: list[int] = []
 
         class TrackingEncoder(_CharTokenEncoder):
             def decode(self, tokens, **kwargs):
                 call_counts['decode'] += 1
+                decoded_lengths.append(len(tokens))
                 return 'x' * len(tokens)
 
         chunker._encoder = TrackingEncoder()
@@ -331,6 +341,12 @@ class TestTokenChunker:
         assert len(chunks) == 5
         # At most 2 * num_chunks (one chunk decode + one step decode each).
         assert call_counts['decode'] <= 2 * len(chunks)
+        # No decode call may exceed chunk_size tokens; growing-prefix decoding
+        # (the O(n^2) regression) would push this above chunk_size.
+        assert decoded_lengths, 'expected at least one decode call'
+        assert max(decoded_lengths) <= chunker.chunk_size, (
+            f'largest decode input {max(decoded_lengths)} exceeds chunk_size {chunker.chunk_size}'
+        )
 
     def test_start_char_correctness_with_overlap(self):
         chunker = TokenChunker(chunk_size=10, chunk_overlap=3)
