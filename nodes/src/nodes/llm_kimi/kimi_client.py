@@ -52,14 +52,11 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the api key
-        apikey = config.get('apikey') or ''
+        # Get the api key, use some dummy key if not provided
+        apikey = config.get('apikey') or 'sk-dummy-key'
 
-        # API key validation: Kimi/Moonshot API keys are required for cloud access
-        if not apikey:
-            raise ValueError('Kimi/Moonshot API key is required.')
-
-        if not apikey.startswith('sk-'):
+        # API key format validation: only check when a real key was explicitly configured
+        if config.get('apikey') and not apikey.startswith('sk-'):
             raise ValueError('Invalid Kimi/Moonshot API key format, please check your API key.')
 
         # kimi-k2.x models only accept temperature=1; moonshot-v1 models are flexible
