@@ -49,13 +49,14 @@
  */
 
 import React, { ReactElement, useMemo } from 'react';
+import { useTheme } from '@mui/material/styles';
 import { Edge, Position } from '@xyflow/react';
 
 import { useFlow } from '../../../hooks';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
-import { getIconPath } from '../../../util/get-icon-path';
+import { getIconPathForMode } from '../../../util/get-icon-path';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
 
@@ -116,6 +117,7 @@ interface INodeProps {
  */
 export default function NodeComponent({ id, data, type, parentId, children, layout = 'horizontal', handleClick }: INodeProps): ReactElement {
 	// Pull shared canvas state from the flow context
+	const theme = useTheme();
 	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson, edges } = useFlow();
 	const { setQuickAddState } = useFlowGraph();
 	const { onOpenStatus, onOpenLink, serverHost } = useFlowProject();
@@ -131,7 +133,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	const service: IService | undefined = catalog[data.provider];
 
 	// Service-derived fields
-	const icon = getIconPath(service?.icon);
+	const icon = getIconPathForMode(service?.icon, theme.palette.mode === 'dark');
 	const classType = service?.classType;
 	const lanes = service?.lanes as Record<string, IServiceLane> | undefined;
 	const capabilities = service?.capabilities ?? 0;

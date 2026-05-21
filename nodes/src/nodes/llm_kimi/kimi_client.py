@@ -1,0 +1,78 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+Kimi (Moonshot AI) binding for the ChatLLM.
+"""
+
+from typing import Any, Dict
+from ai.common.chat import ChatBase
+from ai.common.config import Config
+from langchain_openai import ChatOpenAI
+
+
+class Chat(ChatBase):
+    """
+    Creates a Kimi/Moonshot AI chat bot.
+    """
+
+    _llm: ChatOpenAI
+
+    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+        """Initialize the Kimi/Moonshot chat bot.
+
+        Args:
+            provider (str): Provider name
+            connConfig (Dict[str, Any]): Node configuration
+            bag (Dict[str, Any]): Bag to store data
+        """
+        # Init the base
+        super().__init__(provider, connConfig, bag)
+
+        # Get the nodes configuration
+        config = Config.getNodeConfig(provider, connConfig)
+
+        # Get the api key
+        apikey = config.get('apikey') or ''
+
+        # API key validation: Kimi/Moonshot API keys are required for cloud access
+        if not apikey:
+            raise ValueError('Kimi/Moonshot API key is required.')
+
+        if not apikey.startswith('sk-'):
+            raise ValueError('Invalid Kimi/Moonshot API key format, please check your API key.')
+
+        # kimi-k2.x models only accept temperature=1; moonshot-v1 models are flexible
+        temperature = 1 if self._model.startswith('kimi-') else 0
+
+        # Get the llm using the Kimi/Moonshot OpenAI-compatible endpoint
+        self._llm = ChatOpenAI(
+            model=self._model,
+            base_url='https://api.moonshot.ai/v1',
+            api_key=apikey,
+            temperature=temperature,
+            max_tokens=self._modelOutputTokens,
+        )
+
+        # Save our chat class into the bag
+        bag['chat'] = self

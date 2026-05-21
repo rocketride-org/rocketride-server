@@ -40,6 +40,8 @@ import classificationIcon from '../../../assets/nodes/classification.svg';
 import confluenceIcon from '../../../assets/nodes/confluence.svg';
 import crewaiIcon from '../../../assets/nodes/crewai.svg';
 import deepseekIcon from '../../../assets/nodes/deepseek.svg';
+import kimiIcon from '../../../assets/nodes/kimi.svg';
+import kimiDarkIcon from '../../../assets/nodes/kimi-dark.svg';
 import dictionaryIcon from '../../../assets/nodes/dictionary.svg';
 import dropperIcon from '../../../assets/nodes/dropper.svg';
 import embeddingImageIcon from '../../../assets/nodes/embedding-image.svg';
@@ -134,6 +136,7 @@ const iconMap: Record<string, string> = {
 	confluence: confluenceIcon,
 	crewai: crewaiIcon,
 	deepseek: deepseekIcon,
+	kimi: kimiIcon,
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,
 	elasticsearch: elasticsearchIcon,
@@ -204,6 +207,16 @@ const iconMap: Record<string, string> = {
 	git: gitIcon,
 	telegram: telegramIcon,
 	pipetool: pipetoolIcon,
+};
+
+/**
+ * Icons that have explicit separate dark-mode variants.
+ * Maps the icon name (without extension) to the dark-mode asset import.
+ * These are multi-color brand icons where a single CSS filter cannot
+ * produce the correct per-path colors in both themes.
+ */
+const DARK_VARIANT_ICONS: Record<string, string> = {
+	kimi: kimiDarkIcon,
 };
 
 /**
@@ -282,6 +295,21 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
  * @param path - An icon name (e.g., 'openai'), filename (e.g., 'openai.svg'), or full URL.
  * @returns The resolved asset URL string for use in `<img>` tags.
  */
+/**
+ * Like {@link getIconPath} but selects the dark-mode variant for icons
+ * that have explicit dark/light SVG pairs (see {@link DARK_VARIANT_ICONS}).
+ * Falls back to the standard light icon for all other icons.
+ */
+export const getIconPathForMode = (path?: string, isDark: boolean = false): string => {
+	if (!path) return unknownIcon;
+	if (isUrl(path)) return path;
+	const iconName = path.replace(/\.(svg|png|jpg|jpeg)$/i, '');
+	if (isDark && DARK_VARIANT_ICONS[iconName]) {
+		return DARK_VARIANT_ICONS[iconName];
+	}
+	return getIconPath(path);
+};
+
 export const getIconPath = (path?: string): string => {
 	// No path provided; return the generic unknown icon as a safe default
 	if (!path) {

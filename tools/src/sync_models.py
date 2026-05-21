@@ -64,6 +64,7 @@ _PROVIDER_REGISTRY: Dict[str, str] = {
     'llm_xai': 'providers.xai:XAIProvider',
     'llm_perplexity': 'providers.perplexity:PerplexityProvider',
     'llm_qwen': 'providers.qwen:QwenProvider',
+    'llm_kimi': 'providers.kimi:KimiProvider',
 }
 
 # Maps provider name → relative path to its services.json from the repo root
@@ -77,6 +78,7 @@ _SERVICES_JSON_PATHS: Dict[str, str] = {
     'llm_xai': 'nodes/src/nodes/llm_xai/services.json',
     'llm_perplexity': 'nodes/src/nodes/llm_perplexity/services.json',
     'llm_qwen': 'nodes/src/nodes/llm_qwen/services.json',
+    'llm_kimi': 'nodes/src/nodes/llm_kimi/services.json',
 }
 
 # Default extra fields added to every new profile (placeholder for API key)

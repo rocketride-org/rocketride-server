@@ -1,0 +1,7 @@
+# Plugin Kimi core
+openai
+langchain-openai
+
+# LangChain deps
+langchain-core
+langchain

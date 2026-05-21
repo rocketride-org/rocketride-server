@@ -383,6 +383,30 @@
 				// "qwen-max": 32768
 			}
 		}
+		// ----------------------------------------------------------------------
+		// Kimi (Moonshot AI) — moonshot-v1 and kimi-k series models
+		// OpenAI-compatible API at https://api.moonshot.ai/v1
+		// ----------------------------------------------------------------------
+		"llm_kimi": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_KIMI_KEY",
+			"module": "kimi",
+			"models_endpoint": "https://api.moonshot.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["moonshot-", "kimi-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": []
+			},
+			"token_limit_overrides": {
+				// "moonshot-v1-8k": 8192,
+				// "moonshot-v1-32k": 32768,
+				// "moonshot-v1-128k": 131072,
+				// "kimi-k2-5": 262144
+			}
+		}
 	},
 	// --------------------------------------------------------------------------
 	// Profile keys that must NEVER be deprecated, for every provider.
