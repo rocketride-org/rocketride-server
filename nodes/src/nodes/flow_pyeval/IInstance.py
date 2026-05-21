@@ -12,13 +12,12 @@ the active lane's payload by name (`text`, `image`, `obj`, ...).
 from __future__ import annotations
 
 import ast
-import logging
 from typing import Any
+
+from rocketlib import error, warning
 
 from ..flow_base import FlowBaseIInstance
 from .IGlobal import IGlobal
-
-_logger = logging.getLogger('rocketride.flow')
 
 
 # Audited builtins available inside the sandbox. Anything not listed
@@ -94,30 +93,22 @@ class IInstance(FlowBaseIInstance):
         try:
             tree = ast.parse(expression, mode='eval')
         except SyntaxError as exc:
-            _logger.error('flow.pyeval invalid syntax in condition %r: %s', expression, exc)
+            warning(f'flow.pyeval: invalid syntax in condition {expression!r}: {exc}')
             return False
 
         for node in ast.walk(tree):
             if isinstance(node, _FORBIDDEN_NODES):
-                _logger.error(
-                    'flow.pyeval rejected %s in condition %r — forbidden',
-                    type(node).__name__,
-                    expression,
-                )
+                warning(f'flow.pyeval: rejected {type(node).__name__} in condition {expression!r} — forbidden')
                 return False
             # Block dunder attribute access (__class__, __globals__) to prevent escapes.
             if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
-                _logger.error(
-                    'flow.pyeval rejected access to dunder %r in condition %r',
-                    node.attr,
-                    expression,
-                )
+                warning(f'flow.pyeval: rejected access to dunder {node.attr!r} in condition {expression!r}')
                 return False
 
         try:
             compiled = compile(tree, filename='<flow.pyeval>', mode='eval')
         except Exception as exc:
-            _logger.error('flow.pyeval failed to compile condition %r: %s', expression, exc)
+            warning(f'flow.pyeval: failed to compile condition {expression!r}: {exc}')
             return False
 
         # Namespace: safe builtins + lane bindings + `obj` (current entry).
@@ -127,6 +118,6 @@ class IInstance(FlowBaseIInstance):
 
         try:
             return bool(eval(compiled, namespace, {}))  # noqa: S307 — AST-gated
-        except Exception:
-            _logger.exception('flow.pyeval evaluation failed for condition %r — fail-closed to ELSE', expression)
+        except Exception as exc:
+            error(f'flow.pyeval: evaluation failed for condition {expression!r} — fail-closed to ELSE: {exc}')
             return False

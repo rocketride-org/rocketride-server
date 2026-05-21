@@ -108,7 +108,6 @@
 			"default": {
 				"title": "Default",
 				"flow_llm.condition": "Does the content match the criterion?",
-				"flow_llm.timeout_s": 30,
 				"flow_llm.branches": { "then": [], "else": [] }
 			}
 		}
@@ -125,15 +124,6 @@
 			"title": "Question",
 			"description": "Natural-language yes/no question evaluated by the connected LLM. The chunk being routed is provided as context. Write ONLY the question — the node automatically prepends the routing-classifier system prompt and appends the 'Reply with EXACTLY one word: YES or NO' instruction. Do not add 'answer YES/NO' yourself. Examples: 'Is this image a screenshot?', 'Is this text in Spanish?', 'Does the image contain a person?'. Be specific.",
 			"default": "Does the content match the criterion?"
-		},
-		"flow_llm.timeout_s": {
-			"type": "integer",
-			"title": "Timeout (seconds)",
-			"description": "Maximum wall-clock time per evaluation. LLM inference is much slower than sandbox eval; default 30s. Timeout routes to ELSE.",
-			"default": 30,
-			"minimum": 5,
-			"maximum": 120,
-			"optional": true
 		},
 		"flow_llm.branches": {
 			"type": "object",
@@ -157,7 +147,7 @@
 		{
 			"section": "Pipe",
 			"title": "Flow If/Else (LLM)",
-			"properties": ["type", "flow_llm.condition", "flow_llm.timeout_s"]
+			"properties": ["type", "flow_llm.condition"]
 		}
 	]
 }

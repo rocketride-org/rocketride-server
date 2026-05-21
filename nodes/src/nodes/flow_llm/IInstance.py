@@ -12,14 +12,13 @@ active payload plus the question and replies YES or NO.
 from __future__ import annotations
 
 import base64
-import logging
 import re
 from typing import Any
 
+from rocketlib import error
+
 from ..flow_base import FlowBaseIInstance
 from .IGlobal import IGlobal
-
-_logger = logging.getLogger('rocketride.flow')
 
 
 _SYSTEM_INSTRUCTION = 'You are a routing classifier. Read the user-supplied content and answer the user-supplied question with EXACTLY one word: either YES or NO. No explanation, no punctuation, no hedging. If the question cannot be answered from the content, reply NO.'
@@ -73,14 +72,14 @@ class IInstance(FlowBaseIInstance):
 
         try:
             llm_nodes = self.instance.getControllerNodeIds(invoke_channel)
-        except Exception:
-            _logger.exception('flow.llm getControllerNodeIds(%r) raised', invoke_channel)
+        except Exception as e:
+            error(f'flow.llm: getControllerNodeIds({invoke_channel!r}) raised: {e}')
             return False
         if not llm_nodes:
-            _logger.error('flow.llm: no LLM wired on channel %r', invoke_channel)
+            error(f'flow.llm: no LLM wired on channel {invoke_channel!r}')
             return False
         if len(llm_nodes) > 1:
-            _logger.error('flow.llm: expected one LLM on %r, found %d', invoke_channel, len(llm_nodes))
+            error(f'flow.llm: expected one LLM on {invoke_channel!r}, found {len(llm_nodes)}')
             return False
         llm_node_id = llm_nodes[0]
 
@@ -102,8 +101,8 @@ class IInstance(FlowBaseIInstance):
         try:
             param = IInvokeLLM.Ask(question=question_obj, lane=invoke_channel)
             invoke_result = self.instance.invoke(param, component_id=llm_node_id)
-        except Exception:
-            _logger.exception('flow.llm invocation failed')
+        except Exception as e:
+            error(f'flow.llm: invocation failed: {e}')
             return False
 
         text = self._extract_answer_text(invoke_result)

@@ -6,13 +6,10 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, List
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE
-
-_logger = logging.getLogger('rocketride.flow')
 
 
 class IGlobal(IGlobalBase):

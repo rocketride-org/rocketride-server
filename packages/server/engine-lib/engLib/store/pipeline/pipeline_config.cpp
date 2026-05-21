@@ -300,13 +300,15 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
             const auto &lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
             const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
-                for (auto &output : comp.outputs) {
-                    if (!wildcard && !lanesDef.isMember(input->name))
-                        return APERR(Ec::InvalidParam, "Component", id,
-                                     "input lane", input->name,
-                                     "not found in service definition");
+                // These depend only on `input`, not `output` — hoist out of the
+                // inner loop instead of recomputing once per output.
+                if (!wildcard && !lanesDef.isMember(input->name))
+                    return APERR(Ec::InvalidParam, "Component", id,
+                                 "input lane", input->name,
+                                 "not found in service definition");
 
-                    const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
+                const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
+                for (auto &output : comp.outputs) {
                     // `input->name == "*"` (canvas wildcard-to-wildcard
                     // sentinel) matches every output → passthrough fan-out.
                     const bool matches =

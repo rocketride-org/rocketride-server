@@ -10,13 +10,10 @@ buffer, and peer-direct branch dispatch live here.
 
 from __future__ import annotations
 
-import logging
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
-from rocketlib import AVI_ACTION, IInstanceBase
-
-_logger = logging.getLogger('rocketride.flow')
+from rocketlib import AVI_ACTION, IInstanceBase, error, warning
 
 
 class FlowBaseIInstance(IInstanceBase):
@@ -55,25 +52,25 @@ class FlowBaseIInstance(IInstanceBase):
         for target_id in target_ids:
             try:
                 peer = self.instance.getInstance(target_id)
-            except Exception:
-                _logger.exception('getInstance(%r) raised', target_id)
+            except Exception as e:
+                error(f'flow: getInstance({target_id!r}) raised: {e}')
                 continue
 
             if peer is None:
-                _logger.error('target %r not found in pipe stack', target_id)
+                warning(f'flow: target {target_id!r} not found in pipe stack')
                 continue
 
             method = getattr(peer, accept_method_name, None)
             if method is None:
-                _logger.error('peer %s has no %s method', target_id, accept_method_name)
+                warning(f'flow: peer {target_id} has no {accept_method_name} method')
                 continue
 
             # Pybind binds acceptXxx as positional-only; pass in insertion order.
             args = tuple(write_kwargs.values())
             try:
                 method(*args)
-            except Exception:
-                _logger.exception('%s on peer=%s raised', accept_method_name, target_id)
+            except Exception as e:
+                error(f'flow: {accept_method_name} on peer={target_id} raised: {e}')
 
         self.preventDefault()
 
@@ -111,15 +108,15 @@ class FlowBaseIInstance(IInstanceBase):
             try:  # fail-closed per target, like _route
                 peer = self.instance.getInstance(target_id)
                 if peer is None:
-                    _logger.error('classifications: target %r not found', target_id)
+                    warning(f'flow: classifications target {target_id!r} not found')
                     continue
                 peer.acceptClassifications(
                     classifications,
                     classificationPolicy,
                     classificationRules,
                 )
-            except Exception:
-                _logger.exception('classifications dispatch to %r raised', target_id)
+            except Exception as e:
+                error(f'flow: classifications dispatch to {target_id!r} raised: {e}')
         self.preventDefault()
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes) -> None:
@@ -176,17 +173,17 @@ class FlowBaseIInstance(IInstanceBase):
         for target_id in target_ids:
             peer = self.instance.getInstance(target_id)
             if peer is None:
-                _logger.error('stream %s: target %r not found', lane, target_id)
+                warning(f'flow: stream {lane}: target {target_id!r} not found')
                 continue
             accept_method = getattr(peer, accept_method_name, None)
             if accept_method is None:
-                _logger.error('stream %s: peer %s has no %s method', lane, target_id, accept_method_name)
+                warning(f'flow: stream {lane}: peer {target_id} has no {accept_method_name} method')
                 continue
             try:
                 for call_action, call_mime, call_buffer in calls:
                     accept_method(call_action, call_mime, call_buffer)
-            except Exception:
-                _logger.exception('stream %s on peer=%s raised', accept_method_name, target_id)
+            except Exception as e:
+                error(f'flow: stream {accept_method_name} on peer={target_id} raised: {e}')
 
         self.preventDefault()
 
@@ -195,8 +192,8 @@ class FlowBaseIInstance(IInstanceBase):
         condition = getattr(self.IGlobal, 'condition', '')
         try:
             return bool(self.checkCondition(condition, **kwargs))
-        except Exception:
-            _logger.exception('checkCondition raised — failing closed to ELSE')
+        except Exception as e:
+            error(f'flow: checkCondition raised — failing closed to ELSE: {e}')
             return False
 
 
