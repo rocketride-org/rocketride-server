@@ -9,171 +9,33 @@ Tests cover token counting, budget allocation, truncation, history
 summarization, document ranking, the full optimization pipeline, model
 limit lookup, edge cases, and IGlobal / IInstance lifecycle.
 
-Runs without a live server. ``rocketlib`` and the ``ai`` package are provided
-by the engine runtime, so the real modules are imported here (their lib paths
-are added to ``sys.path``); only the opaque engine bootstrap modules
-(``engLib``, ``depends``) are stubbed.
-
-Third-party compute/parse libraries (``tiktoken``, ``json5``) are NOT shadowed
-from ``nodes/test/mocks/``. Those mocks would be picked up engine-wide via
-ROCKETRIDE_MOCK during ``builder nodes:test-full`` and make the live node
-under-count tokens / mis-parse JSON5, breaking the dynamic ci_tiny truncation
-case. Instead, these libs are used REAL when installed; only when a bare test
-environment lacks them does this module inject a *test-local* stub into
-``sys.modules`` for THIS pytest process. The unit assertions pass identically
-with the real libraries or the stub.
+The build interpreter provides ``rocketlib``, the ``ai`` package and
+``depends`` (plus the native ``engLib``) at runtime; ``tiktoken`` and
+``json5`` are installed in CI. The node source is not on the interpreter's
+import path by default, so -- like every other node suite -- we prepend
+``nodes/src/nodes`` to import the ``context_optimizer.*`` package by name.
+There is no skip fallback: outside the build interpreter the ``rocketlib``
+import fails and collection errors out, by design.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Make the real engine packages importable.
-#
-# ``rocketlib`` and the ``ai`` package ship with the engine runtime; under a
-# bare pytest run we point sys.path at their in-repo sources so the REAL
-# modules load (IGlobalBase, IInstanceBase, OPEN_MODE, debug, warning come from
-# rocketlib; Question, QuestionHistory from ai.common.schema; Config from
-# ai.common.config). Only the opaque bootstrap modules rocketlib touches at
-# import time are stubbed:
-#   - engLib:  the native C++ engine binding, only built into the runtime.
-#   - depends: rocketlib's dependency bootstrapper (writes to an install-
-#              adjacent cache dir); we turn it into a no-op.
-# ---------------------------------------------------------------------------
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
-sys.modules.setdefault('engLib', MagicMock())
-if 'depends' not in sys.modules:
-    _depends_stub = types.ModuleType('depends')
-    _depends_stub.depends = lambda *_a, **_k: None
-    sys.modules['depends'] = _depends_stub
-
-for _lib_path in (
-    _REPO_ROOT / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib',
-    _REPO_ROOT / 'packages' / 'client-python' / 'src',
-    _REPO_ROOT / 'packages' / 'ai' / 'src',
-    _REPO_ROOT / 'nodes' / 'src',
-):
-    _lib_str = str(_lib_path)
-    if _lib_path.is_dir() and _lib_str not in sys.path:
-        sys.path.insert(0, _lib_str)
-
-# Other node test modules (e.g. guardrails) install fake ``rocketlib`` / ``ai``
-# stubs into sys.modules at import time and do not always restore them. Pytest
-# collection order is not guaranteed, so evict any such leftover stub (and the
-# node modules that may have bound to it) before importing the real packages.
-for _name in list(sys.modules):
-    if _name in ('rocketlib', 'ai') or _name.startswith(('rocketlib.', 'ai.', 'nodes.context_optimizer')):
-        _mod = sys.modules.get(_name)
-        if getattr(_mod, '__file__', None) is None:
-            del sys.modules[_name]
-
-# ---------------------------------------------------------------------------
-# Inject TEST-LOCAL stubs for tiktoken / json5 ONLY when the real libraries are
-# absent from this bare pytest environment.
-#
-# These stubs are defined inline (not under nodes/test/mocks/) on purpose: the
-# engine loads everything in nodes/test/mocks/ engine-wide via ROCKETRIDE_MOCK,
-# so a tiktoken/json5 mock there would shadow the real libs during the live
-# ``builder nodes:test-full`` dynamic run -- the whitespace token stub would
-# under-count tokens and the ci_tiny truncation case would never fire. The live
-# node MUST use real tiktoken/json5 (both installed in CI). Injecting here only
-# touches THIS process's sys.modules, which the engine spawns in a separate
-# subprocess, so the dynamic test is unaffected.
-#
-# The unit assertions are calibrated to hold for either the real encoder or the
-# stub, so this is a pure availability fallback.
-# ---------------------------------------------------------------------------
-
-
-def _make_tiktoken_stub() -> types.ModuleType:
-    """Build a deterministic whitespace-splitting tiktoken stub.
-
-    Used only when real tiktoken is not installed. ``cl100k_base`` is
-    approximated by splitting on whitespace -- enough for the budget /
-    truncation assertions the suite makes.
-    """
-    module = types.ModuleType('tiktoken')
-
-    class Encoding:
-        def __init__(self, name: str = 'cl100k_base') -> None:
-            self.name = name
-
-        def encode(self, text: str):
-            return text.split() if text else []
-
-        def decode(self, tokens) -> str:
-            return ' '.join(tokens)
-
-    def get_encoding(name: str = 'cl100k_base') -> Encoding:
-        return Encoding(name)
-
-    module.Encoding = Encoding
-    module.get_encoding = get_encoding
-    return module
-
-
-def _make_json5_stub() -> types.ModuleType:
-    """Build a stdlib-json based json5 stub.
-
-    Used only when real json5 is not installed. ``ai.common.config`` imports
-    json5 at module load; the suite only triggers the import, it does not parse
-    JSON5-specific syntax.
-    """
-    import json
-
-    module = types.ModuleType('json5')
-
-    class JSONError(ValueError):
-        """Mirror of ``json5.JSONError`` (a ValueError subclass)."""
-
-    def loads(s: str, **_kwargs):
-        try:
-            return json.loads(s)
-        except json.JSONDecodeError as exc:
-            raise JSONError(str(exc)) from exc
-
-    def dumps(obj, **_kwargs) -> str:
-        return json.dumps(obj)
-
-    def load(fp, **_kwargs):
-        try:
-            return json.load(fp)
-        except json.JSONDecodeError as exc:
-            raise JSONError(str(exc)) from exc
-
-    def dump(obj, fp, **_kwargs) -> None:
-        json.dump(obj, fp)
-
-    module.JSONError = JSONError
-    module.loads = loads
-    module.dumps = dumps
-    module.load = load
-    module.dump = dump
-    return module
-
-
-if importlib.util.find_spec('tiktoken') is None:
-    sys.modules['tiktoken'] = _make_tiktoken_stub()
-
-if importlib.util.find_spec('json5') is None:
-    sys.modules['json5'] = _make_json5_stub()
-
+_NODES_SRC = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes'
+if str(_NODES_SRC) not in sys.path:
+    sys.path.insert(0, str(_NODES_SRC))
 
 from ai.common.schema import Question  # noqa: E402
 
-from nodes.context_optimizer.IGlobal import IGlobal  # noqa: E402
-from nodes.context_optimizer.IInstance import IInstance  # noqa: E402
-from nodes.context_optimizer.optimizer import ContextOptimizer  # noqa: E402
+from context_optimizer.IGlobal import IGlobal  # noqa: E402
+from context_optimizer.IInstance import IInstance  # noqa: E402
+from context_optimizer.optimizer import ContextOptimizer  # noqa: E402
 
 
 # ===========================================================================
@@ -691,7 +553,7 @@ class TestIGlobalLifecycle:
         iglobal.IEndpoint = endpoint_mock
         iglobal.glb = MagicMock()
 
-        with patch('nodes.context_optimizer.IGlobal.OPEN_MODE', _OPEN_MODE):
+        with patch('context_optimizer.IGlobal.OPEN_MODE', _OPEN_MODE):
             iglobal.beginGlobal()
 
         assert iglobal.optimizer is None
@@ -810,7 +672,7 @@ class TestIInstanceLifecycle:
         q = Question()
         q.questions = []  # explicitly empty
 
-        with patch('nodes.context_optimizer.IInstance.debug') as mock_debug:
+        with patch('context_optimizer.IInstance.debug') as mock_debug:
             inst.writeQuestions(q)
 
         # The debug log about discarding should have been called
