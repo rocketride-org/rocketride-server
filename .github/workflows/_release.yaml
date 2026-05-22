@@ -182,16 +182,26 @@ jobs:
           ls -la release-assets/
 
       # --- npm: rocketride ---
+      #
+      # Authenticated via npm trusted publishing (OIDC), configured on the
+      # npm side for package `rocketride` against this repo + this workflow
+      # file + the `release` environment. No NODE_AUTH_TOKEN — npm CLI
+      # exchanges the GitHub OIDC token for a short-lived registry token
+      # automatically when --provenance is used and no static token is set.
+      #
+      # Requires npm >= 11.5.1 for the auto-exchange; Node 22's bundled npm
+      # is still 10.x, so we upgrade explicitly before publishing.
       - name: Set up Node.js
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
         run: |
+          npm install -g npm@latest
           VERSION="${{ matrix.version }}"
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
@@ -200,8 +210,6 @@ jobs:
             echo "Publishing ${TARBALL}"
             npm publish "./${TARBALL}" --access public --provenance
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # --- PyPI ---
       - name: Set up Python
