@@ -31,6 +31,7 @@ import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
+import { DeployApi } from './deploy.js';
 import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
@@ -321,6 +322,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created database API namespace. */
 	private _database?: DatabaseApi;
+
+	/** Lazily-created deploy API namespace. */
+	private _deploy?: DeployApi;
 
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
@@ -2447,7 +2451,7 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
-	// ACCOUNT & BILLING NAMESPACES
+	// ACCOUNT, BILLING & DEPLOY NAMESPACES
 	// ============================================================================
 
 	/**
@@ -2502,6 +2506,24 @@ export class RocketRideClient extends DAPClient {
 			this._database = new DatabaseApi(this);
 		}
 		return this._database;
+	}
+
+	/**
+	 * Lazily-initialised deploy API namespace.
+	 *
+	 * Provides typed methods for managing server-side pipeline deployments:
+	 * add, remove, list, status, and update.
+	 *
+	 * @example
+	 * ```typescript
+	 * const rec = await client.deploy.add(pipeline, { schedule: '0/15 * * * *' });
+	 * ```
+	 */
+	get deploy(): DeployApi {
+		if (!this._deploy) {
+			this._deploy = new DeployApi(this);
+		}
+		return this._deploy;
 	}
 
 	// ============================================================================

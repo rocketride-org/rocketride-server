@@ -23,19 +23,33 @@
  */
 
 /**
- * Type definitions for the RocketRide TypeScript SDK.
+ * Deploy type definitions for the RocketRide TypeScript SDK.
  *
- * Re-exports all type definitions from individual modules for convenient imports.
+ * Mirrors the server's `DeploymentRecord` model returned by `rrext_deploy_*` commands.
  */
 
-export * from './account.js';
-export * from './billing.js';
-export * from './deploy.js';
-export * from './client.js';
-export * from './cprofile.js';
-export * from './dashboard.js';
-export * from './data.js';
-export * from './events.js';
-export * from './pipeline.js';
-export * from './service.js';
-export * from './task.js';
+import type { PipelineConfig } from './pipeline.js';
+export type { PipelineConfig };
+
+// =============================================================================
+// DEPLOY TYPES
+// =============================================================================
+
+/** Deployment record returned by `rrext_deploy_add`, `rrext_deploy_list`, and `rrext_deploy_status`. */
+export interface DeploymentRecord {
+	pipeline?: PipelineConfig;
+	/** Cron expression or `"manual"`. */
+	schedule?: string;
+	state?: 'active' | 'paused' | 'errored';
+	created_by?: string;
+	/** Unix timestamp (seconds). */
+	created_at?: number;
+	/** Unix timestamp (seconds). */
+	updated_at?: number;
+}
+
+/** Parameters accepted by `client.deploy.update()`. */
+export interface DeployUpdateParams {
+	pipeline?: PipelineConfig;
+	schedule?: string;
+}

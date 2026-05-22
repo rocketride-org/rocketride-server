@@ -28,5 +28,9 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # Store task server in server state for access by other modules if needed
     server.app.state.task = task_server
 
+    # Cancel scheduler and background tasks on server shutdown so the process
+    # exits cleanly within the graceful-shutdown window (no force-kill needed).
+    server._user_shutdown = task_server.shutdown
+
     # Register our routes - authentication handled in listen() before accepting
     server.add_socket('/task/service', task_server.listen, public=True)

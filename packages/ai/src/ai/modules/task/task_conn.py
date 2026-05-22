@@ -73,6 +73,7 @@ from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
+from .commands.cmd_deploy import DeployCommands
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -101,6 +102,7 @@ class TaskConn(
     AccountCommands,
     AppCommands,
     PublicCommands,
+    DeployCommands,
     DAPConn,
 ):
     """

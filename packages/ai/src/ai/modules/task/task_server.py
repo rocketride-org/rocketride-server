@@ -85,10 +85,14 @@ from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.account.store import Store
+from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
+
+# todo: feat/deploy2 - enable TaskScheduler
+# from .task_scheduler import TaskScheduler
 from rocketlib import debug
 
 
@@ -213,12 +217,22 @@ class TaskServer(DAPBase):
 
         # Shared store instance (lazy-loaded via property)
         self._store_instance: Optional[Store] = None
+        self._deployments_instance: Optional[DeploymentStore] = None
 
-        # Start background cleanup process for completed tasks
-        asyncio.create_task(self._cleanup_tasks())
+        # Scheduler for running deployed pipelines
+        # todo: feat/deploy2 - enable TaskScheduler
+        # self.scheduler = TaskScheduler(self)
 
-        # Start background TTL monitoring process
-        asyncio.create_task(self._monitor_ttl())
+        # Start background tasks that must be cancelled on shutdown.
+        self._bg_tasks: List[asyncio.Task] = [
+            # Cleanup for completed tasks
+            asyncio.create_task(self._cleanup_tasks()),
+            # TTL monitoring
+            asyncio.create_task(self._monitor_ttl()),
+            # Run scheduled deployments
+            # todo: feat/deploy2 - enable TaskScheduler
+            # asyncio.create_task(self.scheduler.start()),
+        ]
 
         # Store reference to parent server for statistics integration
         self._server = server
@@ -245,6 +259,13 @@ class TaskServer(DAPBase):
         if self._store_instance is None:
             self._store_instance = Store.create()
         return self._store_instance
+
+    @property
+    def deployments(self) -> DeploymentStore:
+        """Shared DeploymentStore instance, lazy-initialized on first access."""
+        if self._deployments_instance is None:
+            self._deployments_instance = DeploymentStore(self.store._store)
+        return self._deployments_instance
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -360,6 +381,16 @@ class TaskServer(DAPBase):
             except Exception as e:
                 # Log errors but continue operation to maintain system stability
                 self.debug_message(f'Error during TTL monitoring cycle: {e}')
+
+    async def shutdown(self) -> None:
+        """Cancel all background tasks."""
+        # todo: feat/deploy2 - enable TaskScheduler
+        # await self.scheduler.stop()
+        bg_tasks = getattr(self, '_bg_tasks', [])
+        for task in bg_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
 
     def release_unauthed_slot(self, ip: str) -> None:
         """
