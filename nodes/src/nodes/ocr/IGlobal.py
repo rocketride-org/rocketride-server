@@ -160,8 +160,10 @@ class ModelServerOCR(OCRInstance):
 
         Returns:
             On img2table v2: an ``OCRData`` instance whose ``records`` dict is
-            keyed by zero-based page index, or ``None`` if no text was found or
-            an exception was caught.
+            keyed by zero-based page index. Pages that produced no OCR text
+            still appear with an empty record list — ``None`` is returned only
+            when ``document.images`` is empty (nothing to extract) or an
+            exception was caught while iterating.
             On img2table v1: whatever the base class's ``of`` returns —
             typically an ``OCRDataframe`` built from ``content()`` +
             ``to_ocr_dataframe()``.
@@ -211,9 +213,14 @@ class ModelServerOCR(OCRInstance):
                 if not isinstance(box_info, dict):
                     continue
                 bbox = box_info.get('bbox', box_info.get('box', [0, 0, 10, 10]))
+                if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+                    continue
+                try:
+                    x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                except (TypeError, ValueError):
+                    continue
                 box_text = box_info.get('text', '')
                 confidence = box_info.get('confidence', 1.0)
-                x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
                 word_id = f'word_{page + 1}_{idx + 1}'
                 records.append(
                     {
@@ -221,13 +228,13 @@ class ModelServerOCR(OCRInstance):
                         'parent': word_id,
                         'value': box_text,
                         'confidence': round(100 * confidence),
-                        'x1': int(x1),
-                        'y1': int(y1),
-                        'x2': int(x2),
-                        'y2': int(y2),
+                        'x1': x1,
+                        'y1': y1,
+                        'x2': x2,
+                        'y2': y2,
                     }
                 )
-        elif text:
+        if not records and text:
             h, w = image_shape[:2]
             word_id = f'word_{page + 1}_1'
             records.append(

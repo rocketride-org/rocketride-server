@@ -282,6 +282,41 @@ def test_format_to_v2_records_skips_non_dict_boxes(adapter) -> None:
     assert records[0]['confidence'] == 50
 
 
+def test_format_to_v2_records_skips_malformed_bbox(adapter) -> None:
+    """Boxes with short or non-numeric ``bbox`` values are skipped, not raised."""
+    result = {
+        'text': '',
+        'boxes': [
+            {'bbox': [1, 2, 3], 'text': 'too-short', 'confidence': 1.0},
+            {'bbox': 'not-a-list', 'text': 'wrong-type', 'confidence': 1.0},
+            {'bbox': [1, 'x', 3, 4], 'text': 'non-numeric', 'confidence': 1.0},
+            {'bbox': [10, 20, 30, 40], 'text': 'good', 'confidence': 0.5},
+        ],
+    }
+
+    records = adapter._format_to_v2_records(result, (10, 20, 3), page=0)
+
+    assert len(records) == 1
+    assert records[0]['value'] == 'good'
+
+
+def test_format_to_v2_records_text_fallback_when_all_boxes_invalid(adapter) -> None:
+    """If every entry in ``boxes`` is malformed but ``text`` is set, fall back to text."""
+    result = {
+        'text': 'document-level',
+        'boxes': [
+            {'bbox': [1, 2], 'text': 'bad', 'confidence': 1.0},
+            'garbage',
+        ],
+    }
+
+    records = adapter._format_to_v2_records(result, (10, 20, 3), page=0)
+
+    assert len(records) == 1
+    assert records[0]['value'] == 'document-level'
+    assert records[0]['x2'] == 20  # full-image bbox from image_shape
+
+
 # ---------------------------------------------------------------------------
 # of() — branches on the installed img2table major
 # ---------------------------------------------------------------------------
