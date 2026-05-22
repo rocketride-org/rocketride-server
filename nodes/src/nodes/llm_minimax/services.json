@@ -170,9 +170,15 @@
 			"title": "Tokens",
 			"description": "Total Tokens"
 		},
+		"minimax.serverbase": {
+			"type": "string",
+			"title": "Server base URL",
+			"description": "OpenAI-compatible base URL for the MiniMax endpoint (e.g. https://api.minimax.io/v1 for international, https://api.minimaxi.com/v1 for China).",
+			"default": "https://api.minimax.io/v1"
+		},
 		"minimax.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": ["model", "modelTotalTokens", "minimax.serverbase", "llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"minimax.minimax-m2": {
 			"object": "minimax-m2",

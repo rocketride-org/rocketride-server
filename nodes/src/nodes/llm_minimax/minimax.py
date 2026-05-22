@@ -52,10 +52,9 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the serverbase url
-        serverbase = config.get('serverbase')
-        if not serverbase:
-            raise ValueError('MiniMax serverbase is required.')
+        # Get the serverbase url; fall back to the MiniMax default so runtime
+        # accepts the same "no explicit serverbase" config that validateConfig does
+        serverbase = config.get('serverbase') or 'https://api.minimax.io/v1'
 
         # Get the api key
         apikey = config.get('apikey')
