@@ -15,6 +15,7 @@ def _vision_available():
     """Check if ai.common.models.vision is available."""
     try:
         from ai.common.models.vision import CLIPModel, ViTModel  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -39,7 +40,6 @@ def test_embedding_image_create_embedding():
 
     # Use the same embedding class the node uses
     from nodes.embedding_image.embedding import Embedding
-    from ai.common.config import Config
 
     # Minimal config: provider and connConfig with default model
     provider = 'embedding_image'

@@ -36,26 +36,11 @@ import EmailIcon from './EmailIcon';
 import ConfigIcon from './ConfigIcon';
 import OutlookIcon from './OutlookIcon';
 import SparklingIcon from './SparklingIcon';
+import PadlockIcon from './PadlockIcon';
 
 /**
  * Barrel export for all custom SVG icon components used throughout the shared-ui library.
  * These icons represent various file types, UI actions, and visual indicators,
  * providing a centralized import point for consumers of the icon set.
  */
-export {
-	VectorSquareSolidIcon,
-	WordIcon,
-	VideoIcon,
-	PowerpointIcon,
-	PdfIcon,
-	ImageIcon,
-	GenericFileIcon,
-	ExcelIcon,
-	EmailIcon,
-	ConfigIcon,
-	CompressedIcon,
-	CodeIcon,
-	AudioIcon,
-	OutlookIcon,
-	SparklingIcon,
-};
+export { VectorSquareSolidIcon, WordIcon, VideoIcon, PowerpointIcon, PdfIcon, ImageIcon, GenericFileIcon, ExcelIcon, EmailIcon, ConfigIcon, CompressedIcon, CodeIcon, AudioIcon, OutlookIcon, SparklingIcon, PadlockIcon };

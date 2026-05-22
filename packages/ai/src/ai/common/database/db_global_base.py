@@ -38,19 +38,29 @@ Everything else — schema reflection, type inference, table auto-creation,
 session lifecycle — is handled here and is dialect-agnostic.
 """
 
-import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import (
-    Column, DateTime, Float, Integer, MetaData, String, Text,
-    Table as SQLTable, create_engine, inspect, text,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    Table as SQLTable,
+    create_engine,
+    inspect,
+    text,
 )
 from sqlalchemy.exc import DBAPIError
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
+
+DEFAULT_MAX_EXECUTE_ROWS = 25000
 
 
 class DatabaseGlobalBase(IGlobalBase, ABC):
@@ -63,6 +73,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     schema: Dict[str, Tuple[str, str]] = {}
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
+    allow_execute: bool = False
+    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -355,7 +367,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {}
             for column in columns:
                 col_name = column['name']
-                col_type = column['type']   # renamed to avoid shadowing the 'type' builtin
+                col_type = column['type']  # renamed to avoid shadowing the 'type' builtin
                 comment = column.get('comment', '')
                 self.schema[col_name] = (str(col_type), comment)
 
@@ -435,6 +447,20 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
         self.db_description = (self._db_description(raw) or '').strip()
 
+        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
+        # the LLM translation + is_sql_safe gate, so the node owner must
+        # explicitly enable the capability. Strings like 'false' / '0' must
+        # not be truthy here, so don't use bool() directly.
+        allow_execute = raw.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
+        try:
+            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+
         self.database = params['database']
         self.table = params['table']
 
@@ -454,9 +480,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         table_schema = self._getTableSchema(self.table)
         if table_schema is None:
             warning(
-                f'Table "{self.table}" does not exist in database "{self.database}". '
-                f'It will be created automatically when data is received. '
-                f'If you prefer to create it manually, please do so before running the pipeline.'
+                f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.'
             )
             self.schema = {}
         else:

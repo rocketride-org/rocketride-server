@@ -21,57 +21,65 @@
 // SOFTWARE.
 // =============================================================================
 
+/* global process */
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getenv, requireKeys } = require('../../scripts/lib/getenv');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const env = getenv();
+requireKeys(env, ['RR_STRIPE_PUBLISHABLE_KEY'], 'vscode:build-webview');
 
 export default defineConfig({
-	plugins: [
-		pluginReact(),
-	],
+	plugins: [pluginReact()],
 
 	source: {
+		// Inject public build-time config values into webview bundles.
+		// SECURITY: never add server-side secrets here — only publishable keys.
+		define: {
+			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
+			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || ''),
+		},
 		include: ['./src/**/*'],
-		exclude: [
-			'./dist/**',
-			'./node_modules/**',
-			'./**/*.test.*',
-			'./**/*.spec.*'
-		],
+		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'page-connection': './src/providers/views/PageConnection/index.tsx',
-			'page-settings': './src/providers/views/PageSettings/index.tsx',
-			'page-editor': './src/providers/views/PageEditor/index.tsx',
-			'page-status': './src/providers/views/PageStatus/index.tsx',
-			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
-			'page-welcome': './src/providers/views/PageWelcome/index.tsx'
-		}
+			'page-sidebar': './src/providers/views/Sidebar/index.tsx',
+			'page-settings': './src/providers/views/Settings/index.tsx',
+			'page-project': './src/providers/views/Project/index.tsx',
+			'page-welcome': './src/providers/views/Welcome/index.tsx',
+			'page-monitor': './src/providers/views/Monitor/index.tsx',
+			'page-account': './src/providers/views/Account/index.tsx',
+			'page-environment': './src/providers/views/Environment/index.tsx',
+			'page-auth': './src/providers/views/Auth/index.tsx',
+		},
 	},
 
 	resolve: {
 		alias: {
-			'shared': path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
-			'react': path.resolve(__dirname, 'node_modules/react'),
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
+			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
-		}
+		},
 	},
 
 	output: {
 		distPath: {
-			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/webview')
+			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/webview'),
 		},
 		filename: {
-			js: '[name].js'
+			js: '[name].js',
 		},
 		sourceMap: {
 			js: false,
-			css: false
+			css: false,
 		},
 		externals: {
-			'vscode': 'commonjs vscode'
+			vscode: 'commonjs vscode',
 		},
 		cleanDistPath: true,
 		// Inline all static assets as data URIs — VS Code webviews cannot
@@ -91,16 +99,15 @@ export default defineConfig({
 				minimize: false,
 				// CRITICAL: Disable all code splitting for VS Code webviews
 				splitChunks: false,
-				runtimeChunk: false
-			}
-		}
+				runtimeChunk: false,
+			},
+		},
 	},
 
 	performance: {
 		// Disable chunk splitting at the Rsbuild level too
 		chunkSplit: {
-			strategy: 'all-in-one'
-		}
-	}
+			strategy: 'all-in-one',
+		},
+	},
 });
-

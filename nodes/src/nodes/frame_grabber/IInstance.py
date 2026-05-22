@@ -38,7 +38,9 @@ class IInstance(IInstanceBase):
         from ai.common.avi.frame import VideoFrameExtractor
 
         # Create the reader
-        self._reader = VideoFrameExtractor(frame_callback=self._frame_callback, name='FrameGrabber', config=self.IGlobal.config)
+        self._reader = VideoFrameExtractor(
+            frame_callback=self._frame_callback, name='FrameGrabber', config=self.IGlobal.config
+        )
 
     def endInstance(self):
         # Release the reader

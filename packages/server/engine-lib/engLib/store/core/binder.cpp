@@ -133,6 +133,16 @@ Error Binder::callMethods(
             pThis->m_pInstance->pipe->debugger.debugError(
                 pThis->m_pInstance, pInstance, methodName, ccode);
 
+            // Set the completion code on the entry so the error surfaces
+            // in the object result (e.g. dropper UI, failedCount stats).
+            // Skip PreventDefault — that's a "skip" signal, not an error.
+            // Only set if not already failed — preserves the first (root)
+            // error when cascading failures occur.
+            if (ccode.code() != Ec::PreventDefault
+                && pInstance->currentEntry
+                && !pInstance->currentEntry->objectFailed())
+                pInstance->currentEntry->completionCode(ccode);
+
             // Build leave trace with error/skip result
             json::Value leaveTrace;
             if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {

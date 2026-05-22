@@ -1,0 +1,188 @@
+# ---------------------------------------------------------------------------
+# docker-compose.yml — RocketRide local development stack
+#
+# MIT License
+# Copyright (c) 2026 RocketRide
+#
+# Usage:
+#   docker compose up              # start all services
+#   docker compose up engine       # start engine only
+#   docker compose down -v         # stop and remove volumes
+# ---------------------------------------------------------------------------
+
+services:
+  # ── RocketRide Engine ────────────────────────────────────────────────────
+  engine:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.engine
+    ports:
+      - '${ENGINE_PORT:-5565}:5565'
+    environment:
+      - ROCKETRIDE_LOG_LEVEL=${ROCKETRIDE_LOG_LEVEL:-info}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-rocketride}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rocketride}
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        # service_started: Milvus is optional — engine must handle connection retries.
+        # Use service_healthy if your deployment always requires Milvus.
+        condition: service_started
+      chroma:
+        # service_started: Chroma is optional — engine must handle connection retries.
+        # Use service_healthy if your deployment always requires ChromaDB.
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:5565/ping']
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '${ENGINE_CPU_LIMIT:-4}'
+          memory: '${ENGINE_MEMORY_LIMIT:-4G}'
+        reservations:
+          cpus: '1'
+          memory: 1G
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  # ── PostgreSQL + pgvector ────────────────────────────────────────────────
+  postgres:
+    image: ankane/pgvector:v0.8.0
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rocketride}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-rocketride}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-rocketride}']
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  # ── etcd (Milvus metadata store) ────────────────────────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: '1000'
+      ETCD_QUOTA_BACKEND_BYTES: '4294967296' # 4 GiB
+      ETCD_SNAPSHOT_COUNT: '50000'
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcddata:/etcd
+    healthcheck:
+      test: ['CMD', 'etcdctl', 'endpoint', 'health']
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  # ── MinIO (Milvus object storage) ───────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
+    command: minio server /data --console-address ":9001"
+    ports:
+      - '${MINIO_API_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  # ── Milvus (vector database) ────────────────────────────────────────────
+  milvus:
+    image: milvusdb/milvus:v2.4.17
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-changeme}
+    command: ['milvus', 'run', 'standalone']
+    ports:
+      - '${MILVUS_PORT:-19530}:19530'
+      - '${MILVUS_GRPC_PORT:-9091}:9091'
+    volumes:
+      - milvusdata:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
+      interval: 20s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+  # ── ChromaDB (vector database) ──────────────────────────────────────────
+  chroma:
+    image: chromadb/chroma:0.6.3
+    environment:
+      IS_PERSISTENT: 'TRUE'
+      ANONYMIZED_TELEMETRY: 'FALSE'
+    ports:
+      - '${CHROMA_PORT:-8000}:8000'
+    volumes:
+      - chromadata:/chroma/chroma
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v2/heartbeat']
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - rocketride-net
+
+volumes:
+  pgdata:
+    driver: local
+  etcddata:
+    driver: local
+  miniodata:
+    driver: local
+  milvusdata:
+    driver: local
+  chromadata:
+    driver: local
+
+networks:
+  rocketride-net:
+    driver: bridge

@@ -30,7 +30,7 @@ import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
 
 const App: React.FC = () => {
-	const [isVSCode] = useState(() => window.parent !== window);
+	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
 
 	// Initialize VSCode state
@@ -40,14 +40,14 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: false,
-				isReady: true
+				isReady: true,
 			};
 		} else {
 			// VSCode mode - not ready yet
 			return {
 				theme: null,
 				isVSCode: true,
-				isReady: false
+				isReady: false,
 			};
 		}
 	});
@@ -91,31 +91,18 @@ const App: React.FC = () => {
 			uri = window.location.origin;
 		}
 
-		// Try to get the token from session storage (skip in VSCode webview - shared storage would mix auth across tabs)
-		if (!isVSCode) {
+		// URL param always wins — it carries the freshly-minted pk for the
+		// current task and must not be shadowed by a stale sessionStorage value
+		// left over from a previous task on the same origin.
+		token = urlParams.get('auth') || '';
+		if (token) {
+			window.history.replaceState({}, '', window.location.pathname);
+		} else if (!isVSCode) {
+			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 			token = sessionStorage.getItem('auth') || '';
-			if (token) {
-			}
 		}
-
-		// If we don't have a token yet
-		if (!token) {
-			// See if we can get from the .env if we are in dev mode
-			if (API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
-				token = API_CONFIG.ROCKETRIDE_APIKEY;
-			}
-		}
-
-		// If still do not have a token...
-		if (!token) {
-			// It has to be in the query string
-			token = urlParams.get('auth') || '';
-
-			// If we got it from the query string...
-			if (token) {
-				// Remove it so the user doesn't see it in the URL
-				window.history.replaceState({}, "", window.location.pathname);
-			}
+		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
+			token = API_CONFIG.ROCKETRIDE_APIKEY;
 		}
 
 		// Check these
@@ -129,11 +116,11 @@ const App: React.FC = () => {
 		// Set the config
 		setAPIConfig({
 			ROCKETRIDE_APIKEY: token,
-			ROCKETRIDE_URI: uri
+			ROCKETRIDE_URI: uri,
 		});
 
 		// Start the client with persistent connection
-		startClient(token).catch(error => {
+		startClient(token).catch((error) => {
 			console.error('Failed to start client:', error);
 		});
 
@@ -160,7 +147,7 @@ const App: React.FC = () => {
 					setVscodeState({
 						theme: message.theme,
 						isVSCode: true,
-						isReady: true
+						isReady: true,
 					});
 				}
 			};
@@ -168,7 +155,7 @@ const App: React.FC = () => {
 			window.addEventListener('message', handleVSCodeData);
 
 			// Send ready message to parent
-			window.parent.postMessage({ type: 'ready' }, '*');
+			window.parent.postMessage({ type: 'view:ready' }, '*');
 
 			return () => window.removeEventListener('message', handleVSCodeData);
 		} else {

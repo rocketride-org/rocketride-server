@@ -106,7 +106,17 @@ class IGlobal(IGlobalBase):
                     message = self._format_error(status, None, None, message)
                 warning(message)
                 return
-            except (APIConnectionError, APITimeoutError, RateLimitError, AuthenticationError, BadRequestError, PermissionDeniedError, NotFoundError, InternalServerError, APIError) as e:
+            except (
+                APIConnectionError,
+                APITimeoutError,
+                RateLimitError,
+                AuthenticationError,
+                BadRequestError,
+                PermissionDeniedError,
+                NotFoundError,
+                InternalServerError,
+                APIError,
+            ) as e:
                 message = self._format_error(None, None, None, str(e))
                 warning(message)
                 return
@@ -190,7 +200,7 @@ class IGlobal(IGlobalBase):
 
         Called when the filter is being destroyed or reset.
         """
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:
         """

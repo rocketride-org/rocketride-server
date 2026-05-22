@@ -52,7 +52,7 @@
  * @module clientSingleton
  */
 
-import { RocketRideClient, RocketRideClientConfig } from 'rocketride';
+import { RocketRideClient, RocketRideClientConfig, ConnectionException } from 'rocketride';
 import { API_CONFIG } from '../config/apiConfig';
 
 // ============================================================================
@@ -261,7 +261,7 @@ export async function startClient(authToken: string): Promise<void> {
 	}
 
 	if (!authToken) {
-		throw new Error('Sorry, I couldn\'t get you authenticated. Please contact your system admin.');
+		throw new Error("Sorry, I couldn't get you authenticated. Please contact your system admin.");
 	}
 
 	const config: RocketRideClientConfig = {
@@ -275,9 +275,9 @@ export async function startClient(authToken: string): Promise<void> {
 		onDisconnected: async (reason?: string, hasError?: boolean) => {
 			await handleDisconnected(reason || 'Connection lost', hasError || false);
 		},
-		onConnectError: (message: string) =>
-			handleDisconnected(message, true).catch((e) => console.error('handleDisconnected:', e)),
-		env: API_CONFIG
+		onConnectError: (error: ConnectionException) =>
+			handleDisconnected(error.message, true).catch((e) => console.error('handleDisconnected:', e)),
+		env: API_CONFIG,
 	};
 
 	const client = new RocketRideClient(config);
@@ -388,4 +388,3 @@ export function subscribeToClient(callbacks: {
 		if (onStatusChange) statusSubscribers.delete(onStatusChange);
 	};
 }
-

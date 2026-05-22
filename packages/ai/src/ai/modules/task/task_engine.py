@@ -33,17 +33,15 @@ import asyncio
 import sys
 import json
 import tempfile
-import aiofiles
 import time
 import socket
 import hashlib
 import shlex
 import shutil
-import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import args as startup_args
+from rocketlib import debug, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -54,11 +52,11 @@ from ai.constants import (
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
 )
 from ai import CONST_AI_NODE_SCRIPT
-from ai.web.metrics import metrics
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
+from .pipeline import resolve_pipeline_env
 from .types import LAUNCH_TYPE
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -191,10 +189,12 @@ class Task(DAPBase):
         token: str,
         public_auth: str,
         pipeline: Dict[str, Any],
-        launch_args: Dict[str, Any] = {},
+        launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
+        client_id: str = '',
+        env: Dict[str, str] = None,
         **kwargs,
     ) -> None:
         """
@@ -207,6 +207,7 @@ class Task(DAPBase):
             launch_args: Launch configuration parameters
             launch_type: Task creation mode (launch/attach)
             ttl: Time-to-live in seconds for idle tasks (default: 900 = 15 minutes; 0 = no timeout)
+            client_id: Account identifier for store access scoping
             **kwargs: Additional DAP configuration
         """
         # Store authentication
@@ -215,6 +216,7 @@ class Task(DAPBase):
         self.source = source
         self.token = token
         self.public_auth = public_auth
+        self.client_id = client_id
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -222,6 +224,9 @@ class Task(DAPBase):
 
         # Have the final events been sent yet
         self._final_events_sent = False
+
+        # Guard against _terminated() being called more than once
+        self._terminated_called = False
 
         # Server reference
         self._server = server
@@ -237,8 +242,10 @@ class Task(DAPBase):
         self._service_down_notes = []
 
         # Execution configuration
-        self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
+        _args = launch_args or {}
+        self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
+        self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = _args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -296,32 +303,17 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
+        self._env: Dict[str, str] = env or {}
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using the merged environment dict.
+
+        Delegates to :func:`pipeline.resolve_pipeline_env`.
         """
-        Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
-
-        Args:
-            pipeline: Dictionary containing the pipeline configuration
-
-        Returns:
-            New dictionary with resolved environment variables
-        """
-        # Convert dict to JSON string
-        pipeline_str = json.dumps(pipeline)
-
-        # Replace ${VAR_NAME} with environment variable value
-        def replacer(match):
-            env_var = match.group(1)
-            return os.environ.get(env_var, match.group(0))  # Keep original if not found
-
-        resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
-
-        # Parse back to dict and return
-        return json.loads(resolved_str)
+        return resolve_pipeline_env(pipeline, self._env)
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
@@ -347,10 +339,10 @@ class Task(DAPBase):
             source_component['config'] = {}
         config = source_component['config']
 
-        if 'name' not in config:
-            self._status.name = self.source
-        else:
-            self._status.name = config['name']
+        # Build status name: {task_name | task_id}.{component_name | source_id}
+        task_label = self._task_name or self.id
+        component_label = source_component.get('name') or config.get('name') or self.source
+        self._status.name = f'{task_label}.{component_label}'
 
         if 'mode' not in config:
             config['mode'] = 'Source'
@@ -359,9 +351,13 @@ class Task(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
+
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). Must
+                      not be stored — caller discards it after the temp file is written.
 
         Returns:
             Complete subprocess task configuration
@@ -375,12 +371,12 @@ class Task(DAPBase):
         config = {
             'keystore': 'kvsfile://data/keystore.json',
             'pipeline': {
-                'version': self._pipeline.get('version', 1),
-                'source': self._pipeline.get('source'),
-                'project_id': self._pipeline.get('project_id'),
-                'name': self._pipeline.get('name'),
-                'description': self._pipeline.get('description'),
-                'components': self._pipeline.get('components', []),
+                'version': pipeline.get('version', 1),
+                'source': pipeline.get('source'),
+                'project_id': pipeline.get('project_id'),
+                'name': pipeline.get('name'),
+                'description': pipeline.get('description'),
+                'components': pipeline.get('components', []),
             },
             'threadCount': self._threads,
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -394,9 +390,18 @@ class Task(DAPBase):
             'type': 'pipeline',
         }
 
-    async def _write_task_file(self) -> str:
+    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
         """
         Write task configuration to temporary file.
+
+        Uses mkstemp for secure temporary file creation:
+        - Owner-only permissions (0o600) to protect API keys in pipeline config
+        - Unpredictable filename to prevent symlink attacks
+        - O_EXCL flag to prevent TOCTOU race conditions
+
+        Args:
+            pipeline: Resolved pipeline dict (secrets already substituted). The
+                      caller must not retain a reference after this returns.
 
         Returns:
             Path to temporary task configuration file
@@ -404,12 +409,12 @@ class Task(DAPBase):
         Raises:
             OSError: If file cannot be created or written
         """
-        pipeline_task = self._build_task()
+        pipeline_task = self._build_task(pipeline)
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
-        taskpath = os.path.join(tempfile.gettempdir(), f'{self.id}.json')
 
-        async with aiofiles.open(taskpath, 'w', encoding='utf-8') as f:
-            await f.write(pipeline_str)
+        fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            await asyncio.to_thread(f.write, pipeline_str)
 
         return taskpath
 
@@ -504,7 +509,9 @@ class Task(DAPBase):
                     stop=stop_after_attempt(10),
                     wait=wait_fixed(0.15),
                     reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'),
+                    before_sleep=lambda retry_state: self.debug_message(
+                        f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
+                    ),
                 )
                 async def _connect_data_client():
                     # Don't retry if subprocess has died
@@ -512,7 +519,7 @@ class Task(DAPBase):
                         raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
                     transport = TransportWebSocket(uri)
                     name = f'DATA-{self.id}'
-                    client = DAPClient(module=name, transport=transport)
+                    client = Task.TaskData(parent_task=self, module=name, transport=transport)
                     await client.connect()
                     return client
 
@@ -530,8 +537,20 @@ class Task(DAPBase):
             if provider and provider != self._provider:
                 raise RuntimeError(f'You are looking for a "{provider}", but this pipeline isn\'t it')
 
-        # Send request and return response
-        response = await self._data_client.request(data)
+        # Build a brand new DAP packet for the outbound hop instead of forwarding
+        # the inbound dict.  Many concurrent inbound chat clients multiplex through
+        # this single _data_client; if we forwarded their dicts verbatim, the
+        # caller-supplied seqs (e.g. two clients both using seq=128) would collide
+        # in DAPClient._pending_requests, the second future would overwrite the
+        # first, and one of the two responses would be silently dropped -- hanging
+        # the originating chat forever.  dap_request() builds a fresh envelope via
+        # build_request() which allocates a unique seq from _data_client._next_seq()
+        # so each outbound message has its own correlation slot.
+        response = await self._data_client.dap_request(
+            command=data['command'],
+            arguments=args,
+            token=args.get('token'),
+        )
         return response
 
     async def _terminated(self) -> None:
@@ -540,7 +559,20 @@ class Task(DAPBase):
 
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
+
+        Idempotent: safe to call multiple times (only the first call performs
+        cleanup; subsequent calls return immediately).
         """
+        # Guard: only run cleanup once.  Multiple callers can reach here --
+        # e.g. the stdio on_disconnected callback AND the start_task exception
+        # handler -- so we must be idempotent.
+        if self._terminated_called:
+            return
+        self._terminated_called = True
+
+        # Block new operations (e.g. data requests) during teardown
+        self._is_terminating = True
+
         # Update status to stopping
         self._status.status = 'Stopping'
         self._status.state = TASK_STATE.STOPPING.value
@@ -760,6 +792,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'end',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -769,6 +802,27 @@ class Task(DAPBase):
                     EVENT_TYPE.TASK,
                     task_message,
                 )
+
+                # Notify dashboard of task errors (non-zero exit)
+                if self._status.exitCode and self._status.exitCode != 0:
+                    try:
+                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
+                    except Exception:
+                        task_user_id = None
+                    await self._server.broadcast_server_event(
+                        EVENT_TYPE.DASHBOARD,
+                        {
+                            'event': 'apaevt_dashboard',
+                            'body': {
+                                'action': 'task_error',
+                                'timestamp': time.time(),
+                                'taskId': self.id,
+                                'exitCode': self._status.exitCode,
+                                'exitMessage': self._status.exitMessage or None,
+                            },
+                        },
+                        user_id=task_user_id,
+                    )
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -861,8 +915,8 @@ class Task(DAPBase):
 
         else:
             # Route through server broadcast system
-            await self._server.broadcast_event(
-                type=type,
+            await self._server.broadcast_task_event(
+                event_type=type,
                 token=self.token,
                 event=message,
             )
@@ -917,10 +971,11 @@ class Task(DAPBase):
             download_name = download_info.get('name', 'unknown')
             self._status.status = f'Downloading "{download_name}"'
 
-        # Handle performance metrics with merging
+        # Handle subprocess billing metrics (from >MET* protocol)
         elif event_type == 'apaevt_status_metrics':
             new_metrics = body.get('metrics', {})
-            self._status.metrics = metrics.merge(self._status.metrics, new_metrics)
+            if self._task_metrics:
+                self._task_metrics.merge_subprocess_metrics(new_metrics)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':
@@ -1045,6 +1100,8 @@ class Task(DAPBase):
                 'op': operation,
                 'pipes': self._status.pipeflow.byPipe[pipe_index],
                 'trace': trace or {},
+                'project_id': self.project_id,
+                'source': self.source,
             }
             flow = self.build_event('apaevt_flow', body=body)
 
@@ -1063,6 +1120,7 @@ class Task(DAPBase):
         # Handle debug output
         elif event_type == 'output':
             output_message = body.get('output', '')
+            debug(output_message)
 
             self._status_trace.append(output_message)
 
@@ -1156,7 +1214,9 @@ class Task(DAPBase):
 
             # Check sliding timeout (resets on events)
             if time_since_last_event >= CONST_MAX_READY_TIME:
-                raise TimeoutError(f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)')
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)'
+                )
 
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
@@ -1278,7 +1338,7 @@ class Task(DAPBase):
         self._status.rateSize = 0
         self._status.rateCount = 0
         self._status.serviceUp = False
-        self._status.exitCode = 0
+        self._status.exitCode = None
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()
@@ -1354,7 +1414,9 @@ class Task(DAPBase):
             # Start fresh (full initialization)
             await self.start_task()
 
-            self._server.debug_message(f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})')
+            self._server.debug_message(
+                f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
+            )
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
@@ -1386,6 +1448,7 @@ class Task(DAPBase):
             # Make sure some of our start is initialized in case we are restarting
             self._status.completed = False
             self._final_events_sent = False
+            self._terminated_called = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
@@ -1394,18 +1457,20 @@ class Task(DAPBase):
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
 
-            # Resolve any ${...} in the pipeline
-            self._pipeline = self._resolve_pipeline(self._pipeline)
+            # Resolve ${...} placeholders into a local variable — never stored on self
+            # so secrets are not retained in memory beyond the temp file write.
+            resolved = self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
-            self._check_pipeline(self._pipeline)
+            self._check_pipeline(resolved)
 
             # Mark the start time
             if not self._is_restarting:
                 self._status.startTime = time.time()
 
-            # Write it out
-            self._tmpfile = await self._write_task_file()
+            # Write it out, then let `resolved` go out of scope
+            self._tmpfile = await self._write_task_file(resolved)
+            del resolved
 
             # Setup the first part of the command line args
             # --autoterm: exit when parent dies (stdin closes)
@@ -1490,7 +1555,14 @@ class Task(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess - explicitly pass environment to inherit ROCKETRIDE_MOCK for testing
+            # Launch subprocess - pass environment with account context for store access
+            subprocess_env = os.environ.copy()
+            subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+
+            # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
+            if self._pipeline.get('avoidMocks'):
+                subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,
@@ -1499,7 +1571,7 @@ class Task(DAPBase):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=CONST_SUBPROCESS_BUFFER_LIMIT,
-                env=os.environ.copy(),
+                env=subprocess_env,
             )
 
             # Initialize stdio interface
@@ -1518,9 +1590,16 @@ class Task(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
+                # Resolve billing identity from task control
+                _control = self._server.get_task_control(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
+                    task_id=self.id,
+                    client_id=self.client_id,
+                    user_id=getattr(_control, 'userId', '') if _control else '',
+                    team_id=getattr(_control, 'teamId', '') if _control else '',
+                    org_id=getattr(_control, 'orgId', '') if _control else '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()
@@ -1542,6 +1621,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'begin',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -1557,6 +1637,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'restart',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -1588,18 +1669,19 @@ class Task(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as user-requested stop
+                # Mark as user-requested stop and block new operations
                 self._stop_requested = True
+                self._is_terminating = True
 
                 # Handle subprocess termination
-                if engine.returncode is None:
+                if engine is not None and engine.returncode is None:
                     self.debug_message('Initiating subprocess termination')
 
                     # Graceful shutdown with timeout
                     try:
                         # Phase 1: Graceful termination
                         self.debug_message('Sending termination signal to subprocess')
-                        self._engine_process.terminate()
+                        engine.terminate()
 
                         try:
                             await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)

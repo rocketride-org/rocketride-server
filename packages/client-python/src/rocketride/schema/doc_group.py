@@ -81,10 +81,17 @@ class DocGroup(BaseModel):
             print(f"Complete relevant content: {full_content}")
     """
 
-    score: float = Field(0.0, description='Overall relevance score for this entire document/file. Higher scores indicate the file is more relevant to your query.')
+    score: float = Field(
+        0.0,
+        description='Overall relevance score for this entire document/file. Higher scores indicate the file is more relevant to your query.',
+    )
     objectId: str = Field('', description='Unique identifier for this document object in the RocketRide system.')
-    parent: str = Field('', description='File path or name of the source document. This is typically the filename you would recognize.')
-    documents: List[Doc] = Field(default_factory=list, description='List of all document chunks from this file that matched your query.')
+    parent: str = Field(
+        '', description='File path or name of the source document. This is typically the filename you would recognize.'
+    )
+    documents: List[Doc] = Field(
+        default_factory=list, description='List of all document chunks from this file that matched your query.'
+    )
 
     def __repr__(self):
         """

@@ -45,14 +45,41 @@ import * as vscode from 'vscode';
 import { icons } from './icons';
 
 /**
+ * Case-insensitive regex matching sensitive key names.
+ */
+const SENSITIVE_KEY_PATTERN = new RegExp(
+	[
+		'auth[-_]?key',
+		'auth[-_]?token',
+		'authorization',
+		'api[-_]?key',
+		'access[-_]?token',
+		'refresh[-_]?token',
+		'private[-_]?key',
+		'token',
+		'bearer',
+		'password',
+		'secret',
+		'credential',
+	].join('|'),
+	'i'
+);
+
+/** Prefixes that indicate a secret value regardless of key name. */
+const SENSITIVE_VALUE_PREFIXES = ['sk-', 'pk_', 'tk_', 'rr_'];
+
+/**
+ * Returns true if a string value looks like a secret based on its prefix.
+ */
+function isSensitiveValue(value: string): boolean {
+	return SENSITIVE_VALUE_PREFIXES.some(p => value.startsWith(p));
+}
+
+/**
  * Recursively redacts sensitive fields in an object.
  * Modifies the object in place, replacing values of sensitive keys with "*****".
- * 
- * Sensitive patterns (case-insensitive substring matching):
- * - Keys containing 'auth-key' (e.g., 'auth-key', 'user-auth-key')
- * - Keys containing 'token-key' (e.g., 'token-key', 'api-token-key')
- * - Keys containing 'apikey' (e.g., 'apikey', 'apiKey', 'user-apikey')
- * 
+ * Also redacts string values that match known secret prefixes (sk-, pk_, tk_, rr_).
+ *
  * @param obj The object to redact (will be modified in place)
  */
 function redactSensitiveFields(obj: unknown): void {
@@ -73,15 +100,16 @@ function redactSensitiveFields(obj: unknown): void {
 		const record = obj as Record<string, unknown>;
 		for (const key in record) {
 			if (Object.prototype.hasOwnProperty.call(record, key)) {
+				const value = record[key];
 				// Check if key contains any sensitive pattern (case-insensitive)
-				const lowerKey = key.toLowerCase();
-				if (lowerKey.includes('auth-key') ||
-				    lowerKey.includes('token-key') ||
-				    lowerKey.includes('apikey')) {
+				if (SENSITIVE_KEY_PATTERN.test(key)) {
 					record[key] = '*****';
+				} else if (typeof value === 'string' && isSensitiveValue(value)) {
+					// Redact values that look like secrets by their prefix
+					record[key] = value.slice(0, 4) + '*****';
 				} else {
 					// Recursively process nested objects/arrays
-					redactSensitiveFields(record[key]);
+					redactSensitiveFields(value);
 				}
 			}
 		}
@@ -93,13 +121,11 @@ function redactSensitiveFields(obj: unknown): void {
  * 
  * This function uses a lazy redaction strategy for optimal performance:
  * 1. Stringify the object first (required anyway for output)
- * 2. Quick string search for sensitive field patterns
+ * 2. Quick regex search for sensitive field patterns
  * 3. Only if found, parse, redact, and re-stringify
  * 
  * This ensures minimal overhead for the common case where no sensitive
  * data is present, while still protecting keys when they do appear.
- * 
- * Sensitive patterns searched: auth-key, token-key, apikey (case-insensitive)
  * 
  * @param obj The object to stringify
  * @returns JSON string with sensitive values redacted
@@ -108,13 +134,8 @@ export function safeJSONStringify(obj: unknown): string {
 	// Stringify first - we need to do this anyway
 	const jsonString = JSON.stringify(obj);
 
-	// Quick check: does this contain sensitive fields?
-	// Search for common patterns in lowercase for case-insensitive matching
-	// Note: No quotes around patterns so we match any key containing these substrings
-	const lowerString = jsonString.toLowerCase();
-	if (lowerString.includes('auth-key') || 
-	    lowerString.includes('token-key') || 
-	    lowerString.includes('apikey')) {
+	// Quick check: does the serialized string contain any sensitive field names or value prefixes?
+	if (SENSITIVE_KEY_PATTERN.test(jsonString) || SENSITIVE_VALUE_PREFIXES.some(p => jsonString.includes(p))) {
 		// Yes - parse (creating a deep clone), redact, and re-stringify
 		const parsed = JSON.parse(jsonString);
 		redactSensitiveFields(parsed);

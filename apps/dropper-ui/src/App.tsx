@@ -12,7 +12,7 @@ import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
 
 const App: React.FC = () => {
-	const [isVSCode] = useState(() => window.parent !== window);
+	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
 
 	// Initialize VSCode state
@@ -22,14 +22,14 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: false,
-				isReady: true
+				isReady: true,
 			};
 		} else {
 			// VSCode mode - not ready yet
 			return {
 				theme: null,
 				isVSCode: true,
-				isReady: false
+				isReady: false,
 			};
 		}
 	});
@@ -64,17 +64,17 @@ const App: React.FC = () => {
 			uri = window.location.origin;
 		}
 
-		if (!isVSCode) {
+		// URL param always wins — it carries the freshly-minted pk for the
+		// current task and must not be shadowed by a stale sessionStorage value
+		// left over from a previous task on the same origin.
+		token = urlParams.get('auth') || '';
+		if (token) {
+			window.history.replaceState({}, '', window.location.pathname);
+		} else if (!isVSCode) {
 			token = sessionStorage.getItem('auth') || '';
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
-		}
-		if (!token) {
-			token = urlParams.get('auth') || '';
-			if (token && window.location.search.includes('auth=')) {
-				window.history.replaceState({}, '', window.location.pathname);
-			}
 		}
 
 		if (!uri) {
@@ -86,10 +86,10 @@ const App: React.FC = () => {
 
 		setAPIConfig({
 			ROCKETRIDE_APIKEY: token,
-			ROCKETRIDE_URI: uri
+			ROCKETRIDE_URI: uri,
 		});
 
-		startClient(token).catch(error => {
+		startClient(token).catch((error) => {
 			console.error('Failed to start client:', error);
 		});
 
@@ -105,12 +105,12 @@ const App: React.FC = () => {
 					setVscodeState({
 						theme: message.theme,
 						isVSCode: true,
-						isReady: true
+						isReady: true,
 					});
 				}
 			};
 			window.addEventListener('message', handleVSCodeData);
-			window.parent.postMessage({ type: 'ready' }, '*');
+			window.parent.postMessage({ type: 'view:ready' }, '*');
 			return () => window.removeEventListener('message', handleVSCodeData);
 		}
 		return undefined;

@@ -117,6 +117,7 @@ def monitorSSE(pipe_id: int, type: str, data: dict = None) -> None:
         data:    Optional dict payload to include in the event (passed as-is from kwargs)
     """
     import json
+
     payload = {'pipe_id': pipe_id, 'type': type}
     if data:
         payload['data'] = data
@@ -130,7 +131,6 @@ class Lvl(Enum):
 
     Python = engLib.Lvl.Python
     Remoting = engLib.Lvl.Remoting
-    ServicePython = engLib.Lvl.ServicePython
     DebugOut = engLib.Lvl.DebugOut
     DebugProtocol = engLib.Lvl.DebugProtocol
 
@@ -162,7 +162,7 @@ globals()['isLevelEnabled'] = engLib.isLevelEnabled
 
 def debug(*args) -> None:
     """
-    Messages shown if the --trace=ServicePython is specified.
+    Output debug messages. Shown when the appropriate trace level is enabled.
     """
     ...
 

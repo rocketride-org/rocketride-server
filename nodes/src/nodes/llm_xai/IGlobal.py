@@ -124,7 +124,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status_or_code, etype_or_status, emsg, fallback: str) -> str:
         """Compose a user-facing error string.

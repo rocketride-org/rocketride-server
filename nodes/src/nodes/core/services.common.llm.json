@@ -27,6 +27,12 @@
 			"title": "Location",
 			"optional": false,
 			"description": "LLM server location"
+		},
+		"llm.cloud.modelSource": {
+			"type": "string",
+			"title": "Model source",
+			"optional": true,
+			"hidden": true
 		}
 	}
 }

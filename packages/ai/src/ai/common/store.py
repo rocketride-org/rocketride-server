@@ -154,7 +154,7 @@ class DocumentStoreBase(ABC):
 
             # Update the score if this one is higher
             if doc.score > tableDocs[tableKey].score:
-                tableDocs[tableKey] = doc.score
+                tableDocs[tableKey].score = doc.score
 
         # If there are no tables, done
         if not len(tableIds):
@@ -182,9 +182,11 @@ class DocumentStoreBase(ABC):
 
                 # If this is the first part of the table
                 if tableKey not in tableDocs:
-                    # Add it to the list
-                    # TODO: Fix this
-                    tableDocs[tableKey] = Doc(objectId=objectId, chunk=doc.metadata.chunkId, score=chunk.score)
+                    original_content = chunk.page_content
+                    chunk.page_content = ''
+                    tableDocs[tableKey] = chunk
+                    tableDocs[tableKey].page_content += original_content
+                    continue
 
                 # Append the text
                 tableDocs[tableKey].page_content += chunk.page_content
@@ -468,9 +470,13 @@ class DocumentStoreBase(ABC):
                     if not doc.embedding_model:
                         raise Exception('You must run your documents through an embedding filter')
                     if doc.embedding_model != self.modelName:
-                        raise Exception(f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}')
+                        raise Exception(
+                            f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
+                        )
                     if len(doc.embedding) != self.vectorSize:
-                        raise Exception(f'The collection uses a vector size of {self.vectorSize} but the document has {len(doc.embedding)} vector size')
+                        raise Exception(
+                            f'The collection uses a vector size of {self.vectorSize} but the document has {len(doc.embedding)} vector size'
+                        )
                 return True
 
             # If no documents are provided, exit early
@@ -522,9 +528,13 @@ class DocumentStoreBase(ABC):
                 if not doc.embedding_model:
                     raise Exception('You must run your documents through an embedding filter')
                 if doc.embedding_model != modelName:
-                    raise Exception(f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}')
+                    raise Exception(
+                        f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'
+                    )
                 if len(doc.embedding) != vectorSize:
-                    raise Exception(f'The collection uses a vector size of {vectorSize} but the document has {len(doc.embedding)} vector size')
+                    raise Exception(
+                        f'The collection uses a vector size of {vectorSize} but the document has {len(doc.embedding)} vector size'
+                    )
 
         # Collection successfully created and validated
         return True

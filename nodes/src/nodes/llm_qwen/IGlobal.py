@@ -58,7 +58,14 @@ class IGlobal(IGlobalBase):
             depends(requirements)
 
             # Prefer provider-driven exceptions vs string parsing
-            from openai import OpenAI, APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                OpenAIError,
+                AuthenticationError,
+                RateLimitError,
+                APIConnectionError,
+            )
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -137,4 +144,4 @@ class IGlobal(IGlobalBase):
             self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None

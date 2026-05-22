@@ -47,6 +47,17 @@ from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
 
+# Default batch size for bulk upsert operations
+DEFAULT_BULK_INSERT_BATCH_SIZE = 50
+
+# Default connection timeout in seconds
+DEFAULT_TIMEOUT = 60
+
+
+def _escape_milvus_str(value: object) -> str:
+    """Escape a value for safe interpolation into a Milvus filter expression."""
+    return str(value).replace('\\', '\\\\').replace("'", "\\'")
+
 
 class Store(DocumentStoreBase):
     apikey: str = ''
@@ -84,6 +95,10 @@ class Store(DocumentStoreBase):
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.threshold_search = config.get('score', 0.5)
 
+        # Configurable timeout (seconds) and bulk insert batch size
+        self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
+        self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
+
         profile = config.get('mode')
 
         # check if the similarity matches milvus configuration options
@@ -93,15 +108,16 @@ class Store(DocumentStoreBase):
         else:
             raise Exception('The metric you provided in the config.json does not match required milvus configurations')
 
-        # Establish a connection // TODO: Revise alternative setup as this connection action is only necessary for the flush() method
-        if profile != 'local':
-            # Init the store
-            if self.host.startswith('https:') or self.host.startswith('http:'):
-                self.client = MilvusClient(uri=self.host, token=self.apikey, timeout=20)
+        # Establish a connection to the Milvus instance with configurable timeout
+        try:
+            if profile != 'local':
+                # Init the store (host was stripped of protocol at line 87, so always add https://)
+                self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
-                self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=20)
-        else:
-            self.client = MilvusClient(uri=f'http://{self.host}:{self.port}', timeout=20)
+                self.client = MilvusClient(uri=f'http://{self.host}:{self.port}', timeout=self.timeout)
+        except Exception as e:
+            self.client = None
+            raise Exception(f'Failed to connect to Milvus at {self.host}: {e}') from e
 
         return
 
@@ -184,24 +200,24 @@ class Store(DocumentStoreBase):
         must_conditions = []
 
         if docFilter.nodeId is not None:
-            must_conditions.append(f"meta['nodeId'] == '{docFilter.nodeId}'")
+            must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'")
 
         if docFilter.isTable is not None:
-            must_conditions.append(f"meta['isTable'] == {docFilter.isTable}")
+            (must_conditions.append(f"meta['isTable'] == '{_escape_milvus_str(docFilter.isTable)}'"),)
 
         if docFilter.tableIds is not None:
-            table_ids = ', '.join(map(str, docFilter.tableIds))
+            table_ids = ', '.join(f"'{_escape_milvus_str(t)}'" for t in docFilter.tableIds)
             must_conditions.append(f"meta['tableId'] in [{table_ids}]")
 
         if docFilter.parent is not None:
-            must_conditions.append(f"meta['parent'] == '{docFilter.parent}'")
+            must_conditions.append(f"meta['parent'] == '{_escape_milvus_str(docFilter.parent)}'")
 
         if docFilter.permissions is not None:
-            permission_ids = ', '.join(map(str, docFilter.permissions))
+            permission_ids = ', '.join(f"'{_escape_milvus_str(p)}'" for p in docFilter.permissions)
             must_conditions.append(f"meta['permissionId'] in [{permission_ids}]")
 
         if docFilter.objectIds is not None:
-            object_ids = ', '.join(json.dumps(str(oid)) for oid in docFilter.objectIds)
+            object_ids = ', '.join(f"'{_escape_milvus_str(o)}'" for o in docFilter.objectIds)
             must_conditions.append(f"meta['objectId'] in [{object_ids}]")
 
         # If we are not going after deleted docs, add a condition
@@ -245,13 +261,15 @@ class Store(DocumentStoreBase):
                 entity = point
                 score = 0
             else:
-                # If we are return scaled scores, build it TODO: CHECK IF THIS IS ALSO THE CASE FOR MILVUS (-1 to 1 range) OR MIGHT IT BE CORRECTED ALREADY?
+                # Milvus COSINE distance returns values in the range [0, 2] where 0 is
+                # identical. We rescale to [0, 1] with 1 meaning most similar to stay
+                # consistent with the rest of the codebase score convention.
                 if self.similarity == 'COSINE':
                     score = (point.get('distance') + 1) / 2
                 else:
                     score = float(1.0 / (1.0 + np.exp(point.get('distance') / -100)))  # expit function unwrapped
                 # Ignore it if it doesn't have a high enough score
-                if score < 0.20:
+                if score < self.threshold_search:
                     continue
 
             # Process the entity as needed
@@ -262,7 +280,7 @@ class Store(DocumentStoreBase):
             # Get the payload content and metadata
             metadata = cast(DocMetadata, metadata)
 
-            # Create asearc new document
+            # Create a new document
             doc = Doc(score=score, page_content=content, metadata=metadata)
 
             # Append it to this documents chunks
@@ -304,7 +322,7 @@ class Store(DocumentStoreBase):
         must_conditions = self._convertFilter(docFilter=docFilter)
 
         # Append it
-        must_conditions.append(f"content like '%{query}%'")
+        must_conditions.append(f"content like '%{_escape_milvus_str(query)}%'")
 
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -353,9 +371,18 @@ class Store(DocumentStoreBase):
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
         # Perform the search
-        points = self.client.search(collection_name=self.collection, data=[query.embedding], filter=filter_expression, limit=25 if docFilter.limit <= 10 else docFilter.limit, output_fields=['meta', 'content'])
+        points = self.client.search(
+            collection_name=self.collection,
+            data=[query.embedding],
+            filter=filter_expression,
+            limit=25 if docFilter.limit <= 10 else docFilter.limit,
+            output_fields=['meta', 'content'],
+        )
 
         docs = self._convertToDocs(points[0])
+
+        # Filter results based on retrieval_score_threshold (self.threshold_search)
+        docs = [doc for doc in docs if doc.score >= self.threshold_search]
 
         # Return the results
         return docs
@@ -376,7 +403,13 @@ class Store(DocumentStoreBase):
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
         # Perform the query
-        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['meta', 'content'], offset=docFilter.offset, limit=docFilter.limit)
+        results = self.client.query(
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['meta', 'content'],
+            offset=docFilter.offset,
+            limit=docFilter.limit,
+        )
 
         # Convert results to Docs
         return self._convertToDocs(results)
@@ -398,7 +431,9 @@ class Store(DocumentStoreBase):
             filter_expr += f' and meta["parent"] == {json.dumps(parent)}'
 
         # Perform the query
-        results = self.client.query(collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit)
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit
+        )
 
         # Build paths dictionary
         paths = {}
@@ -414,7 +449,7 @@ class Store(DocumentStoreBase):
 
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
-        Addsdocument chunks to the document store.
+        Add document chunks to the document store using batched bulk upsert.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -432,7 +467,8 @@ class Store(DocumentStoreBase):
             # Save this object id
             objectIds[chunk.metadata.objectId] = True
 
-        # Erase all documents/chunks associated with that ObjectId in one operation (TODO: Start discussion about better use of upsert() method to increase performance)
+        # Erase all documents/chunks associated with that ObjectId in one operation
+        # so we can cleanly insert the new version
         if len(objectIds.keys()):
             filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds.keys())}]"
             try:
@@ -441,8 +477,20 @@ class Store(DocumentStoreBase):
             except Exception as e:
                 engLib.debug(f'Error deleting old chunks: {e}')
 
-        # TODO: Consider implementing a bulk insertion https://milvus.io/api-reference/pymilvus/v2.4.x/ORM/utility/do_bulk_insert.md
-        # Disatvantage here is that is will require to reformat interation data into a JSON file format
+        # Collect chunks into batches for bulk upsert instead of one-at-a-time
+        batch: List[dict] = []
+
+        def flush_batch():
+            nonlocal batch
+            if not batch:
+                return
+            try:
+                self.client.upsert(collection_name=self.collection, data=batch)
+                engLib.debug(f'Milvus bulk upsert: {len(batch)} chunks inserted')
+            except Exception as e:
+                engLib.debug(f'Error during bulk upsert ({len(batch)} chunks): {e}')
+                raise
+            batch = []
 
         # For each document
         for chunk in chunks:
@@ -454,10 +502,21 @@ class Store(DocumentStoreBase):
                 raise Exception('No embedding in document')
 
             # Append the points // create a unique identifier that fits into an int64 id field
-            tmp_struct = {'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)), 'vector': embedding, 'content': chunk.page_content, 'meta': chunk.metadata}
+            tmp_struct = {
+                'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)),
+                'vector': embedding,
+                'content': chunk.page_content,
+                'meta': chunk.metadata,
+            }
 
-            # TODO: Consider printing out upsert count for debugging and imprement bulk insert
-            self.client.upsert(collection_name=self.collection, data=[tmp_struct])
+            batch.append(tmp_struct)
+
+            # Flush when batch reaches configured size
+            if len(batch) >= self.bulkInsertBatchSize:
+                flush_batch()
+
+        # Flush any remaining chunks
+        flush_batch()
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -472,15 +531,41 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
-        # TODO: Add time out
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
         if filter_expression:
-            self.client.delete(collection_name=self.collection, filter=filter_expression)
+            try:
+                self.client.delete(collection_name=self.collection, filter=filter_expression, timeout=self.timeout)
+            except Exception as e:
+                engLib.debug(f'Error removing documents: {e}')
+                raise
 
         return
+
+    def _batchUpsertResults(self, results: List[dict], *, isDeleted: bool) -> None:
+        """
+        Batch-update the isDeleted metadata field on a list of query results.
+
+        Collects results into batches of bulkInsertBatchSize and upserts them
+        together, avoiding the performance bottleneck of one-at-a-time upserts.
+        """
+        batch: List[dict] = []
+
+        for result in results:
+            meta = result.get('meta', {})
+            meta['isDeleted'] = isDeleted
+            result['meta'] = meta
+            batch.append(result)
+
+            if len(batch) >= self.bulkInsertBatchSize:
+                self.client.upsert(collection_name=self.collection, data=batch)
+                batch = []
+
+        # Flush remaining
+        if batch:
+            self.client.upsert(collection_name=self.collection, data=batch)
 
     def markDeleted(self, objectIds: List[str]) -> None:
         """
@@ -497,21 +582,19 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression)
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+        )
 
-        # Update the 'isDeleted' field for each result -> TODO: Might there be a better way to do this? Looping over the
-        # vecotrs can be a performance bottleneck and additionally whats the oint if all entries will be deleled shortly after?
-        for result in results:
-            result['isDeleted'] = True
-            # Assuming there's a method to update the document in the client
-            self.client.upsert(collection_name=self.collection, data=result)
+        # Batch-update instead of one-at-a-time to avoid performance bottleneck
+        self._batchUpsertResults(results, isDeleted=True)
         return
 
     def markActive(self, objectIds: List[str]) -> None:
@@ -529,21 +612,19 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression)
+        results = self.client.query(
+            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+        )
 
-        # Update the 'isDeleted' field for each result -> TODO: Might there be a better way to do this? Looping over the
-        # vecotrs can be a performance bottleneck and additionally whats the oint if all entries will be deleled shortly after?
-        for result in results:
-            result['isDeleted'] = False
-            # Assuming there's a method to update the document in the client
-            self.client.upsert(collection_name=self.collection, data=result)
+        # Batch-update instead of one-at-a-time to avoid performance bottleneck
+        self._batchUpsertResults(results, isDeleted=False)
         return
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
@@ -566,9 +647,11 @@ class Store(DocumentStoreBase):
         offset = 0
         while True:
             # Build filter for getting a set of chunks within the offset range
-            must_condition = f"(meta['objectId'] == '{objectId}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
+            must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
-            results = self.client.query(collection_name=self.collection, filter=must_condition)
+            results = self.client.query(
+                collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content']
+            )
 
             # Create a renderChunkSize array with empty
             # entries. This will allow us to join even when

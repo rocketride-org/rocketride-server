@@ -40,4 +40,6 @@ export interface IIconProps {
 	style?: React.CSSProperties;
 	width?: number | string;
 	opacity?: number;
+	/** Shorthand for setting both width and height. */
+	size?: number | string;
 }

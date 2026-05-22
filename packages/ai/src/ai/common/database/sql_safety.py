@@ -34,52 +34,47 @@ import re
 
 
 def is_sql_safe(sql: str) -> bool:
-    """Return False if the SQL contains potentially unsafe command statements.
+    """Return False if the SQL is not a read-only query.
 
-    Allows safe usage of keywords in identifiers or strings.
+    Uses a whitelist approach: only SELECT statements (optionally prefixed by
+    EXPLAIN) are allowed. Everything else is rejected. This is safer than a
+    blacklist because new or uncommon SQL commands (SET, COPY, PREPARE /
+    EXECUTE, DO, HANDLER, etc.) are blocked by default.
+
+    Empty / whitespace-only input passes vacuously (no statements means no
+    statement to reject). Callers that want to forbid empty SQL must guard
+    that at a higher layer.
+
+    WITH (CTE) is deliberately NOT in the allowlist. PostgreSQL accepts
+    CTE-into-mutation — e.g. ``WITH x AS (...) DELETE FROM t WHERE id IN
+    (SELECT id FROM x)`` — so a naive `select|with` allowlist would let
+    write operations through. If WITH support is needed later it must be
+    matched with a stricter pattern that guarantees the trailing data
+    operation is a SELECT, not a DELETE / INSERT / UPDATE.
     """
     # Strip comments first so embedded keywords in comments don't fool the
     # patterns, and so comment-based bypasses (e.g. /*!DROP*/) are neutralised.
     sql = re.sub(r'--.*?$', '', sql, flags=re.MULTILINE)  # Remove single-line comments
     sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)  # Remove block comments
-    sql_lower = sql.lower()
 
     # Split on semicolons to check each individual statement separately.
     # A single input may contain multiple statements chained with ';'.
-    statements = re.split(r';\s*', sql_lower.strip())
+    statements = [s.strip() for s in re.split(r';\s*', sql.strip()) if s.strip()]
 
-    # These patterns are anchored to the start of each statement (^) so that
-    # keywords appearing as column names, aliases, or inside WHERE clauses are
-    # not mistakenly flagged (e.g. "WHERE delete_flag = 1" is safe).
-    forbidden_patterns = [
-        r'^\s*(delete\s+from)',
-        r'^\s*(insert\s+into)',
-        r'^\s*update\s+\w+',
-        r'^\s*drop\s+table',
-        r'^\s*drop\s+database',
-        r'^\s*alter\s+table',
-        r'^\s*truncate\s+table',
-        r'^\s*create\s+(table|database)',
-        r'^\s*replace\s+into',
-        r'^\s*merge\s+into',
-        r'^\s*(exec|execute)\b',
-        r'^\s*grant\b',
-        r'^\s*revoke\b',
-        r'^\s*use\s+\w+',
-        r'^\s*call\s+\w+',
-        r'^\s*load\s+data',
-    ]
+    # Only SELECT is allowed. EXPLAIN is permitted as a prefix.
+    # WITH (CTE) is intentionally excluded — see docstring.
+    allowed_pattern = re.compile(r'^\s*(explain\s+)?(select)\b', re.IGNORECASE)
 
     for stmt in statements:
-        for pattern in forbidden_patterns:
-            if re.match(pattern, stmt):
-                return False
+        # Every statement must start with an allowed keyword.
+        if not allowed_pattern.match(stmt):
+            return False
+
+        stmt_lower = stmt.lower()
 
         # SELECT ... INTO OUTFILE / INTO DUMPFILE can write arbitrary files on
         # the database server — block it even though it starts with SELECT.
-        # This requires a non-anchored search across the whole statement because
-        # the INTO clause appears after the column list, not at the start.
-        if re.search(r'\bselect\b.*\binto\s+(outfile|dumpfile)\b', stmt, re.DOTALL):
+        if re.search(r'\bselect\b.*\binto\s+(outfile|dumpfile)\b', stmt_lower, re.DOTALL):
             return False
 
     return True

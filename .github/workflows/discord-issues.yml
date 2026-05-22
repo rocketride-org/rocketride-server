@@ -1,0 +1,154 @@
+name: Discord Issue Notification
+
+on:
+  issues:
+    types: [opened, closed, reopened, labeled, unlabeled, assigned, unassigned]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: discord-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout helper script
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            .github/workflows/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Build embed, post or patch Discord
+        run: |
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_ISSUES_WEBHOOK_URL secret is not set — skipping"
+            exit 0
+          fi
+
+          # ── Source the shared discord_curl helper (retry/backoff + status sink) ──
+          # shellcheck source=scripts/discord-helper.sh
+          source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
+
+          NUMBER="${{ github.event.issue.number }}"
+
+          # ── Fetch current issue state (always fresh, not from stale event payload) ──
+          if ! ISSUE=$(gh api "/repos/$REPO/issues/$NUMBER") || [ -z "$ISSUE" ]; then
+            echo "Failed to fetch issue #$NUMBER — skipping"
+            exit 0
+          fi
+
+          TITLE=$(echo    "$ISSUE" | jq -r '.title')
+          URL=$(echo      "$ISSUE" | jq -r '.html_url')
+          AUTHOR=$(echo   "$ISSUE" | jq -r '.user.login')
+          AVATAR=$(echo   "$ISSUE" | jq -r '.user.avatar_url')
+          STATE=$(echo    "$ISSUE" | jq -r '.state')
+          REASON=$(echo   "$ISSUE" | jq -r '.state_reason // empty')
+
+          LABELS=$(echo    "$ISSUE" | jq -r '[.labels[].name]       | if length==0 then "None"       else join(", ") end')
+          ASSIGNEES=$(echo "$ISSUE" | jq -r '[.assignees[].login]   | if length==0 then "Unassigned" else join(", ") end')
+          MILESTONE=$(echo "$ISSUE" | jq -r '.milestone.title // "None"')
+
+          # ── Status + color ───────────────────────────────────────────────
+          if [ "$STATE" = "open" ]; then
+            COLOR=3066993;  STATUS="🟢 Open"
+          elif [ "$REASON" = "not_planned" ]; then
+            COLOR=9807270;  STATUS="⚫ Closed (not planned)"
+          else
+            COLOR=15158332; STATUS="🔴 Closed"
+          fi
+
+          # ── Build payload ────────────────────────────────────────────────
+          PAYLOAD=$(jq -n \
+            --arg  title     "#$NUMBER $TITLE" \
+            --arg  url       "$URL" \
+            --arg  author    "$AUTHOR" \
+            --arg  avatar    "$AVATAR" \
+            --arg  repo      "$REPO" \
+            --arg  status    "$STATUS" \
+            --arg  labels    "$LABELS" \
+            --arg  assignees "$ASSIGNEES" \
+            --arg  milestone "$MILESTONE" \
+            --argjson color  "$COLOR" \
+            '{embeds: [{
+              title: $title, url: $url, color: $color,
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Status",    value: $status,    inline: true},
+                {name: "Labels",    value: $labels,    inline: true},
+                {name: "Assignees", value: $assignees, inline: true},
+                {name: "Milestone", value: $milestone, inline: true},
+                {name: "Repo",      value: $repo,      inline: true}
+              ]
+            }]}')
+
+          # ── Look up stored message ID ────────────────────────────────────
+          COMMENTS=$(gh api "/repos/$REPO/issues/$NUMBER/comments" \
+            --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
+
+          DISCORD_MSG_ID=$(echo "$COMMENTS" | \
+            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .body' | \
+            grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
+
+          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
+          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+
+          # ── Post or patch ────────────────────────────────────────────────
+          if [ -n "$DISCORD_MSG_ID" ]; then
+            PATCH_BODY=$(discord_curl -X PATCH \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID") || true
+            PATCH_STATUS=$(cat "$DISCORD_STATUS_FILE")
+            echo "PATCH status: $PATCH_STATUS"
+
+            if [ "$PATCH_STATUS" = "404" ]; then
+              STALE_COMMENT_ID=$(echo "$COMMENTS" | \
+                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
+              gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
+              DISCORD_MSG_ID=""
+            elif [ "$PATCH_STATUS" != "200" ]; then
+              echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$DISCORD_MSG_ID" ]; then
+            if ! RESPONSE=$(discord_curl \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${DISCORD_WEBHOOK_URL}?wait=true"); then
+              echo "::error::Discord POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
+              exit 1
+            fi
+            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+            # ── Race guard: re-check for a comment created by a concurrent run ──
+            EXISTING=$(gh api "/repos/$REPO/issues/$NUMBER/comments" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))] | first // empty' 2>/dev/null)
+
+            if [ -n "$EXISTING" ]; then
+              # Another run won the race — delete our duplicate message, use theirs
+              discord_curl -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" > /dev/null || true
+              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              # Patch the existing message with our payload
+              discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null || true
+            else
+              DISCORD_MSG_ID="$NEW_MSG_ID"
+              gh api "/repos/$REPO/issues/$NUMBER/comments" \
+                -X POST \
+                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            fi
+          fi

@@ -1,8 +1,34 @@
-"""
-Base Model Client: Shared WebSocket/DAP client for model proxies.
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-This module provides the base functionality for communicating with the
-model server over WebSocket using DAP protocol.
+"""
+Base Model Client: Shared client for model server proxies.
+
+ModelClient subclasses RocketRideClient with ws_path='/models' so it
+connects to the model server endpoint.  All URI normalisation, protocol
+selection (ws vs wss), auth, and reconnection are handled by the SDK.
+
+get_model_server_address() reads --modelserver=<addr> from sys.argv and
+returns the raw string — no parsing or URL construction.
 """
 
 import hashlib
@@ -12,8 +38,13 @@ import asyncio
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from ai.common.dap import DAPClient, TransportWebSocket
+from rocketride import RocketRideClient
 from ai import node as ai_node
+
+
+# =============================================================================
+# BASE LOADER
+# =============================================================================
 
 
 class BaseLoader:
@@ -57,7 +88,7 @@ class BaseLoader:
         the actual ML libraries.
         """
         if cls._REQUIREMENTS_FILE and not cls._dependencies_loaded:
-            import ai.common.torch
+            import ai.common.torch  # noqa: F401
             from depends import depends
 
             depends(cls._REQUIREMENTS_FILE)
@@ -158,76 +189,64 @@ class BaseLoader:
         raise NotImplementedError('Subclasses must implement postprocess()')
 
 
-def get_model_server_address() -> Optional[tuple]:
+# =============================================================================
+# MODEL SERVER ADDRESS
+# =============================================================================
+
+
+def get_model_server_address() -> Optional[str]:
     """
     Extract --modelserver=<address> from command line arguments.
 
-    Accepts:
-        --modelserver=5590          -> ('localhost', 5590)
-        --modelserver=localhost:5590 -> ('localhost', 5590)
-        --modelserver=192.168.1.1:5590 -> ('192.168.1.1', 5590)
+    Returns the raw address string exactly as provided — no parsing,
+    no protocol prefixing.  The RocketRide client SDK handles URI
+    normalisation (ws vs wss, default ports, etc.).
+
+    Accepts any format the client SDK understands:
+        --modelserver=5590
+        --modelserver=localhost:5590
+        --modelserver=model.rocketride.dev:443
+        --modelserver=wss://model.rocketride.dev:443
 
     Returns:
-        (host, port) tuple if found, None otherwise
+        Address string if --modelserver is set, None otherwise.
     """
     for arg in sys.argv:
         if arg.startswith('--modelserver='):
-            try:
-                value = arg.split('=')[1]
-                if ':' in value:
-                    # Full address: host:port
-                    host, port_str = value.rsplit(':', 1)
-                    return (host, int(port_str))
-                else:
-                    # Just port number
-                    return ('localhost', int(value))
-            except (IndexError, ValueError):
-                return None
+            value = arg.split('=', 1)[1]
+            return value if value else None
     return None
 
 
-def get_model_server_port() -> Optional[int]:
+# =============================================================================
+# MODEL CLIENT
+# =============================================================================
+
+
+class ModelClient(RocketRideClient):
     """
-    Legacy function - returns just the port number.
+    Client for communicating with the model server.
 
-    Returns:
-        Port number if --modelserver is set, None otherwise
-    """
-    addr = get_model_server_address()
-    return addr[1] if addr else None
+    Subclasses RocketRideClient with ws_path='/models' so all URI
+    normalisation, protocol selection, auth, and transport management
+    are inherited from the SDK.
 
-
-class ModelClient:
-    """
-    Simple DAP client for communicating with model server.
-
-    This class provides a shared connection that multiple threads can use
-    concurrently. DAP supports concurrent commands over a single connection.
-
-    Attributes:
-        port (int): Model server port
-        url (str): WebSocket URL for model server
-        client (DAPClient): DAP client for communication
-        model_id (Optional[str]): Server-assigned model ID
-        metadata (Dict): Model metadata from server
-        _model_name (Optional[str]): Model name to load
-        _model_type (Optional[str]): Model type
-        _model_kwargs (Dict): Model loading arguments
-        _connect_lock (asyncio.Lock): Lock for thread-safe connection
+    Adds model-specific functionality:
+    - load_model / unload via rrext_ms_load_model / rrext_ms_unload_model
+    - send_command with auto-reconnect and model reload on transport errors
+    - Metrics recording from server-reported perf counters
     """
 
-    def __init__(self, port: int, host: str = 'localhost'):
+    def __init__(self, address: str):
         """
         Initialize the model client.
 
         Args:
-            port: Model server port number
-            host: Model server host (default: localhost)
+            address: Model server address in any format the client SDK
+                     understands (e.g. "5590", "localhost:5590",
+                     "model.rocketride.dev:443", "wss://host:443").
         """
-        self.port = port
-        self.host = host
-        self.url = f'ws://{host}:{port}/models'
-        self.client: Optional[DAPClient] = None
+        super().__init__(uri=address, module='MODEL_CLIENT', ws_path='/models')
         self.model_id: Optional[str] = None
         self.metadata: Dict = {}
         self._model_name: Optional[str] = None
@@ -251,7 +270,7 @@ class ModelClient:
 
         Args:
             model_name: Model name/path
-            model_type: Model type ('sentence_transformer', 'transformers', 'whisper')
+            model_type: Model type ('sentence_transformer', 'transformers', 'whisper', 'kokoro')
             loader_options: Options passed to the loader (identity + HF params)
 
         Raises:
@@ -278,7 +297,7 @@ class ModelClient:
         async with self._connect_lock:
             # Double-check if already connected (prevents multiple
             # threads from reconnecting simultaneously)
-            if self.client and self.client._transport.is_connected():
+            if self.is_connected():
                 return
 
             # Retry parameters
@@ -290,25 +309,20 @@ class ModelClient:
 
             while True:
                 try:
-                    # Clean up old connection if any (reconnection scenario)
-                    if self.client:
+                    # Disconnect old connection if any (reconnection scenario)
+                    if self.is_connected():
                         print('[MODEL_CLIENT] Disconnecting old client')
                         try:
-                            await self.client.disconnect()
+                            await super().disconnect()
                         except Exception:
                             pass  # Ignore errors during cleanup
-                    else:
-                        # Create a new client connection
-                        print(f'[MODEL_CLIENT] Creating new client for {self.url}')
-                        transport = TransportWebSocket(self.url)
-                        self.client = DAPClient(module='MODEL_CLIENT', transport=transport)
 
                     # Clear model ID before reconnection
                     self.model_id = None
 
-                    # Connect (or reconnect) to server
-                    print(f'[MODEL_CLIENT] Connecting to {self.url} (attempt {attempt + 1})')
-                    await self.client.connect()
+                    # Connect to server using RocketRideClient.connect()
+                    print(f'[MODEL_CLIENT] Connecting to {self._uri} (attempt {attempt + 1})')
+                    await super().connect()
                     print('[MODEL_CLIENT] Connected successfully')
 
                     # Load model on server (if model info is stored)
@@ -324,8 +338,7 @@ class ModelClient:
                         if self._loader_options:
                             arguments['loader_options'] = self._loader_options
 
-                        request = self.client.build_request('load_model', arguments=arguments)
-                        result = await self.client.request(request)
+                        result = await super().request(self.build_request('rrext_ms_load_model', arguments=arguments))
 
                         # Check for errors in response
                         if not result.get('success', True):
@@ -366,39 +379,40 @@ class ModelClient:
 
                     await asyncio.sleep(delay)
 
-    def disconnect(self) -> None:
-        """Disconnect from model server."""
-        # Run async disconnect on global event loop
-        future = asyncio.run_coroutine_threadsafe(self._disconnect_async(), ai_node.server_loop)
-        future.result()  # Block until complete
-
     async def _disconnect_async(self) -> None:
-        """Disconnect from server asynchronously (internal use only)."""
+        """Disconnect from server, unloading the model first."""
         async with self._connect_lock:
-            # If we have a connection and loaded model
-            if self.client and self.model_id:
+            if self.is_connected() and self.model_id:
                 # Unload model from server first
-                if self.model_id:
-                    try:
-                        request = self.client.build_request('unload_model', arguments={'model_id': self.model_id})
-                        await self.client.request(request)
-                    except Exception:
-                        pass  # Ignore errors during cleanup
+                try:
+                    await super().request(
+                        self.build_request('rrext_ms_unload_model', arguments={'model_id': self.model_id})
+                    )
+                except Exception:
+                    pass  # Ignore errors during cleanup
 
-                    # Reset model
-                    self.model_id = None
+                self.model_id = None
 
-                # Close WebSocket connection
-                await self.client.disconnect()
+            await super().disconnect()
 
-                # Release the client - we will get a new one if we connect again
-                self.client = None
+    def disconnect(self) -> None:
+        """Disconnect from model server (synchronous).
+
+        Overrides the async RocketRideClient.disconnect() because ModelClient
+        callers (model wrappers, tests, OCR cleanup) call disconnect()
+        synchronously from worker threads.
+        """
+        future = asyncio.run_coroutine_threadsafe(self._disconnect_async(), ai_node.server_loop)
+        future.result()
 
     def send_command(self, command: str, arguments: Dict[str, Any], retry_on_error: bool = True) -> Any:
         """
         Send a DAP command to the model server with automatic reconnection.
 
         Used for inference and other commands (not model loading).
+        If the response contains a ``perf`` dict (server-reported timing
+        breakdown), it is automatically recorded into the metrics singleton
+        via ``metrics.add_time()``.
 
         Args:
             command: Command name
@@ -412,50 +426,61 @@ class ModelClient:
             Exception: If command fails and retry_on_error is False, or if retry fails
         """
         # Run async command on global event loop
-        future = asyncio.run_coroutine_threadsafe(self._send_command_async(command, arguments, retry_on_error), ai_node.server_loop)
-        return future.result()  # Block until complete
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_command_async(command, arguments, retry_on_error), ai_node.server_loop
+        )
+        body = future.result()  # Block until complete
+
+        # Record server-reported perf counters (preprocess, gpu, postprocess,
+        # queue_wait, latency) into the metrics singleton — one call covers
+        # all model wrappers that go through ModelClient
+        perf = body.get('perf') if isinstance(body, dict) else None
+        if perf:
+            from ai.web.metrics import metrics
+
+            metrics.add_time(perf)
+
+        return body
 
     async def _send_command_async(self, command: str, arguments: Dict[str, Any], retry_on_error: bool) -> Any:
-        """Send command asynchronously with retry logic (internal use only)."""
+        """
+        Send command asynchronously with retry logic (internal use only).
+
+        Distinguishes between transport errors (connection dropped, WebSocket
+        failure) and server-reported errors (valid response with success=false).
+        Only transport errors trigger reconnection and retry — server errors
+        propagate immediately since retrying the same request won't help.
+        """
         try:
-            # Always inject the current model_id into arguments
-            # The ModelClient owns the model_id, callers shouldn't need to specify it
-            # Use spread operator to create new dict without modifying caller's dict
-            request = self.client.build_request(command, arguments={**arguments, 'model_id': self.model_id})
-            response = await self.client.request(request)
-
-            # Check if command was successful
-            if not response.get('success', True):  # Default to True if 'success' field missing
-                error_msg = response.get('message', 'Unknown error')
-                raise RuntimeError(f'Command failed: {error_msg}')
-
-            return response.get('body', {})
+            # Send the DAP request over WebSocket.  Transport-level failures
+            # (connection dropped, WebSocket error) raise here and are caught
+            # by the except below for retry.
+            response = await super().request(
+                self.build_request(command, arguments={**arguments, 'model_id': self.model_id})
+            )
         except BaseException as e:
-            # Catch all exceptions including CancelledError (which inherits from BaseException, not Exception)
-            print(f'[MODEL_CLIENT] Command "{command}" failed: {e}')
+            # Transport-level failure — reconnect and retry once if allowed
+            print(f'[MODEL_CLIENT] Transport error for "{command}": {e}')
 
-            # Check if we should attempt reconnection
             if not retry_on_error:
                 raise
 
-            # Trigger reconnection
+            # Reconnect to the model server and reload the model
             await self._connect_and_load()
 
             # Retry the command once after successful reconnection
             print(f'[MODEL_CLIENT] Retrying command "{command}" with model_id={self.model_id}')
-
-            # Inject the current model_id (will be the new one after reconnection)
-            # Use spread operator to create new dict without modifying caller's dict
             try:
-                request = self.client.build_request(command, arguments={**arguments, 'model_id': self.model_id})
-                response = await self.client.request(request)
-
-                # Check if command was successful
-                if not response.get('success', True):
-                    error_msg = response.get('message', 'Unknown error')
-                    raise RuntimeError(f'Command failed: {error_msg}')
-
-                return response.get('body', {})
+                response = await super().request(
+                    self.build_request(command, arguments={**arguments, 'model_id': self.model_id})
+                )
             except BaseException as retry_error:
-                print(f'[MODEL_CLIENT] Command retry after reconnection failed: {retry_error}')
+                print(f'[MODEL_CLIENT] Retry failed for "{command}": {retry_error}')
                 raise
+
+        # Check if the server returned an error in the response.
+        if not response.get('success', True):
+            error_msg = response.get('message', 'Unknown error')
+            raise RuntimeError(f'Command failed: {error_msg}')
+
+        return response.get('body', {})
