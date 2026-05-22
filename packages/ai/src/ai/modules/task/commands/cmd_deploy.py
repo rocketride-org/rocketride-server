@@ -116,7 +116,8 @@ class DeployCommands(DAPConn):
             updated_at=time.time(),
         )
         await self._server.deployments.save(self._account_info.userId, record, mode='create')
-        self._server.scheduler.schedule(self._account_info.userId, record)
+        # todo: feat/deploy2 - enable TaskScheduler
+        # self._server.scheduler.schedule(self._account_info.userId, record)
         return self.build_response(request, body=record.model_dump())
 
     # ── rrext_deploy_remove ──────────────────────────────────────────────────
@@ -131,7 +132,8 @@ class DeployCommands(DAPConn):
             raise ValueError('projectId is required')
 
         await self._server.deployments.delete(self._account_info.userId, project_id)
-        self._server.scheduler.unschedule(project_id)
+        # todo: feat/deploy2 - enable TaskScheduler
+        # self._server.scheduler.unschedule(project_id)
         return self.build_response(request, body={})
 
     # ── rrext_deploy_list ────────────────────────────────────────────────────
@@ -188,5 +190,6 @@ class DeployCommands(DAPConn):
 
         record.updated_at = time.time()
         await self._server.deployments.save(client_id, record)
-        self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
+        # todo: feat/deploy2 - enable TaskScheduler
+        # self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
         return self.build_response(request, body={})

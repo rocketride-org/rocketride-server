@@ -172,6 +172,7 @@ class TaskScheduler:
                 'command': 'execute',
                 'arguments': {'pipeline': record.pipeline},
             }
+            # todo: feat/deploy2 - build conn and verify permissions
             result = await self._server.start_task(
                 request,
                 conn=None,
