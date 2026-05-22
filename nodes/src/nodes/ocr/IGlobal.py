@@ -40,7 +40,16 @@ from PIL import Image
 # img2table internally imports cv2, so this must come first
 from ai.common.opencv import cv2  # noqa: F401 - ensures correct opencv
 
-from img2table.ocr.base import OCRInstance
+# img2table 2.0 (2026-05-10) rewrote its OCR plug-in API and moved the base
+# class. Detect which version is installed so this adapter works against both.
+try:
+    from img2table.ocr._types import OCRInstance  # img2table >= 2.0
+
+    _IMG2TABLE_V2 = True
+except ImportError:
+    from img2table.ocr.base import OCRInstance  # img2table < 2.0
+
+    _IMG2TABLE_V2 = False
 
 
 class ModelServerOCR(OCRInstance):
@@ -135,6 +144,105 @@ class ModelServerOCR(OCRInstance):
             _diag(f'[DIAG] Traceback: {traceback.format_exc()}')
 
         return all_results
+
+    def of(self, document) -> Any:
+        """
+        Entry point called by img2table to run OCR on a document.
+
+        img2table v2 removed the two-step content/to_ocr_dataframe contract and
+        expects subclasses to override `of` directly, returning an `OCRData`.
+        For v1, the base class's `of` already orchestrates `content` +
+        `to_ocr_dataframe`, so we just defer to it.
+
+        Args:
+            document: img2table ``Document`` (or ``MockDocument``) whose
+                ``.images`` attribute yields one numpy array per page.
+
+        Returns:
+            On img2table v2: an ``OCRData`` instance whose ``records`` dict is
+            keyed by zero-based page index, or ``None`` if no text was found or
+            an exception was caught.
+            On img2table v1: whatever the base class's ``of`` returns —
+            typically an ``OCRDataframe`` built from ``content()`` +
+            ``to_ocr_dataframe()``.
+        """
+        if not _IMG2TABLE_V2:
+            return super().of(document)
+
+        from img2table.ocr._types import OCRData
+
+        records = {}
+        try:
+            for page_idx, image in enumerate(document.images):
+                image_bytes = self._to_bytes(image)
+                result = self.ocr.read(image_bytes)
+                records[page_idx] = self._format_to_v2_records(result, image.shape, page_idx)
+        except Exception as e:
+            import traceback
+
+            debug(f'ModelServerOCR.of() error: {e}\n{traceback.format_exc()}')
+            return None
+
+        return OCRData(records=records) if records else None
+
+    def _format_to_v2_records(self, result: dict, image_shape: tuple, page: int) -> List[dict]:
+        """
+        Convert a model-server OCR result into img2table v2 word-record dicts.
+
+        Args:
+            result: OCR result from the model server, shaped as
+                ``{'text': str, 'boxes': [{'bbox': [x1, y1, x2, y2],
+                'text': str, 'confidence': float}, ...]}``.
+            image_shape: Shape of the source image (``(h, w, ...)``), used as a
+                fallback bounding box when ``result`` carries text but no boxes.
+            page: Zero-based page index used to build per-record ``id``/``parent``.
+
+        Returns:
+            List of word-record dicts with keys ``id``, ``parent``, ``value``,
+            ``confidence`` (0-100 int), ``x1``, ``y1``, ``x2``, ``y2`` — the
+            shape img2table v2 expects in ``OCRData.records[page]``.
+        """
+        records = []
+        text = result.get('text', '')
+        boxes = result.get('boxes', [])
+
+        if boxes and isinstance(boxes, list):
+            for idx, box_info in enumerate(boxes):
+                if not isinstance(box_info, dict):
+                    continue
+                bbox = box_info.get('bbox', box_info.get('box', [0, 0, 10, 10]))
+                box_text = box_info.get('text', '')
+                confidence = box_info.get('confidence', 1.0)
+                x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+                word_id = f'word_{page + 1}_{idx + 1}'
+                records.append(
+                    {
+                        'id': word_id,
+                        'parent': word_id,
+                        'value': box_text,
+                        'confidence': round(100 * confidence),
+                        'x1': int(x1),
+                        'y1': int(y1),
+                        'x2': int(x2),
+                        'y2': int(y2),
+                    }
+                )
+        elif text:
+            h, w = image_shape[:2]
+            word_id = f'word_{page + 1}_1'
+            records.append(
+                {
+                    'id': word_id,
+                    'parent': word_id,
+                    'value': text,
+                    'confidence': 100,
+                    'x1': 0,
+                    'y1': 0,
+                    'x2': int(w),
+                    'y2': int(h),
+                }
+            )
+        return records
 
     def to_ocr_dataframe(self, content: List[List]) -> Any:
         """
