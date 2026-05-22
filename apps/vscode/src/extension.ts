@@ -391,6 +391,9 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 	const agentManager = new AgentManager();
 
 	const commands = [
+		vscode.commands.registerCommand('rocketride.sidebar.documentation.open', () => {
+			vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org/'));
+		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.connect', async () => {
 			await connectionManager?.connect();
 		}),
