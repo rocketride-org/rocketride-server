@@ -319,11 +319,8 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	// ── Announcements ticker (flat mode) ────────────────────────────────────
 	const announcements: { title: string; body: string; linkText: string; linkUrl: string }[] = useMemo(
 		() => [
-			{ title: 'Join us in SF', body: 'Hack-with-the-Bay, Tue June 25–26.', linkText: 'Details & RSVP', linkUrl: 'https://rocketride.dev/events/sf-hack' },
-			{ title: 'RocketRide 2.4 is live', body: 'Streaming pipelines, token tracing, new connectors.', linkText: 'See what\'s new', linkUrl: 'https://rocketride.dev/changelog' },
-			{ title: 'NYC Meetup', body: 'AI Pipeline Workshop, Thu July 10.', linkText: 'Register now', linkUrl: 'https://rocketride.dev/events/nyc-workshop' },
-			{ title: 'New RAG template', body: 'Pinecone + OpenAI in 3 nodes — ready to go.', linkText: 'Try it out', linkUrl: 'https://rocketride.dev/templates/rag-pinecone' },
-			{ title: 'Community spotlight', body: '1,200+ pipelines built this month.', linkText: 'Join Discord', linkUrl: 'https://discord.gg/rocketride' },
+			{ title: 'Agentic AI Hackathon - SF', body: 'Hack-with-the-Bay, Fri June 5.', linkText: 'Details & RSVP', linkUrl: 'https://luma.com/zemh10km' },
+			{ title: 'Connect with us', body: 'See what others are building.', linkText: 'Join Discord', linkUrl: 'https://discord.gg/9hr3tdZmEG' },
 		],
 		[]
 	);
