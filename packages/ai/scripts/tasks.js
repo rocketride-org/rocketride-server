@@ -33,7 +33,7 @@
  */
 const path = require('path');
 const {
-    execCommand, syncDir, formatSyncStats, DIST_ROOT
+    execCommand, runPytest, syncDir, formatSyncStats, DIST_ROOT
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -81,20 +81,22 @@ function makeRunPytestAction(options = {}) {
             // --cov to the absolute source directory bypasses the import-time
             // package resolution and tracks the directory we actually run.
             const HTMLCOV_DIR = path.join(SERVER_DIR, 'htmlcov', 'ai');
-            const pytestArgs = [
-                '-m', 'pytest', TESTS_DIR, '-v', '--rootdir', PACKAGE_DIR,
+            const extraArgs = [
+                '-v', '--rootdir', PACKAGE_DIR,
                 // Coverage flags
                 '--cov', SRC_DIR,
                 '--cov-report=term-missing',
                 `--cov-report=html:${HTMLCOV_DIR}`,
             ];
             if (options.pytest) {
-                pytestArgs.push(...options.pytest);
+                extraArgs.push(...options.pytest);
             }
 
-            await execCommand(ENGINE, pytestArgs, {
-                task,
-                cwd: SERVER_DIR
+            await runPytest({
+                engine: ENGINE,
+                testsDir: TESTS_DIR,
+                extraArgs,
+                execOpts: { task, cwd: SERVER_DIR },
             });
         }
     };
