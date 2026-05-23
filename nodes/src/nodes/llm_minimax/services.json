@@ -150,6 +150,44 @@
 				"modelOutputTokens": 8192,
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
+			},
+			// Local-deploy profiles. Defaults target vLLM / SGLang on port 8000 with the
+			// HuggingFace model path (MiniMaxAI/MiniMax-M2.X) — that's the path MiniMax
+			// itself documents at platform.minimax.io/docs/guides/local-deploy.
+			//
+			// MiniMax open-weight models are MIT-licensed but very large (M2 = 230B MoE /
+			// 10B active; M2.5 / M2.7 likewise) and need ≥96 GB unified memory or a
+			// multi-GPU server. M2.7 is the only variant whose local-deploy steps are
+			// formally documented today; M2 / M2.5 entries here are scaffolded against
+			// the same HF naming so they work as soon as their guides land.
+			//
+			// To use Ollama instead: edit serverbase to http://localhost:11434/v1 and set
+			// `model` to the Ollama tag you pulled. To use MLX on Apple Silicon: set
+			// serverbase to http://localhost:8080/v1 and model to e.g.
+			// mlx-community/MiniMax-M2.7-4bit.
+			"minimax-m2-local": {
+				"title": "MiniMax M2 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-5-local": {
+				"title": "MiniMax M2.5 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.5",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-7-local": {
+				"title": "MiniMax M2.7 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.7",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
 			}
 		}
 	},
@@ -208,6 +246,18 @@
 			"object": "minimax-m2-7-highspeed",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
+		"minimax.minimax-m2-local": {
+			"object": "minimax-m2-local",
+			"properties": ["llm.local.serverbase"]
+		},
+		"minimax.minimax-m2-5-local": {
+			"object": "minimax-m2-5-local",
+			"properties": ["llm.local.serverbase"]
+		},
+		"minimax.minimax-m2-7-local": {
+			"object": "minimax-m2-7-local",
+			"properties": ["llm.local.serverbase"]
+		},
 		"minimax.profile": {
 			"title": "Model",
 			"description": "MiniMax LLM model",
@@ -246,6 +296,18 @@
 				{
 					"value": "minimax-m2-7-highspeed",
 					"properties": ["minimax.minimax-m2-7-highspeed"]
+				},
+				{
+					"value": "minimax-m2-local",
+					"properties": ["minimax.minimax-m2-local"]
+				},
+				{
+					"value": "minimax-m2-5-local",
+					"properties": ["minimax.minimax-m2-5-local"]
+				},
+				{
+					"value": "minimax-m2-7-local",
+					"properties": ["minimax.minimax-m2-7-local"]
 				}
 			]
 		}

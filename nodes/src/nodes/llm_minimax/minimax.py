@@ -56,10 +56,15 @@ class Chat(ChatBase):
         # accepts the same "no explicit serverbase" config that validateConfig does
         serverbase = config.get('serverbase') or 'https://api.minimax.io/v1'
 
-        # Get the api key
-        apikey = config.get('apikey')
-        if not apikey:
-            raise ValueError('MiniMax API key is required.')
+        # Get the api key, use a dummy key if not provided. Local profiles
+        # (Ollama / vLLM / TGI) intentionally have no apikey property — local
+        # OpenAI-compatible servers accept any token. Mirrors the llm_deepseek pattern.
+        apikey = config.get('apikey') or 'sk-local-dummy-key'
+
+        # API key is only required when calling MiniMax's cloud API. Matches both
+        # api.minimax.io (international) and api.minimaxi.com (China) by substring.
+        if 'api.minimax' in serverbase and apikey == 'sk-local-dummy-key':
+            raise ValueError('MiniMax API key is required for cloud profiles.')
 
         # Get the llm via the OpenAI-compatible client
         self._llm = ChatOpenAI(
