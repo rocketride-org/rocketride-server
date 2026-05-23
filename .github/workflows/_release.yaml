@@ -208,14 +208,24 @@ jobs:
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
         run: |
           npm install -g npm@latest
-          npm --version  # log npm version for OIDC trusted-publisher debugging (needs >= 11.5.1)
+          echo "=== OIDC env diagnostics ==="
+          echo "npm: $(npm --version)"
+          echo "CI=$CI"
+          echo "GITHUB_ACTIONS=$GITHUB_ACTIONS"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL is $([ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && echo SET || echo UNSET)"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is $([ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ] && echo SET || echo UNSET)"
+          echo "NODE_AUTH_TOKEN is $([ -n "$NODE_AUTH_TOKEN" ] && echo SET || echo UNSET)"
+          echo "npm config get registry: $(npm config get registry)"
+          ls -la "$RUNNER_TEMP/.npmrc" 2>/dev/null || echo ".npmrc not in RUNNER_TEMP"
+          ls -la "$HOME/.npmrc" 2>/dev/null || echo ".npmrc not in HOME"
+          echo "=== begin publish ==="
           VERSION="${{ matrix.version }}"
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
           else
             TARBALL=$(find release-assets -name '*.tgz' | head -n1)
             echo "Publishing ${TARBALL}"
-            npm publish "./${TARBALL}" --access public --provenance
+            npm publish "./${TARBALL}" --access public --provenance --loglevel verbose
           fi
 
       # --- PyPI ---
