@@ -1,0 +1,56 @@
+{
+  "name": "Live Speech To Text",
+  "description": "Captures microphone audio and streams partial transcripts on the text lane.",
+  "components": [
+    {
+      "id": "live_stt_1",
+      "provider": "audio_transcribe_live",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {
+          "live_stt.profile": "default"
+        },
+        "type": "audio_transcribe_live"
+      },
+      "ui": {
+        "position": {
+          "x": -200,
+          "y": 0
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_text_1",
+      "provider": "response_text",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 80,
+          "y": 0
+        },
+        "measured": {
+          "width": 150,
+          "height": 84
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "live_stt_1"
+        }
+      ]
+    }
+  ],
+  "source": "live_stt_1",
+  "version": 1,
+  "project_id": "1a7ab4c4-39fb-47fb-877d-403c4e79ba23"
+}

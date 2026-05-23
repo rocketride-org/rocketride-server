@@ -1,0 +1,157 @@
+{
+	"title": "Live Transcribe",
+	"protocol": "audio_transcribe_live://",
+	"classType": ["source"],
+	"capabilities": [],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.audio_transcribe_live",
+	"prefix": "Live Transcribe",
+	"description": [
+		"A live speech-to-text source that captures audio from the system microphone ",
+		"and streams partial transcripts on the text lane. Uses local Whisper for ",
+		"low-latency, chainable transcription while the pipeline is running."
+	],
+	"icon": "audio-transcribe.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.live_stt.model}", "Interval: ${parameters.live_stt.chunk_interval}s"],
+	"lanes": {
+		"_source": ["text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model": "base",
+				"language": "en",
+				"chunk_interval": 1.5,
+				"window_seconds": 4,
+				"silence_reset_seconds": 1.0,
+				"device": -1,
+				"vad_threshold": 0.35,
+				"vad_min_silence_duration_ms": 300,
+				"vad_max_speech_duration_s": 8
+			},
+			"tiny": {
+				"model": "tiny",
+				"language": "en",
+				"chunk_interval": 1.0,
+				"window_seconds": 3,
+				"silence_reset_seconds": 1.0,
+				"device": -1,
+				"vad_threshold": 0.35,
+				"vad_min_silence_duration_ms": 300,
+				"vad_max_speech_duration_s": 8
+			},
+			"small": {
+				"model": "small",
+				"language": "en",
+				"chunk_interval": 2.0,
+				"window_seconds": 5,
+				"silence_reset_seconds": 1.0,
+				"device": -1,
+				"vad_threshold": 0.35,
+				"vad_min_silence_duration_ms": 300,
+				"vad_max_speech_duration_s": 8
+			}
+		}
+	},
+	"fields": {
+		"live_stt.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Whisper model size used for live transcription",
+			"enum": [
+				["tiny", "Tiny — fastest, lowest accuracy"],
+				["base", "Base — balanced speed and accuracy"],
+				["small", "Small — slower, higher accuracy"],
+				["medium", "Medium — slow, high accuracy"],
+				["large-v3", "Large v3 — slowest, highest accuracy"]
+			],
+			"default": "base"
+		},
+		"live_stt.language": {
+			"type": "string",
+			"title": "Language",
+			"description": "Spoken language code (ISO 639-1)",
+			"default": "en"
+		},
+		"live_stt.chunk_interval": {
+			"type": "number",
+			"title": "Update Interval (seconds)",
+			"description": "How often to run partial transcription while speaking",
+			"default": 1.5,
+			"minimum": 0.5,
+			"maximum": 5
+		},
+		"live_stt.window_seconds": {
+			"type": "number",
+			"title": "Audio Window (seconds)",
+			"description": "Rolling audio context sent to Whisper on each update",
+			"default": 4,
+			"minimum": 1,
+			"maximum": 15
+		},
+		"live_stt.silence_reset_seconds": {
+			"type": "number",
+			"title": "Silence Reset (seconds)",
+			"description": "Pause duration that starts a new transcript line",
+			"default": 1.0,
+			"minimum": 0.5,
+			"maximum": 5
+		},
+		"live_stt.device": {
+			"type": "number",
+			"title": "Input Device",
+			"description": "Sounddevice input index (-1 for system default microphone)",
+			"default": -1
+		},
+		"live_stt.default": {
+			"object": "default",
+			"properties": [
+				"live_stt.model",
+				"live_stt.language",
+				"live_stt.chunk_interval",
+				"live_stt.window_seconds",
+				"live_stt.silence_reset_seconds",
+				"live_stt.device"
+			]
+		},
+		"live_stt.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				["default", "Default"],
+				["tiny", "Tiny — fastest"],
+				["small", "Small — higher accuracy"]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["live_stt.default"]
+				},
+				{
+					"value": "tiny",
+					"properties": ["live_stt.model", "live_stt.language", "live_stt.chunk_interval", "live_stt.window_seconds", "live_stt.silence_reset_seconds", "live_stt.device"]
+				},
+				{
+					"value": "small",
+					"properties": ["live_stt.model", "live_stt.language", "live_stt.chunk_interval", "live_stt.window_seconds", "live_stt.silence_reset_seconds", "live_stt.device"]
+				}
+			]
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"title": "Live Transcription",
+			"properties": ["live_stt.profile"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Live Transcribe",
+			"properties": ["hideForm", "type", "source.mode", "Pipe.source.parameters"]
+		}
+	]
+}

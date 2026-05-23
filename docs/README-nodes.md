@@ -65,6 +65,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `anonymize`        | PII redaction            |                                            |
 | `summarization`    | Text summarization       |                                            |
 | `audio_transcribe` | Audio to text (Whisper)  |                                            |
+| `audio_transcribe_live` | Live microphone STT (local Whisper) |                     |
 
 ## Media
 
@@ -74,6 +75,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `image_cleanup` | Image preprocessing    |
 | `thumbnail`     | Thumbnail generation   |
 | `audio_player`  | Audio playback         |
+| `audio_transcribe_live` | Live microphone speech-to-text |
 
 ## Storage and Connectivity
 
