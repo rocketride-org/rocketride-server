@@ -24,6 +24,7 @@ import io
 import logging
 import os
 import time
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
@@ -155,42 +156,48 @@ class DocTRLoader(BaseLoader):
         images = preprocessed['images']
         results = []
 
-        for img_np in images:
-            try:
-                doc = predictor([img_np])
-                boxes = []
-                text_lines = []
-                line_idx = 0
+        # Run on the acquired CUDA stream to avoid default-stream serialization
+        from ai.common.torch import torch
 
-                for page in doc.pages:
-                    h, w = page.dimensions
-                    for block in page.blocks:
-                        for line in block.lines:
-                            line_words = []
-                            for word in line.words:
-                                x1, y1 = word.geometry[0]
-                                x2, y2 = word.geometry[1]
-                                boxes.append(
-                                    {
-                                        'text': word.value,
-                                        'bbox': [x1 * w, y1 * h, x2 * w, y2 * h],
-                                        'confidence': word.confidence,
-                                        'line': line_idx,
-                                    }
-                                )
-                                line_words.append(word.value)
-                            # Join words in this line
-                            if line_words:
-                                text_lines.append(' '.join(line_words))
-                                line_idx += 1
+        stream_ctx = torch.cuda.stream(stream) if stream is not None else nullcontext()
 
-                # Join lines with newlines
-                full_text = '\n'.join(text_lines)
-                results.append({'text': full_text, 'boxes': boxes})
+        with stream_ctx:
+            for img_np in images:
+                try:
+                    doc = predictor([img_np])
+                    boxes = []
+                    text_lines = []
+                    line_idx = 0
 
-            except Exception as e:
-                logger.error(f'docTR inference failed: {e}')
-                results.append({'text': '', 'boxes': [], 'error': str(e)})
+                    for page in doc.pages:
+                        h, w = page.dimensions
+                        for block in page.blocks:
+                            for line in block.lines:
+                                line_words = []
+                                for word in line.words:
+                                    x1, y1 = word.geometry[0]
+                                    x2, y2 = word.geometry[1]
+                                    boxes.append(
+                                        {
+                                            'text': word.value,
+                                            'bbox': [x1 * w, y1 * h, x2 * w, y2 * h],
+                                            'confidence': word.confidence,
+                                            'line': line_idx,
+                                        }
+                                    )
+                                    line_words.append(word.value)
+                                # Join words in this line
+                                if line_words:
+                                    text_lines.append(' '.join(line_words))
+                                    line_idx += 1
+
+                    # Join lines with newlines
+                    full_text = '\n'.join(text_lines)
+                    results.append({'text': full_text, 'boxes': boxes})
+
+                except Exception as e:
+                    logger.error(f'docTR inference failed: {e}')
+                    results.append({'text': '', 'boxes': [], 'error': str(e)})
 
         return results
 

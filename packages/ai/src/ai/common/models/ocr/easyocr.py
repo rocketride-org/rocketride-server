@@ -33,6 +33,7 @@ import io
 import logging
 import os
 import time
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
@@ -229,41 +230,47 @@ class EasyOCRLoader(BaseLoader):
         images = preprocessed['images']
         dimensions = preprocessed.get('dimensions', [])
 
+        # Run on the acquired CUDA stream to avoid default-stream serialization
+        from ai.common.torch import torch
+
+        stream_ctx = torch.cuda.stream(stream) if stream is not None else nullcontext()
+
         results = []
 
-        for idx, img_np in enumerate(images):
-            try:
-                raw_results = reader.readtext(img_np)
+        with stream_ctx:
+            for idx, img_np in enumerate(images):
+                try:
+                    raw_results = reader.readtext(img_np)
 
-                # Convert EasyOCR format to standard box format
-                boxes = []
-                for bbox, text, conf in raw_results:
-                    # EasyOCR returns [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
-                    # Convert to [x1, y1, x2, y2]
-                    x_coords = [p[0] for p in bbox]
-                    y_coords = [p[1] for p in bbox]
-                    boxes.append(
+                    # Convert EasyOCR format to standard box format
+                    boxes = []
+                    for bbox, text, conf in raw_results:
+                        # EasyOCR returns [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                        # Convert to [x1, y1, x2, y2]
+                        x_coords = [p[0] for p in bbox]
+                        y_coords = [p[1] for p in bbox]
+                        boxes.append(
+                            {
+                                'text': text,
+                                'bbox': [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
+                                'confidence': conf,
+                            }
+                        )
+
+                    # Group words into lines
+                    image_height = dimensions[idx][0] if idx < len(dimensions) else None
+                    grouped_text, grouped_boxes = group_words_into_lines(boxes, image_height)
+
+                    results.append(
                         {
-                            'text': text,
-                            'bbox': [min(x_coords), min(y_coords), max(x_coords), max(y_coords)],
-                            'confidence': conf,
+                            'text': grouped_text,
+                            'boxes': grouped_boxes,
                         }
                     )
 
-                # Group words into lines
-                image_height = dimensions[idx][0] if idx < len(dimensions) else None
-                grouped_text, grouped_boxes = group_words_into_lines(boxes, image_height)
-
-                results.append(
-                    {
-                        'text': grouped_text,
-                        'boxes': grouped_boxes,
-                    }
-                )
-
-            except Exception as e:
-                logger.error(f'EasyOCR inference failed: {e}')
-                results.append({'text': '', 'boxes': [], 'error': str(e)})
+                except Exception as e:
+                    logger.error(f'EasyOCR inference failed: {e}')
+                    results.append({'text': '', 'boxes': [], 'error': str(e)})
 
         return results
 
