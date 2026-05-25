@@ -60,6 +60,7 @@ class EasyOCRLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'easyocr'
+    CLONE_TIER: int = 3  # Non-clonable: multi-model Reader, no single state_dict
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_easyocr.txt')
 
     # Defaults applied before hashing (ensures consistent model IDs)

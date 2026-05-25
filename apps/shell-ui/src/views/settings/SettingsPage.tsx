@@ -330,6 +330,27 @@ const SettingField: React.FC<{
 		);
 	}
 
+	// ── type: number ─────────────────────────────────────────────────────
+	if (def.type === 'number') {
+		return (
+			<div style={styles.settingRow as CSSProperties}>
+				{header}
+				<input
+					type="number"
+					value={value || def.default || ''}
+					onChange={(e) => onChange(def.key, e.target.value)}
+					placeholder={def.default || '0'}
+					style={{
+						...commonStyles.inputField,
+						maxWidth: 120,
+						textAlign: 'right',
+						fontFamily: 'var(--rr-font-mono, monospace)',
+					} as CSSProperties}
+				/>
+			</div>
+		);
+	}
+
 	// ── type: text (default) ──────────────────────────────────────────────
 	return (
 		<div style={styles.settingRow as CSSProperties}>
@@ -405,6 +426,47 @@ const SettingsPage: React.FC = () => {
 		return unsub;
 	}, []);
 
+	// ── Dynamic app settings (injected at runtime via shell:appSettings) ──
+	const [dynamicSections, setDynamicSections] = useState<SettingsSection[]>([]);
+	const [dynamicValues, setDynamicValues] = useState<Record<string, string>>({});
+	const dynamicKeysRef = React.useRef<Set<string>>(new Set());
+
+	useEffect(() => {
+		// Fire shell:loadSettings so apps can respond with their settings
+		ConnectionManager.getInstance().emit('shell:loadSettings', { settings: { ...settings } });
+
+		// Listen for app responses
+		const unsub = ConnectionManager.getInstance().on('shell:appSettings', ({ appId, definitions, values: vals }) => {
+			// Track which keys are dynamic (not persisted to workspace)
+			const keys = new Set(definitions.map(d => d.key));
+			keys.forEach(k => dynamicKeysRef.current.add(k));
+
+			// Add section
+			const section: SettingsSection = {
+				id: `dynamic:${appId}`,
+				label: appId,
+				defs: definitions.map(d => ({
+					key: d.key,
+					label: d.label,
+					description: d.description,
+					default: d.default,
+					type: d.type as AppSettingDefinition['type'],
+					options: d.options,
+				})),
+			};
+			setDynamicSections(prev => {
+				// Replace existing section for this app, or add new
+				const filtered = prev.filter(s => s.id !== section.id);
+				return [...filtered, section];
+			});
+
+			// Merge values
+			setDynamicValues(prev => ({ ...prev, ...vals }));
+		});
+
+		return unsub;
+	}, [settings]);
+
 	// ── Environment key names from account ───────────────────────────────
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
 
@@ -459,8 +521,17 @@ const SettingsPage: React.FC = () => {
 			result.push({ id, label, defs: uniqueDefs });
 		}
 
+		// Append dynamically injected app settings
+		for (const dynSection of dynamicSections) {
+			const uniqueDefs = dynSection.defs.filter(d => !seenKeys.has(d.key));
+			if (uniqueDefs.length > 0) {
+				uniqueDefs.forEach(d => seenKeys.add(d.key));
+				result.push({ ...dynSection, defs: uniqueDefs });
+			}
+		}
+
 		return result;
-	}, [appManifest]);
+	}, [appManifest, dynamicSections]);
 
 	// Filter sections by search query and sidebar selection
 	const query = search.toLowerCase().trim();
@@ -489,8 +560,8 @@ const SettingsPage: React.FC = () => {
 	 * Returns the current value for any settings key, preferring draft over saved.
 	 */
 	const getValue = useCallback(
-		(key: string) => draft[key] ?? settings[key] ?? '',
-		[draft, settings],
+		(key: string) => draft[key] ?? settings[key] ?? dynamicValues[key] ?? '',
+		[draft, settings, dynamicValues],
 	);
 
 	/**
@@ -505,9 +576,34 @@ const SettingsPage: React.FC = () => {
 	 * Persists all draft changes to the workspace settings store.
 	 */
 	const handleSave = useCallback(() => {
+		// Separate dynamic keys (app-owned, not persisted to workspace) from static keys
+		const dynamicKeys = dynamicKeysRef.current;
+		const dynamicChanges: Record<string, string> = {};
+		const workspaceChanges: Record<string, string> = {};
+
 		for (const [key, value] of Object.entries(draft)) {
+			if (dynamicKeys.has(key)) {
+				dynamicChanges[key] = value;
+			} else {
+				workspaceChanges[key] = value;
+			}
+		}
+
+		// Persist workspace settings (non-dynamic)
+		for (const [key, value] of Object.entries(workspaceChanges)) {
 			updateSetting(key, value);
 		}
+
+		// Fire shell:saveSettings so apps can handle their own settings
+		// Apps extract their keys, apply them, and the keys are NOT persisted
+		if (Object.keys(dynamicChanges).length > 0) {
+			ConnectionManager.getInstance().emit('shell:saveSettings', {
+				settings: dynamicChanges,
+			});
+			// Update dynamic values state to reflect saved values
+			setDynamicValues(prev => ({ ...prev, ...dynamicChanges }));
+		}
+
 		setDraft({});
 		setSaved(true);
 		setTimeout(() => setSaved(false), 3000);

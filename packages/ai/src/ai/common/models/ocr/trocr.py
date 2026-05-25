@@ -50,6 +50,7 @@ class TrOCRLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'trocr'
+    CLONE_TIER: int = 3  # Non-clonable: wraps VisionEncoderDecoder + processor
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_trocr.txt')
 
     # Defaults applied before hashing (ensures consistent model IDs)

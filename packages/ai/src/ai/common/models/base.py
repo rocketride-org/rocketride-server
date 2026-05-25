@@ -70,10 +70,28 @@ class BaseLoader:
     """
 
     LOADER_TYPE: str = 'base'
+    CLONE_TIER: int = 3  # 1=clonable (constructor+state_dict), 2=semi-clonable (move+replenish), 3=non-clonable
     _REQUIREMENTS_FILE: Optional[str] = None
     _dependencies_loaded: bool = False
     _SERVER_PARAMS = {'allocate_gpu', 'exclude_gpus', 'device'}
     _DEFAULTS: dict = {}
+
+    @staticmethod
+    def clone_to_gpu(base_model_obj, device: str, **metadata):
+        """Clone a CPU golden copy to GPU via state_dict.
+
+        Only implemented by Tier 1 loaders. Called from the load queue's
+        consumer thread (behind the single-consumer serialization).
+
+        Args:
+            base_model_obj: The golden CPU model to clone from.
+            device: Target device string (e.g. 'cuda:0').
+            **metadata: Loader-specific metadata from the original load.
+
+        Returns:
+            Tuple of (gpu_model_obj, load_metadata_dict).
+        """
+        raise NotImplementedError('clone_to_gpu not implemented for this loader')
 
     @classmethod
     def _ensure_dependencies(cls) -> None:

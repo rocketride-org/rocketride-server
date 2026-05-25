@@ -197,6 +197,53 @@ export interface ShellConnectionEventMap {
 	 */
 	'shell:themeChange': { tokens: Record<string, string> };
 
+	// ── Settings ─────────────────────────────────────────────────────────
+
+	/**
+	 * Shell requests settings from all apps when the settings page opens.
+	 *
+	 * Apps respond by calling back with dynamically injected AppSettingDefinition
+	 * entries and current values. These settings only exist while the app is
+	 * active — they are NOT persisted in package.json manifests.
+	 *
+	 * The `settings` dict contains current persisted values (from workspace
+	 * settings.json) that the app may use as initial state.
+	 */
+	'shell:loadSettings': { settings: Record<string, string> };
+
+	/**
+	 * Shell notifies apps that settings have been saved by the user.
+	 *
+	 * Each app receives the full settings dict. Apps should:
+	 * 1. Extract their own keys from the payload
+	 * 2. Apply them (e.g. send to model server via DAP)
+	 * 3. Remove their keys from the payload so they are NOT persisted
+	 *    to workspace settings.json (server-side persistence only)
+	 *
+	 * The `settings` dict is mutable — apps delete their keys in-place.
+	 */
+	'shell:saveSettings': { settings: Record<string, string> };
+
+	/**
+	 * App responds to shell:loadSettings with dynamically injected settings.
+	 *
+	 * Contains the app's AppSettingDefinition entries and current values.
+	 * The shell merges these into the settings page alongside static
+	 * manifest settings.
+	 */
+	'shell:appSettings': {
+		appId: string;
+		definitions: Array<{
+			key: string;
+			label: string;
+			description?: string;
+			default?: string;
+			type?: 'text' | 'select' | 'number';
+			options?: Array<{ value: string; label: string }>;
+		}>;
+		values: Record<string, string>;
+	};
+
 	// ── App-defined events ───────────────────────────────────────────────
 	// Apps may emit their own events through the connection manager's event
 	// bus (e.g. 'home:browsingChange'). The index signature allows any

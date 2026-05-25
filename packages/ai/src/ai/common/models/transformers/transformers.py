@@ -63,6 +63,9 @@ class TransformersLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'transformers'
+    # Tier depends on load path: model-path = Tier 1 (clonable), pipeline-path = Tier 2 (semi-clonable).
+    # Server checks metadata['load_path'] to determine actual tier at runtime.
+    CLONE_TIER: int = 1
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_transformers.txt')
     _DEFAULTS: dict = {}  # Transformers typically vary by task/model
 
@@ -173,10 +176,50 @@ class TransformersLoader(BaseLoader):
             'config': model.config.to_dict() if hasattr(model, 'config') else {},
             'tokenizer': tokenizer,
             'loader': 'transformers',
+            'load_path': 'model',  # Tier 1 — clonable via clone_to_gpu
             'estimated_memory_gb': memory_gb,
         }
 
         return {'model': model, 'tokenizer': tokenizer}, metadata, gpu_index
+
+    @staticmethod
+    def clone_to_gpu(base_model_obj, device: str, **metadata):
+        """Clone a CPU golden transformers model to GPU via state_dict.
+
+        Only works for model-path loads (not pipeline-path). Constructs
+        a new model from the golden copy's config and loads weights.
+        Must be called from the load queue's consumer thread.
+
+        Args:
+            base_model_obj: The golden model bundle dict {'model', 'tokenizer'}.
+            device: Target device string (e.g. 'cuda:0').
+            **metadata: Loader metadata from original load.
+
+        Returns:
+            Tuple of (gpu_bundle, metadata_dict).
+        """
+        golden_model = base_model_obj['model']
+
+        # Construct empty shell from config (no from_pretrained, no disk I/O)
+        model_class_name = metadata.get('model_class', 'AutoModel')
+        if model_class_name == 'AutoModel' or not hasattr(golden_model, 'config'):
+            clone = type(golden_model)(golden_model.config)
+        else:
+            clone = type(golden_model)(golden_model.config)
+
+        # Load weights from golden copy
+        clone.load_state_dict(golden_model.state_dict())
+        clone.to(device)
+        clone.eval()
+
+        # Bundle with shared tokenizer (tokenizer is stateless, safe to share)
+        clone_bundle = {
+            'model': clone,
+            'tokenizer': base_model_obj['tokenizer'],
+        }
+
+        clone_metadata = {**metadata, 'device': device, 'cloned_from': 'cpu'}
+        return clone_bundle, clone_metadata
 
     @staticmethod
     def _load_pipeline(
@@ -231,6 +274,7 @@ class TransformersLoader(BaseLoader):
             'model_name': model_name or 'default',
             'device': device_str,
             'loader': 'transformers_pipeline',
+            'load_path': 'pipeline',  # Tier 2 — semi-clonable (move + replenish)
             'estimated_memory_gb': memory_gb,
         }
 

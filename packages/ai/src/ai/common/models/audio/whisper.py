@@ -54,6 +54,7 @@ class WhisperLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'whisper'
+    CLONE_TIER: int = 3  # Non-clonable: CTranslate2 engine, not a torch nn.Module
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_whisper.txt')
 
     # Per-model locks for thread safety (faster-whisper is NOT thread-safe)

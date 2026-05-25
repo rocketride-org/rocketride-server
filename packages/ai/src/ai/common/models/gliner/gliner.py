@@ -34,6 +34,7 @@ class GLiNERLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'gliner'
+    CLONE_TIER: int = 1
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_gliner.txt')
     _DEFAULTS: dict = {
         'threshold': 0.5,
@@ -112,6 +113,39 @@ class GLiNERLoader(BaseLoader):
         }
 
         return model, metadata, gpu_index
+
+    @staticmethod
+    def clone_to_gpu(base_model_obj, device: str, **metadata):
+        """Clone a CPU golden GLiNER model to GPU via state_dict.
+
+        Constructs a new GLiNER instance from the golden copy's config
+        (no from_pretrained, no disk I/O) and loads the golden weights.
+        Must be called from the load queue's consumer thread.
+
+        Args:
+            base_model_obj: The golden GLiNER model on CPU.
+            device: Target device string (e.g. 'cuda:0').
+            **metadata: Loader metadata from original load.
+
+        Returns:
+            Tuple of (gpu_model, metadata_dict).
+        """
+        from gliner import GLiNER as GLiNERModel
+
+        # Build empty shell from config (no backbone download)
+        clone = GLiNERModel(
+            base_model_obj.config,
+            tokenizer=base_model_obj.data_processor.transformer_tokenizer,
+            backbone_from_pretrained=False,
+        )
+
+        # Load weights from golden copy — assign=True replaces meta tensors
+        clone.model.load_state_dict(base_model_obj.model.state_dict(), assign=True)
+        clone.to(device)
+        clone.eval()
+
+        clone_metadata = {**metadata, 'device': device, 'cloned_from': 'cpu'}
+        return clone, clone_metadata
 
     @staticmethod
     def _patch_mecab() -> None:

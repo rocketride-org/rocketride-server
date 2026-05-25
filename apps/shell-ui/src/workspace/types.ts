@@ -148,7 +148,7 @@ export interface AppSettingDefinition {
 	 * - `'envkey'`  — text input for a raw API key, or dropdown to pick a
 	 *                  server-side environment variable (from account env keys).
 	 */
-	type?: 'text' | 'select' | 'service' | 'envkey';
+	type?: 'text' | 'select' | 'service' | 'envkey' | 'number';
 	/**
 	 * Fixed options for `type: 'select'` — each entry is `{ value, label }`.
 	 */

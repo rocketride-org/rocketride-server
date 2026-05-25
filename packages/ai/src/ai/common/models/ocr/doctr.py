@@ -37,6 +37,7 @@ class DocTRLoader(BaseLoader):
     """Static loader for docTR models."""
 
     LOADER_TYPE: str = 'doctr'
+    CLONE_TIER: int = 3  # Non-clonable: predictor wrapping multiple models
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_doctr.txt')
 
     _DEFAULTS = {

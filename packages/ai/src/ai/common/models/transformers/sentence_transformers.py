@@ -40,6 +40,7 @@ class SentenceTransformerLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'sentence_transformer'
+    CLONE_TIER: int = 2  # Semi-clonable: .to(device) works, but no simple config constructor
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_sentence_transformers.txt')
     _DEFAULTS: dict = {}  # SentenceTransformers typically only vary by model_name
 

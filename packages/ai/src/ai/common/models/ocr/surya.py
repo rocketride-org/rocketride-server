@@ -37,6 +37,7 @@ class SuryaLoader(BaseLoader):
     """Static loader for Surya OCR models."""
 
     LOADER_TYPE: str = 'surya'
+    CLONE_TIER: int = 3  # Non-clonable: multi-model pipeline
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_surya.txt')
 
     _DEFAULTS = {

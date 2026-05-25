@@ -28,6 +28,7 @@ class KokoroLoader(BaseLoader):
     """Static loader: one ``KPipeline`` per (lang_code, repo_id); voice is per inference."""
 
     LOADER_TYPE: str = 'kokoro'
+    CLONE_TIER: int = 3  # Non-clonable: KPipeline with custom pipeline state
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_kokoro.txt')
     _DEFAULTS: dict = {'lang_code': 'a', 'repo_id': 'hexgrad/Kokoro-82M'}
     # Kokoro-82M weights (~330 MB fp32) + activations; conservative for GPU placement

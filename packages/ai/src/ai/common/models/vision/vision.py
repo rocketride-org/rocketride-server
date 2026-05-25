@@ -28,6 +28,7 @@ class VisionLoader(BaseLoader):
     """
 
     LOADER_TYPE: str = 'vision'
+    CLONE_TIER: int = 1
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_vision.txt')
     _DEFAULTS = MappingProxyType({'variant': 'clip'})
     _SERVER_PARAMS = frozenset({'allocate_gpu', 'exclude_gpus', 'device'})
@@ -117,6 +118,50 @@ class VisionLoader(BaseLoader):
         }
 
         return bundle, metadata, gpu_index
+
+    @staticmethod
+    def clone_to_gpu(base_model_obj, device: str, **metadata):
+        """Clone a CPU golden vision model (CLIP or ViT) to GPU via state_dict.
+
+        Constructs a new model from the golden copy's config and loads weights.
+        Must be called from the load queue's consumer thread.
+
+        Args:
+            base_model_obj: The golden model bundle dict {'model', 'processor', 'variant'}.
+            device: Target device string (e.g. 'cuda:0').
+            **metadata: Loader metadata from original load.
+
+        Returns:
+            Tuple of (gpu_bundle, metadata_dict).
+        """
+        # Extract the golden model and its config
+        golden_model = base_model_obj['model']
+        variant = base_model_obj['variant']
+
+        # Construct empty shell from config (no from_pretrained, no disk I/O)
+        if variant == 'clip':
+            from transformers import CLIPModel as HFCLIPModel
+
+            clone = HFCLIPModel(golden_model.config)
+        else:
+            from transformers import ViTModel as HFViTModel
+
+            clone = HFViTModel(golden_model.config)
+
+        # Load weights from golden copy
+        clone.load_state_dict(golden_model.state_dict())
+        clone.to(device)
+        clone.eval()
+
+        # Bundle with shared processor (processor is stateless, safe to share)
+        clone_bundle = {
+            'model': clone,
+            'processor': base_model_obj['processor'],
+            'variant': variant,
+        }
+
+        clone_metadata = {**metadata, 'device': device, 'cloned_from': 'cpu'}
+        return clone_bundle, clone_metadata
 
     @staticmethod
     def preprocess(
