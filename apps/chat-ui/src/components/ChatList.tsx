@@ -153,7 +153,17 @@ export const ChatList: React.FC<ChatListProps> = ({ client, pipelineId, currentC
 						return (
 							<div
 								key={entry.guid}
+								role="button"
+								tabIndex={isEditing ? -1 : 0}
+								aria-current={isActive ? 'true' : undefined}
 								onClick={() => !isEditing && onSelectChat(entry.guid)}
+								onKeyDown={(e) => {
+									if (isEditing) return;
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										onSelectChat(entry.guid);
+									}
+								}}
 								style={{
 									padding: '10px 12px',
 									cursor: isEditing ? 'default' : 'pointer',

@@ -98,7 +98,8 @@ const App: React.FC = () => {
 		// URL param always wins — it carries the freshly-minted pk for the
 		// current task and must not be shadowed by a stale sessionStorage value
 		// left over from a previous task on the same origin.
-		token = urlParams.get('auth') || '';
+		const urlToken = urlParams.get('auth') || '';
+		token = urlToken;
 		if (token) {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
@@ -110,13 +111,22 @@ const App: React.FC = () => {
 		}
 
 		// Pull persistent-chat params from the URL alongside auth (same channel as authToken).
-		// Sessionstorage them so they survive the query-string scrub above and reloads inside
-		// the iframe.
+		// When the URL carries a fresh ?auth=, treat the params as authoritative for that session —
+		// missing pipelineId/persist mean "this task isn't persistent", NOT "fall back to whatever
+		// the last task left in sessionStorage". Falling back unconditionally would let a stale
+		// pipelineId/persist=1 enable persistence on the wrong task.
 		let urlPipelineId = urlParams.get('pipelineId') || '';
 		let urlPersist = urlParams.get('persist') === '1';
 		if (!isVSCode) {
-			if (!urlPipelineId) urlPipelineId = sessionStorage.getItem('chatPipelineId') || '';
-			if (!urlPersist) urlPersist = sessionStorage.getItem('chatPersist') === '1';
+			if (urlToken) {
+				// Fresh URL session: scrub stale persist keys to match the new ?auth=.
+				if (!urlPipelineId) sessionStorage.removeItem('chatPipelineId');
+				if (!urlPersist) sessionStorage.removeItem('chatPersist');
+			} else {
+				// Reload without ?auth= — rehydrate everything from sessionStorage.
+				if (!urlPipelineId) urlPipelineId = sessionStorage.getItem('chatPipelineId') || '';
+				if (!urlPersist) urlPersist = sessionStorage.getItem('chatPersist') === '1';
+			}
 		}
 
 		// Check these

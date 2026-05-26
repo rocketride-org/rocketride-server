@@ -205,6 +205,9 @@ export const useChatMessages = () => {
 	 */
 	const hydrateFromChat = useCallback((chat: Chat) => {
 		const flattened: Message[] = [];
+		// Monotonic id per hydrated message — turn.seq * 2 + i collides when a turn
+		// emits >1 response (bot id overlaps the next turn's user id).
+		let nextId = 1;
 		for (const turn of chat.history as ChatTurn[]) {
 			const questionDict = turn.question as Record<string, unknown>;
 			const qs = (questionDict?.questions as Array<{ text?: string }> | undefined) ?? [];
@@ -214,17 +217,16 @@ export const useChatMessages = () => {
 
 			if (userText) {
 				flattened.push({
-					id: turn.seq * 2,
+					id: nextId++,
 					text: userText,
 					sender: 'user',
 					timestamp: turn.created.slice(11, 16),
 				});
 			}
-			for (let i = 0; i < responses.length; i++) {
-				const r = responses[i];
+			for (const r of responses) {
 				if (!r) continue;
 				flattened.push({
-					id: turn.seq * 2 + 1 + i,
+					id: nextId++,
 					text: r.text,
 					sender: 'bot',
 					timestamp: turn.created.slice(11, 16),
@@ -233,7 +235,7 @@ export const useChatMessages = () => {
 			}
 		}
 		setMessages(flattened);
-	}, []);
+	}, [setMessages]);
 
 	/**
 	 * Clears all messages and resets to initial state

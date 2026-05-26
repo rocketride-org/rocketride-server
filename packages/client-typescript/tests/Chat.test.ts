@@ -295,7 +295,11 @@ describe('chat_id format guard', () => {
 	});
 
 	test('Question.fromDict rejects a chat_id that is not a valid UUID', () => {
+		// Cover several invalid shapes so the guard can't regress to a permissive check.
 		expect(() => Question.fromDict({ chat_id: 'nope' } as any)).toThrow();
+		expect(() => Question.fromDict({ chat_id: '' } as any)).toThrow();
+		expect(() => Question.fromDict({ chat_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-extra' } as any)).toThrow();
+		expect(() => Question.fromDict({ chat_id: 'gggggggg-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } as any)).toThrow();
 		const ok = Question.fromDict({ chat_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } as any);
 		expect(ok.chat_id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 	});

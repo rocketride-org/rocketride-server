@@ -37,6 +37,7 @@ import asyncio
 import json
 import re
 import uuid
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence
@@ -168,6 +169,9 @@ def parse_chat_file(raw: str) -> tuple[Optional[ChatHeader], List[ChatTurn]]:
         except json.JSONDecodeError:
             # Partial write on the trailing line — tolerate.
             continue
+        if not isinstance(rec, dict):
+            # JSON scalar (e.g. a stray "123" or "null") — rec.get would AttributeError.
+            continue
         kind = rec.get('type')
         if kind == 'header':
             if header is None:
@@ -220,6 +224,9 @@ class Chat:
         self.pipeline_id = pipeline_id
         self.created = created
         self.history: List[ChatTurn] = list(history)
+        # Serializes send() so concurrent callers can't mint duplicate seq numbers
+        # or interleave the read-then-rewrite append on chat.jsonl.
+        self._send_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ factories
     @classmethod
@@ -297,18 +304,19 @@ class Chat:
 
         result = await self._client.chat(token=self._token, question=question, on_sse=on_sse)
 
-        seq = (self.history[-1].seq if self.history else 0) + 1
-        turn = ChatTurn(
-            type='turn',
-            schema_version=CHAT_SCHEMA_VERSION,
-            seq=seq,
-            created=_now(),
-            question=question.model_dump(),
-            answer=result,
-        )
-        await self._append_turn_line(turn)
-        self.history.append(turn)
-        await self._update_catalog_for_turn(turn)
+        async with self._send_lock:
+            seq = (self.history[-1].seq if self.history else 0) + 1
+            turn = ChatTurn(
+                type='turn',
+                schema_version=CHAT_SCHEMA_VERSION,
+                seq=seq,
+                created=_now(),
+                question=question.model_dump(),
+                answer=result,
+            )
+            await self._append_turn_line(turn)
+            self.history.append(turn)
+            await self._update_catalog_for_turn(turn)
         return result
 
     async def rename(self, title: str) -> None:
@@ -441,7 +449,36 @@ async def _read_or_init_catalog(client: RocketRideChatClient) -> tuple[_Catalog,
     )
 
 
+# Per-client serialization locks for catalog mutations. Closing the TOCTOU
+# window inside a single client lets concurrent in-process mutators compose
+# without burning the OCC retry budget. Cross-client contention still falls
+# through to the bounded retry below. WeakKeyDictionary avoids leaking locks
+# when a client is GCed.
+_catalog_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _catalog_lock_for(client: RocketRideChatClient) -> asyncio.Lock:
+    try:
+        lock = _catalog_locks.get(client)
+    except TypeError:
+        # Client isn't weakly referenceable — fall back to no-op lock (a fresh
+        # one per call won't serialize, but mutation still works via OCC retry).
+        return asyncio.Lock()
+    if lock is None:
+        lock = asyncio.Lock()
+        _catalog_locks[client] = lock
+    return lock
+
+
 async def _mutate_catalog(
+    client: RocketRideChatClient,
+    mutator: Callable[[_Catalog], None],
+) -> None:
+    async with _catalog_lock_for(client):
+        await _mutate_catalog_once(client, mutator)
+
+
+async def _mutate_catalog_once(
     client: RocketRideChatClient,
     mutator: Callable[[_Catalog], None],
 ) -> None:

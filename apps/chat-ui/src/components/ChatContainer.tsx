@@ -52,6 +52,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	const [currentChat, setCurrentChat] = useState<Chat | null>(null);
 	const [listRefreshKey, setListRefreshKey] = useState(0);
 
+	// Dedupe in-flight Chat.create so rapid sends don't spawn multiple on-disk chats
+	// before setCurrentChat lands. All concurrent senders await the same promise.
+	const creatingChatRef = useRef<Promise<Chat | null> | null>(null);
+
 	// Handle connection established
 	const handleConnected = useCallback(
 		async (_client: RocketRideClient) => {
@@ -177,13 +181,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 			}
 			let chat = currentChat;
 			if (persistEnabled && pipelineId && !chat) {
-				try {
-					chat = await Chat.create({ client, token: authToken, pipelineId });
-					setCurrentChat(chat);
-				} catch (err) {
-					console.warn('ChatContainer: Chat.create failed; falling back to non-persistent send', err);
-					chat = null;
+				if (!creatingChatRef.current) {
+					creatingChatRef.current = (async () => {
+						try {
+							const created = await Chat.create({ client, token: authToken, pipelineId });
+							setCurrentChat(created);
+							return created;
+						} catch (err) {
+							console.warn('ChatContainer: Chat.create failed; falling back to non-persistent send', err);
+							return null;
+						} finally {
+							creatingChatRef.current = null;
+						}
+					})();
 				}
+				chat = await creatingChatRef.current;
 			}
 			await sendMessage(text, client, authToken, chat);
 			if (chat) setListRefreshKey((k) => k + 1);

@@ -132,6 +132,13 @@ export class Chat {
 	private readonly _client: RocketRideChatClient;
 	private readonly _token: string;
 
+	/**
+	 * Tail of the per-instance send queue. Serializes the seq-assignment +
+	 * read-then-rewrite append on `chat.jsonl` so concurrent `send()` calls
+	 * don't mint duplicate seq numbers or overwrite each other's turn line.
+	 */
+	private _sendQueueTail: Promise<unknown> = Promise.resolve();
+
 	private constructor(opts: { client: RocketRideChatClient; token: string; id: string; pipelineId: string; created: string; history: ChatTurn[] }) {
 		this._client = opts.client;
 		this._token = opts.token;
@@ -238,34 +245,42 @@ export class Chat {
 			history?: QuestionHistory[];
 		}
 	): Promise<PIPELINE_RESULT> {
-		const question = new Question({ type: QuestionType.PROMPT, chat_id: this.id });
-		question.addQuestion(text);
-		if (opts?.history) {
-			for (const item of opts.history) {
-				question.addHistory(item);
+		const run = async (): Promise<PIPELINE_RESULT> => {
+			const question = new Question({ type: QuestionType.PROMPT, chat_id: this.id });
+			question.addQuestion(text);
+			if (opts?.history) {
+				for (const item of opts.history) {
+					question.addHistory(item);
+				}
 			}
-		}
 
-		const result = await this._client.chat({
-			token: this._token,
-			question,
-			onSSE: opts?.onSSE,
-		});
+			const result = await this._client.chat({
+				token: this._token,
+				question,
+				onSSE: opts?.onSSE,
+			});
 
-		const seq = (this.history[this.history.length - 1]?.seq ?? 0) + 1;
-		const turn: ChatTurn = {
-			type: 'turn',
-			schema_version: CHAT_SCHEMA_VERSION,
-			seq,
-			created: new Date().toISOString(),
-			question: question.toDict(),
-			answer: result as unknown,
+			const seq = (this.history[this.history.length - 1]?.seq ?? 0) + 1;
+			const turn: ChatTurn = {
+				type: 'turn',
+				schema_version: CHAT_SCHEMA_VERSION,
+				seq,
+				created: new Date().toISOString(),
+				question: question.toDict(),
+				answer: result as unknown,
+			};
+			await this._appendTurnLine(turn);
+			this.history.push(turn);
+			await this._updateCatalogEntryForTurn(turn);
+
+			return result;
 		};
-		await this._appendTurnLine(turn);
-		this.history.push(turn);
-		await this._updateCatalogEntryForTurn(turn);
 
-		return result;
+		// Chain onto the per-instance queue tail so concurrent sends run sequentially.
+		// `.catch(() => {})` keeps the chain alive even if a prior send rejected.
+		const next = this._sendQueueTail.then(run, run);
+		this._sendQueueTail = next.catch(() => {});
+		return next;
 	}
 
 	/** Rename a chat. Mutates catalog only; `chat.jsonl` header is immutable. */
@@ -454,11 +469,27 @@ export function extractAnswerText(answer: unknown): string {
 }
 
 /**
+ * Per-client serialization tails for catalog mutations. Closing the TOCTOU
+ * window inside a single client is cheap and lets concurrent in-tab mutators
+ * (e.g. send + rename + delete arriving back-to-back) compose without
+ * burning through the OCC retry budget. Cross-tab/cross-client contention
+ * still falls through to the bounded OCC retry below.
+ */
+const _catalogQueueTails = new WeakMap<RocketRideChatClient, Promise<unknown>>();
+
+/**
  * Optimistic-version retry loop for `catalog.json`. Exposed at module scope
  * so future catalog-rebuild / maintenance code can reuse it without going
  * through a `Chat` instance.
  */
 export async function mutateCatalog(client: RocketRideChatClient, mutator: (cat: ChatCatalog) => void): Promise<void> {
+	const prev = _catalogQueueTails.get(client) ?? Promise.resolve();
+	const next = prev.then(() => _mutateCatalogOnce(client, mutator), () => _mutateCatalogOnce(client, mutator));
+	_catalogQueueTails.set(client, next.catch(() => {}));
+	return next;
+}
+
+async function _mutateCatalogOnce(client: RocketRideChatClient, mutator: (cat: ChatCatalog) => void): Promise<void> {
 	for (let attempt = 1; attempt <= CATALOG_MAX_RETRY; attempt++) {
 		const { catalog, observedVersion } = await readOrInitCatalog(client);
 		mutator(catalog);
