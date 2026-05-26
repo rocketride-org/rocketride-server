@@ -25,10 +25,17 @@
 MiniMax binding for the ChatLLM.
 """
 
+import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
+
+# MiniMax M2-series models return chain-of-thought wrapped in <think>...</think>
+# inside the `content` field (per the OpenAI-compatible spec at
+# https://platform.minimax.io/docs/api-reference/text-chat-openai). The block is
+# stripped here so downstream pipeline nodes only see the final answer.
+_THINK_BLOCK_RE = re.compile(r'<think>.*?</think>\s*', re.DOTALL | re.IGNORECASE)
 
 
 class Chat(ChatBase):
@@ -73,3 +80,8 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat(self, prompt: str) -> str:
+        """Invoke the LLM and strip any <think>...</think> reasoning block from the response."""
+        results = self._llm.invoke(prompt)
+        return _THINK_BLOCK_RE.sub('', results.content).lstrip()
