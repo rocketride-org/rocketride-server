@@ -36,7 +36,7 @@
 
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config';
-import { getConnectionManager } from '../extension';
+import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 
 const DISMISSED_KEY = 'welcomeDismissed';
@@ -55,6 +55,8 @@ export class WelcomeProvider {
 		this.connHandler = new ConnectionMessageHandler({
 			extensionFsPath: extensionUri.fsPath,
 			getActiveWebviews: () => (this.panel ? [this.panel.webview] : []),
+			getConnectionManager,
+			getEngineRegistry,
 		});
 		this.registerCommands();
 	}
@@ -212,58 +214,41 @@ export class WelcomeProvider {
 		});
 	}
 
-	/** Save settings, start connection, close the welcome page */
+	/**
+	 * Persist the user's welcome-page settings and kick off the first connection.
+	 *
+	 * Sequence mirrors SettingsProvider.saveAllSettings():
+	 *   1. Atomic config write (listeners suppressed)
+	 *   2. Mark welcome as dismissed so it won't re-open
+	 *   3. Cancel stale debounced handlers that would race with reconcile
+	 *   4. Initialize CMs (validates creds, sets mode)
+	 *   5. Reconcile engines (downloads/starts, CMs auto-connect on 'ready')
+	 *   6. Close the welcome panel
+	 *
+	 * @param settings - The full settings snapshot from the welcome form.
+	 */
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
-			const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
-			const dev = settings.development as Record<string, unknown> | undefined;
+			// Step 1: Atomic write — suppresses config-change listeners during the batch
+			await this.configManager.applyAllSettings(settings as any);
 
-			if (dev?.connectionMode !== undefined) {
-				await workspaceConfig.update('development.connectionMode', dev.connectionMode, vscode.ConfigurationTarget.Global);
-			}
-			if (dev?.hostUrl !== undefined) {
-				await workspaceConfig.update('development.hostUrl', dev.hostUrl, vscode.ConfigurationTarget.Global);
-			}
-			if (dev?.teamId !== undefined) {
-				await workspaceConfig.update('development.teamId', dev.teamId, vscode.ConfigurationTarget.Global);
-			}
+			// Step 2: Persist dismissal so the welcome page doesn't re-open on next activation
+			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
 
-			const devLocal = dev?.local as Record<string, unknown> | undefined;
-			if (devLocal?.engineVersion !== undefined) {
-				await workspaceConfig.update('development.local.engineVersion', devLocal.engineVersion, vscode.ConfigurationTarget.Global);
-			}
-			if (devLocal?.engineArgs !== undefined) {
-				await workspaceConfig.update('development.local.engineArgs', devLocal.engineArgs, vscode.ConfigurationTarget.Global);
-			}
-			if (devLocal?.debugOutput !== undefined) {
-				await workspaceConfig.update('development.local.debugOutput', devLocal.debugOutput, vscode.ConfigurationTarget.Global);
-			}
-
-			if (settings.autoAgentIntegration !== undefined) {
-				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			}
-
-			// Save API key to secure storage
-			if (typeof dev?.apiKey === 'string') {
-				const apiKey = dev.apiKey as string;
-				if (apiKey.trim() !== '') {
-					await this.configManager.setApiKey('development', apiKey.trim());
-				} else {
-					await this.configManager.deleteApiKey('development');
-				}
-			}
-
-			// Mark welcome as dismissed so it doesn't show again
-			await workspaceConfig.update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
-
-			// Close panel
-			this.panel?.dispose();
-
-			// Start connection
+			// Step 3: The welcomeDismissed write above fires a config-change event
+			// AFTER the batch flag is cleared. Cancel it so it doesn't race with
+			// the reconcile we're about to trigger.
 			const connectionManager = getConnectionManager();
-			connectionManager?.initialize().catch((error) => {
-				console.error('[WelcomeProvider] Connection initialization failed:', error);
-			});
+			connectionManager?.cancelPendingConfigChange();
+
+			// Step 4-5: Initialize CMs then reconcile — same order as normal activation
+			if (connectionManager) await connectionManager.initialize();
+
+			const registry = getEngineRegistry();
+			if (registry) await registry.reconcile();
+
+			// Step 6: Close panel — engines are starting, CMs will auto-connect
+			this.panel?.dispose();
 		} catch (error) {
 			console.error('[WelcomeProvider] Failed to save settings:', error);
 			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save settings: ${error}` });

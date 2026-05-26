@@ -36,6 +36,8 @@ import { icons } from './shared/util/icons';
 import { ConnectionManager } from './connection/connection';
 import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
+import { EngineRegistry } from './engine';
+import { getUserConfigDir, getSystemInstallDir, migrateLocalEngine, migrateServiceConfig } from './engine/config/config-migration';
 
 import { SidebarProvider } from './providers/SidebarProvider';
 import { ProjectProvider } from './providers/ProjectProvider';
@@ -46,6 +48,7 @@ import { StatusProvider } from './providers/StatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
+import { EnvironmentProvider } from './providers/EnvironmentProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
 import { AuthProvider } from './providers/AuthProvider';
 import { AgentManager } from './agents/agent-manager';
@@ -54,6 +57,7 @@ import { CloudAuthProvider } from './auth/CloudAuthProvider';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
+let engineRegistry: EngineRegistry | undefined;
 let configManager: ConfigManager | undefined;
 
 // Provider references
@@ -155,6 +159,17 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 		await context.globalState.update('settingsMigrationV2Done', true);
 		logger.output(`${icons.success} Migrated settings to development/deployment groups`);
 	}
+
+	// Migration 4: Move local engine from globalStorage to per-user dir
+	// Old: globalStorage/engines/server-3.2.0--abc/engine.exe + pointer files
+	// New: %LOCALAPPDATA%/RocketRide/engine/engine.exe + version.json
+	const oldEnginesDir = path.join(context.globalStorageUri.fsPath, 'engines');
+	migrateLocalEngine(oldEnginesDir);
+
+	// Migration 5: Convert service config.json → engine/version.json
+	// Old: %PROGRAMDATA%/RocketRide/config.json + engines/server-3.2.0--abc/
+	// New: %PROGRAMDATA%/RocketRide/engine/engine.exe + engine/version.json
+	migrateServiceConfig();
 }
 
 /**
@@ -209,12 +224,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				//-------------------------------------
 				logger.output(`${icons.info} Creating connection manager...`);
 				progress.report({ increment: 30, message: 'Creating connection manager...' });
-				connectionManager = ConnectionManager.getInstance();
-				connectionManager.setEnginesRoot(context.globalStorageUri.fsPath);
 
-				// Deploy connection manager — same pattern, same engines root
+				// --- Engine Registry + Connection Managers ---
+				// One EngineManager per mode, shared across dev and deploy.
+				engineRegistry = EngineRegistry.getInstance({
+					localParentDir: getUserConfigDir(),
+					serviceInstallDir: getSystemInstallDir(),
+				});
+
+				connectionManager = ConnectionManager.getInstance();
+				connectionManager.setEngineRegistry(engineRegistry);
+
 				const deployManager = DeployManager.getDeployInstance();
-				deployManager.setEnginesRoot(context.globalStorageUri.fsPath);
+				deployManager.setEngineRegistry(engineRegistry);
 
 				//-------------------------------------
 				// Create status bar
@@ -246,8 +268,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
 				welcome = new WelcomeProvider(context, context.extensionUri);
-				new AccountProvider(context);
-				new AuthProvider(context, context.extensionUri);
+				const account = new AccountProvider(context);
+				const environment = new EnvironmentProvider(context);
+				const auth = new AuthProvider(context, context.extensionUri);
+				context.subscriptions.push(account, environment, auth);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);
@@ -306,15 +330,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					barStatus.setNeedsSetup();
 					welcome!.show();
 				} else {
-					// Normal flow: auto-connect
-					logger.output(`${icons.info} Initializing connections...`);
-					progress.report({ increment: 110, message: 'Starting connections...' });
+					// Normal flow: initialize CMs first so they validate credentials
+					// and set their connection mode. This must happen BEFORE reconcile
+					// because the reconciler reads CM config checksums to decide which
+					// engines need (re)starting. CMs don't connect here — they wait
+					// for the engine's 'ready' event emitted during reconcile.
+					logger.output(`${icons.info} Initializing connections and reconciling engines...`);
+					progress.report({ increment: 110, message: 'Starting engines...' });
 					barStatus.setReady();
-					connectionManager.initialize().catch((error) => {
-						console.error('[ROCKETRIDE] Connection initialization failed:', error);
-					});
-					deployManager.initialize().catch((error) => {
-						console.error('[ROCKETRIDE] Deploy connection initialization failed:', error);
+					await connectionManager.initialize();
+					await deployManager.initialize();
+					// Reconcile kicks off engine downloads/starts. Engines emit 'ready'
+					// events which handleEngineStatus() picks up to connect the WebSocket.
+					engineRegistry.reconcile().catch((err) => {
+						console.error('[ROCKETRIDE] Initial engine reconcile failed:', err);
 					});
 				}
 
@@ -362,6 +391,9 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 	const agentManager = new AgentManager();
 
 	const commands = [
+		vscode.commands.registerCommand('rocketride.sidebar.documentation.open', () => {
+			vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org/'));
+		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.connect', async () => {
 			await connectionManager?.connect();
 		}),
@@ -369,7 +401,8 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			await connectionManager?.disconnect();
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.reconnect', async () => {
-			await connectionManager?.reconnect();
+			await connectionManager?.disconnect();
+			await connectionManager?.connect();
 		}),
 		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
 			status?.show(projectId, sourceId, displayName);
@@ -516,10 +549,21 @@ export async function deactivate(): Promise<void> {
 		}
 	}
 
-	// Dispose connection manager (async — awaits engine process shutdown)
+	// Dispose engine registry (stops all engines)
+	if (engineRegistry) {
+		try {
+			await engineRegistry.disposeAll();
+		} catch (error: unknown) {
+			if (!(error instanceof Error) || error.name !== 'Canceled') {
+				console.error('[ROCKETRIDE] Error disposing engine registry:', error);
+			}
+		}
+	}
+
+	// Dispose connection manager (disconnects WebSocket)
 	if (connectionManager) {
 		try {
-			await connectionManager.dispose();
+			await connectionManager.stop();
 		} catch (error: unknown) {
 			// Silently ignore cancellation errors during shutdown
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
@@ -541,8 +585,32 @@ export async function deactivate(): Promise<void> {
 	}
 }
 
+// =========================================================================
+// GLOBAL VERSION CACHES — populated by ConnectionMessageHandler, read by backends
+// =========================================================================
+//
+// These module-level caches are the single source of truth for available
+// engine versions and Docker image tags. ConnectionMessageHandler fetches
+// them from GitHub/GHCR and writes via the setters. Engine backends read
+// from the exported arrays when resolving "latest" or "prerelease" tags
+// during install/pull operations. This avoids redundant API calls and
+// ensures all consumers see the same data regardless of which webview
+// triggered the fetch.
+// =========================================================================
+
+/** Cached GitHub releases (engine binaries). Populated by ConnectionMessageHandler.fetchAndBroadcastVersions(). */
+export let cachedEngineVersions: Array<{ tag_name: string; prerelease: boolean }> = [];
+/** Replaces the cached engine version list. Called by ConnectionMessageHandler after a successful GitHub API fetch. */
+export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => { cachedEngineVersions = v; };
+
+/** Cached GHCR container tags (Docker images). Populated by ConnectionMessageHandler.fetchAndBroadcastDockerTags(). */
+export let cachedDockerTags: string[] = [];
+/** Replaces the cached Docker tag list. Called by ConnectionMessageHandler after a successful GHCR API fetch. */
+export const setCachedDockerTags = (t: string[]) => { cachedDockerTags = t; };
+
 // Export getters for provider access
 export const getConnectionManager = () => connectionManager;
+export const getEngineRegistry = () => engineRegistry;
 export const getSettingsProvider = () => settings;
 export const getConfigManager = () => configManager;
 export const getPipelineFilesTreeProvider = () => undefined;

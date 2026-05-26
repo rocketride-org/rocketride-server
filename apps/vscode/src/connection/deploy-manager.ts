@@ -177,6 +177,30 @@ export class DeployManager extends ConnectionManager {
 	}
 
 	// =========================================================================
+	// ENGINE STATUS — no-op in shared mode (dev CM handles it)
+	// =========================================================================
+
+	/**
+	 * In shared mode the dev ConnectionManager owns the engine lifecycle
+	 * and WebSocket connection — the deploy manager must not react to
+	 * engine status events or it will open a second connection with
+	 * potentially stale deploy credentials.
+	 */
+	protected override shouldHandleEngineStatus(): boolean {
+		return !this.isSharedMode();
+	}
+
+	/**
+	 * Always register the engine status listener, even in shared mode.
+	 * When the user switches from shared → independent, the listener
+	 * must already be in place to receive the 'ready' event from the
+	 * newly started engine.
+	 */
+	public override setEngineRegistry(registry: import('../engine').EngineRegistry): void {
+		super.setEngineRegistry(registry);
+	}
+
+	// =========================================================================
 	// CONNECT / DISCONNECT — no-ops in shared mode
 	// =========================================================================
 
@@ -190,10 +214,6 @@ export class DeployManager extends ConnectionManager {
 		return super.disconnect();
 	}
 
-	public override async reconnect(): Promise<void> {
-		if (this.isSharedMode()) return;
-		return super.reconnect();
-	}
 
 	// =========================================================================
 	// INITIALIZATION — start forwarding or connect independently
@@ -221,17 +241,24 @@ export class DeployManager extends ConnectionManager {
 	// CONFIG CHANGE — handle transitions between shared and independent
 	// =========================================================================
 
+	/**
+	 * Handles config changes with four transition cases based on whether
+	 * the deploy connection was/is in shared mode (connectionMode === null).
+	 *
+	 * The key invariant: in shared mode, we forward dev events and don't
+	 * own a connection. In independent mode, we own our own WebSocket.
+	 * Transitions must tear down the old mode before setting up the new one.
+	 */
 	protected override async handleConfigurationChanged(): Promise<void> {
 		const nowShared = this.isSharedMode();
 
 		if (this.wasShared && nowShared) {
-			// Stayed in shared mode — nothing to do, dev handles its own reconnect
+			// Case 1: Stayed shared — dev CM handles its own reconnect, nothing to do
 			return;
 		}
 
 		if (!this.wasShared && !nowShared) {
-			// Stayed in independent mode — reconnect with new config.
-			// Always connect — the user is actively changing deploy settings.
+			// Case 2: Stayed independent — reconnect with new deploy-specific config
 			this.wasShared = nowShared;
 			await super.disconnect();
 			await this.updateCredentialsStatus();
@@ -240,22 +267,29 @@ export class DeployManager extends ConnectionManager {
 		}
 
 		if (this.wasShared && !nowShared) {
-			// Shared → independent: stop forwarding, connect independently.
-			// The user just explicitly configured a deploy target — connect now.
+			// Case 3: Shared -> independent — user just configured a separate deploy target.
+			// Must stop forwarding dev events before starting our own connection.
 			this.stopForwarding();
 			this.wasShared = nowShared;
 			await super.disconnect();
 			await this.updateCredentialsStatus();
 			await this.connect();
+			// Ask the registry to reconcile — if the deploy engine is already
+			// running it will re-emit 'ready', which handleEngineStatus() picks
+			// up and connects the WebSocket.
+			if (this.engineRegistry) {
+				await this.engineRegistry.reconcile();
+			}
 			return;
 		}
 
-		// Independent → shared: disconnect own connection, start forwarding
+		// Case 4: Independent -> shared — user unchecked "Deploy to a different target".
+		// Tear down our own connection and start proxying dev events instead.
 		this.wasShared = nowShared;
 		await super.disconnect();
 		this.startForwarding();
 
-		// Re-emit the dev connection's current state so listeners update
+		// Replay current dev state so deploy-side listeners see the correct status
 		const devStatus = this.getDevManager().getConnectionStatus();
 		this.emit('shell:statusChange', devStatus);
 		if (this.getDevManager().isConnected()) {

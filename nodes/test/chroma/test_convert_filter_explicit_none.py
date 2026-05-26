@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Regression tests for Chroma `_convertFilter` explicit-None vs empty-container semantics."""
+"""Regression tests for Chroma `_convertFilter`: isDeleted default-exclusion and explicit-None vs empty-container semantics."""
 
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def test_convert_filter_empty_object_ids_list_is_not_omitted() -> None:
     Store = _load_store_class()
     store = Store.__new__(Store)
     converted = store._convertFilter(_doc_filter(objectIds=[]))
-    assert converted == {'objectId': {'$in': []}}
+    assert converted == {'$and': [{'objectId': {'$in': []}}, {'isDeleted': {'$ne': True}}]}
 
 
 def test_convert_filter_empty_string_node_id_is_included() -> None:
@@ -106,7 +106,7 @@ def test_convert_filter_empty_string_node_id_is_included() -> None:
     Store = _load_store_class()
     store = Store.__new__(Store)
     converted = store._convertFilter(_doc_filter(nodeId=''))
-    assert converted == {'nodeId': {'$eq': ''}}
+    assert converted == {'$and': [{'nodeId': {'$eq': ''}}, {'isDeleted': {'$ne': True}}]}
 
 
 def test_convert_filter_empty_table_ids_list_is_not_omitted() -> None:
@@ -114,12 +114,39 @@ def test_convert_filter_empty_table_ids_list_is_not_omitted() -> None:
     Store = _load_store_class()
     store = Store.__new__(Store)
     converted = store._convertFilter(_doc_filter(tableIds=[]))
-    assert converted == {'tableId': {'$in': []}}
+    assert converted == {'$and': [{'tableId': {'$in': []}}, {'isDeleted': {'$ne': True}}]}
 
 
-def test_convert_filter_omits_object_ids_when_unset() -> None:
-    """When objectIds is unset (None), no objectId filter clause is added."""
+def test_convert_filter_default_excludes_deleted() -> None:
+    """Default filter (isDeleted=None) must include the isDeleted $ne True clause."""
     Store = _load_store_class()
     store = Store.__new__(Store)
     converted = store._convertFilter(_doc_filter())
-    assert converted is None
+    assert converted == {'isDeleted': {'$ne': True}}
+
+
+# --- Regression tests for isDeleted behaviour ---
+
+
+def test_convert_filter_is_deleted_none_excludes_deleted() -> None:
+    """isDeleted=None -> {'isDeleted': {'$ne': True}} (bug was: previously returned None)."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(isDeleted=None))
+    assert converted == {'isDeleted': {'$ne': True}}
+
+
+def test_convert_filter_is_deleted_false_excludes_deleted() -> None:
+    """isDeleted=False -> {'isDeleted': {'$ne': True}}."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(isDeleted=False))
+    assert converted == {'isDeleted': {'$ne': True}}
+
+
+def test_convert_filter_is_deleted_true_includes_only_deleted() -> None:
+    """isDeleted=True -> {'isDeleted': {'$eq': True}}."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(isDeleted=True))
+    assert converted == {'isDeleted': {'$eq': True}}

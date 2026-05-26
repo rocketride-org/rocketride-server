@@ -322,10 +322,22 @@ class Account(AccountBase):
                 # Only accept ROCKETRIDE_* keys — reject anything else
                 raw = args.get('env', {})
                 env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
-                # Persist to .env file
+
+                # Step 1: Remove existing ROCKETRIDE_* keys from os.environ
+                # so that deleted keys don't linger in memory.
+                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+                    del os.environ[k]
+
+                # Step 2: Set the new values in os.environ so get_env
+                # reflects the change immediately without a restart.
+                os.environ.update(env)
+
+                # Step 3: Persist to .env file on disk.
+                # Use sys.executable (engine.exe path) — must match the
+                # load_dotenv path in server.py, which also uses sys.executable.
                 import sys
 
-                exec_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                exec_dir = os.path.dirname(sys.executable)
                 self._write_env_file(os.path.join(exec_dir, '.env'), env)
                 return conn.build_response(request, body={'updated': True})
 

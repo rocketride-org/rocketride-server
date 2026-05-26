@@ -449,9 +449,28 @@ function buildBracketTask(bracket, seen, logModule, options) {
 function buildWhenTask(when, seen, logModule, options) {
     const variant = when._variant || 'when';
 
-    // Pre-build both branches so structure is known
-    const thenTasks = buildTaskTree(when.then, seen, logModule, options);
-    const elseTasks = when.else?.length ? buildTaskTree(when.else, seen, logModule, options) : [];
+    // Pre-build both branches with cloned `seen` sets so the branch contents
+    // do NOT pollute the parent's dedup state.
+    //
+    // Why this matters: a `when`/`whenNot` block decides which branch runs at
+    // RUNTIME, but its branches' subtrees are built upfront. If we share the
+    // parent's `seen` set, a compound action `X` referenced inside (say) the
+    // then-branch would be marked seen at the parent level. Any later
+    // reference to `X` elsewhere in the tree then becomes a dedup stub
+    // (`Waiting for: X`) whose resolver lives inside the conditional branch's
+    // own subtree. When the condition skips that branch at runtime, the
+    // resolver never fires and the stub hangs forever.
+    //
+    // Cloning isolates each branch's `seen` so:
+    //   - Actions exclusively inside a branch don't appear in the parent's
+    //     dedup state. Later references outside the conditional build their
+    //     own real subtree.
+    //   - Runtime `completedActions`/lock check at line 130/192 still skips
+    //     duplicate executions if both the branch AND another path do run.
+    //   - `getOrCreateCompletion` is process-global, so a real reference
+    //     anywhere still satisfies dedup stubs that share the same name.
+    const thenTasks = buildTaskTree(when.then, new Set(seen), logModule, options);
+    const elseTasks = when.else?.length ? buildTaskTree(when.else, new Set(seen), logModule, options) : [];
     
     return {
         title: `? ${variant} ${when.name}`,

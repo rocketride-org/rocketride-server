@@ -96,8 +96,14 @@ export class BarStatus {
 	}
 
 	/**
-	 * Sets up connection manager event listeners
+	 * Sets up event listeners on the connection manager.
+	 *
+	 * Listens to shell:statusChange which now carries both connection-level
+	 * states (connected, auth-failed, disconnected) and engine progress
+	 * (downloading, extracting, starting) via progressMessage.
 	 */
+	private statusChangeHandler?: (status: ConnectionStatus) => void;
+
 	private setupEventListeners(): void {
 		if (!this.connectionManager) {
 			console.warn('[BarStatus] No connection manager available for event listeners');
@@ -105,18 +111,18 @@ export class BarStatus {
 		}
 
 		try {
-			const statusListener = this.connectionManager.on('shell:statusChange', (status: ConnectionStatus) => {
+			this.statusChangeHandler = (status: ConnectionStatus) => {
 				this.handleConnectionStatusChange(status);
-			});
-
-			this.disposables.push(statusListener);
+			};
+			this.connectionManager.on('shell:statusChange', this.statusChangeHandler);
 		} catch {
 			// Ignore any error
 		}
 	}
 
 	/**
-	 * Handles connection status changes and updates status bar accordingly
+	 * Handles connection-level status changes (connected, disconnected, auth).
+	 * This is the primary driver of the status bar — shows dev connection state.
 	 */
 	private handleConnectionStatusChange(status: ConnectionStatus): void {
 		if (status.state === ConnectionState.CONNECTED) {
@@ -126,16 +132,11 @@ export class BarStatus {
 			this.statusBarItem.tooltip = 'Connected - Click to disconnect';
 			this.statusBarItem.backgroundColor = undefined;
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', true);
-		} else if (status.state === ConnectionState.DOWNLOADING_ENGINE) {
-			this.statusBarItem.text = '$(cloud-download) RocketRide: Downloading Engine...';
+		} else if (status.state === ConnectionState.CONNECTING) {
+			const msg = status.progressMessage || 'Connecting...';
+			this.statusBarItem.text = `$(sync~spin) RocketRide: ${msg}`;
 			this.statusBarItem.command = undefined;
-			this.statusBarItem.tooltip = 'Downloading engine from GitHub...';
-			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
-		} else if (status.state === ConnectionState.STARTING_ENGINE || status.state === ConnectionState.CONNECTING) {
-			this.statusBarItem.text = '$(sync~spin) RocketRide: Connecting...';
-			this.statusBarItem.command = undefined;
-			this.statusBarItem.tooltip = 'Connecting to RocketRide server...';
+			this.statusBarItem.tooltip = msg;
 			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 		} else if (status.state === ConnectionState.AUTH_FAILED) {
@@ -271,6 +272,10 @@ export class BarStatus {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
+		if (this.statusChangeHandler && this.connectionManager) {
+			this.connectionManager.removeListener('shell:statusChange', this.statusChangeHandler);
+			this.statusChangeHandler = undefined;
+		}
 		this.statusBarItem.dispose();
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];

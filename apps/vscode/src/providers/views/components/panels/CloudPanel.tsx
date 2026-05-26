@@ -21,16 +21,26 @@ import { useTheme } from '../../hooks/useTheme';
 // =============================================================================
 
 export interface CloudPanelProps {
+	/** Whether the user is currently signed in via OAuth. */
 	cloudSignedIn: boolean;
+	/** Display name of the signed-in user. */
 	cloudUserName: string;
+	/** Trigger the OAuth sign-in flow. */
 	onCloudSignIn: () => void;
 	onCloudSignOut: () => void;
+	/** Available teams for the signed-in account. */
 	teams: Array<{ id: string; name: string }>;
+	/** Currently selected team ID (persisted in settings). */
 	selectedTeamId: string;
 	onTeamChange: (teamId: string) => void;
+	/** Unique prefix for HTML element IDs. */
 	idPrefix: string;
+	/** When true, hides advanced fields (used on Welcome page). */
 	simplified?: boolean;
-	/** Whether the server supports SaaS/OAuth. When false, shows an incompatible-server message. */
+	/**
+	 * Whether the server supports SaaS/OAuth (from probe result).
+	 * undefined = probing in progress, false = incompatible server.
+	 */
 	isSaas?: boolean;
 	/** Called on mount to probe the cloud server. Receives the cloud endpoint URL. */
 	onProbeServer?: (cloudUrl: string) => void;
@@ -120,6 +130,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					<div style={S.helpText}>Which team's engine to connect to</div>
 				</div>
 			)}
+
 		</>
 	);
 };

@@ -31,7 +31,7 @@ import { createPortal } from 'react-dom';
 import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { PopupRow } from '../PopupRow';
-import { BxBookOpen, BxCog, BxChevronRight, BxCheck } from '../BoxIcon';
+import { BxBookOpen, BxCog, BxChevronRight, BxCheck, BxLock } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
 
 // =============================================================================
@@ -75,6 +75,22 @@ export interface SidebarFooterProps {
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
 	onOpenDocs?: () => void;
+	/** Opens the Environment page (shown in flat mode when connected). */
+	onEnvironmentClick?: () => void;
+	/** Opens the Settings page directly (used in both flat and popup modes). */
+	onSettingsClick?: () => void;
+
+	// ── Inline connection status (flat mode) ────────────────────────────────
+	/**
+	 * When provided, the footer renders in "flat" mode: Documentation,
+	 * Settings, and connection status are shown directly — no popup.
+	 */
+	connectionStatus?: {
+		state: 'connected' | 'connecting' | 'disconnected';
+		text: string;
+		message?: string;
+	};
+
 	// ── Popup menu items ────────────────────────────────────────────────────
 	/** Host-specific menu items shown in the avatar popup. */
 	menuItems?: SidebarFooterMenuItem[];
@@ -178,13 +194,20 @@ const S = {
 
 	// ── Popup divider ───────────────────────────────────────────────────────
 	divider: commonStyles.divider,
+
+	// ── Full-width divider (bleeds past wrapper padding) ────────────────────
+	fullDivider: {
+		...commonStyles.divider,
+		marginLeft: -8,
+		marginRight: -8,
+	} as CSSProperties,
 };
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, onEnvironmentClick, onSettingsClick, connectionStatus, menuItems }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
 		if (!userName) return 'U';
@@ -201,6 +224,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [hovered, setHovered] = useState(false);
 	const [docsHovered, setDocsHovered] = useState(false);
+	const [envHovered, setEnvHovered] = useState(false);
 	const triggerRef = useRef<HTMLDivElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState(200);
@@ -290,11 +314,112 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	}, [menuOpen]);
 
 	const topLevelItems = menuItems ?? [];
+	const flatMode = !!connectionStatus;
+
+	// ── Announcements ticker (flat mode) ────────────────────────────────────
+	const announcements: { title: string; body: string; linkText: string; linkUrl: string }[] = useMemo(
+		() => [
+			{ title: 'Agentic AI Hackathon - SF', body: 'Hack-with-the-Bay, Fri June 5.', linkText: 'Details & RSVP', linkUrl: 'https://luma.com/zemh10km' },
+			{ title: 'Connect with us', body: 'See what others are building.', linkText: 'Join Discord', linkUrl: 'https://discord.gg/9hr3tdZmEG' },
+		],
+		[]
+	);
+	const [tickerIndex, setTickerIndex] = useState(0);
+	const [tickerFade, setTickerFade] = useState(true);
+
+	useEffect(() => {
+		if (announcements.length === 0) return;
+		const interval = setInterval(() => {
+			setTickerFade(false);
+			setTimeout(() => {
+				setTickerIndex((i) => (i + 1) % announcements.length);
+				setTickerFade(true);
+			}, 300);
+		}, 7000);
+		return () => clearInterval(interval);
+	}, [announcements.length]);
 
 	// ── Render ──────────────────────────────────────────────────────────────
 
+	// ── Flat mode: no popup, render items directly in the footer ────────
+	if (flatMode) {
+		const current = announcements[tickerIndex];
+		return (
+			<div style={S.wrapper}>
+				{/* Separator above announcements */}
+				<div style={S.fullDivider} />
+				{/* Announcements ticker */}
+				<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+					<div
+						style={{
+							opacity: tickerFade ? 1 : 0,
+							transition: 'opacity 300ms ease',
+						}}
+					>
+						<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{current.title}</div>
+						<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>{current.body}</div>
+						<a href={current.linkUrl} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>{current.linkText} &rarr;</a>
+					</div>
+				</div>
+				{onOpenDocs && (
+					<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
+						<BxBookOpen size={16} />
+						{!collapsed && 'Documentation'}
+					</button>
+				)}
+				{onEnvironmentClick && (
+					<button style={{ ...S.docsBtn, background: envHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setEnvHovered(true)} onMouseLeave={() => setEnvHovered(false)} onClick={onEnvironmentClick}>
+						<BxLock size={16} />
+						{!collapsed && 'Variables'}
+					</button>
+				)}
+				{onSettingsClick && (
+					<button style={S.gearTrigger(hovered, false, collapsed)} onClick={onSettingsClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+						<BxCog size={20} />
+						{!collapsed && <span>Settings</span>}
+					</button>
+				)}
+				{/* Separator under Settings, above connection info */}
+				<div style={S.fullDivider} />
+				{!collapsed && (
+					<div style={{ padding: '4px 15px', fontSize: 11, color: 'var(--rr-text-secondary)' }}>
+						<div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+							<span
+								style={{
+									width: 8,
+									height: 8,
+									borderRadius: '50%',
+									flexShrink: 0,
+									backgroundColor: connectionStatus.state === 'connected' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+								}}
+							/>
+							<span>{connectionStatus.text}</span>
+						</div>
+						{connectionStatus.message && <div style={{ paddingLeft: 13, marginTop: 2, fontSize: 11, color: 'var(--rr-text-secondary)' }}>{connectionStatus.message}</div>}
+					</div>
+				)}
+			</div>
+		);
+	}
+
+	// ── Popup mode ──────────────────────────────────────────────────────
+
 	return (
 		<div style={S.wrapper}>
+			{/* ── Announcements ticker (popup mode) ────────────────────── */}
+			{!collapsed && announcements.length > 0 && (
+				<>
+					<div style={S.fullDivider} />
+					<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+						<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
+							<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{announcements[tickerIndex].title}</div>
+							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>{announcements[tickerIndex].body}</div>
+							<a href={announcements[tickerIndex].linkUrl} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>{announcements[tickerIndex].linkText} &rarr;</a>
+						</div>
+					</div>
+				</>
+			)}
+
 			{/* ── Documentation button ──────────────────────────────────── */}
 			{onOpenDocs && (
 				<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
@@ -316,7 +441,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				</div>
 			)}
 
-			{/* ── Gear trigger fallback (no identity, but menu items exist) */}
+			{/* ── Gear trigger fallback (no identity, popup mode) ──────── */}
 			{!userName && menuItems && menuItems.length > 0 && (
 				<button ref={triggerRef as React.RefObject<HTMLButtonElement>} style={S.gearTrigger(hovered, menuOpen, collapsed)} onClick={() => setMenuOpen((v) => !v)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
 					<BxCog size={20} />
@@ -350,16 +475,11 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 							<React.Fragment key={item.id}>
 								{item.dividerBefore && <div style={S.divider} />}
 
-								{/* Section header — bold label with gear icon + status line */}
+								{/* Section header — bold label + status line */}
 								{item.header ? (
 									<div style={{ padding: '6px 10px', fontSize: 11, fontWeight: 600, color: 'var(--rr-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
 										<div style={{ display: 'flex', alignItems: 'center' }}>
 											<span style={{ flex: 1 }}>{item.label}</span>
-											{item.onClick && (
-												<span onClick={item.onClick} style={{ cursor: 'pointer', display: 'inline-flex' }}>
-													<BxCog size={14} />
-												</span>
-											)}
 										</div>
 										{/* Status lines (e.g. "Connected (Local)" + "Team: Dev") */}
 										{item.statusText &&
