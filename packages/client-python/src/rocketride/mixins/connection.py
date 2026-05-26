@@ -380,7 +380,11 @@ class ConnectionMixin(DAPClient):
 
         parsed = urllib.parse.urlparse(uri)
 
-        if not parsed.port and 'rocketride.ai' not in (parsed.hostname or ''):
+        # Use `is None` (not `not parsed.port`) so port=0 stays as 0 instead of
+        # being silently rewritten to CONST_DEFAULT_WEB_PORT. Port 0 reaching this
+        # code is a caller bug; the substitution would mask it as a connection
+        # error against the wrong host.
+        if parsed.port is None and 'rocketride.ai' not in (parsed.hostname or ''):
             hostname = parsed.hostname
             if not hostname:
                 raise ValueError(f"Invalid URI '{uri}': missing hostname")
