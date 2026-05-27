@@ -71,7 +71,11 @@ class TestDynamicNodesFull:
 
                     if errors:
                         error_msgs = [f'  - {e.path}: {e.args[0]}' for e in errors]
-                        pytest.fail(f'Test case {case_id} failed validation:\n' + '\n'.join(error_msgs) + f'\n\nResults: {results}')
+                        pytest.fail(
+                            f'Test case {case_id} failed validation:\n'
+                            + '\n'.join(error_msgs)
+                            + f'\n\nResults: {results}'
+                        )
 
                 except Exception as e:
                     pytest.fail(f'Test case {case_id} raised exception: {e}')

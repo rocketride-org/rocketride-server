@@ -87,7 +87,14 @@ class Chat(ChatBase):
         """
         Get the maximum token count for the specified model.
         """
-        model_tokens = {'sonar-pro': 127072, 'sonar': 127072, 'sonar-reasoning-pro': 127072, 'sonar-reasoning': 127072, 'sonar-deep-research': 127072, 'r1-1776': 128000}
+        model_tokens = {
+            'sonar-pro': 127072,
+            'sonar': 127072,
+            'sonar-reasoning-pro': 127072,
+            'sonar-reasoning': 127072,
+            'sonar-deep-research': 127072,
+            'r1-1776': 128000,
+        }
         return model_tokens.get(model, 127072)
 
     def _getModelTimeout(self, model: str) -> int:
@@ -139,7 +146,9 @@ class Chat(ChatBase):
 
         # Model availability
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable', 'not available']):
-            return f"The model '{self._model}' is currently unavailable. Please try a different model or contact support."
+            return (
+                f"The model '{self._model}' is currently unavailable. Please try a different model or contact support."
+            )
 
         # Server errors
         if any(phrase in error_lower for phrase in ['internal server error', '500', 'service unavailable', '503']):
@@ -165,7 +174,19 @@ class Chat(ChatBase):
         error_msg = str(error).lower()
 
         # Retry on temporary network/server issues
-        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'bad gateway']
+        retryable_errors = [
+            'timeout',
+            'timed out',
+            'connection',
+            'network',
+            '500',
+            '502',
+            '503',
+            '504',
+            'internal server error',
+            'service unavailable',
+            'bad gateway',
+        ]
 
         return any(phrase in error_msg for phrase in retryable_errors)
 

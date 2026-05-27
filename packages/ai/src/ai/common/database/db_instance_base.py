@@ -49,7 +49,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DatabaseGlobalBase
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
 from .sql_safety import is_sql_safe
 
 
@@ -70,6 +70,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _db_display_name(self) -> str:
         """Return the human-readable database name (e.g. 'MySQL', 'PostgreSQL')."""
 
+    @abstractmethod
+    def _db_dialect(self) -> str:
+        """Return the machine-readable dialect identifier (e.g. 'mysql', 'postgres').
+
+        Surfaced to SDK callers via ``QuestionType.DIALECT`` so applications can
+        branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
+        """
+
     # ------------------------------------------------------------------
     # Tool methods — dispatched by IInstanceBase.invoke() via @tool_function
     # ------------------------------------------------------------------
@@ -79,19 +87,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'type': 'object',
             'required': ['question'],
             'properties': {
-                'question': {'type': 'string', 'description': 'Natural-language description of the data you want to retrieve'},
-                'limit': {'type': 'integer', 'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.'},
+                'question': {
+                    'type': 'string',
+                    'description': 'Natural-language description of the data you want to retrieve',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}). Increase when you need the full result set.',
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'description': 'Result rows returned by the query.', 'items': {'type': 'object'}},
+                'rows': {
+                    'type': 'array',
+                    'description': 'Result rows returned by the query.',
+                    'items': {'type': 'object'},
+                },
                 'sql': {'type': 'string', 'description': 'The generated SQL SELECT statement that was executed.'},
                 'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
                 'valid': {'type': 'boolean', 'description': 'Whether a valid SQL query was generated.'},
                 'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
-                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a database query.'},
+                'answer': {
+                    'type': 'string',
+                    'description': 'LLM text response when the question is not a database query.',
+                },
             },
         },
         description=lambda self: (
@@ -114,7 +135,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         question = question.strip()
         raw_limit = args.get('limit')
         try:
-            limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+            limit = max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
         except (TypeError, ValueError):
             limit = 250
 
@@ -134,7 +155,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         input_schema={
             'type': 'object',
             'properties': {
-                'table': {'type': 'string', 'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.'},
+                'table': {
+                    'type': 'string',
+                    'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.',
+                },
             },
         },
         output_schema={
@@ -197,7 +221,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 'answer': {'type': 'string'},
             },
         },
-        description=lambda self: f'Accepts a natural-language description and returns the equivalent {self._db_display_name()} SQL SELECT statement without executing it. Only use when the user explicitly asks to see the SQL -- for actual data retrieval, use get_data instead.',
+        description=lambda self: (
+            f'Accepts a natural-language description and returns the equivalent {self._db_display_name()} SQL SELECT statement without executing it. Only use when the user explicitly asks to see the SQL -- for actual data retrieval, use get_data instead.'
+        ),
     )
     def get_sql(self, args):
         """Translate natural language to SQL without executing."""
@@ -282,14 +308,20 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             # EXPLAIN rejected the query — log and feed the error back so the
             # LLM can produce a corrected statement on the next attempt.
-            warning(f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}')
+            warning(
+                f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
+            )
             previous_sql = sql_query
             last_error = explain_error
 
-        warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.')
+        warning(
+            f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.'
+        )
         return result
 
-    def _buildSQLQueryOnce(self, question_text: str, *, limit: int = 250, previous_sql: str | None = None, error: str | None = None) -> dict:
+    def _buildSQLQueryOnce(
+        self, question_text: str, *, limit: int = 250, previous_sql: str | None = None, error: str | None = None
+    ) -> dict:
         """Single LLM call: translate a natural-language question into SQL.
 
         ``previous_sql`` and ``error`` are supplied on retry attempts so the
@@ -363,19 +395,26 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'Tell me the salaries of department managers',
             {
                 'isValid': 'true',
-                'query': ('SELECT dm.emp_no, e.first_name, e.last_name, s.salary\nFROM dept_manager dm\nJOIN employees e ON dm.emp_no = e.emp_no\nJOIN salaries s ON dm.emp_no = s.emp_no\nWHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\nLIMIT 250'),
+                'query': (
+                    'SELECT dm.emp_no, e.first_name, e.last_name, s.salary\nFROM dept_manager dm\nJOIN employees e ON dm.emp_no = e.emp_no\nJOIN salaries s ON dm.emp_no = s.emp_no\nWHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\nLIMIT 250'
+                ),
             },
         )
         # Off-topic example so the LLM knows how to handle non-DB questions.
         question.addExample(
             'When did the Visigoths sack Rome?',
-            {'isValid': 'false', 'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.'},
+            {
+                'isValid': 'false',
+                'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.',
+            },
         )
 
         # On a retry, provide the rejected SQL and the EXPLAIN error so the
         # LLM knows exactly what was wrong and can produce a corrected query.
         if previous_sql and error:
-            question.addContext(f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.')
+            question.addContext(
+                f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.'
+            )
 
         result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
@@ -395,6 +434,39 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         except SQLAlchemyError as e:
             error(f'Error executing SQL query: {e}')
+            return None
+
+    def _executeRawQuery(self, query: str) -> dict | None:
+        """Execute a raw SQL statement (read or write) without LLM or safety gating.
+
+        Uses ``engine.begin()`` so writes auto-commit. Returns
+        ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
+        (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+
+        SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
+        large query from exhausting worker memory. ``rowcount`` is normalized
+        to a non-negative int — some dialects return -1 when unknown.
+        """
+        try:
+            with self.IGlobal.engine.begin() as conn:
+                result = conn.execute(text(query))
+                if result.returns_rows:
+                    max_rows = self.IGlobal.max_execute_rows
+                    rows = result.fetchmany(max_rows + 1)
+                    if len(rows) > max_rows:
+                        error(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+                        return None
+                    column_names = result.keys()
+                    return {
+                        'rows': [dict(zip(column_names, row)) for row in rows],
+                        'affected_rows': 0,
+                    }
+                rowcount = result.rowcount
+                affected = rowcount if isinstance(rowcount, int) and rowcount >= 0 else 0
+                return {'rows': [], 'affected_rows': affected}
+
+        except SQLAlchemyError as e:
+            error(f'Error executing raw SQL query: {e}')
             return None
 
     def _formatResultAsMarkdown(self, result: Any) -> str:
@@ -432,6 +504,46 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
+
+        # DIALECT: dialect-discovery request — emit {'dialect': '...'} on the
+        # answers lane so the SDK can branch on the engine. No gate needed:
+        # the value is metadata, not data, and the node already exposed itself
+        # by being connected.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': self._db_dialect()}))
+                self.instance.writeAnswers(answer)
+            return
+
+        # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
+                return
+            try:
+                execute_result = self._executeRawQuery(question_text)
+                if execute_result is None:
+                    return
+
+                rows = [self._sanitize_row(row) for row in execute_result['rows']]
+                affected = execute_result['affected_rows']
+                payload = {'rows': rows, 'affected_rows': affected}
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
+
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(payload, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
+            return
 
         try:
             # Ask the LLM to translate the natural-language question into SQL.
@@ -514,8 +626,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal._tableExists(self.IGlobal.table):
             debug(f'Table "{self.IGlobal.table}" does not exist. Creating it from data structure...')
             if not self.IGlobal._createTableFromData(self.IGlobal.table, items):
-                error(f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.')
-                raise RuntimeError(f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.')
+                error(
+                    f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.'
+                )
+                raise RuntimeError(
+                    f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.'
+                )
             debug(f'Successfully created table "{self.IGlobal.table}" from data structure.')
 
         # Fetch the schema if it wasn't populated at startup (e.g. the table
@@ -537,7 +653,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             table = SQLTable(self.IGlobal.table, metadata, autoload_with=engine)
         except NoSuchTableError:
-            error(f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.')
+            error(
+                f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.'
+            )
             raise
 
         def prepare_value(value: Any) -> Any:

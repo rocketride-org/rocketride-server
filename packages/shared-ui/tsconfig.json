@@ -16,7 +16,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "incremental": true,
     "declaration": true,
     "declarationMap": true,
     "outDir": "./dist"

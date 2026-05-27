@@ -30,6 +30,7 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
+import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
 
 // =============================================================================
@@ -80,14 +81,18 @@ export interface IProjectViewProps {
 	onSave?: () => void;
 	/** Called when the user clears the trace log. */
 	onTraceClear?: () => void;
-	/** When true, hides the Design tab, disables Run (Stop still works), defaults to Status tab. */
-	statusOnly?: boolean;
+	/** When true, the canvas is fully read-only: editing, saving, and run/stop are disabled. */
+	isReadonly?: boolean;
 	/**
 	 * Whether the user has an active subscription for pipeline execution.
 	 * When false, play buttons show a lock overlay and the run button shows "Subscribe".
 	 * Defaults to true (ungated) when not provided.
 	 */
 	isSubscribed?: boolean;
+	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
+	envKeys?: string[];
+	/** Called when the pipeline references ROCKETRIDE_* vars not present in envKeys. */
+	onMissingEnvVars?: (missingKeys: string[]) => void;
 }
 
 // =============================================================================
@@ -105,12 +110,7 @@ const styles = {
 		backgroundColor: 'var(--rr-bg-default)',
 	} as CSSProperties,
 	disconnectOverlay: {
-		position: 'absolute',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		...commonStyles.modalOverlay,
 		backdropFilter: 'blur(8px)',
 		WebkitBackdropFilter: 'blur(8px)',
 		zIndex: 1000,
@@ -172,11 +172,11 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear, statusOnly = false }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
-		mode: initialViewState?.mode ?? (statusOnly ? 'status' : 'design'),
+		mode: initialViewState?.mode ?? 'design',
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
 	}));
@@ -267,10 +267,19 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	);
 
 	const handleRunPipeline = useCallback(
-		(source: string, _project: any) => {
+		(source: string, pipelineProject: any) => {
+			// Check for missing ROCKETRIDE_* env vars before running
+			if (onMissingEnvVars && envKeys) {
+				const referenced = extractPipelineEnvVars(pipelineProject);
+				const missing = referenced.filter((v) => !envKeys.includes(v));
+				if (missing.length > 0) {
+					onMissingEnvVars(missing);
+					return;
+				}
+			}
 			onPipelineAction?.('run', source);
 		},
-		[onPipelineAction]
+		[onPipelineAction, onMissingEnvVars, envKeys]
 	);
 
 	const handleStopPipeline = useCallback(
@@ -310,7 +319,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	// --- Tab definitions -----------------------------------------------------
 
 	const allTabs = [
-		...(statusOnly ? [] : [{ id: 'design', label: 'Design' }]),
+		{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
@@ -327,11 +336,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			// In statusOnly mode, only allow stop (no pipeline JSON to run)
-			if (statusOnly && action !== 'stop') return;
 			onPipelineAction?.(action, source);
 		},
-		[onPipelineAction, statusOnly]
+		[onPipelineAction]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -342,10 +349,10 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isDirty} isNew={isNew} onSave={handleSave} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} statusOnly={statusOnly} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
@@ -421,16 +428,15 @@ const SourceStatusPane: React.FC<{
 	taskStatus: TaskStatus | undefined;
 	isConnected: boolean;
 	isSubscribed?: boolean;
-	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	onOpenLink?: (url: string, displayName?: string) => void;
 	serverHost?: string;
-	statusOnly?: boolean;
-}> = ({ source, taskStatus, isConnected, isSubscribed, onPipelineAction, onOpenLink, serverHost, statusOnly }) => {
+}> = ({ source, taskStatus, isConnected, isSubscribed, onPipelineAction, onOpenLink, serverHost }) => {
 	const currentElapsed = useElapsedTimer(taskStatus ?? null);
 
 	return (
 		<div style={styles.sourcePane}>
-			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} disableRun={statusOnly} isSubscribed={isSubscribed} />
+			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={onPipelineAction ? (action, src) => onPipelineAction(action, src ?? source.id) : undefined} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} isSubscribed={isSubscribed} />
 			<div style={styles.sourceBody}>
 				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} isConnected={isConnected} />
 			</div>

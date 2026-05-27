@@ -66,11 +66,14 @@ account: Account = Account()
 from .keystore import KeyStore
 from .report import Reporter
 from .store import Store, IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS, LOG_PAGE_SIZE
-from .models import AccountInfo, resolve_team_permissions
+from .deployment_store import DeploymentStore
+from .models import AccountInfo, DeploymentRecord, resolve_team_permissions
 
 __all__ = [
     'Account',
     'AccountInfo',
+    'DeploymentRecord',
+    'DeploymentStore',
     'resolve_team_permissions',
     'account',
     'KeyStore',

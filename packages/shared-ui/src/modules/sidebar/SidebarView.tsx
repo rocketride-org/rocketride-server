@@ -16,7 +16,7 @@
 
 import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
-import { BxPlus, BxDesktop, BxCloudUpload, BxComponent, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
+import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
 import { Explorer } from '../explorer';
 import type { ISidebarViewProps } from './types';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
@@ -167,12 +167,6 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				</button>
 				<button style={{ ...S.navBtn, ...navHoverBg('monitor'), ...(isConnected ? {} : S.navBtnDisabled) }} onMouseEnter={() => setHoveredNav('monitor')} onMouseLeave={() => setHoveredNav(null)} onClick={() => isConnected && onNavigate('monitor')} disabled={!isConnected}>
 					<BxDesktop size={16} /> Monitor
-				</button>
-				<button style={{ ...S.navBtn, ...navHoverBg('deploy'), ...(isConnected ? {} : S.navBtnDisabled) }} onMouseEnter={() => setHoveredNav('deploy')} onMouseLeave={() => setHoveredNav(null)} onClick={() => isConnected && onNavigate('deploy')} disabled={!isConnected}>
-					<BxCloudUpload size={16} /> Deployments
-				</button>
-				<button style={{ ...S.navBtn, ...navHoverBg('templates'), ...(isConnected ? {} : S.navBtnDisabled) }} onMouseEnter={() => setHoveredNav('templates')} onMouseLeave={() => setHoveredNav(null)} onClick={() => isConnected && onNavigate('templates')} disabled={!isConnected}>
-					<BxComponent size={16} /> Templates
 				</button>
 			</div>
 

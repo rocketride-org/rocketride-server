@@ -1,0 +1,301 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
+/**
+ * AuthProvider — authentication recovery page.
+ *
+ * Opened automatically when a connection attempt fails with an
+ * AuthenticationException. Shows the appropriate credential form based on
+ * the active connection mode (Cloud sign-in, On-prem API key, etc.).
+ *
+ * After the user fixes their credentials, "Save & Connect" persists them
+ * and triggers an EngineRegistry.reconcile() which restarts affected
+ * engines and reconnects the ConnectionManagers with fresh credentials.
+ */
+
+import * as vscode from 'vscode';
+import { ConfigManager } from '../config';
+import { getConnectionManager, getEngineRegistry } from '../extension';
+import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+
+// =============================================================================
+// PROVIDER
+// =============================================================================
+
+/**
+ * Authentication recovery page provider.
+ *
+ * Creates a webview panel that lets the user fix credentials after an
+ * AuthenticationException. Supports Cloud OAuth (PKCE), On-prem API keys,
+ * and Docker/Service default keys. After saving, triggers an engine
+ * reconcile to restart and reconnect with the new credentials.
+ */
+export class AuthProvider {
+	private disposables: vscode.Disposable[] = [];
+	private configManager: ConfigManager;
+	private connHandler: ConnectionMessageHandler;
+	private panel: vscode.WebviewPanel | undefined;
+	private pendingGroup: string | undefined;
+	private pendingConnectionMode: string | undefined;
+	private pendingErrorMessage: string | undefined;
+
+	constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly extensionUri: vscode.Uri
+	) {
+		this.configManager = ConfigManager.getInstance();
+		this.connHandler = new ConnectionMessageHandler({
+			extensionFsPath: extensionUri.fsPath,
+			getActiveWebviews: () => (this.panel ? [this.panel.webview] : []),
+			getConnectionManager,
+		});
+		this.registerCommands();
+	}
+
+	// =========================================================================
+	// COMMANDS
+	// =========================================================================
+
+	private registerCommands(): void {
+		const cmd = vscode.commands.registerCommand('rocketride.page.auth.open', async (group?: string, connectionMode?: string, errorMessage?: string) => {
+			this.pendingGroup = group || 'development';
+			this.pendingConnectionMode = connectionMode;
+			this.pendingErrorMessage = errorMessage;
+			await this.show();
+		});
+		this.disposables.push(cmd);
+		this.context.subscriptions.push(cmd);
+	}
+
+	// =========================================================================
+	// SHOW / LIFECYCLE
+	// =========================================================================
+
+	/**
+	 * Creates or reveals the auth panel.
+	 */
+	public async show(): Promise<void> {
+		if (this.panel) {
+			this.panel.reveal(vscode.ViewColumn.One);
+			// Re-send init in case mode/error changed
+			this.sendInit();
+			return;
+		}
+
+		this.panel = vscode.window.createWebviewPanel('rocketrideAuth', 'RocketRide: Sign In', vscode.ViewColumn.One, {
+			enableScripts: true,
+			localResourceRoots: [this.extensionUri],
+			retainContextWhenHidden: false,
+		});
+
+		this.panel.webview.html = this.getHtmlForWebview(this.panel.webview);
+
+		// --- Message handler -----------------------------------------------------
+		const messageDisposable = this.panel.webview.onDidReceiveMessage(async (message) => {
+			if (!this.panel) return;
+			try {
+				switch (message.type) {
+					case 'view:ready':
+						this.sendInit();
+						break;
+
+					case 'saveCredentials':
+						await this.saveAndConnect(message);
+						break;
+
+					default: {
+						// Delegate cloud auth messages (cloud:signIn, cloud:signOut, cloud:getStatus, fetchTeams)
+						const handled = await this.connHandler.handleMessage(message, this.panel.webview);
+						if (handled) break;
+						console.warn('[AuthProvider] Unhandled message type:', message.type);
+						break;
+					}
+				}
+			} catch (error) {
+				console.error('[AuthProvider] Message handling error:', error);
+				this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Error: ${error}` });
+			}
+		});
+		this.disposables.push(messageDisposable);
+
+		// Listen for cloud auth changes (e.g. PKCE callback completes)
+		const panelWebview = this.panel.webview;
+		const cleanupCloudAuth = this.connHandler.registerCloudAuthListener(panelWebview);
+
+		// When PKCE sign-in completes (cloud mode), auto-reconnect and close.
+		const cloudAuth = CloudAuthProvider.getInstance();
+		const onAuthChanged = async () => {
+			try {
+				const signedIn = await cloudAuth.isSignedIn();
+				if (signedIn) {
+					// Reconcile — cloud token changed, engine restarts, CM reconnects
+					const registry = getEngineRegistry();
+					if (registry) await registry.reconcile();
+					this.panel?.dispose();
+				}
+			} catch (error) {
+				console.error('[AuthProvider] Reconnect after sign-in failed:', error);
+			}
+		};
+		cloudAuth.onDidChange.on('changed', onAuthChanged);
+
+		this.panel.onDidDispose(() => {
+			cleanupCloudAuth();
+			cloudAuth.onDidChange.removeListener('changed', onAuthChanged);
+			this.panel = undefined;
+			const index = this.disposables.indexOf(messageDisposable);
+			if (index !== -1) {
+				this.disposables.splice(index, 1);
+			}
+		});
+	}
+
+	// =========================================================================
+	// MESSAGING
+	// =========================================================================
+
+	/**
+	 * Send the initial state to the webview so it knows which mode to render.
+	 */
+	private sendInit(): void {
+		if (!this.panel) return;
+
+		const config = this.configManager.getConfig();
+		const group = (this.pendingGroup || 'development') as 'development' | 'deployment';
+		const groupConfig = config[group];
+		const connectionMode = this.pendingConnectionMode || groupConfig.connectionMode;
+
+		this.panel.webview.postMessage({
+			type: 'init',
+			group,
+			connectionMode,
+			errorMessage: this.pendingErrorMessage || 'Authentication failed',
+			hostUrl: groupConfig.hostUrl,
+			apiKey: groupConfig.apiKey || '',
+		});
+
+		// Also send cloud auth status so CloudPanel knows the state
+		this.connHandler.sendCloudStatus(this.panel.webview);
+	}
+
+	// =========================================================================
+	// SAVE & CONNECT
+	// =========================================================================
+
+	/**
+	 * Persist new credentials and trigger a reconnect via engine reconcile.
+	 * On success, closes the auth panel. On failure, shows an error in the panel.
+	 *
+	 * Unlike SettingsProvider.saveAllSettings(), this only writes the credentials
+	 * that changed (API key and/or host URL) rather than the full settings snapshot,
+	 * since the user is only fixing auth — not changing other settings.
+	 *
+	 * @param message - The webview message containing group, apiKey, and/or hostUrl.
+	 */
+	private async saveAndConnect(message: Record<string, unknown>): Promise<void> {
+		try {
+			const group = (message.group as 'development' | 'deployment') || (this.pendingGroup as 'development' | 'deployment') || 'development';
+
+			// Persist API key if provided (on-prem, docker, service modes)
+			if (typeof message.apiKey === 'string') {
+				if (message.apiKey.trim() !== '') {
+					await this.configManager.setApiKey(group, message.apiKey.trim());
+				} else {
+					await this.configManager.deleteApiKey(group);
+				}
+			}
+
+			// Persist host URL if provided (on-prem mode)
+			if (typeof message.hostUrl === 'string') {
+				await this.configManager.updateHostUrl(group, message.hostUrl);
+			}
+
+			// Reconcile triggers the full sequence: config checksum change detected
+			// -> engine restart -> 'ready' event -> CM reconnects with new credentials
+			const registry = getEngineRegistry();
+			if (registry) await registry.reconcile();
+
+			// Close the panel only after successful reconnect
+			this.panel?.dispose();
+		} catch (error) {
+			console.error('[AuthProvider] Failed to save credentials:', error);
+			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save: ${error}` });
+		}
+	}
+
+	// =========================================================================
+	// HTML
+	// =========================================================================
+
+	private getHtmlForWebview(webview: vscode.Webview): string {
+		const nonce = this.generateNonce();
+		const htmlPath = vscode.Uri.joinPath(this.extensionUri, 'webview', 'page-auth.html');
+
+		try {
+			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
+
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
+
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
+		} catch (error) {
+			console.error('Error loading auth HTML:', error);
+			return `<!DOCTYPE html>
+			<html lang="en">
+			<head><meta charset="UTF-8"><title>Auth Error</title></head>
+			<body>
+				<div style="padding: 20px; color: #f44336;">
+					<h3>Error Loading Auth View</h3>
+					<p><strong>Error:</strong> ${error}</p>
+					<p>Run <code>pnpm run build</code> to build the webview.</p>
+					<p>Expected: <code>${htmlPath.fsPath}</code></p>
+				</div>
+			</body>
+			</html>`;
+		}
+	}
+
+	private generateNonce(): string {
+		let text = '';
+		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+		for (let i = 0; i < 32; i++) {
+			text += possible.charAt(Math.floor(Math.random() * possible.length));
+		}
+		return text;
+	}
+
+	// =========================================================================
+	// DISPOSE
+	// =========================================================================
+
+	public dispose(): void {
+		this.connHandler.dispose();
+		this.panel?.dispose();
+		this.disposables.forEach((d) => d.dispose());
+		this.disposables = [];
+	}
+}

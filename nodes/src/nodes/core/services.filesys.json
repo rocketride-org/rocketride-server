@@ -50,17 +50,6 @@
 	"lanes": {
 		"_source": ["tags"]
 	},
-	"input": [
-		{
-			"lane": "_source",
-			"output": [
-				{
-					"lane": "tags",
-					"description": "Outputs documents to be processed."
-				}
-			]
-		}
-	],
 	//
 	// Optional:
 	//		Local fields definitions - these define fields only for the

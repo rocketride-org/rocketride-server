@@ -427,6 +427,13 @@ class WebServer:
         """
         # Walk each registered authenticator in registration order.
         # The first one that returns a non-None AccountInfo wins; the rest are skipped.
+        #
+        # On exception, the client gets a generic message; the actual exception
+        # text goes to the server-side debug log only. Returning str(e) to the
+        # client used to leak library internals (JWT verifier internals, crypto
+        # error specifics, occasional file paths) — CodeQL py/stack-trace-exposure
+        # alerts #5 and #6 flagged this taint flow into the HTMLResponse /
+        # PlainTextResponse error path.
         for authenticator in self._authenticators:
             try:
                 account_info = await authenticator(authorization)
@@ -436,10 +443,12 @@ class WebServer:
                 return account_info
             except PermissionError as e:
                 # Authenticator explicitly denied access (known-bad credential)
-                return (401, str(e))
+                debug(f'auth: PermissionError from authenticator: {str(e)}')
+                return (401, 'Authentication failed')
             except Exception as e:
                 # Authenticator raised an unexpected error — treat as a bad-request failure
-                return (400, str(e))
+                debug(f'auth: authenticator raised unexpected error: {str(e)}')
+                return (400, 'Bad request')
 
         # No registered authenticator matched; fall back to the built-in account authenticator
         try:
@@ -450,7 +459,8 @@ class WebServer:
             return account_info
         except Exception as e:
             # Built-in authenticator raised an unexpected error
-            return (400, str(e))
+            debug(f'auth: built-in account authenticator raised: {str(e)}')
+            return (400, 'Bad request')
 
     async def authenticate_request(
         self,
@@ -873,7 +883,9 @@ class WebServer:
         # Without this check, an attacker could load arbitrary Python modules
         # via importlib.import_module(), leading to remote code execution.
         if moduleName not in ALLOWED_MODULES:
-            raise ValueError(f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}')
+            raise ValueError(
+                f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}'
+            )
 
         # If it is already loaded, return success
         if moduleName in self.app.state.modules:

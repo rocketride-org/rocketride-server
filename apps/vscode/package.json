@@ -2,7 +2,7 @@
 	"name": "rocketride",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.6",
+	"version": "1.1.0",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -443,6 +443,50 @@
 				{
 					"command": "rocketride.page.settings.setupCredentials",
 					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.connection.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.files.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.connect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.disconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.reconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.clearApiKey",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.createFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.deploy.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.install",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.uninstall",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -488,10 +532,10 @@
 	},
 	"main": "./dist/rocketride.js",
 	"devDependencies": {
-		"@rsbuild/core": "^1.4.10",
-		"@rsbuild/plugin-react": "^1.3.4",
-		"@rsbuild/plugin-type-check": "^1.2.3",
-		"@types/adm-zip": "^0.5.5",
+		"@rsbuild/core": "~1.7.5",
+		"@rsbuild/plugin-react": "~1.4.6",
+		"@rsbuild/plugin-type-check": "~1.3.4",
+		"@types/adm-zip": "^0.5.8",
 		"@types/chart.js": "^2.9.41",
 		"@types/dockerode": "^4.0.1",
 		"@types/mocha": "^10.0.10",
@@ -499,26 +543,26 @@
 		"@types/proper-lockfile": "^4.1.4",
 		"@types/react": "^18.0.0",
 		"@types/react-dom": "^18.0.0",
-		"@types/vscode": "^1.99.0",
+		"@types/vscode": "~1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
-		"@vscode/test-cli": "^0.0.10",
+		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
-		"@vscode/vsce": "^3.6.0",
-		"esbuild": "^0.25.9",
+		"@vscode/vsce": "^3.9.1",
+		"esbuild": "^0.28.0",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"typescript": "^5.8.3"
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.16",
+		"adm-zip": "^0.5.17",
 		"chart.js": "^4.4.0",
-		"dockerode": "^4.0.9",
+		"dockerode": "^4.0.12",
 		"proper-lockfile": "^4.1.2",
 		"rocketride": "workspace:*",
 		"shared": "workspace:*",
-		"tar": "^7.5.8"
+		"tar": "^7.5.15"
 	},
 	"files": [
 		"README.md",

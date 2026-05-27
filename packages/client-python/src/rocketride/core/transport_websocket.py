@@ -133,21 +133,12 @@ class TransportWebSocket(TransportBase):
         self._websocket: Union[object, None] = None
         self._receive_task = None
         self._uri = uri
-        self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
         self._draining: bool = False
-
-    def get_auth(self) -> Optional[str]:
-        """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
-        return self._auth
 
     def get_connection_info(self) -> Optional[str]:
         """Return connection info for the "connected" callback (URI)."""
         return self._uri
-
-    def set_auth(self, auth: str) -> None:
-        """Update auth credential. Takes effect on the next connect()."""
-        self._auth = auth
 
     def set_uri(self, uri: str) -> None:
         """Update connection URI. Takes effect on the next connect()."""
@@ -189,8 +180,26 @@ class TransportWebSocket(TransportBase):
         Called during disconnect() after _draining is set, so no new tasks
         will be added while we wait. Allows in-flight handlers to finish
         sending their responses before the socket is closed.
+
+        Excludes any task whose await-chain transitively reaches this drain
+        task itself. Including such a task in the gather would form a cycle
+        (X awaits us, we await a gather containing X) which asyncio's cancel
+        propagation recurses on until RecursionError fires.
         """
-        pending = [t for t in self._message_tasks if not t.done()]
+        me = asyncio.current_task()
+
+        def awaits_me(t: asyncio.Task) -> bool:
+            seen: set = set()
+            cur = t
+            while cur is not None and id(cur) not in seen:
+                seen.add(id(cur))
+                if cur is me:
+                    return True
+                waiter = getattr(cur, '_fut_waiter', None)
+                cur = waiter if isinstance(waiter, asyncio.Task) else None
+            return False
+
+        pending = [t for t in self._message_tasks if not t.done() and not awaits_me(t)]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
@@ -316,7 +325,11 @@ class TransportWebSocket(TransportBase):
             has_error = False
 
         except Exception as e:
-            if websockets and hasattr(websockets.exceptions, 'ConnectionClosed') and isinstance(e, websockets.exceptions.ConnectionClosed):
+            if (
+                websockets
+                and hasattr(websockets.exceptions, 'ConnectionClosed')
+                and isinstance(e, websockets.exceptions.ConnectionClosed)
+            ):
                 reason = 'Connection closed'
                 has_error = False
             elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
@@ -431,7 +444,9 @@ class TransportWebSocket(TransportBase):
             self._connected = True
             self._draining = False
 
-            client_info = f'ws://{websocket.client.host}:{websocket.client.port}' if websocket.client else 'ws://unknown'
+            client_info = (
+                f'ws://{websocket.client.host}:{websocket.client.port}' if websocket.client else 'ws://unknown'
+            )
             await self._transport_connected(client_info)
 
             # Block in receive loop — propagates exceptions for us to handle below

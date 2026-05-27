@@ -54,12 +54,7 @@ const styles = {
 		marginBottom: 8,
 	} as CSSProperties,
 	disconnectOverlay: {
-		position: 'absolute',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		...commonStyles.modalOverlay,
 		backdropFilter: 'blur(8px)',
 		WebkitBackdropFilter: 'blur(8px)',
 		zIndex: 1000,
@@ -129,7 +124,7 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 			overview: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<OverviewTab data={data} />
+						<OverviewTab data={data} events={events} onRefresh={onRefresh} />
 					</div>
 				),
 			},

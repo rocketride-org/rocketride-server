@@ -28,7 +28,6 @@ on:
         default: '7'
 
 permissions:
-  actions: write
   contents: read
 
 concurrency:
@@ -40,6 +39,12 @@ jobs:
     name: Delete old artifacts and caches
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Narrowed from top-level: actions:write only at job scope so other
+    # jobs added to this workflow in the future inherit the read default.
+    # Closes Scorecard TokenPermissionsID #528.
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: Delete old artifacts
         env:

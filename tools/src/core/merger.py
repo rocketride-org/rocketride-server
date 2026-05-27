@@ -491,7 +491,9 @@ def merge(
         _model_source: str = _source_to_model_source.get(_api_entry_source, 'provider')
         _api_entry_out = api_entry.get('max_output_tokens')
         _api_entry_name: Optional[str] = api_entry.get('name')
-        _or_ctx, _or_out, _or_name, _or_exp = _openrouter_info(_token_lookup_id) if _use_openrouter else (None, None, None, None)
+        _or_ctx, _or_out, _or_name, _or_exp = (
+            _openrouter_info(_token_lookup_id) if _use_openrouter else (None, None, None, None)
+        )
         _display_name: Optional[str] = _api_entry_name or _or_name
         _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if _use_litellm else (None, None)
         # Cast to int — config/litellm/openrouter values may arrive as float or str
@@ -654,13 +656,17 @@ def merge(
             if _exp and not existing.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
                 if not existing.get('migration'):
-                    updated_profiles[profile_key]['migration'] = f'Model deprecated by OpenRouter (expiration date: {_exp}). Please select a current model.'
+                    updated_profiles[profile_key]['migration'] = (
+                        f'Model deprecated by OpenRouter (expiration date: {_exp}). Please select a current model.'
+                    )
                 deprecated.append(profile_key)
                 changed = True
             elif not _exp:
                 # Un-deprecate if the current source is authoritative for this profile
                 # and the model just appeared in the source's response.
-                if existing.get('deprecated') and _source_is_authoritative(_api_entry_source, existing.get('modelSource', 'manual')):
+                if existing.get('deprecated') and _source_is_authoritative(
+                    _api_entry_source, existing.get('modelSource', 'manual')
+                ):
                     updated_profiles[profile_key].pop('deprecated', None)
                     updated_profiles[profile_key].pop('deprecatedSince', None)
                     updated_profiles[profile_key].pop('migration', None)
@@ -712,7 +718,9 @@ def merge(
                 updated_profiles[profile_key]['deprecated'] = True
                 # Only set migration if not already present (don't overwrite manual msgs).
                 if not profile.get('migration'):
-                    updated_profiles[profile_key]['migration'] = f'Model no longer listed in {deprecation_source}. Please select a current model.'
+                    updated_profiles[profile_key]['migration'] = (
+                        f'Model no longer listed in {deprecation_source}. Please select a current model.'
+                    )
                 deprecated.append(profile_key)
             else:
                 unchanged.append(profile_key)

@@ -28,7 +28,7 @@
 # ------------------------------------------------------------------------------
 import re
 import sys
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 import numpy as np
@@ -103,9 +103,7 @@ class Store(DocumentStoreBase):
 
         similarity = config.get('similarity', 'cosine')
         if similarity not in ('cosine', 'l2_norm', 'dot_product'):
-            raise Exception(
-                'Similarity must be one of: cosine, l2_norm, dot_product'
-            )
+            raise Exception('Similarity must be one of: cosine, l2_norm, dot_product')
         self.similarity = similarity
 
         # Use explicit scheme from host if present; else derive from mode (self-managed -> http)
@@ -387,7 +385,13 @@ class Store(DocumentStoreBase):
         # Build the search query with vector search using knn
         # For Elasticsearch 8.x, use knn query for vector search
         search_body = {
-            'knn': {'field': 'embedding', 'query_vector': query.embedding, 'k': docFilter.limit if docFilter.limit is not None else 25, 'num_candidates': (docFilter.limit if docFilter.limit is not None else 25) * 10, 'filter': filter_query},
+            'knn': {
+                'field': 'embedding',
+                'query_vector': query.embedding,
+                'k': docFilter.limit if docFilter.limit is not None else 25,
+                'num_candidates': (docFilter.limit if docFilter.limit is not None else 25) * 10,
+                'filter': filter_query,
+            },
             'size': docFilter.limit if docFilter.limit is not None else 25,
         }
 
@@ -414,7 +418,12 @@ class Store(DocumentStoreBase):
         filter_query = self._convertFilter(docFilter=docFilter)
 
         # Build the search query
-        search_body = {'query': filter_query, 'size': docFilter.limit if docFilter.limit is not None else 1000, 'from': docFilter.offset if docFilter.offset is not None else 0, 'sort': [{'meta.chunkId': {'order': 'asc'}}]}
+        search_body = {
+            'query': filter_query,
+            'size': docFilter.limit if docFilter.limit is not None else 1000,
+            'from': docFilter.offset if docFilter.offset is not None else 0,
+            'sort': [{'meta.chunkId': {'order': 'asc'}}],
+        }
 
         # Perform the search (Elasticsearch 8.x uses body parameter)
         response = self.client.search(index=self.index, body=search_body)
@@ -446,7 +455,12 @@ class Store(DocumentStoreBase):
         paths: Dict[str, str] = {}
 
         # Build the search query
-        search_body = {'query': filter_query, 'size': limit, 'from': offset, '_source': ['meta.parent', 'meta.objectId']}
+        search_body = {
+            'query': filter_query,
+            'size': limit,
+            'from': offset,
+            '_source': ['meta.parent', 'meta.objectId'],
+        }
 
         # Perform the search (Elasticsearch 8.x uses body parameter)
         response = self.client.search(index=self.index, body=search_body)
@@ -539,9 +553,7 @@ class Store(DocumentStoreBase):
                     err = op.get('error', {})
                     reason = err.get('reason') or err.get('type') or str(err) or str(e)
                     doc_id = op.get('_id', '?')
-                    raise Exception(
-                        f'Elasticsearch index failed (id={doc_id}): {reason}'
-                    ) from e
+                    raise Exception(f'Elasticsearch index failed (id={doc_id}): {reason}') from e
                 raise
 
         # For each document
@@ -610,7 +622,10 @@ class Store(DocumentStoreBase):
             return
 
         # Build a query for object ids
-        update_query = {'query': {'terms': {'meta.objectId': objectIds}}, 'script': {'source': 'ctx._source.meta.isDeleted = true', 'lang': 'painless'}}
+        update_query = {
+            'query': {'terms': {'meta.objectId': objectIds}},
+            'script': {'source': 'ctx._source.meta.isDeleted = true', 'lang': 'painless'},
+        }
 
         # Update all the objects with the given objectId to deleted
         self.client.update_by_query(index=self.index, body=update_query, wait_for_completion=True)
@@ -628,7 +643,10 @@ class Store(DocumentStoreBase):
             return
 
         # Build a query for object ids
-        update_query = {'query': {'terms': {'meta.objectId': objectIds}}, 'script': {'source': 'ctx._source.meta.isDeleted = false', 'lang': 'painless'}}
+        update_query = {
+            'query': {'terms': {'meta.objectId': objectIds}},
+            'script': {'source': 'ctx._source.meta.isDeleted = false', 'lang': 'painless'},
+        }
 
         # Update all the objects with the given objectId to active
         self.client.update_by_query(index=self.index, body=update_query, wait_for_completion=True)
@@ -653,7 +671,14 @@ class Store(DocumentStoreBase):
         while True:
             # Build query for getting a set of chunks
             search_body = {
-                'query': {'bool': {'must': [{'term': {'meta.objectId': objectId}}, {'range': {'meta.chunkId': {'gte': offset, 'lt': offset + self.renderChunkSize}}}]}},
+                'query': {
+                    'bool': {
+                        'must': [
+                            {'term': {'meta.objectId': objectId}},
+                            {'range': {'meta.chunkId': {'gte': offset, 'lt': offset + self.renderChunkSize}}},
+                        ]
+                    }
+                },
                 'size': self.renderChunkSize,
                 'sort': [{'meta.chunkId': {'order': 'asc'}}],
                 '_source': [CONTENT_FIELD, 'meta.chunkId'],
@@ -798,9 +823,7 @@ class Store(DocumentStoreBase):
             op = 'or'
         slop = max(int(match_operator_slop or 0), 0)
         if op == 'exact':
-            base_query: Dict[str, Any] = {
-                'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}
-            }
+            base_query: Dict[str, Any] = {'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}}
         elif op == 'and':
             base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'and'}}}
         elif op == 'or':
@@ -818,4 +841,3 @@ class Store(DocumentStoreBase):
             frag_size = max(int(highlight_fragment_size or 0), 0) or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
             body['highlight'] = _build_highlight_config(CONTENT_FIELD, frag_size)
         return body
-

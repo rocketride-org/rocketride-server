@@ -42,10 +42,10 @@ export interface ApiKeyRecord {
 	/** Human-readable label given to the key at creation time. */
 	name: string;
 
-	/** The team this key is scoped to. */
-	teamId: string;
+	/** Team this key is scoped to, or null for all teams. */
+	teamId: string | null;
 
-	/** Display name of the team, or null if unavailable. */
+	/** Display name of the scoped team, or null. */
 	teamName: string | null;
 
 	/** Array of permission strings granted to this key. */
@@ -65,6 +65,9 @@ export interface ApiKeyRecord {
 
 	/** Whether the key is currently active (not expired and not revoked). */
 	active: boolean;
+
+	/** Whether this is an auto-managed session key for reconnect persistence. */
+	isSession: boolean;
 }
 
 // =============================================================================
@@ -168,7 +171,7 @@ export interface TeamMemberRecord {
  * Union type for the five navigable sections within AccountView.
  * Controls which tab panel is active and which data is fetched.
  */
-export type AccountSection = 'profile' | 'api-keys' | 'organization' | 'teams' | 'members';
+export type AccountSection = 'profile' | 'billing' | 'api-keys' | 'organization' | 'teams' | 'members';
 
 // =============================================================================
 // PROFILE UPDATE
@@ -210,14 +213,14 @@ export interface CreateKeyParams {
 	/** Human-readable label for the key. */
 	name: string;
 
-	/** The team this key is scoped to. */
-	teamId: string;
-
-	/** Array of permission strings to grant to this key. */
+	/** Array of permission strings to grant to this key. Empty for full PAT. */
 	permissions: string[];
 
 	/** Optional ISO timestamp for key expiration. Omit for no expiry. */
 	expiresAt?: string;
+
+	/** Optional team UUID to scope this key to. Omit for all teams. */
+	teamId?: string;
 }
 
 /** Parameters for inviting a new member to an organization. */

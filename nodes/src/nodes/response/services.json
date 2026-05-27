@@ -75,40 +75,6 @@
 		"video": [],
 		"image": []
 	},
-	"input": [
-		{
-			"lane": "text",
-			"output": []
-		},
-		{
-			"lane": "table",
-			"output": []
-		},
-		{
-			"lane": "documents",
-			"output": []
-		},
-		{
-			"lane": "questions",
-			"output": []
-		},
-		{
-			"lane": "answers",
-			"output": []
-		},
-		{
-			"lane": "audio",
-			"output": []
-		},
-		{
-			"lane": "video",
-			"output": []
-		},
-		{
-			"lane": "image",
-			"output": []
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

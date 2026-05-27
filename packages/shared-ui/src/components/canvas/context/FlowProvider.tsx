@@ -41,7 +41,7 @@
 
 import { ReactElement, ReactNode } from 'react';
 
-import { IProject, IFlowFeatures, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidateResponse, ITaskStatus } from '../types';
 
 import { FlowPreferencesProvider } from './FlowPreferencesContext';
 import { FlowProjectProvider } from './FlowProjectContext';
@@ -66,9 +66,9 @@ export interface IFlowProviderProps {
 	/** Host-provided preference writer. */
 	setPreference?: (key: string, value: unknown) => void;
 
-	// --- Features ----------------------------------------------------------
-	/** Controls which toolbar buttons are visible. */
-	features?: IFlowFeatures;
+	// --- Readonly ----------------------------------------------------------
+	/** When true, the canvas is fully read-only. */
+	isReadonly?: boolean;
 
 	// --- Pipeline runtime data ---------------------------------------------
 	taskStatuses?: Record<string, ITaskStatus>;
@@ -116,6 +116,9 @@ export interface IFlowProviderProps {
 	isDirty?: boolean;
 	isNew?: boolean;
 	onSave?: () => void;
+
+	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
+	envKeys?: string[];
 }
 
 // =============================================================================
@@ -134,10 +137,10 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, getPreference, setPreference, features, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, getPreference, setPreference, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, envKeys }: IFlowProviderProps): ReactElement {
 	return (
-		<FlowPreferencesProvider projectId={projectId} getPreference={getPreference} setPreference={setPreference}>
-			<FlowProjectProvider project={project} features={features} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave}>
+		<FlowPreferencesProvider projectId={projectId} getPreference={getPreference} setPreference={setPreference} isReadonly={isReadonly}>
+			<FlowProjectProvider project={project} isReadonly={isReadonly} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} envKeys={envKeys}>
 				<FlowGraphProvider>{children}</FlowGraphProvider>
 			</FlowProjectProvider>
 		</FlowPreferencesProvider>

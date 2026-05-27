@@ -40,8 +40,10 @@ const {
     startServer,
     stopServer,
     execCommand,
+    runPytest,
     parallel,
-    bracket
+    bracket,
+    parseServerAddress
 } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -79,10 +81,12 @@ function makeSyncNodesAction(options = {}) {
 function makeStartTestServerAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            if (options.testport) {
-                ctx.port = options.testport;
-                task.output = `Using existing server on port ${ctx.port}`;
-                return { port: ctx.port, server: null };
+            const taskserver = options.taskserver || ctx.options?.taskserver;
+            if (taskserver) {
+                const parsed = parseServerAddress(taskserver);
+                ctx.port = parsed.port;
+                task.output = `Using existing server at ${parsed.uri}`;
+                return { port: parsed.port, server: null, serverUri: parsed.uri };
             }
 
             task.output = 'Starting server...';
@@ -136,19 +140,21 @@ function makeRunPytestAction(options = {}) {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
-            const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            const bracket = ctx.brackets?.['node-test-server'];
+            const port = bracket?.port || ctx.port;
+            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_URI: serverUri,
                 ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks')
             };
 
             // Use absolute paths since cwd is dist/server
-            const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
+            const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
 
             if (!options.test_full) {
-                pytestArgs.push(
+                extraArgs.push(
                     '--ignore-glob', '**/test_*_full.py',
                     '--ignore-glob', '**/test_*_full/**');
             }
@@ -165,7 +171,7 @@ function makeRunPytestAction(options = {}) {
                 return tokens.some(t => t === '-m' || (t.startsWith('-m') && !t.startsWith('--')));
             })();
             if (!hasExplicitMarkers) {
-                pytestArgs.push('-m', 'not skip_node');
+                extraArgs.push('-m', 'not skip_node');
             }
 
             // Add any additional pytest options (from CLI or direct options)
@@ -174,10 +180,10 @@ function makeRunPytestAction(options = {}) {
                 // Handle both string and array formats
                 // CLI passes array like ["-v -s"], so split each element by spaces
                 if (typeof pytestOpts === 'string') {
-                    pytestArgs.push(...pytestOpts.split(/\s+/).filter(x => x));
+                    extraArgs.push(...pytestOpts.split(/\s+/).filter(x => x));
                 } else if (Array.isArray(pytestOpts)) {
                     for (const opt of pytestOpts) {
-                        pytestArgs.push(...opt.split(/\s+/).filter(x => x));
+                        extraArgs.push(...opt.split(/\s+/).filter(x => x));
                     }
                 }
             }
@@ -186,10 +192,10 @@ function makeRunPytestAction(options = {}) {
             const markers = options.markers;
             const pattern = options.pytestPattern;
             if (markers) {
-                pytestArgs.push('-m', markers);
+                extraArgs.push('-m', markers);
             }
             if (pattern) {
-                pytestArgs.push('-k', pattern);
+                extraArgs.push('-k', pattern);
             }
 
             // Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
@@ -199,13 +205,14 @@ function makeRunPytestAction(options = {}) {
             const parallelRaw = options.pytestParallel ?? String(Math.min(os.cpus().length, 8));
             const parallelVal = String(parallelRaw).trim().toLowerCase();
             if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
-                pytestArgs.push('-n', parallelVal);
+                extraArgs.push('-n', parallelVal);
             }
 
-            await execCommand(ENGINE, pytestArgs, {
-                task,
-                cwd: PACKAGE_DIR,
-                env: testEnv,
+            await runPytest({
+                engine: ENGINE,
+                testsDir: TEST_DIR,
+                extraArgs,
+                execOpts: { task, cwd: PACKAGE_DIR, env: testEnv },
             });
         }
     };
@@ -214,16 +221,11 @@ function makeRunPytestAction(options = {}) {
 function makeRunContractTestsAction() {
     return {
         run: async (ctx, task) => {
-            const pytestArgs = [
-                '-m', 'pytest',
-                path.join(TEST_DIR, 'test_contracts.py'),
-                '-v',
-                '--rootdir', PACKAGE_DIR
-            ];
-
-            await execCommand(ENGINE, pytestArgs, {
-                task,
-                cwd: PACKAGE_DIR
+            await runPytest({
+                engine: ENGINE,
+                testsDir: path.join(TEST_DIR, 'test_contracts.py'),
+                extraArgs: ['-v', '--rootdir', PACKAGE_DIR],
+                execOpts: { task, cwd: PACKAGE_DIR },
             });
         }
     };
@@ -231,7 +233,7 @@ function makeRunContractTestsAction() {
 
 function makeTestAction(options = {}) {
     return {
-        description: 'Test pipeline nodes (full integration)',
+        description: 'Testing nodes',
         steps: [
             'server:build',
             parallel([
@@ -273,17 +275,17 @@ module.exports = {
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
-            description: 'Build pipeline nodes',
+            description: 'Build nodes',
             steps: ['server:build', 'nodes:sync']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
         { name: 'nodes:test-contracts', action: () => ({
-            description: 'Test node contracts',
+            description: 'Testing nodes (contracts)',
             steps: ['server:build', 'nodes:run-contracts']
         })},
         { name: 'nodes:clean', action: () => ({
-            description: 'Clean pipeline nodes',
+            description: 'Cleaning nodes',
             run: async (ctx, task) => {
                 await removeDir(DIST_DIR);
                 task.output = 'Cleaned nodes';

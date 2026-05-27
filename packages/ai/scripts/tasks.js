@@ -23,17 +23,17 @@
 
 /**
  * Build tasks for @rocketride/ai
- * 
+ *
  * Commands:
  *   build - Sync AI modules to dist
  *   test  - Run AI module tests
  *   clean - Remove build artifacts
- * 
+ *
  * Note: Model server tests moved to packages/model_server/scripts/tasks.js
  */
 const path = require('path');
 const {
-    execCommand, syncDir, formatSyncStats, DIST_ROOT
+    execCommand, runPytest, syncDir, formatSyncStats, DIST_ROOT
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -64,14 +64,39 @@ function makeSyncAiAction() {
 function makeRunPytestAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            const pytestArgs = ['-m', 'pytest', TESTS_DIR, '-v', '--rootdir', PACKAGE_DIR];
-            if (options.pytest) {
-                pytestArgs.push(...options.pytest);
-            }
-
-            await execCommand(ENGINE, pytestArgs, {
+            const aiTestRequirements = path.join(TESTS_DIR, 'requirements.txt');
+            task.output = `Installing AI test requirements (${aiTestRequirements})...`;
+            await execCommand(ENGINE, ['-m', 'pip', 'install', '--quiet', '-r', aiTestRequirements], {
                 task,
                 cwd: SERVER_DIR
+            });
+
+            // Coverage points to the absolute SOURCE path (packages/ai/src/ai),
+            // NOT the package name "ai". Two copies of the ai package exist on
+            // disk — packages/ai/src/ai (source) and dist/server/ai (synced).
+            // pytest-cov starts before tests/conftest.py runs, so resolving
+            // "ai" by name at startup picks up dist/server/ai (next to cwd),
+            // while conftest later redirects imports to packages/ai/src/ai.
+            // The two paths don't match, so coverage reports 0%. Pinning
+            // --cov to the absolute source directory bypasses the import-time
+            // package resolution and tracks the directory we actually run.
+            const HTMLCOV_DIR = path.join(SERVER_DIR, 'htmlcov', 'ai');
+            const extraArgs = [
+                '-v', '--rootdir', PACKAGE_DIR,
+                // Coverage flags
+                '--cov', SRC_DIR,
+                '--cov-report=term-missing',
+                `--cov-report=html:${HTMLCOV_DIR}`,
+            ];
+            if (options.pytest) {
+                extraArgs.push(...options.pytest);
+            }
+
+            await runPytest({
+                engine: ENGINE,
+                testsDir: TESTS_DIR,
+                extraArgs,
+                execOpts: { task, cwd: SERVER_DIR },
             });
         }
     };
@@ -93,13 +118,13 @@ module.exports = {
         // Public actions (have descriptions)
         {
             name: 'ai:build', action: () => ({
-                description: 'Build AI modules',
+                description: 'Build ai',
                 steps: ['server:build', 'ai:sync']
             })
         },
         {
             name: 'ai:test', action: () => ({
-                description: 'Test AI modules',
+                description: 'Testing ai',
                 steps: [
                     'ai:build',
                     'ai:run-pytest'
@@ -108,7 +133,7 @@ module.exports = {
         },
         {
             name: 'ai:clean', action: () => ({
-                description: 'Clean AI modules',
+                description: 'Cleaning ai',
                 run: async (ctx, task) => {
                     const { removeDir } = require('../../../scripts/lib');
                     await removeDir(DIST_DIR);

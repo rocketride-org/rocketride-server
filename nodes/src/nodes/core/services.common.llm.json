@@ -32,9 +32,7 @@
 			"type": "string",
 			"title": "Model source",
 			"optional": true,
-			"ui": {
-				"ui:readonly": true
-			}
+			"hidden": true
 		}
 	}
 }

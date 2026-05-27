@@ -60,6 +60,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # _docker.yaml's docker job declares id-token: write for cosign
+      # keyless Sigstore signing. GitHub validates at workflow-start that
+      # the caller covers every permission the reusable job declares.
+      # Without it the workflow fails with startup_failure — same bug
+      # that broke nightly.yaml in PR #929 / fixed in #955. Latent here
+      # only because this job is gated by `if: server_tag_exists ==
+      # 'false'`, so the misconfiguration only surfaces on a fresh
+      # release cut. Fixing preemptively.
+      id-token: write
     with:
       server_version: ${{ needs.init.outputs.server_version }}
     secrets: inherit

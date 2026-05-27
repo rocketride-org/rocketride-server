@@ -69,6 +69,7 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
+import { isInVSCode } from '../../../themes/vscode';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
 
@@ -189,7 +190,7 @@ export default function Canvas(): ReactElement {
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
 
 	// --- Floating toolbar position (persisted via workspace state) ----------
 	const toolbarPosition = getPreference('toolbarPosition') as IToolbarPosition | undefined;
@@ -200,7 +201,7 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { features, onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, initialViewport } = useFlowProject();
+	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, initialViewport } = useFlowProject();
 	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
 
 	// Keep a ref so the restore handler always sees the latest viewport value
@@ -311,32 +312,36 @@ export default function Canvas(): ReactElement {
 	// --- Canvas toolbar --------------------------------------------------------
 	const canvasToolbar = (
 		<>
-			<ToolbarButton
-				title="Add node"
-				onClick={() => {
-					setShowCreatePanel((v) => {
-						if (!v) setEditingNodeId(undefined);
-						return !v;
-					});
-				}}
-				isActive={showCreatePanel}
-				forceColor="var(--rr-brand)"
-			>
-				<BxIcon d={BX_PLUS_SQUARE} size={16} />
-			</ToolbarButton>
-			{features.addAnnotation && (
+			{!isLocked && (
+				<ToolbarButton
+					title="Add node"
+					onClick={() => {
+						setShowCreatePanel((v) => {
+							if (!v) setEditingNodeId(undefined);
+							return !v;
+						});
+					}}
+					isActive={showCreatePanel}
+					forceColor="var(--rr-brand)"
+				>
+					<BxIcon d={BX_PLUS_SQUARE} size={16} />
+				</ToolbarButton>
+			)}
+			{!isLocked && (
 				<ToolbarButton title="Add annotation" onClick={addAnnotation}>
 					<NoteIcon color="currentColor" size={18} />
 				</ToolbarButton>
 			)}
-			<ToolbarDivider />
-			<ToolbarButton title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} isActive={isLocked}>
-				{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
-			</ToolbarButton>
+			{!isLocked && <ToolbarDivider />}
+			{!isReadonly && (
+				<ToolbarButton title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} isActive={isLocked}>
+					{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
+				</ToolbarButton>
+			)}
 			<ToolbarButton title="Fit to screen" onClick={() => fitView()}>
 				<FitIcon color="currentColor" size={18} />
 			</ToolbarButton>
-			{features.autoLayout !== false && (
+			{!isLocked && (
 				<ToolbarButton title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0}>
 					<TidyIcon color="currentColor" size={18} />
 				</ToolbarButton>
@@ -347,24 +352,28 @@ export default function Canvas(): ReactElement {
 			<ToolbarButton title="Zoom out" onClick={() => zoomOut()}>
 				<ZoomOutIcon color="currentColor" size={18} />
 			</ToolbarButton>
-			<ToolbarDivider />
-			{onUndo && (
+			{!isReadonly && <ToolbarDivider />}
+			{onUndo && !isLocked && !isInVSCode() && (
 				<ToolbarButton title="Undo" onClick={onUndo}>
 					<BxIcon d={BX_UNDO} size={16} />
 				</ToolbarButton>
 			)}
-			{onRedo && (
+			{onRedo && !isLocked && !isInVSCode() && (
 				<ToolbarButton title="Redo" onClick={onRedo}>
 					<BxIcon d={BX_REDO} size={16} />
 				</ToolbarButton>
 			)}
-			<ToolbarButton title="Select mode" onClick={() => setNavigationMode(NavigationMode.SELECT)} isActive={!isPanMode}>
-				<BxIcon d={BX_POINTER} size={16} />
-			</ToolbarButton>
-			<ToolbarButton title="Pan mode" onClick={() => setNavigationMode(NavigationMode.DRAG)} isActive={isPanMode}>
-				<HandIcon size={16} />
-			</ToolbarButton>
-			{features.save && onSave && (
+			{!isReadonly && (
+				<>
+					<ToolbarButton title="Select mode" onClick={() => setNavigationMode(NavigationMode.SELECT)} isActive={!isPanMode}>
+						<BxIcon d={BX_POINTER} size={16} />
+					</ToolbarButton>
+					<ToolbarButton title="Pan mode" onClick={() => setNavigationMode(NavigationMode.DRAG)} isActive={isPanMode}>
+						<HandIcon size={16} />
+					</ToolbarButton>
+				</>
+			)}
+			{onSave && !isLocked && (
 				<>
 					<ToolbarDivider />
 					<ToolbarButton title={isNew ? 'Save As…' : 'Save'} onClick={onSave} disabled={!isDirty && !isNew} forceColor={isDirty ? 'var(--rr-brand)' : undefined}>

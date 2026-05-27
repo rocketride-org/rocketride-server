@@ -5,6 +5,11 @@
 # Make sure wheel is loaded so we can load all older dependencies
 certifi
 charset-normalizer
+# Transitive dep of requests/urllib3; pinned explicitly to cover
+# GHSA-r6ph-v2qm-q3c2 (SECT curve subgroup attack, fix 46.0.5),
+# GHSA-m959-cc7f-wv43 (DNS constraint enforcement, fix 46.0.6),
+# GHSA-p423-j2cm-9vmq (buffer overflow, fix 46.0.7).
+cryptography>=46.0.7,<47
 idna
 requests
 urllib3

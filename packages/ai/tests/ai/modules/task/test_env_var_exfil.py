@@ -1,5 +1,5 @@
 """
-Tests for environment variable exfiltration fix in _resolve_pipeline.
+Tests for environment variable exfiltration fix in resolve_pipeline_env.
 
 Validates that the allowlist-based restriction on ${VAR} expansion in
 pipeline configs prevents sensitive env vars (AWS keys, DB URLs, tokens)
@@ -9,34 +9,20 @@ variables.
 
 import json
 import os
-import re
 import pytest
 from unittest.mock import patch
+
+from ai.modules.task.pipeline import resolve_pipeline_env
 
 
 class _FakeTask:
     """
-    Minimal stand-in that carries only _resolve_pipeline and ALLOWED_ENV_PREFIX
-    from the real Task class, avoiding heavyweight __init__ dependencies.
+    Minimal stand-in that delegates to the shared resolve_pipeline_env,
+    using os.environ as the env dict (tests patch os.environ).
     """
 
-    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
-
     def _resolve_pipeline(self, pipeline):
-        pipeline_str = json.dumps(pipeline)
-
-        def replacer(match):
-            env_var = match.group(1)
-            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                # Check JSON injection vulnerability in env var resolution.
-                value = os.environ.get(env_var, match.group(0))
-                if value == match.group(0):
-                    return value  # placeholder not found
-                return json.dumps(value)[1:-1]  # escape but strip outer quotes
-            return '<REDACTED>'
-
-        resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
-        return json.loads(resolved_str)
+        return resolve_pipeline_env(pipeline, dict(os.environ))
 
 
 @pytest.fixture
@@ -52,11 +38,14 @@ def task():
 class TestAllowedEnvVars:
     """Env vars with the ROCKETRIDE_ prefix should be resolved normally."""
 
-    @pytest.mark.parametrize('var_name,value', [
-        ('ROCKETRIDE_API_KEY', 'rr-key-123'),
-        ('ROCKETRIDE_HOST', 'localhost'),
-        ('ROCKETRIDE_DEBUG', 'true'),
-    ])
+    @pytest.mark.parametrize(
+        'var_name,value',
+        [
+            ('ROCKETRIDE_API_KEY', 'rr-key-123'),
+            ('ROCKETRIDE_HOST', 'localhost'),
+            ('ROCKETRIDE_DEBUG', 'true'),
+        ],
+    )
     def test_allowed_prefix_resolves(self, task, var_name, value):
         with patch.dict(os.environ, {var_name: value}):
             pipeline = {'config': f'${{{var_name}}}'}
@@ -88,21 +77,24 @@ class TestAllowedEnvVars:
 class TestBlockedEnvVars:
     """Env vars outside the allowlist must be redacted."""
 
-    @pytest.mark.parametrize('var_name', [
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_ACCESS_KEY_ID',
-        'DATABASE_URL',
-        'PYPI_TOKEN',
-        'GITHUB_TOKEN',
-        'HOME',
-        'PATH',
-        'SSH_PRIVATE_KEY',
-        'OPENAI_API_KEY',
-        'STRIPE_SECRET_KEY',
-        'PIPELINE_MODE',
-        'NODE_ENV',
-        'ROCKET_DEBUG',
-    ])
+    @pytest.mark.parametrize(
+        'var_name',
+        [
+            'AWS_SECRET_ACCESS_KEY',
+            'AWS_ACCESS_KEY_ID',
+            'DATABASE_URL',
+            'PYPI_TOKEN',
+            'GITHUB_TOKEN',
+            'HOME',
+            'PATH',
+            'SSH_PRIVATE_KEY',
+            'OPENAI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'PIPELINE_MODE',
+            'NODE_ENV',
+            'ROCKET_DEBUG',
+        ],
+    )
     def test_sensitive_var_redacted(self, task, var_name):
         with patch.dict(os.environ, {var_name: 'super-secret-value'}):
             pipeline = {'leak': f'${{{var_name}}}'}
@@ -146,10 +138,13 @@ class TestBlockedEnvVars:
 
     def test_inline_mixed_text(self, task):
         """Blocked var embedded in a larger string is still redacted."""
-        with patch.dict(os.environ, {
-            'ROCKETRIDE_HOST': 'myhost',
-            'AWS_SECRET_ACCESS_KEY': 'secret123',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'ROCKETRIDE_HOST': 'myhost',
+                'AWS_SECRET_ACCESS_KEY': 'secret123',
+            },
+        ):
             pipeline = {'cmd': 'connect ${ROCKETRIDE_HOST} using ${AWS_SECRET_ACCESS_KEY}'}
             result = task._resolve_pipeline(pipeline)
             assert 'myhost' in result['cmd']

@@ -21,20 +21,20 @@
 // SOFTWARE.
 
 // =============================================================================
-// rocketride/app-sdk — subpath export for cloud-ui app development
+// rocketride/app-sdk — subpath export for shell-ui app development
 // =============================================================================
 //
 // External developers install `rocketride` and import from this subpath:
 //
 //   import type { AppDescriptor, ShellAppProps } from 'rocketride/app-sdk';
-//   import { useShellConnection, useWorkspace, shellBus } from 'rocketride/app-sdk';
+//   import { useShellConnection, useWorkspace, connectionManager } from 'rocketride/app-sdk';
 //
 // At build time:   TypeScript resolves these declarations and provides full
 //                  IntelliSense for all types, hooks, and functions.
 //
 // At runtime:      Module Federation's shared singleton mechanism replaces
 //                  these stubs with the real implementations from the shell
-//                  host (cloud-ui).  Third-party apps never bundle the
+//                  host (shell-ui).  Third-party apps never bundle the
 //                  implementations.
 // =============================================================================
 
@@ -57,7 +57,6 @@ export type {
 	// Workspace
 	WorkspacePrefs,
 	IWorkspaceContext,
-	WorkspaceAction,
 
 	// Shell config
 	ShellApiConfig,
@@ -146,13 +145,14 @@ export declare function useAuthUser(): ConnectResult | null;
 export declare function useLogout(): (() => void) | null;
 
 /**
- * Access the user's subscription state.
+ * Access the user's desktop apps and subscription state.
  *
- * @returns Object with subscribedAppIds (Set) and subscriptionStatuses (Map).
+ * @returns Object with desktopApps array, isOnDesktop lookup, and getStatus lookup.
  */
 export declare function useSubscriptions(): {
-	subscribedAppIds: Set<string>;
-	subscriptionStatuses: Map<string, string>;
+	desktopApps: { appId: string; appStatus: string; onDesktop: boolean; seats?: number; seatsUsed?: number; features?: string[] }[];
+	isOnDesktop: (appId: string) => boolean;
+	getStatus: (appId: string) => string | undefined;
 };
 
 // =============================================================================
@@ -202,20 +202,25 @@ export declare class Documents {
 }
 
 // =============================================================================
-// EVENT BUS
+// CONNECTION MANAGER
 // =============================================================================
 
 /**
- * Module-level event bus singleton.
+ * Module-level connection manager singleton.
  *
- * Provides typed `emit` and `on` methods backed by the shell's event system.
- * Works from React components, hooks, or plain functions.
+ * Provides typed `emit` and `on` methods backed by the shell's event system,
+ * plus client access and connection state.  Works from React components,
+ * hooks, or plain functions.
  */
-export declare const shellBus: {
+export declare const connectionManager: {
 	/** Emit a typed shell event. */
 	emit<K extends keyof ShellEventMap>(event: K, payload: ShellEventMap[K]): void;
 	/** Subscribe to a typed shell event. Returns an unsubscribe function. */
 	on<K extends keyof ShellEventMap>(event: K, handler: (payload: ShellEventMap[K]) => void): () => void;
+	/** Returns the RocketRide client singleton, or null if not initialised. */
+	getClient(): import('../client/index').RocketRideClient | null;
+	/** Returns true when the WebSocket is authenticated and connected. */
+	isConnected(): boolean;
 };
 
 /**

@@ -9,10 +9,10 @@ const path = require('path');
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
 /** Build directory for temporary build artifacts */
-const BUILD_ROOT = path.join(PROJECT_ROOT, 'build');
+const BUILD_ROOT = process.env.ROCKETRIDE_BUILD_ROOT || path.join(PROJECT_ROOT, 'build');
 
 /** Distribution directory for final outputs */
-const DIST_ROOT = path.join(PROJECT_ROOT, 'dist');
+const DIST_ROOT = process.env.ROCKETRIDE_DIST_ROOT || path.join(PROJECT_ROOT, 'dist');
 
 module.exports = {
     PROJECT_ROOT,

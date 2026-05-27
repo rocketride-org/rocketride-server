@@ -41,7 +41,7 @@
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
 
-import { IProject, IToolchainState, IFlowFeatures, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE, DEFAULT_FLOW_FEATURES } from '../types';
+import { IProject, IToolchainState, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
 
 // =============================================================================
 // Context shape
@@ -67,10 +67,10 @@ export interface IFlowProjectContext {
 	/** Whether any pipeline task is currently running (derived from taskStatuses). */
 	isPipelineRunning: boolean;
 
-	// --- Feature flags -----------------------------------------------------
+	// --- Readonly flag -----------------------------------------------------
 
-	/** Controls which toolbar buttons and capabilities are visible. */
-	features: IFlowFeatures;
+	/** When true, the canvas is fully read-only: no editing, no adding nodes, no run/stop. */
+	isReadonly: boolean;
 
 	// --- Pipeline runtime data (from host) ---------------------------------
 
@@ -159,6 +159,9 @@ export interface IFlowProjectContext {
 
 	/** Called when the user requests a save from within the canvas. */
 	onSave?: () => void;
+
+	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
+	envKeys?: string[];
 }
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
@@ -173,8 +176,8 @@ export interface IFlowProjectProviderProps {
 	/** The project to edit. */
 	project: IProject;
 
-	/** Feature flags controlling toolbar visibility. */
-	features?: IFlowFeatures;
+	/** When true, the canvas is fully read-only: no editing, no adding nodes, no run/stop. */
+	isReadonly?: boolean;
 
 	// --- Pipeline runtime data (updated by host during execution) -----------
 	taskStatuses?: Record<string, ITaskStatus>;
@@ -214,6 +217,9 @@ export interface IFlowProjectProviderProps {
 	isNew?: boolean;
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+
+	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
+	envKeys?: string[];
 }
 
 // =============================================================================
@@ -227,7 +233,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -256,7 +262,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		patchToolchainState,
 		toggleDevMode,
 		isPipelineRunning,
-		features,
+		isReadonly,
 		taskStatuses,
 		componentPipeCounts,
 		totalPipes,
@@ -283,6 +289,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		isDirty,
 		isNew,
 		onSave,
+		envKeys,
 	};
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

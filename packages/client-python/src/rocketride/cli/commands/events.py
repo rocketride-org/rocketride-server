@@ -137,7 +137,12 @@ class EventsCommand(BaseCommand):
             self.log_file = await aiofiles.open(self.log_filename, 'a', encoding='utf-8')
 
             # Write initialization marker to log
-            init_entry = {'timestamp': datetime.now().isoformat(), 'event_type': 'LOG_INIT', 'message': f'Event logging initialized for token {self.args.token}', 'event_types': self.args.event_types}
+            init_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'event_type': 'LOG_INIT',
+                'message': f'Event logging initialized for token {self.args.token}',
+                'event_types': self.args.event_types,
+            }
             await self.log_file.write(json.dumps(init_entry) + '\n')
             await self.log_file.flush()
 
@@ -167,7 +172,12 @@ class EventsCommand(BaseCommand):
 
         try:
             # Create log entry with full event data
-            log_entry = {'timestamp': event_entry['timestamp'], 'iso_timestamp': datetime.now().isoformat(), 'index': event_entry['index'], 'event': event_entry['message']}
+            log_entry = {
+                'timestamp': event_entry['timestamp'],
+                'iso_timestamp': datetime.now().isoformat(),
+                'index': event_entry['index'],
+                'event': event_entry['message'],
+            }
 
             # Write to file as JSON line
             await self.log_file.write(json.dumps(log_entry) + '\n')
@@ -190,7 +200,12 @@ class EventsCommand(BaseCommand):
 
         try:
             # Write completion marker to log
-            completion_entry = {'timestamp': datetime.now().isoformat(), 'event_type': 'LOG_COMPLETE', 'message': f'Event logging completed. Total events logged: {self.index}', 'total_events': self.index}
+            completion_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'event_type': 'LOG_COMPLETE',
+                'message': f'Event logging completed. Total events logged: {self.index}',
+                'total_events': self.index,
+            }
             await self.log_file.write(json.dumps(completion_entry) + '\n')
             await self.log_file.flush()
 
@@ -275,7 +290,11 @@ class EventsCommand(BaseCommand):
             await self.client.set_events(token='*', event_types=self.args.parsed_event_types)
 
             # Prepare command status messages
-            status_messages = [f'Token: {self.args.token}', f'Event Types: {self.args.event_types}', 'Events monitoring active...']
+            status_messages = [
+                f'Token: {self.args.token}',
+                f'Event Types: {self.args.event_types}',
+                'Events monitoring active...',
+            ]
 
             # Add log file info if logging is enabled
             if self.log_filename:
