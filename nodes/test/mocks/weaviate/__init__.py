@@ -40,7 +40,6 @@ Storage:
 
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
-
 import hashlib
 
 
@@ -278,7 +277,7 @@ class MockQuery:
             )
 
         # Sort by distance (lower is better for cosine distance)
-        results.sort(key=lambda x: x.metadata.distance if x.metadata.distance else 1.0)
+        results.sort(key=lambda x: x.metadata.distance if x.metadata.distance is not None else 1.0)
 
         return QueryResult(objects=results[:limit])
 

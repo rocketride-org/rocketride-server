@@ -31,13 +31,12 @@ Exposes ``exa_search`` as a @tool_function for semantic web search via the Exa A
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, Dict
 
 import requests
 
-from rocketlib import IInstanceBase, tool_function, warning, debug
+from rocketlib import IInstanceBase, normalize_tool_input, tool_function, debug
 
 from .IGlobal import IGlobal
 
@@ -115,7 +114,7 @@ class IInstance(IInstanceBase):
     )
     def exa_search(self, args):
         """Search the web using Exa semantic search."""
-        args = _normalize_tool_input(args)
+        args = normalize_tool_input(args, tool_name='exa_search')
 
         query = (args.get('query') or '').strip()
         if not query:
@@ -254,38 +253,3 @@ def _request_with_retry(
             raise RuntimeError(f'Exa search request failed{detail}: {type(exc).__name__}') from None
 
     raise RuntimeError('Exa search: max retries exceeded')
-
-
-def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
-    """Normalize tool input into a plain dict.
-
-    Handles: None, dict, Pydantic model, JSON string, and nested ``input`` wrappers
-    that some framework paths produce.
-    """
-    if input_obj is None:
-        return {}
-
-    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
-        input_obj = input_obj.model_dump()
-    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
-        input_obj = input_obj.dict()
-
-    if isinstance(input_obj, str):
-        try:
-            parsed = json.loads(input_obj)
-            if isinstance(parsed, dict):
-                input_obj = parsed
-        except (json.JSONDecodeError, TypeError):
-            warning('exa_search: failed to parse input as JSON')
-
-    if not isinstance(input_obj, dict):
-        warning(f'exa_search: unexpected input type {type(input_obj).__name__}')
-        return {}
-
-    if 'input' in input_obj and isinstance(input_obj['input'], dict):
-        inner = input_obj['input']
-        extras = {k: v for k, v in input_obj.items() if k != 'input'}
-        input_obj = {**inner, **extras}
-
-    input_obj.pop('security_context', None)
-    return input_obj

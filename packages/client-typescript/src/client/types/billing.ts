@@ -51,11 +51,29 @@ export interface BillingDetail {
 	/** One of: active, trialing, past_due, canceled. */
 	status: string;
 
+	/** Human-readable plan name from Stripe price nickname (e.g. "Pro Monthly"), or null. */
+	planNickname: string | null;
+
+	/** Price in USD cents for the subscribed plan, or null. */
+	unitAmount: number | null;
+
+	/** Billing interval: "month" or "year", or null. */
+	billingInterval: string | null;
+
+	/** ISO 8601 datetime when the current billing period started, or null. */
+	currentPeriodStart: string | null;
+
 	/** ISO 8601 datetime when the current billing period ends, or null. */
 	currentPeriodEnd: string | null;
 
 	/** True when the user has requested cancellation at period end. */
 	cancelAtPeriodEnd: boolean;
+
+	/** Credit grants config from Stripe price metadata, or null. */
+	credits: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+
+	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
+	creditLabels: Record<string, string> | null;
 }
 
 /**
@@ -81,18 +99,27 @@ export interface StripePlan {
 // =============================================================================
 
 /**
- * Current credit balance for an organisation's compute wallet.
+ * Multi-resource credit balance for an organisation's wallet.
  * Returned by the `credits_balance` subcommand.
+ *
+ * Each field is a dict keyed by resource type (e.g. ``{ tokens: 4200, video: 80 }``).
  */
 export interface CreditBalance {
-	/** Current unspent credit balance for the org. */
-	balance: number;
+	/** Current unspent balances per resource type. */
+	balances: Record<string, number>;
 
-	/** Total credits ever purchased — useful for ledger display. */
-	lifetimePurchased: number;
+	/** Total purchased per resource type — useful for ledger display. */
+	lifetimePurchased: Record<string, number>;
 
-	/** Total credits ever consumed — useful for ledger display. */
-	lifetimeConsumed: number;
+	/** Total consumed per resource type — useful for ledger display. */
+	lifetimeConsumed: Record<string, number>;
+
+	/**
+	 * Human-readable display templates per resource type, from Stripe price metadata.
+	 * Supports ``{amount}`` substitution (e.g. ``"{amount} minutes of Audio"``).
+	 * Falls back to the raw resource key when a label is not configured.
+	 */
+	labels: Record<string, string>;
 }
 
 /**

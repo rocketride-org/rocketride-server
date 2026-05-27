@@ -60,9 +60,7 @@ class ApplicationPermissions:
             'roleName': 'Group.Read.All',
             'Display Name': 'Read all groups',
             'Description': (
-                'Allows the app to create groups, read all group properties and memberships, update group properties '
-                'and memberships, and delete groups. Also allows the app to read and write conversations. '
-                'All of these operations can be performed by the app without a signed-in user.'
+                'Allows the app to create groups, read all group properties and memberships, update group properties and memberships, and delete groups. Also allows the app to read and write conversations. All of these operations can be performed by the app without a signed-in user.'
             ),
         },
         '62a82d76-70ea-41e2-9197-370581804d09': {

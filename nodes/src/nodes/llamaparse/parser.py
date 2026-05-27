@@ -105,7 +105,7 @@ class Parser(ReaderBase):
             return result.get('text', '')
         return result
 
-    def parse(self, pipe_id: int, file_data: bytes, file_name: Optional[str] = None) -> dict[str, Any]:
+    def parse(self, file_data: bytes, file_name: Optional[str] = None) -> dict[str, Any]:
         """
         Parse document data using LlamaParse.
 
@@ -220,12 +220,11 @@ class Parser(ReaderBase):
                         if page_count > 0:
                             try:
                                 metrics.event(
-                                    pipe_id,
                                     {
                                         'llamaparse_pages': int(page_count),
-                                        'llamaparse_mode': (self._parse_mode),
-                                        'llamaparse_model': (self._lvm_model),
-                                    },
+                                        'llamaparse_mode': self._parse_mode,
+                                        'llamaparse_model': self._lvm_model,
+                                    }
                                 )
                             except Exception as e:
                                 debug(f'Could not record metrics from metadata: \n \n {str(e)}')
@@ -256,12 +255,11 @@ class Parser(ReaderBase):
                     if page_count > 0:
                         try:
                             metrics.event(
-                                pipe_id,
                                 {
                                     'llamaparse_pages': int(page_count),
-                                    'llamaparse_mode': (self._parse_mode),
-                                    'llamaparse_model': (self._lvm_model),
-                                },
+                                    'llamaparse_mode': self._parse_mode,
+                                    'llamaparse_model': self._lvm_model,
+                                }
                             )
                         except Exception as e:
                             debug(f'Could not record metrics from parsing output: \n \n {str(e)}')

@@ -171,9 +171,14 @@ class TASK_TOKENS(BaseModel):
     )
     cpu_memory: float = Field(default=0.0, description='Cumulative CPU memory tokens charged since monitoring started')
     gpu_memory: float = Field(default=0.0, description='Cumulative GPU memory tokens charged since monitoring started')
+    gpu_inference: float = Field(
+        default=0.0, description='Cumulative GPU inference timing tokens charged since monitoring started'
+    )
+    custom: Dict[str, float] = Field(
+        default_factory=dict, description='Custom node billing counters converted to tokens (counter_name -> tokens)'
+    )
     total: float = Field(
-        default=0.0,
-        description='Total cumulative tokens charged (cpu_utilization + cpu_memory + gpu_memory) since monitoring started',
+        default=0.0, description='Total cumulative tokens charged (all dimensions) since monitoring started'
     )
 
 

@@ -32,12 +32,13 @@
  */
 const path = require('path');
 const {
-    execCommand, syncDir, formatSyncStats,
+    execCommand, runPytest, syncDir, formatSyncStats,
     removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
     mkdir, copyFile, exists,
     hasSourceChanged, saveSourceHash, setState,
     startServer, stopServer,
-    bracket, parallel
+    bracket, parallel,
+    parseServerAddress
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -124,27 +125,28 @@ function makeRunPytestAction(options = {}) {
             const port = bracket?.port || ctx.port;
             const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
-            // Install MCP test dependencies
-            task.output = 'Installing test deps (mcp, python-dotenv)...';
-            await execCommand(ENGINE, [
-                '-m', 'pip', 'install', 'mcp>=1.2.0', 'python-dotenv>=1.0.0', '--quiet'
-            ], { task, cwd: SERVER_DIR });
+            // MCP and python-dotenv are installed by server:setup-pip
 
             // Run pytest
             const buildSrcDir = path.join(BUILD_DIR, 'src');
             const testsDir = path.join(PACKAGE_DIR, 'tests');
-            const pytestArgs = ['-m', 'pytest', testsDir, '-v', '--rootdir', PACKAGE_DIR];
+            const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
             if (options.pytest) {
-                pytestArgs.push(...options.pytest);
+                extraArgs.push(...options.pytest);
             }
-            await execCommand(ENGINE, pytestArgs, {
-                task,
-                cwd:  SERVER_DIR,
-                env: {
-                    ...process.env,
-                    ROCKETRIDE_URI: serverUri,
-                    PYTHONPATH: buildSrcDir
-                }
+            await runPytest({
+                engine: ENGINE,
+                testsDir,
+                extraArgs,
+                execOpts: {
+                    task,
+                    cwd: SERVER_DIR,
+                    env: {
+                        ...process.env,
+                        ROCKETRIDE_URI: serverUri,
+                        PYTHONPATH: buildSrcDir,
+                    },
+                },
             });
         }
     };
@@ -153,10 +155,12 @@ function makeRunPytestAction(options = {}) {
 function makeStartTestServerAction(options = {}) {
     return {
         run: async (ctx, task) => {
-            if (options.testport) {
-                ctx.port = options.testport;
-                task.output = `Using existing server on port ${ctx.port}`;
-                return { port: ctx.port, server: null };
+            const taskserver = options.taskserver || ctx.options?.taskserver;
+            if (taskserver) {
+                const parsed = parseServerAddress(taskserver);
+                ctx.port = parsed.port;
+                task.output = `Using existing server at ${parsed.uri}`;
+                return { port: parsed.port, server: null, serverUri: parsed.uri };
             }
             const envUri = process.env.ROCKETRIDE_URI;
             if (envUri) {
@@ -220,7 +224,7 @@ module.exports = {
 
         // Public actions (have descriptions)
         { name: 'client-mcp:build', action: () => ({
-            description: 'Build MCP client',
+            description: 'Build client-mcp',
             steps: [
                 'server:build',
                 'client-mcp:sync-source',
@@ -230,8 +234,9 @@ module.exports = {
         })},
         { name: 'client-mcp:build-wheel', action: makeBuildWheelAction },
         { name: 'client-mcp:test', action: () => ({
-            description: 'Test MCP client',
+            description: 'Testing client-mcp',
             steps: [
+                'server:build',
                 parallel([
                     'ai:build',
                     'nodes:build',
@@ -247,7 +252,7 @@ module.exports = {
             ]
         })},
         { name: 'client-mcp:clean', action: () => ({
-            description: 'Clean MCP client',
+            description: 'Cleaning client-mcp',
             run: async (ctx, task) => {
                 await removeDirs([
                     path.join(PACKAGE_DIR, 'build'),

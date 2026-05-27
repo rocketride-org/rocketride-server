@@ -83,12 +83,16 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_team_permissions
+from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.account.store import Store
+from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
+
+# todo: feat/deploy2 - enable TaskScheduler
+# from .task_scheduler import TaskScheduler
 from rocketlib import debug
 
 
@@ -109,11 +113,10 @@ class TASK_CONTROL:
         pipeline (Optional[Dict[str, Any]]): Task configuration and execution parameters
     """
 
-    # Short of the pipe -  used for display and events
+    # Short of the pipe — used for display and events
     id: str = ''
 
-    # These are the mapped userToken, client_id, and the token for the task
-    apikey: str = ''  # kept for backward compat; set to userToken at task start
+    # Connection and task identifiers
     client_id: str = ''
     token: str = ''
 
@@ -214,12 +217,22 @@ class TaskServer(DAPBase):
 
         # Shared store instance (lazy-loaded via property)
         self._store_instance: Optional[Store] = None
+        self._deployments_instance: Optional[DeploymentStore] = None
 
-        # Start background cleanup process for completed tasks
-        asyncio.create_task(self._cleanup_tasks())
+        # Scheduler for running deployed pipelines
+        # todo: feat/deploy2 - enable TaskScheduler
+        # self.scheduler = TaskScheduler(self)
 
-        # Start background TTL monitoring process
-        asyncio.create_task(self._monitor_ttl())
+        # Start background tasks that must be cancelled on shutdown.
+        self._bg_tasks: List[asyncio.Task] = [
+            # Cleanup for completed tasks
+            asyncio.create_task(self._cleanup_tasks()),
+            # TTL monitoring
+            asyncio.create_task(self._monitor_ttl()),
+            # Run scheduled deployments
+            # todo: feat/deploy2 - enable TaskScheduler
+            # asyncio.create_task(self.scheduler.start()),
+        ]
 
         # Store reference to parent server for statistics integration
         self._server = server
@@ -246,6 +259,13 @@ class TaskServer(DAPBase):
         if self._store_instance is None:
             self._store_instance = Store.create()
         return self._store_instance
+
+    @property
+    def deployments(self) -> DeploymentStore:
+        """Shared DeploymentStore instance, lazy-initialized on first access."""
+        if self._deployments_instance is None:
+            self._deployments_instance = DeploymentStore(self.store._store)
+        return self._deployments_instance
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -362,6 +382,16 @@ class TaskServer(DAPBase):
                 # Log errors but continue operation to maintain system stability
                 self.debug_message(f'Error during TTL monitoring cycle: {e}')
 
+    async def shutdown(self) -> None:
+        """Cancel all background tasks."""
+        # todo: feat/deploy2 - enable TaskScheduler
+        # await self.scheduler.stop()
+        bg_tasks = getattr(self, '_bg_tasks', [])
+        for task in bg_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
+
     def release_unauthed_slot(self, ip: str) -> None:
         """
         Decrement the unauthenticated connection count for an IP.
@@ -453,6 +483,10 @@ class TaskServer(DAPBase):
         connection_id = conn.get_connection_id()
         debug(f'[CONN] disconnected: id={connection_id} authenticated={getattr(conn, "_authenticated", False)}')
 
+        # Release any cProfile session owned by this connection
+        if hasattr(conn, 'release_profiler'):
+            conn.release_profiler()
+
         # Remove connection from active connections registry
         if connection_id in self._connections:
             del self._connections[connection_id]
@@ -461,7 +495,7 @@ class TaskServer(DAPBase):
         if not getattr(conn, '_authenticated', False):
             self.release_unauthed_slot(getattr(conn, '_client_ip', ''))
 
-        conn_apikey = getattr(getattr(conn, '_account_info', None), 'userToken', None)
+        conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {
@@ -474,7 +508,7 @@ class TaskServer(DAPBase):
                     'clientVersion': getattr(conn, '_client_info', {}).get('version'),
                 },
             },
-            apikey=conn_apikey,
+            user_id=conn_user_id,
         )
 
         # Process all tasks for disconnection cleanup
@@ -585,12 +619,11 @@ class TaskServer(DAPBase):
         for control in self._task_control.values():
             if control.project_id == project_id and control.source == source:
                 if account_info is not None:
-                    if control.userId != account_info.userId:
-                        raise PermissionError('Access denied: task belongs to a different account')
-                    if require:
-                        perms = resolve_team_permissions(account_info, control.teamId)
-                        if require not in perms:
-                            raise PermissionError(f'Permission {require!r} denied for this task')
+                    perms = resolve_task_permissions(account_info, control.teamId)
+                    if not perms:
+                        raise PermissionError('Access denied: no permissions for this task')
+                    if require and require not in perms:
+                        raise PermissionError(f'Permission {require!r} denied for this task')
                 return control
 
         raise RuntimeError('Your pipeline is not running')
@@ -704,7 +737,7 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
         """
         Broadcast a server-level event to all connections subscribed via the '*' wildcard.
 
@@ -717,13 +750,13 @@ class TaskServer(DAPBase):
                 Only connections whose '*' subscription includes this bit will receive the event.
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
-            apikey (str, optional): When provided, restricts delivery to connections
-                whose authenticated userToken matches this value (tenant scoping).
+            user_id (str, optional): When provided, restricts delivery to connections
+                whose authenticated userId matches this value (tenant scoping).
                 Pass None to broadcast to all '*'-subscribed connections regardless of tenant.
         """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event, apikey=apikey)
+                await conn.send_server_event(type, event=event, user_id=user_id)
             except Exception as e:
                 # Log individual delivery failures so dashboard-event drops leave
                 # a trace; match the pattern used by broadcast_task_event below.
@@ -896,7 +929,7 @@ class TaskServer(DAPBase):
                 'event': 'apaevt_dashboard',
                 'body': {'action': 'task_removed', 'timestamp': time.time(), 'taskId': control.id},
             },
-            apikey=control.apikey,
+            user_id=control.userId,
         )
 
         # Log task removal for audit trail and debugging
@@ -905,7 +938,6 @@ class TaskServer(DAPBase):
 
     async def start_task(
         self,
-        apikey: str,
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,
@@ -915,6 +947,7 @@ class TaskServer(DAPBase):
         user_id: str = '',
         team_id: str = '',
         org_id: str = '',
+        env: Dict[str, str] | None = None,
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -990,7 +1023,6 @@ class TaskServer(DAPBase):
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
         # Parse task configuration from request arguments
-        control.apikey = apikey
         control.client_id = client_id
         control.userId = user_id
         control.teamId = team_id
@@ -1049,7 +1081,7 @@ class TaskServer(DAPBase):
         if control.token is None:
             control.token = self._server.account.generate_token(
                 content={
-                    'apikey': control.apikey,
+                    'userId': control.userId,
                     'project_id': control.project_id,
                     'source': control.source,
                 },
@@ -1127,6 +1159,7 @@ class TaskServer(DAPBase):
                 provider=control.provider,
                 ttl=ttl,
                 client_id=control.client_id,
+                env=env or {},
             )
 
             # Register task in central registry
@@ -1164,7 +1197,6 @@ class TaskServer(DAPBase):
 
     async def restart_task(
         self,
-        apikey: str,
         request: Dict[str, Any],
         conn: TaskConn = None,
         *,
@@ -1252,10 +1284,13 @@ class TaskServer(DAPBase):
             # Update the new owner
             control.launch_owner = conn
 
-            # Verify the caller owns this task
+            # Verify the caller has control permissions for this task
             if conn and hasattr(conn, '_account_info') and conn._account_info:
-                if conn._account_info.userId != control.userId:
-                    raise RuntimeError('Cannot restart task: task belongs to a different account.')
+                perms = resolve_task_permissions(conn._account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Cannot restart task: no permissions for this task')
+                if 'task.control' not in perms:
+                    raise PermissionError("Permission 'task.control' denied for this task")
 
             # Check if debugger is attached - fail if so
             if control.task.has_attached_debugger():

@@ -35,6 +35,7 @@ import { RocketRideClient, DAPMessage, ConnectionException } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConfigManager } from '../config';
+import { ConnectionManager } from '../connection/connection';
 import { GenericEvent, GenericResponse, GenericRequest } from '../shared/types/protocol';
 
 import { LaunchRequest, AttachRequest } from '../shared/types/protocol';
@@ -77,7 +78,8 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 
 	private async initializeConnection(): Promise<void> {
 		const rocketrideConfig = this.configManager.getConfig();
-		const uri = this.configManager.getHttpUrl();
+		// Use the dev connection manager's URL (accounts for local port override)
+		const uri = ConnectionManager.getInstance().getHttpUrl();
 
 		let apiKey: string | undefined;
 		if (rocketrideConfig.development.connectionMode === 'cloud' || rocketrideConfig.development.connectionMode === 'onprem') {
@@ -154,7 +156,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 
 			await this.client.connect();
 
-			this.apiHost = this.configManager.getHttpUrl();
+			this.apiHost = ConnectionManager.getInstance().getHttpUrl();
 
 			if (type === 'launch') {
 				const [uri, content] = await this.loadPipeline(session);

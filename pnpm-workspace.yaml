@@ -1,11 +1,17 @@
 # Rocketride Engine Monorepo Workspace Configuration
 # This file defines which directories contain packages in the monorepo
 
+# Suppress cyclic-dependency warning caused by apps/vscode and
+# packages/client-typescript both being named "rocketride".
+# The cycle is via a peer dependency and is harmless.
+ignoreWorkspaceCycles: true
+
 # Only allow postinstall/install scripts for known, trusted packages that
 # require native compilation or binary downloads.
 # See: https://pnpm.io/npmrc#onlybuiltdependencies
 onlyBuiltDependencies:
   - '@homebridge/node-pty-prebuilt-multiarch'
+  - '@vscode/vsce-sign'
   - 'core-js'
   - 'cpu-features'
   - 'esbuild'
@@ -14,17 +20,6 @@ onlyBuiltDependencies:
   - 'protobufjs'
   - 'ssh2'
   - 'unrs-resolver'
-
-# Mute deprecation warnings for known deprecated (transitive) dependencies.
-# See: https://pnpm.io/npmrc#alloweddeprecatedversions
-allowedDeprecatedVersions:
-  '@mui/styles': '*'
-  glob: '*'
-  deep-diff: '*'
-  popper.js: '*'
-  rimraf: '*'
-  stable: '*'
-  whatwg-encoding: '*'
 
 packages:
   # Shared UI components
@@ -36,7 +31,12 @@ packages:
   # Applications
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
+  - 'apps/hello-ui'
+  - 'apps/monitor-ui'
+  - 'apps/profiler-ui'
+  - 'apps/shell-ui'
   - 'apps/vscode'
+  - 'apps/world-ui'
 
   # Examples
   - 'examples/*'

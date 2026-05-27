@@ -47,7 +47,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         with:
           filters: |
@@ -59,6 +59,54 @@ jobs:
               - 'builder'
               - 'builder.cmd'
               - '.github/workflows/**'
+
+  # ---------------------------------------------------------------------------
+  #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
+  # ---------------------------------------------------------------------------
+  helm-changes:
+    name: Detect Helm changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      helm: ${{ steps.filter.outputs.helm }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: filter
+        with:
+          filters: |
+            helm:
+              - 'deploy/helm/**'
+
+  helm-lint:
+    name: Helm lint & kubeconform
+    needs: helm-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: needs.helm-changes.outputs.helm == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Helm lint
+        run: helm lint deploy/helm/rocketride
+
+      - name: Helm template | kubeconform
+        run: |
+          helm template rocketride deploy/helm/rocketride \
+            --values deploy/helm/rocketride/tests/values_test.yaml \
+            | kubeconform -strict -summary -kubernetes-version 1.29.0
 
   build:
     name: Build
@@ -100,60 +148,17 @@ jobs:
     steps:
       - run: echo "Build skipped — no code changes detected"
 
-  # ---------------------------------------------------------------------------
-  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
-  # ---------------------------------------------------------------------------
-  codeql:
-    name: CodeQL / ${{ matrix.language }}
-    if: github.event_name == 'schedule' || github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: javascript-typescript
-            build-mode: none
-          - language: python
-            build-mode: none
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-          queries: security-and-quality
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          category: '/language:${{ matrix.language }}'
-
-  codeql-cpp:
-    name: CodeQL / cpp
-    if: github.event_name == 'schedule'
-    needs: init
-    uses: ./.github/workflows/_build.yaml
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-    with:
-      codeql: true
-      full_version: ${{ needs.init.outputs.full_server_version }}
-      build_hash: ${{ needs.init.outputs.build_hash }}
-      build_stamp: ${{ needs.init.outputs.build_stamp }}
-      nodownload: true
-    secrets: inherit
+  # CodeQL: replaced by GitHub's "Default setup" — managed in repo Settings →
+  # Code security. Scans Python, JavaScript/TypeScript (and C/C++ via
+  # GitHub-managed autobuild). Findings surface in the Security tab.
 
   # ---------------------------------------------------------------------------
-  #  Container scan
+  #  Container scan — non-PR only (push/schedule/etc.).
+  #
+  #  ⚠ DO NOT add to develop/main required-status-checks (same caveat as
+  #  CodeQL above). Skipped on PR runs → would block merges. Trivy SARIF
+  #  uploads to the Security tab on every push to develop/main, so findings
+  #  remain visible without gating PR merges.
   # ---------------------------------------------------------------------------
   container-scan:
     name: Container scan / ${{ matrix.dockerfile }}
@@ -189,7 +194,7 @@ jobs:
             --ignore-unfixed
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
         if: always()
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
@@ -240,7 +245,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, ruff-check, gitleaks]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -248,11 +253,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.

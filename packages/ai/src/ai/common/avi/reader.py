@@ -6,7 +6,7 @@ import imageio_ffmpeg as ffmpeg
 import subprocess
 from abc import ABC, abstractmethod
 from typing import List
-from rocketlib import AVI_ACTION, debug
+from rocketlib import AVI_ACTION, debug, error as rocketlib_error
 
 
 class AVIReader(ABC):
@@ -85,7 +85,14 @@ class AVIReader(ABC):
             try:
                 self.onData(data)  # Call the callback with the read data
             except Exception as e:
-                debug('[Reader] Error in data callback: {}'.format(e))
+                # Log the error so it appears in the Errors tab
+                rocketlib_error(f'[Reader] Error in {self._name} data callback: {e}')
+
+                # Store the error so stop() can re-raise it on the pipe thread.
+                # Only store the first error — subsequent chunks will likely
+                # fail with the same root cause.
+                if self._error is None:
+                    self._error = e
 
         # Signal callback we are done
         self.onData(None)
@@ -298,6 +305,10 @@ class AVIReader(ABC):
         self._done = False
         self._exit_code = 0
 
+        # Capture errors from the background _data_process thread so they
+        # can be re-raised on the pipe thread when stop() is called
+        self._error = None
+
         # Player process states
         self._data_thread = None
         self._info_thread = None
@@ -383,6 +394,12 @@ class AVIReader(ABC):
         self.stdin = None
         self.stdout = None
         self.stderr = None
+
+        # Re-raise any error captured from the background _data_process
+        # thread.  This runs on the pipe thread (called from writeAVI(END)),
+        # so the exception propagates back to C++ and surfaces as a task error.
+        if self._error is not None:
+            raise self._error
 
     def write(self, buffer: bytes):
         """Send buffer to FFmpeg for decoding."""

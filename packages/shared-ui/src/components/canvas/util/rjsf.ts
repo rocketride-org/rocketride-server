@@ -24,7 +24,7 @@
 import { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { ValidationData } from '@rjsf/utils';
 import { getDefaultFormState as RJSFGetDefaultFormState } from '@rjsf/utils';
-import validator from '@rjsf/validator-ajv8';
+import validator from './csp-safe-validator';
 import { traverseObject } from './traverse-object';
 
 /**

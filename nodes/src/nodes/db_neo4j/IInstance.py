@@ -13,6 +13,7 @@ queries, and inserts data as graph nodes.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase, tool_function, error, warning
@@ -20,7 +21,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .IGlobal import IGlobal
+from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
 from .utils import _is_cypher_safe, _parse_is_valid
 
 
@@ -44,7 +45,7 @@ class IInstance(IInstanceBase):
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of rows to return (default 250, max 25000).',
+                    'description': f'Maximum number of rows to return (default 250, max {DEFAULT_MAX_EXECUTE_ROWS}).',
                 },
             },
         },
@@ -204,6 +205,41 @@ class IInstance(IInstanceBase):
             return
 
         lanes = self.instance.getListeners()
+
+        # DIALECT: dialect-discovery request — emit {'dialect': 'neo4j'} on the
+        # answers lane so SDK callers can tell they're talking to a graph DB
+        # rather than a relational one.
+        if question.type == QuestionType.DIALECT:
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps({'dialect': 'neo4j'}))
+                self.instance.writeAnswers(answer)
+            return
+
+        # EXECUTE: caller passes raw Cypher; bypass LLM translation + safety check.
+        if question.type == QuestionType.EXECUTE:
+            if not self.IGlobal.allow_execute:
+                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
+                return
+            try:
+                execute_result = self.IGlobal._run_query_raw(question_text)
+                rows = execute_result['rows']
+                affected = execute_result['affected_rows']
+                markdown = self._formatResultAsMarkdown(rows) if rows else None
+
+                if 'text' in lanes:
+                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+
+                if 'table' in lanes and rows:
+                    self.instance.writeTable(markdown)
+
+                if 'answers' in lanes:
+                    answer = Answer()
+                    answer.setAnswer(json.dumps(execute_result, default=str))
+                    self.instance.writeAnswers(answer)
+            except Exception as e:
+                error(f'Error handling execute question: {e}')
+            return
 
         try:
             query_json = self._buildCypherQuery(question_text)
@@ -388,8 +424,8 @@ class IInstance(IInstanceBase):
 
 
 def _clamp_limit(raw_limit) -> int:
-    """Clamp a user-supplied limit to [1, 25000]."""
+    """Clamp a user-supplied limit to [1, DEFAULT_MAX_EXECUTE_ROWS]."""
     try:
-        return max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        return max(1, min(int(raw_limit), DEFAULT_MAX_EXECUTE_ROWS)) if raw_limit is not None else 250
     except (ValueError, TypeError):
         return 250

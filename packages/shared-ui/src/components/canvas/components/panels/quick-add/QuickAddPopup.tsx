@@ -18,6 +18,7 @@ import { Search } from 'lucide-react';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { IService, IServiceCapabilities, IServiceLane } from '../../../types';
+import { CATEGORY_TITLES } from '../create-node/categoryTitles';
 import { getOutputLaneDisplayValues, renameInvokeType } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { getIconPath } from '../../../util/get-icon-path';
@@ -155,6 +156,15 @@ const styles = {
 		flexShrink: 0,
 		lineHeight: '14px',
 	},
+	categoryHeader: {
+		fontSize: '10px',
+		fontWeight: 700,
+		textTransform: 'uppercase' as const,
+		letterSpacing: '0.04em',
+		color: 'var(--rr-text-disabled)',
+		padding: '6px 8px 2px',
+		userSelect: 'none' as const,
+	},
 	empty: {
 		padding: '12px',
 		textAlign: 'center' as const,
@@ -169,7 +179,7 @@ const styles = {
 
 export default function QuickAddPopup(): ReactElement | null {
 	const { quickAddState, setQuickAddState, addNode, onEdgeConnect, nodes } = useFlowGraph();
-	const { servicesJson } = useFlowProject();
+	const { servicesJson, inventory } = useFlowProject();
 
 	const [search, setSearch] = useState('');
 	const searchRef = useRef<HTMLInputElement>(null);
@@ -257,6 +267,34 @@ export default function QuickAddPopup(): ReactElement | null {
 
 		return results.sort((a, b) => (a.service.title ?? a.key).localeCompare(b.service.title ?? b.key));
 	}, [quickAddState, servicesJson, search, nodes]);
+
+	// Group compatible services by inventory category
+	const groupedServices = useMemo(() => {
+		const catalog = (inventory ?? {}) as Record<string, Record<string, IService>>;
+
+		// Build provider → category lookup
+		const providerCategory: Record<string, string> = {};
+		for (const [catKey, group] of Object.entries(catalog)) {
+			for (const providerKey of Object.keys(group as Record<string, IService>)) {
+				// First category wins (a provider may appear in "tool" + another)
+				if (!providerCategory[providerKey]) providerCategory[providerKey] = catKey;
+			}
+		}
+
+		const groups: Record<string, { key: string; service: IService }[]> = {};
+		for (const entry of compatibleServices) {
+			const cat = providerCategory[entry.key] ?? 'other';
+			(groups[cat] ??= []).push(entry);
+		}
+
+		// Sort by CATEGORY_ORDER, then alphabetical for unknowns
+		const orderedKeys = Object.keys(CATEGORY_TITLES);
+		return Object.entries(groups).sort(([a], [b]) => {
+			const ia = orderedKeys.indexOf(a);
+			const ib = orderedKeys.indexOf(b);
+			return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+		});
+	}, [compatibleServices, inventory]);
 
 	if (!quickAddState) return null;
 
@@ -392,34 +430,39 @@ export default function QuickAddPopup(): ReactElement | null {
 
 				{/* Service list */}
 				<div style={styles.scrollArea}>
-					{compatibleServices.map(({ key, service }) => (
-						<div
-							key={key}
-							onClick={() => onSelect(key)}
-							style={styles.item}
-							onMouseEnter={(e) => {
-								(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-widget-hover)';
-							}}
-							onMouseLeave={(e) => {
-								(e.currentTarget as HTMLElement).style.backgroundColor = '';
-							}}
-						>
-							{(() => {
-								const icon = getIconPath(service.icon);
-								return (
-									<img
-										src={icon}
-										alt=""
-										style={{
-											...styles.itemIcon,
-											filter: icon.includes('#td') ? 'var(--icon-filter)' : undefined,
-										}}
-									/>
-								);
-							})()}
-							<span style={styles.itemTitle}>{service.title ?? key}</span>
-							{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
-							{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
+					{groupedServices.map(([catKey, items]) => (
+						<div key={catKey}>
+							<div style={styles.categoryHeader}>{CATEGORY_TITLES[catKey] ?? catKey}</div>
+							{items.map(({ key, service }) => (
+								<div
+									key={key}
+									onClick={() => onSelect(key)}
+									style={{ ...styles.item, paddingLeft: '14px' }}
+									onMouseEnter={(e) => {
+										(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-widget-hover)';
+									}}
+									onMouseLeave={(e) => {
+										(e.currentTarget as HTMLElement).style.backgroundColor = '';
+									}}
+								>
+									{(() => {
+										const icon = getIconPath(service.icon);
+										return (
+											<img
+												src={icon}
+												alt=""
+												style={{
+													...styles.itemIcon,
+													filter: icon.includes('#td') ? 'var(--icon-filter)' : undefined,
+												}}
+											/>
+										);
+									})()}
+									<span style={styles.itemTitle}>{service.title ?? key}</span>
+									{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
+									{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
+								</div>
+							))}
 						</div>
 					))}
 

@@ -645,6 +645,27 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             objectSkipped,
             [](const Entry &obj) -> bool { return obj.objectSkipped(); })
 
+        // Read-only property exposing the completion code error details.
+        // Returns a dict with message, file, line, function when the object
+        // has failed, or None if no error is set.  Used by data_conn.py
+        // close_sync() to surface pipeline errors to the dropper client.
+        .PYBIND_PROP_READONLY_CUSTOM(
+            completionError,
+            [](const Entry &obj) -> py::object {
+                if (!obj.completionCode())
+                    return py::none();
+
+                auto err = obj.completionCode.get();
+                auto loc = err.location();
+                py::dict result;
+                result["message"] = std::string(err.message());
+                result["code"] = err.code().value();
+                result["file"] = loc.fileName();
+                result["line"] = loc.line();
+                result["function"] = loc.function();
+                return result;
+            })
+
         .PYBIND_ENTRY_PROP_READONLY(IJson, objectTags, hasObjectTags)
         .PYBIND_ENTRY_PROP_READONLY(IJson, instanceTags, hasInstanceTags)
 

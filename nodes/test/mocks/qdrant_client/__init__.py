@@ -448,23 +448,22 @@ class QdrantClient:
         """
         points = QdrantClient._points.get(collection_name, [])
 
-        # Filter out the schema document (isDeleted=True)
-        # This document is created by the RocketRide store to track metadata
-        # and should never appear in search results
+        # Replicate the real Qdrant filter: exclude only documents explicitly
+        # marked isDeleted=True. Null/missing isDeleted means not deleted,
+        # matching the should=[MatchValue(False), IsNullCondition, IsEmptyCondition]
+        # filter used in _convertFilter().
         filtered_points = []
         for p in points:
             meta = p.payload.get('meta') if p.payload else None
-            is_deleted = False
+            is_deleted = None
 
             if meta is not None:
                 if hasattr(meta, 'isDeleted'):
-                    # meta is a DocMetadata object
                     is_deleted = meta.isDeleted
                 elif isinstance(meta, dict):
-                    # meta is already serialized to dict
-                    is_deleted = meta.get('isDeleted', False)
+                    is_deleted = meta.get('isDeleted')
 
-            if not is_deleted:
+            if is_deleted is not True:
                 filtered_points.append(p)
 
         # Return mock scored points

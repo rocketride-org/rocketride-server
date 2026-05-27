@@ -1,6 +1,6 @@
 # smbprotocol
 cffi
-cryptography
+cryptography==46.0.7
 pycparser
 pyspnego
 smbprotocol

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, TYPE_CHECKING
 from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
+from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
 from rocketlib import (
     IServiceEndpoint,
@@ -153,6 +154,9 @@ class DataConn(DAPConn):
 
         This method stops all background tasks and cleans up pipes.
         """
+        # Release any cProfile session owned by this connection
+        profiler.release(f'data:{id(self)}')
+
         # Signal shutdown to monitoring task
         self._shutdown_event.set()
 
@@ -684,30 +688,44 @@ class DataConn(DAPConn):
             self._reset_pipe_activity(conn_pipe)
 
             def close_sync():
+                # End the pipe and close it.  If either step throws (e.g. a
+                # node's writeText/writeAudio raised during closing flush),
+                # we still need to extract whatever results and error info
+                # the pipeline produced — so result extraction is OUTSIDE
+                # the try/except.
                 try:
-                    # End the pipe
+                    # End the pipe (sends END action to finalize streams)
                     self._end(conn_pipe)
 
-                    # Close the pipe to finalize all processing
+                    # Close the pipe to finalize all processing.
+                    # This calls closing() which may flush buffered data
+                    # through the pipeline — if a downstream node throws,
+                    # the exception is caught below.
                     pipe = conn_pipe.pipe
                     pipe.close()
 
-                    # Extract the result objects from the completed processing
-                    results = conn_pipe.entry.response.toDict()
-                    results['objectId'] = conn_pipe.entry.objectId
-
-                    # Mark pipe as closed
-                    conn_pipe.is_open = False
-
-                    # Return the results
-                    self.debug_message(f'Successfully closed pipe {conn_pipe.pipe_id}')
-                    return results
-
                 except Exception as e:
-                    # Mark pipe as failed
+                    # Pipeline error during end/close — log it but continue
+                    # to extract results so the error info reaches the client
                     conn_pipe.has_failed = True
-                    self.debug_message(f'Error in close_sync: {e}')
-                    raise
+                    self.debug_message(f'Error in close_sync end/close: {e}')
+
+                # Extract results regardless of whether end/close succeeded.
+                # If the pipeline set a completionCode (via callMethods in
+                # binder.cpp), objectFailed will be True and completionError
+                # will contain the rich error details (message, file, line, function).
+                results = conn_pipe.entry.response.toDict()
+                results['objectId'] = conn_pipe.entry.objectId
+
+                # Surface pipeline error to the client if the object failed
+                if conn_pipe.entry.objectFailed:
+                    results['error'] = conn_pipe.entry.completionError
+
+                # Mark pipe as closed
+                conn_pipe.is_open = False
+
+                self.debug_message(f'Closed pipe {conn_pipe.pipe_id} (failed={conn_pipe.has_failed})')
+                return results
 
             # Execute close operations in thread
             results = await asyncio.to_thread(close_sync)
@@ -728,3 +746,68 @@ class DataConn(DAPConn):
             if conn_pipe.semaphore_acquired:
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
+
+    # =========================================================================
+    # CPROFILE COMMANDS
+    # =========================================================================
+
+    async def on_rrext_cprofile_start(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Start a cProfile profiling session on this engine subprocess.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.session (str, optional): Human-readable session name
+
+        Returns:
+            Dict[str, Any]: DAP response with status, session, owner, start_time
+        """
+        args = request.get('arguments', {})
+        session = args.get('session', None)
+        result = profiler.start(f'data:{id(self)}', session)
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_stop(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Stop the active cProfile session on this engine subprocess.
+
+        Only the connection that started the session can stop it.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with status, session, runtime
+        """
+        result = profiler.stop(f'data:{id(self)}')
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get cProfile profiling status for this engine subprocess.
+
+        Any connection can call this regardless of ownership.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with active, owner, session, runtime
+        """
+        result = profiler.status()
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_report(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get the full cProfile report from the last completed session.
+
+        Any connection can call this regardless of ownership.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response with report text
+        """
+        result = profiler.report()
+        return self.build_response(request, body=result)

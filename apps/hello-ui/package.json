@@ -1,0 +1,41 @@
+{
+  "name": "@rocketride/hello-ui",
+  "version": "1.1.0",
+  "private": true,
+  "description": "RocketRide Hello — OSS landing page and dashboard",
+  "license": "MIT",
+  "appManifest": {
+    "id": "rocketride.hello",
+    "publisher": "Aparavi Software AG",
+    "name": "RocketRide",
+    "description": "Landing page and dashboard",
+    "icon": "./src/icon.svg",
+    "categories": ["built-in"],
+    "mode": "free",
+    "authenticated": false,
+    "showStatusBar": true
+  },
+  "scripts": {
+    "build": "pnpm rsbuild build",
+    "build:prod": "pnpm rsbuild build --env-mode production"
+  },
+  "browserslist": [
+    "chrome >= 81",
+    "edge >= 83",
+    "firefox >= 76",
+    "safari >= 13"
+  ],
+  "dependencies": {
+    "@module-federation/rsbuild-plugin": "^0.9.0",
+    "shell-ui": "workspace:*",
+    "shared": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "~1.7.5",
+    "@rsbuild/plugin-react": "~1.4.6",
+    "typescript": "^5.3.0"
+  }
+}

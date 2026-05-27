@@ -15,18 +15,27 @@
 import React, { useState, useEffect } from 'react';
 import dockerIcon from '../../../../assets/docker.svg';
 import { DockerStatus, VersionOption, displayVersion, stateLabels, IMAGE_BASE, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
+import { MessageData } from '../../Settings/SettingsWebview';
+import { MessageDisplay } from '../../Settings/MessageDisplay';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export interface DockerPanelProps {
+	/** Unique prefix for HTML element IDs (e.g. 'dev', 'deploy', 'welcome'). */
 	idPrefix: string;
+	/** Current Docker container state from daemon polling. */
 	status: DockerStatus;
+	/** Streamed progress text during install/update/remove (null when idle). */
 	progress: string | null;
+	/** Error message from the last failed action (null on success). */
 	error: string | null;
+	/** True while an ioControl action is in flight. */
 	busy: boolean;
+	/** Which action is currently running (drives button label text). */
 	action: 'install' | 'update' | 'remove' | 'start' | 'stop' | null;
+	/** Available image tags for the split-button dropdown. */
 	versions: VersionOption[];
 	selectedVersion: string;
 	onVersionChange: (version: string) => void;
@@ -35,6 +44,11 @@ export interface DockerPanelProps {
 	onRemove: () => void;
 	onStart: () => void;
 	onStop: () => void;
+	/** Test connection callback — only enabled when container is running. */
+	onTestConnection?: () => void;
+	/** Inline test result (success/error) shown below the test button. */
+	testMessage?: MessageData | null;
+	/** When true, hides advanced fields (used on Welcome page). */
 	simplified?: boolean;
 }
 
@@ -42,7 +56,7 @@ export interface DockerPanelProps {
 // COMPONENT
 // =============================================================================
 
-export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop, simplified }) => {
+export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, progress, error, busy, action, versions, selectedVersion, onVersionChange, onInstall, onUpdate, onRemove, onStart, onStop, onTestConnection, testMessage, simplified }) => {
 	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 	const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 	const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -59,16 +73,6 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 		return () => document.removeEventListener('click', handler);
 	}, [idPrefix]);
 
-	// Simplified mode: description only (used by PageAuth)
-	if (simplified) {
-		return (
-			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={dockerIcon} alt="Docker" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
-				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the RocketRide engine as a Docker container. Requires Docker to be installed and the daemon running.</div>
-			</div>
-		);
-	}
-
 	const transitional = status.state === 'starting' || status.state === 'stopping';
 	const allDisabled = busy || transitional;
 	const isRunning = status.state === 'running' || status.state === 'stopping';
@@ -78,16 +82,17 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 	// SPLIT BUTTON
 	// =========================================================================
 
-	const renderSplitButton = (label: string, busyLabel: string, onClick: () => void, primary: boolean = true) => {
+	const renderSplitButton = (label: string, busyLabel: string, busyAction: string, onClick: () => void, primary: boolean = true) => {
 		const currentLabel = versions.find((v) => v.value === selectedVersion)?.label ?? '<Latest>';
 		const btnStyle = primary ? primaryBtnStyle : secondaryBtnStyle;
 		const mainId = `${idPrefix}-docker-main`;
 		const arrowId = `${idPrefix}-docker-arrow`;
+		const isBusy = busy && action === busyAction;
 
 		return (
 			<div style={S.splitButton} data-split-button={`${idPrefix}-docker`}>
 				<button type="button" style={{ ...btnStyle(hoveredBtn === mainId, allDisabled), borderRadius: '4px 0 0 4px', whiteSpace: 'nowrap' }} disabled={allDisabled} onClick={onClick} onMouseEnter={() => setHoveredBtn(mainId)} onMouseLeave={() => setHoveredBtn(null)}>
-					{busy ? busyLabel : `${label}: ${currentLabel}`}
+					{isBusy ? busyLabel : `${label}: ${currentLabel}`}
 				</button>
 				<button
 					type="button"
@@ -113,32 +118,28 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 				</button>
 				{dropdownOpen && (
 					<div role="menu" style={S.splitDropdown}>
-						{versions.map((opt) => {
+						<div style={S.splitDropdownGroupLabel}>Recommended</div>
+						{versions.filter((v) => v.value === 'latest' || v.value === 'prerelease').map((opt) => {
 							const optKey = `${idPrefix}-docker-${opt.value}`;
 							return (
-								<button
-									type="button"
-									key={opt.value}
-									role="menuitem"
-									style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)}
-									onClick={() => {
-										onVersionChange(opt.value);
-										setDropdownOpen(false);
-									}}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											onVersionChange(opt.value);
-											setDropdownOpen(false);
-										}
-										if (e.key === 'Escape') setDropdownOpen(false);
-									}}
-									onMouseEnter={() => setHoveredOption(optKey)}
-									onMouseLeave={() => setHoveredOption(null)}
-								>
+								<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
 									{opt.label}
 								</button>
 							);
 						})}
+						{versions.some((v) => v.value !== 'latest' && v.value !== 'prerelease') && (
+							<>
+								<div style={S.splitDropdownGroupLabel}>All versions</div>
+								{versions.filter((v) => v.value !== 'latest' && v.value !== 'prerelease').map((opt) => {
+									const optKey = `${idPrefix}-docker-${opt.value}`;
+									return (
+										<button type="button" key={opt.value} role="menuitem" style={optionStyle(opt.value === selectedVersion, hoveredOption === optKey)} onClick={() => { onVersionChange(opt.value); setDropdownOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(false); } if (e.key === 'Escape') setDropdownOpen(false); }} onMouseEnter={() => setHoveredOption(optKey)} onMouseLeave={() => setHoveredOption(null)}>
+											{opt.label}
+										</button>
+									);
+								})}
+							</>
+						)}
 					</div>
 				)}
 			</div>
@@ -192,7 +193,7 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 				{status.state === 'no-docker' ? (
 					<p style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--rr-text-secondary)', margin: 0, fontStyle: 'italic', marginTop: 4 }}>Docker is not installed or the Docker daemon is not running.</p>
 				) : showInstall ? (
-					renderSplitButton('Install', 'Installing...', onInstall)
+					renderSplitButton('Install', 'Installing...', 'install', onInstall)
 				) : (
 					<>
 						<button type="button" style={isRunning ? secondaryBtnStyle(hoveredBtn === `${idPrefix}-docker-startstop`, allDisabled) : primaryBtnStyle(hoveredBtn === `${idPrefix}-docker-startstop`, allDisabled)} disabled={allDisabled} onClick={isRunning ? onStop : onStart} onMouseEnter={() => setHoveredBtn(`${idPrefix}-docker-startstop`)} onMouseLeave={() => setHoveredBtn(null)}>
@@ -201,10 +202,27 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 						<button type="button" style={secondaryBtnStyle(hoveredBtn === `${idPrefix}-docker-remove`, allDisabled)} disabled={allDisabled} onClick={onRemove} onMouseEnter={() => setHoveredBtn(`${idPrefix}-docker-remove`)} onMouseLeave={() => setHoveredBtn(null)}>
 							Remove
 						</button>
-						{renderSplitButton('Update', 'Updating...', onUpdate, true)}
+						{renderSplitButton('Update', 'Updating...', 'update', onUpdate, true)}
 					</>
 				)}
 			</div>
+
+			{/* Test connection — visible when installed, enabled only when running */}
+			{onTestConnection && status.state !== 'not-installed' && status.state !== 'no-docker' && (
+				<div style={{ marginTop: 12 }}>
+					<button
+						type="button"
+						onClick={onTestConnection}
+						disabled={status.state !== 'running' || busy}
+						style={secondaryBtnStyle(hoveredBtn === `${idPrefix}-docker-test`, status.state !== 'running' || busy)}
+						onMouseEnter={() => setHoveredBtn(`${idPrefix}-docker-test`)}
+						onMouseLeave={() => setHoveredBtn(null)}
+					>
+						Test Connection
+					</button>
+				</div>
+			)}
+			{testMessage && <MessageDisplay message={testMessage} inline />}
 		</>
 	);
 };

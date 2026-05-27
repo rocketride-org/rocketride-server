@@ -7,5 +7,12 @@ pytest-asyncio
 # Optional: For code coverage reports
 pytest-cov
 
-# AI module dependencies
+# Mocking and time control
+time_machine
+
+# AI module dependencies — each sub-package declares its own deps and
+# installs them via depends() at import time. Listing them here pre-installs
+# them so test runs do not pay the depends() pip cost on first import.
 -r ../src/ai/requirements.txt
+-r ../src/ai/common/requirements.txt
+-r ../src/ai/web/requirements.txt

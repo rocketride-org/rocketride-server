@@ -27,7 +27,7 @@ const isUrl = (path: string) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(pat
 // Import all connector icons
 import amazonS3Icon from '../../../assets/nodes/amazon-s3.svg';
 import anthropicIcon from '../../../assets/nodes/anthropic.svg';
-import rocketrideIcon from '../../../assets/nodes/rocketride.svg';
+import rocketrideIcon from '../../../assets/rocketride/rocketride-light.svg';
 import astradbIcon from '../../../assets/nodes/astra_db.svg';
 import audioPlayerIcon from '../../../assets/nodes/audio-player.svg';
 import audioTranscribeIcon from '../../../assets/nodes/audio-transcribe.svg';
@@ -36,6 +36,7 @@ import bedrockIcon from '../../../assets/nodes/bedrock.svg';
 import captivePortalIcon from '../../../assets/nodes/Captive portal.svg';
 import chatIcon from '../../../assets/nodes/chat.svg';
 import chromaIcon from '../../../assets/nodes/chroma.svg';
+import cohereIcon from '../../../assets/nodes/cohere.svg';
 import classificationIcon from '../../../assets/nodes/classification.svg';
 import confluenceIcon from '../../../assets/nodes/confluence.svg';
 import crewaiIcon from '../../../assets/nodes/crewai.svg';
@@ -93,7 +94,6 @@ import thumbnailIcon from '../../../assets/nodes/thumbnail.svg';
 import unknownIcon from '../../../assets/nodes/unknown.svg';
 import utilInfrastructureIcon from '../../../assets/nodes/util-infrastructure.svg';
 import utilTextIcon from '../../../assets/nodes/util-text.svg';
-import vertexIcon from '../../../assets/nodes/vertex.svg';
 import weaviateIcon from '../../../assets/nodes/weaviate.svg';
 import webhookIcon from '../../../assets/nodes/webhook.svg';
 import slackIcon from '../../../assets/nodes/slack.svg';
@@ -110,6 +110,7 @@ import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 import githubIcon from '../../../assets/nodes/github.svg';
 import telegramIcon from '../../../assets/nodes/telegram.svg';
+import gitIcon from '../../../assets/nodes/git.svg';
 import pipetoolIcon from '../../../assets/nodes/pipetool.svg';
 
 /**
@@ -130,6 +131,7 @@ const iconMap: Record<string, string> = {
 	chat: chatIcon,
 	chartjs: chartjsIcon,
 	chroma: chromaIcon,
+	cohere: cohereIcon,
 	classification: classificationIcon,
 	confluence: confluenceIcon,
 	crewai: crewaiIcon,
@@ -193,7 +195,6 @@ const iconMap: Record<string, string> = {
 	unknown: unknownIcon,
 	'util-infrastructure': utilInfrastructureIcon,
 	'util-text': utilTextIcon,
-	vertex: vertexIcon,
 	weaviate: weaviateIcon,
 	webhook: webhookIcon,
 	xai: xaiIcon,
@@ -202,6 +203,7 @@ const iconMap: Record<string, string> = {
 	twelvelabs: twelvelabsIcon,
 	'bland-ai': blandAiIcon,
 	github: githubIcon,
+	git: gitIcon,
 	telegram: telegramIcon,
 	pipetool: pipetoolIcon,
 };

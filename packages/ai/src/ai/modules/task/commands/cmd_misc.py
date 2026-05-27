@@ -46,7 +46,8 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
-from ..pipeline import resolve_implied_source
+from ai.account.models import resolve_task_permissions
+from ..pipeline import resolve_implied_source, resolve_pipeline_env
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -152,6 +153,10 @@ class MiscCommands(DAPConn):
         Validates pipeline structure, component compatibility, and connection
         integrity using rocketlib's validatePipeline function.
 
+        Before validation, ``${ROCKETRIDE_*}`` environment variable references
+        are resolved using the same merged environment as pipeline execution,
+        so that fields containing variable references validate correctly.
+
         Source resolution follows the same logic as execute:
         1. Explicit ``source`` argument (if provided)
         2. ``source`` field inside the pipeline config
@@ -172,8 +177,29 @@ class MiscCommands(DAPConn):
         { "command": "rrext_validate", "arguments": { "pipeline": { "components": [], ... }, "source": "chat_1" } }
         """
         try:
+            from ai.account import account
+
             args = request.get('arguments', {})
             pipeline = args.get('pipeline', {})
+
+            # Build merged environment for variable resolution (same as execute)
+            merged_env: Dict[str, str] = {}
+            if hasattr(self, '_account_info') and self._account_info:
+                # Determine org and team IDs from account info
+                org_id = ''
+                team_id = getattr(self._account_info, 'defaultTeam', '') or ''
+                for org in getattr(self._account_info, 'organizations', []):
+                    org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
+                    if org_id:
+                        break
+                merged_env = await account.get_merged_env(
+                    user_id=self._account_info.userId,
+                    org_id=org_id,
+                    team_id=team_id,
+                )
+
+            # Resolve ${ROCKETRIDE_*} variables before validation
+            pipeline = resolve_pipeline_env(pipeline, merged_env)
 
             # Resolve source: explicit arg > pipeline field > implied from components
             source = args.get('source', None) or pipeline.get('source', None)
@@ -220,8 +246,11 @@ class MiscCommands(DAPConn):
             current_time = time.time()
             caller_user_id = self._account_info.userId
 
-            # Snapshot and filter to caller's own data (cross-team: match on userId)
-            task_controls = [c for c in server._task_control.values() if c.userId == caller_user_id]
+            # Snapshot tasks the caller has access to (own, teammate, org admin)
+            task_controls = [
+                c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
+            ]
+            # Connections are user-scoped (not task-scoped), so filter by userId
             conn_items = [
                 (cid, conn)
                 for cid, conn in server._connections.items()
@@ -281,7 +310,6 @@ class MiscCommands(DAPConn):
                     'messagesOut': getattr(conn, '_messages_out', 0),
                     'authenticated': getattr(conn, '_authenticated', False),
                     'clientId': None,
-                    'apikey': '****',
                     'clientInfo': getattr(conn, '_client_info', {}),
                     'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
                     if hasattr(conn, '_monitors')
@@ -290,7 +318,6 @@ class MiscCommands(DAPConn):
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:
                     conn_info['clientId'] = conn._account_info.userId
-                    conn_info['apikey'] = self._mask_apikey(conn._account_info.userToken)
                 connections.append(conn_info)
 
             # Build tasks list

@@ -30,6 +30,12 @@ export interface CheckoutPlan {
 
 	/** Display price string (e.g. "$29 / mo", "$276 / yr"). */
 	amount: string;
+
+	/** Credit grants config from Stripe price metadata, or null. */
+	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+
+	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
+	creditLabels?: Record<string, string> | null;
 }
 
 // =============================================================================

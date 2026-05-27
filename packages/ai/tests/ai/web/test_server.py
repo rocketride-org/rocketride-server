@@ -98,9 +98,9 @@ class TestAllowedModules:
             'data',
             'dropper',
             'pipe',
-            'profiler',
             'remote',
             'services',
+            'shell',
             'task',
             'task_http',
         }

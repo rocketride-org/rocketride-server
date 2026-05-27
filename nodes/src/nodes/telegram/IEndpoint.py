@@ -626,7 +626,6 @@ class IEndpoint(IEndpointBase):
             webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
             self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
 
-        self._server.use('profiler')
         self._server.run()
 
     def scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None]):

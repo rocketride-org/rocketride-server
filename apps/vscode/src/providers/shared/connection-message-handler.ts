@@ -8,17 +8,20 @@
  * webview messages (cloud auth, engine versions, test connection, docker/service
  * lifecycle).
  *
- * Used by both PageSettingsProvider and PageWelcomeProvider so connection
+ * Used by both SettingsProvider and WelcomeProvider so connection
  * management code is never duplicated.
  */
 
+import * as https from 'https';
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
-import { getConnectionManager } from '../../extension';
-import { EngineInstaller } from '../../connection/engine-installer';
+import { EngineInstaller } from '../../engine/shared/engine-installer';
+import { EngineRegistry } from '../../engine';
+import { IMAGE_BASE } from '../../engine/docker/docker-manager';
+import { ConnectionManager } from '../../connection/connection';
+import { type ConnectionMode } from '../../config';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
-import { DeployManager } from '../../connection/deploy-manager';
-import { EngineOperations, EngineOperationsCallbacks } from '../../deploy/engine-operations';
+import { setCachedEngineVersions, setCachedDockerTags } from '../../extension';
 
 // =============================================================================
 // TYPES
@@ -27,42 +30,70 @@ import { EngineOperations, EngineOperationsCallbacks } from '../../deploy/engine
 export interface ConnectionMessageHandlerOptions {
 	extensionFsPath: string;
 	getActiveWebviews: () => Iterable<vscode.Webview>;
+	/** Returns the ConnectionManager for status events. Optional — auth-only handlers don't need it. */
+	getConnectionManager?: () => ConnectionManager | undefined;
+	/** Returns the EngineRegistry for engine operations. Optional — auth-only handlers don't need it. */
+	getEngineRegistry?: () => EngineRegistry | undefined;
 }
 
 // =============================================================================
 // HANDLER
 // =============================================================================
 
+/** Maximum number of GitHub API attempts before giving up and caching the failure. */
+const MAX_FETCH_ATTEMPTS = 2;
+
+/** How long (ms) to keep cached version results before refetching. */
+const VERSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Cached GitHub release list, shared across all consumers (local, service, docker).
+ * Prevents duplicate API calls and avoids rate limiting.
+ */
+interface VersionCache {
+	/** Cached release list (empty array on failed fetch). */
+	versions: Array<{ tag_name: string; prerelease: boolean }>;
+	/** When the cache was populated (Date.now()). */
+	fetchedAt: number;
+	/** True if the fetch is currently in flight (dedup concurrent callers). */
+	fetching: boolean;
+	/** Promise that concurrent callers can await while a fetch is in flight. */
+	promise?: Promise<void>;
+}
+
+/**
+ * Shared message router for connection-related webview messages.
+ *
+ * Handles: cloud auth (sign-in/out/status), team fetching, server info probing,
+ * engine version/Docker tag fetching (with caching), ioControl dispatch to
+ * engine backends, sudo password relay, and engine status polling.
+ *
+ * Used by SettingsProvider, WelcomeProvider, and AuthProvider so that
+ * connection management code is never duplicated across webview hosts.
+ */
 export class ConnectionMessageHandler {
 	private readonly engineInstaller: EngineInstaller;
-	readonly engineOps: EngineOperations;
 	private pendingSudoPassword: ((pw: string) => void) | null = null;
 	private cloudAuthCleanups: Array<() => void> = [];
 	private cachedServerInfo: { version: string; capabilities: string[]; platform?: string } | null = null;
 
+	/** Global version cache — populated once, served to all webviews. */
+	private versionCache: VersionCache = { versions: [], fetchedAt: 0, fetching: false };
+
+	/** Docker GHCR tag cache — same structure as version cache. */
+	private dockerTagCache: { tags: string[]; fetchedAt: number; fetching: boolean; promise?: Promise<void> } = { tags: [], fetchedAt: 0, fetching: false };
+
 	constructor(private readonly opts: ConnectionMessageHandlerOptions) {
 		this.engineInstaller = new EngineInstaller(opts.extensionFsPath);
-
-		const callbacks: EngineOperationsCallbacks = {
-			postMessage: (msg) => {
-				for (const w of opts.getActiveWebviews()) {
-					w.postMessage(msg);
-				}
-			},
-			requestSudoPassword: () =>
-				new Promise((resolve) => {
-					this.pendingSudoPassword = resolve;
-					for (const w of opts.getActiveWebviews()) {
-						w.postMessage({ type: 'serviceNeedsSudo' });
-					}
-				}),
-		};
-
-		this.engineOps = new EngineOperations(callbacks);
 	}
 
+
 	/**
-	 * Handle a message from the webview. Returns true if handled.
+	 * Routes a webview message to the appropriate handler.
+	 *
+	 * @param message - The message from the webview (must have a `type` field).
+	 * @param webview - The originating webview, used for sending responses.
+	 * @returns `true` if the message was handled, `false` if unrecognized.
 	 */
 	public async handleMessage(message: { type: string; [key: string]: unknown }, webview: vscode.Webview): Promise<boolean> {
 		switch (message.type) {
@@ -84,20 +115,21 @@ export class ConnectionMessageHandler {
 				return true;
 
 			case 'fetchTeams':
-				await this.fetchCloudTeams(webview);
+				await this.fetchCloudTeams(webview, message.hostUrl as string);
 				return true;
 
-			case 'fetchEngineVersions':
-				await this.fetchEngineVersions(webview);
-				return true;
-
-			case 'testConnection':
-				await this.testConnection(message.hostUrl as string, message.apiKey as string, webview);
+			case 'fetchVersions':
+				// Fetch GitHub releases + Docker GHCR tags in parallel.
+				// Both are cached, max 2 retries, broadcast to all active webviews.
+				await Promise.all([
+					this.fetchAndBroadcastVersions(),
+					this.fetchAndBroadcastDockerTags(),
+				]);
 				return true;
 
 			case 'probeServerInfo':
 				this.cachedServerInfo = null; // force re-probe
-				await this.probeServerInfo(webview);
+				await this.probeServerInfo(webview, message.hostUrl as string);
 				return true;
 
 			case 'sudoPassword':
@@ -107,14 +139,26 @@ export class ConnectionMessageHandler {
 				}
 				return true;
 
-			default: {
-				// Route Docker/Service operation messages to EngineOperations
-				const msgType = message.type as string;
-				if (msgType.startsWith('docker') || msgType.startsWith('service')) {
-					return this.engineOps.handleMessage(message);
+			// Unified engine operation dispatch — webview panels send ioControl
+			// messages with a mode (local/docker/service) and a command string
+			// (e.g. 'install', 'start', 'stop', 'remove'). The EngineRegistry
+			// routes to the correct backend and returns the result. We broadcast
+			// the result to all active webviews so every open panel stays in sync.
+			case 'ioControl': {
+				const mode = message.mode as ConnectionMode;
+				const command = message.command as string;
+				const params = message.params as Record<string, unknown> | undefined;
+				const registry = this.opts.getEngineRegistry?.();
+				if (!registry) return false;
+				const result = await registry.ioControl(mode, command, params);
+				for (const w of this.opts.getActiveWebviews()) {
+					w.postMessage({ type: 'ioResult', mode, command, ...result });
 				}
-				return false;
+				return true;
 			}
+
+			default:
+				return false;
 		}
 	}
 
@@ -131,20 +175,74 @@ export class ConnectionMessageHandler {
 		return cleanup;
 	}
 
+	private statusPollInterval?: NodeJS.Timeout;
+	private progressHandler?: (event: { mode: string; command: string; message: string }) => void;
+
 	/**
-	 * Start Docker/Service status polling and send initial status.
+	 * Start polling engine status and forwarding events to all active webviews.
+	 * Polls every 3 seconds to detect external state changes
+	 * (e.g., NSSM stopping the service, Docker Desktop stopping a container).
 	 */
 	public async startStatusPolling(): Promise<void> {
-		await this.engineOps.sendDockerStatus();
-		await this.engineOps.sendServiceStatus();
-		this.engineOps.startStatusPolling();
+		this.stopStatusPolling();
+
+		const cm = this.opts.getConnectionManager?.();
+		if (!cm) return;
+
+		// Forward ioControl progress events to webviews
+		const registry = this.opts.getEngineRegistry?.();
+		if (registry) {
+			this.progressHandler = (event: { mode: string; command: string; message: string }) => {
+				for (const w of this.opts.getActiveWebviews()) {
+					w.postMessage({ type: 'ioProgress', mode: event.mode, command: event.command, message: event.message });
+				}
+			};
+			registry.on('progress', this.progressHandler);
+		}
+
+		// Send initial status for service and docker
+		await this.pollAndBroadcastStatus();
+
+		// Poll every 3 seconds for external state changes (pull-based)
+		this.statusPollInterval = setInterval(() => {
+			this.pollAndBroadcastStatus();
+		}, 3000);
 	}
 
 	/**
-	 * Stop Docker/Service status polling.
+	 * Polls service and docker status via static getEngineStatus() and
+	 * broadcasts results to all active webviews using the message types
+	 * the panels expect.
+	 */
+	private async pollAndBroadcastStatus(): Promise<void> {
+		try {
+			const [serviceStatus, dockerStatus] = await Promise.all([
+				ConnectionManager.getEngineStatus('service'),
+				ConnectionManager.getEngineStatus('docker'),
+			]);
+
+			for (const w of this.opts.getActiveWebviews()) {
+				w.postMessage({ type: 'serviceStatus', status: serviceStatus });
+				w.postMessage({ type: 'dockerStatus', status: dockerStatus });
+			}
+		} catch {
+			// Non-fatal — polling will retry on next interval
+		}
+	}
+
+	/**
+	 * Stop status polling.
 	 */
 	public stopStatusPolling(): void {
-		this.engineOps.stopStatusPolling();
+		if (this.statusPollInterval) {
+			clearInterval(this.statusPollInterval);
+			this.statusPollInterval = undefined;
+		}
+		if (this.progressHandler) {
+			const registry = this.opts.getEngineRegistry?.();
+			registry?.removeListener('progress', this.progressHandler);
+			this.progressHandler = undefined;
+		}
 	}
 
 	// =========================================================================
@@ -152,25 +250,30 @@ export class ConnectionMessageHandler {
 	// =========================================================================
 
 	/**
-	 * Probe the server at ROCKETRIDE_URI for capabilities.
+	 * Probe the server for capabilities.
+	 * Uses the dev connection manager's URL when connected (actual running
+	 * server, which may be on a dynamic port). Falls back to the build-time
+	 * ROCKETRIDE_URI for pre-connection probing.
 	 * Caches the result so subsequent calls are instant.
-	 * Sends the result to the webview as `{ type: 'serverInfo', ... }`.
 	 */
-	public async probeServerInfo(webview: vscode.Webview): Promise<void> {
+	public async probeServerInfo(webview: vscode.Webview, hostUrl: string): Promise<void> {
 		if (this.cachedServerInfo) {
 			webview.postMessage({ type: 'serverInfo', ...this.cachedServerInfo });
 			return;
 		}
 
-		const uri = process.env.ROCKETRIDE_URI || '';
+		const uri = hostUrl;
 		if (!uri) return;
+
+		console.log(`[ConnectionMessageHandler] probeServerInfo: uri=${uri}`);
 
 		try {
 			const info = await RocketRideClient.getServerInfo(uri, 5000);
+			console.log(`[ConnectionMessageHandler] probeServerInfo result: capabilities=${JSON.stringify(info.capabilities)}, version=${info.version}`);
 			this.cachedServerInfo = info;
 			webview.postMessage({ type: 'serverInfo', ...info });
 		} catch (error) {
-			console.error('[ConnectionMessageHandler] Server info probe failed:', error);
+			console.log(`[ConnectionMessageHandler] probeServerInfo FAILED: ${error}`);
 			// Fall back to showing all modes if probe fails
 			webview.postMessage({ type: 'serverInfo', capabilities: [], version: '' });
 		}
@@ -185,45 +288,31 @@ export class ConnectionMessageHandler {
 		const signedIn = await cloudAuth.isSignedIn();
 		const userName = await cloudAuth.getUserName();
 		webview.postMessage({ type: 'cloud:status', signedIn, userName });
-		// Teams are fetched by CloudPanel after it confirms the server is SaaS
 	}
 
-	public async fetchCloudTeams(webview: vscode.Webview): Promise<void> {
-		const devAccount = getConnectionManager()?.getClient()?.getAccountInfo();
-		const devTeams = this.extractTeams(devAccount);
-		if (devTeams.length) {
-			webview.postMessage({ type: 'teamsLoaded', teams: devTeams });
-			return;
-		}
-
-		const deployAccount = DeployManager.getDeployInstance().getClient()?.getAccountInfo();
-		const deployTeams = this.extractTeams(deployAccount);
-		if (deployTeams.length) {
-			webview.postMessage({ type: 'teamsLoaded', teams: deployTeams });
-			return;
-		}
-
-		await this.fetchTeamsViaTempConnection(webview);
-	}
-
-	private async fetchTeamsViaTempConnection(webview: vscode.Webview): Promise<void> {
+	/**
+	 * Fetch cloud teams by connecting to the given cloud URL with the
+	 * stored cloud auth token. The URL comes from the webview (build-time
+	 * ROCKETRIDE_URI injected into the CloudPanel).
+	 */
+	public async fetchCloudTeams(webview: vscode.Webview, hostUrl: string): Promise<void> {
 		const cloudAuth = CloudAuthProvider.getInstance();
-		const signedIn = await cloudAuth.isSignedIn();
-		if (!signedIn) return;
+		const token = await cloudAuth.getToken();
+		if (!token) return;
+
+		const uri = hostUrl;
+		if (!uri) return;
+
+		console.log(`[ConnectionMessageHandler] fetchCloudTeams: uri=${uri}`);
 
 		let client: RocketRideClient | undefined;
 		try {
-			const token = await cloudAuth.getToken();
-			if (!token) return;
-
-			const cloudUri = process.env.ROCKETRIDE_URI || '';
 			client = new RocketRideClient({ module: 'CONN-CFG', requestTimeout: 8000 });
-			await client.connect(token, { uri: cloudUri, timeout: 10000 });
+			await client.connect(token, { uri, timeout: 10000 });
 
 			const teams = this.extractTeams(client.getAccountInfo());
-			if (teams.length) {
-				webview.postMessage({ type: 'teamsLoaded', teams });
-			}
+			console.log(`[ConnectionMessageHandler] fetchCloudTeams: ${teams.length} teams found`);
+			webview.postMessage({ type: 'teamsLoaded', teams });
 		} catch (error) {
 			console.log('[ConnectionMessageHandler] Could not fetch cloud teams:', error);
 		} finally {
@@ -237,117 +326,221 @@ export class ConnectionMessageHandler {
 	}
 
 	// =========================================================================
-	// ENGINE VERSIONS
+	// VERSION FETCHING — cached, retry-limited, shared across all consumers
 	// =========================================================================
 
-	public async fetchEngineVersions(webview: vscode.Webview): Promise<void> {
-		try {
-			let githubToken: string | undefined;
-			try {
-				const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
-				githubToken = session?.accessToken;
-			} catch {
-				/* proceed without token */
-			}
-
-			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
-			webview.postMessage({ type: 'engineVersionsLoaded', versions });
-		} catch (error) {
-			console.error('[ConnectionMessageHandler] Failed to fetch engine versions:', error);
-			webview.postMessage({ type: 'engineVersionsLoaded', versions: [] });
+	/**
+	 * Fetches GitHub releases (with caching and retry limiting), then broadcasts
+	 * the result to ALL active webviews. Also triggers Docker GHCR tag fetch
+	 * via EngineOperations.
+	 *
+	 * Cache behaviour:
+	 *   - Results are cached for 5 minutes (VERSION_CACHE_TTL_MS).
+	 *   - Concurrent callers share a single in-flight request (deduplication).
+	 *   - Max 2 attempts per fetch cycle to avoid rate limiting.
+	 *   - On failure, caches an empty result so we don't hammer the API.
+	 */
+	private async fetchAndBroadcastVersions(): Promise<void> {
+		// Serve from cache if still fresh
+		const now = Date.now();
+		if (this.versionCache.fetchedAt > 0 && (now - this.versionCache.fetchedAt) < VERSION_CACHE_TTL_MS) {
+			this.broadcastVersions(this.versionCache.versions);
+			return;
 		}
+
+		// Deduplicate: if a fetch is already in flight, wait for it
+		if (this.versionCache.fetching && this.versionCache.promise) {
+			await this.versionCache.promise;
+			this.broadcastVersions(this.versionCache.versions);
+			return;
+		}
+
+		// Start a new fetch
+		this.versionCache.fetching = true;
+		this.versionCache.promise = this.doFetchVersions();
+
+		try {
+			await this.versionCache.promise;
+		} finally {
+			this.versionCache.fetching = false;
+			this.versionCache.promise = undefined;
+		}
+
+		this.broadcastVersions(this.versionCache.versions);
 	}
 
-	// =========================================================================
-	// TEST CONNECTION
-	// =========================================================================
-
-	public async testConnection(hostUrl: string, apiKey: string, webview: vscode.Webview, messageContext?: 'development'): Promise<void> {
-		let testClient: RocketRideClient | undefined;
-
+	/**
+	 * Performs the actual GitHub API call with retry limiting.
+	 * Populates the version cache on success or failure.
+	 */
+	private async doFetchVersions(): Promise<void> {
+		// Get GitHub token if available (raises rate limit from 60/hr to 5000/hr)
+		let githubToken: string | undefined;
 		try {
-			this.showMessage(webview, 'info', 'Testing connection...', messageContext);
+			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
+			githubToken = session?.accessToken;
+		} catch {
+			/* proceed without token */
+		}
 
-			hostUrl = (hostUrl || '').trim();
-			if (!hostUrl) {
-				this.showMessage(webview, 'error', 'Host URL is required.', messageContext);
-				return;
-			}
-
-			hostUrl = RocketRideClient.normalizeUri(hostUrl);
-
-			let parsedUrl: URL;
+		for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
 			try {
-				parsedUrl = new URL(hostUrl);
-			} catch {
-				this.showMessage(webview, 'error', 'Invalid URL format. Please enter a valid URL or port.', messageContext);
+				const versions = await this.engineInstaller.getReleases(undefined, githubToken);
+				this.versionCache.versions = versions;
+				this.versionCache.fetchedAt = Date.now();
+				setCachedEngineVersions(versions);
 				return;
-			}
-
-			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : parsedUrl.protocol === 'https:' ? 443 : 80;
-			if (port < 1 || port > 65535) {
-				this.showMessage(webview, 'error', `Invalid port number: ${port}. Port must be between 1 and 65535.`, messageContext);
-				return;
-			}
-
-			apiKey = (apiKey || '').trim();
-			if (!apiKey) {
-				this.showMessage(webview, 'error', 'API key is required.', messageContext);
-				return;
-			}
-
-			testClient = new RocketRideClient({ auth: apiKey, uri: hostUrl, module: 'CONN-TST', requestTimeout: 5000 });
-
-			try {
-				await testClient.connect(undefined, { timeout: 8000 });
-			} catch (connectError) {
-				if (testClient) await testClient.disconnect();
-				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);
-				if (errorMessage.includes('ECONNREFUSED')) {
-					this.showMessage(webview, 'error', `Connection refused. Server is not running at ${parsedUrl.host}.`, messageContext);
-				} else if (errorMessage.includes('ENOTFOUND')) {
-					this.showMessage(webview, 'error', `Server not found at ${parsedUrl.hostname}. Please check the URL.`, messageContext);
-				} else if (errorMessage.includes('timeout')) {
-					this.showMessage(webview, 'error', `Connection timed out. Server at ${parsedUrl.host} is not responding.`, messageContext);
-				} else {
-					this.showMessage(webview, 'error', `Failed to connect: ${errorMessage}`, messageContext);
+			} catch (error) {
+				console.error(`[ConnectionMessageHandler] Version fetch attempt ${attempt}/${MAX_FETCH_ATTEMPTS} failed:`, error);
+				if (attempt === MAX_FETCH_ATTEMPTS) {
+					// Cache the failure so we don't retry immediately
+					this.versionCache.versions = [];
+					this.versionCache.fetchedAt = Date.now();
+					setCachedEngineVersions([]);
 				}
-				return;
 			}
+		}
+	}
 
-			try {
-				await testClient.ping();
-			} catch (pingError) {
-				await testClient.disconnect();
-				const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
-				this.showMessage(webview, 'error', `Server connected but failed to respond: ${errorMessage}`, messageContext);
-				return;
-			}
-
-			await testClient.disconnect();
-			this.showMessage(webview, 'success', `Connection successful! ${parsedUrl.host} is responding correctly.`, messageContext);
-		} catch (error) {
-			if (testClient) testClient.disconnect().catch(() => {});
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.showMessage(webview, 'error', `Connection test failed: ${errorMessage}`, messageContext);
+	/**
+	 * Broadcasts the cached version list to all active webviews.
+	 */
+	private broadcastVersions(versions: Array<{ tag_name: string; prerelease: boolean }>): void {
+		for (const w of this.opts.getActiveWebviews()) {
+			w.postMessage({ type: 'versionsLoaded', versions });
 		}
 	}
 
 	// =========================================================================
-	// HELPERS
+	// DOCKER GHCR TAG FETCHING — cached, same pattern as GitHub releases
 	// =========================================================================
 
-	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development'): void {
-		webview.postMessage({
-			type: 'showMessage',
-			level,
-			message,
-			...(context && { context }),
+	/**
+	 * Fetches GHCR container tags (with caching and deduplication),
+	 * then broadcasts `dockerVersionsLoaded` to all active webviews.
+	 */
+	private async fetchAndBroadcastDockerTags(): Promise<void> {
+		const now = Date.now();
+		if (this.dockerTagCache.fetchedAt > 0 && (now - this.dockerTagCache.fetchedAt) < VERSION_CACHE_TTL_MS) {
+			this.broadcastDockerTags(this.dockerTagCache.tags);
+			return;
+		}
+
+		if (this.dockerTagCache.fetching && this.dockerTagCache.promise) {
+			await this.dockerTagCache.promise;
+			this.broadcastDockerTags(this.dockerTagCache.tags);
+			return;
+		}
+
+		this.dockerTagCache.fetching = true;
+		this.dockerTagCache.promise = this.doFetchDockerTags();
+
+		try {
+			await this.dockerTagCache.promise;
+		} finally {
+			this.dockerTagCache.fetching = false;
+			this.dockerTagCache.promise = undefined;
+		}
+
+		this.broadcastDockerTags(this.dockerTagCache.tags);
+	}
+
+	/**
+	 * Fetches tags from the GHCR (GitHub Container Registry) API.
+	 *
+	 * GHCR uses a two-step auth flow even for public images:
+	 *   1. Request an anonymous bearer token scoped to the image repository
+	 *   2. Use that token to call the OCI distribution tags/list endpoint
+	 *
+	 * Results are filtered to semver-like tags (plus 'latest' and 'prerelease')
+	 * and sorted newest-first for display in the Docker version dropdown.
+	 */
+	private async doFetchDockerTags(): Promise<void> {
+		// Strip the registry prefix to get the scope string GHCR expects
+		const scope = IMAGE_BASE.replace('ghcr.io/', '');
+
+		for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+			try {
+				// Step 1: Get anonymous bearer token (no credentials needed for public images)
+				const tokenUrl = `https://ghcr.io/token?scope=repository:${scope}:pull`;
+				const tokenData = await this.httpsGetJson<{ token: string }>(tokenUrl);
+
+				// Step 2: List tags using the OCI distribution API
+				const tagsUrl = `https://ghcr.io/v2/${scope}/tags/list`;
+				const tagsData = await this.httpsGetJson<{ tags: string[] }>(tagsUrl, tokenData.token);
+
+				// Filter out CI artifacts (sha-xxxx, branch names) — only keep
+				// user-facing version tags that the Docker dropdown should display
+				const tags = (tagsData.tags || [])
+					.filter((t: string) => /^\d+\.\d+/.test(t) || t === 'latest' || t === 'prerelease')
+					.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }));
+
+				this.dockerTagCache.tags = tags;
+				this.dockerTagCache.fetchedAt = Date.now();
+				setCachedDockerTags(tags);
+				return;
+			} catch (error) {
+				console.error(`[ConnectionMessageHandler] Docker tag fetch attempt ${attempt}/${MAX_FETCH_ATTEMPTS} failed:`, error);
+				if (attempt === MAX_FETCH_ATTEMPTS) {
+					this.dockerTagCache.tags = [];
+					this.dockerTagCache.fetchedAt = Date.now();
+					setCachedDockerTags([]);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Simple HTTPS GET that parses the response body as JSON.
+	 *
+	 * @param url - The HTTPS URL to fetch.
+	 * @param bearerToken - Optional bearer token added as an Authorization header.
+	 * @returns The parsed JSON response body.
+	 */
+	private httpsGetJson<T>(url: string, bearerToken?: string): Promise<T> {
+		return new Promise((resolve, reject) => {
+			const options: https.RequestOptions = {
+				headers: {
+					'User-Agent': 'RocketRide-VSCode',
+					...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+				},
+				timeout: 15000,
+			};
+			const req = https.get(url, options, (res) => {
+				if (res.statusCode !== 200) {
+					res.resume();
+					reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+					return;
+				}
+				let body = '';
+				res.on('data', (chunk) => { body += chunk; });
+				res.on('end', () => {
+					try { resolve(JSON.parse(body)); }
+					catch (e) { reject(e); }
+				});
+			});
+			req.on('error', reject);
+			req.on('timeout', () => { req.destroy(new Error(`Request to ${url} timed out`)); });
 		});
 	}
 
+	/**
+	 * Resolves 'prerelease' to the newest prerelease tag from the cached GHCR tag list.
+	 * Returns null if no prerelease tags are available.
+	 */
+	private resolveDockerPrerelease(): string | null {
+		const tag = this.dockerTagCache.tags.find((t) => t.includes('prerelease') || t.includes('-pre'));
+		return tag ?? null;
+	}
+
+	private broadcastDockerTags(tags: string[]): void {
+		for (const w of this.opts.getActiveWebviews()) {
+			w.postMessage({ type: 'dockerVersionsLoaded', tags });
+		}
+	}
+
 	public dispose(): void {
-		this.engineOps.dispose();
+		this.stopStatusPolling();
 		for (const cleanup of this.cloudAuthCleanups) {
 			cleanup();
 		}

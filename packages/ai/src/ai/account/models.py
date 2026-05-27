@@ -26,14 +26,18 @@
 # Placed here to avoid circular imports between account/auth and modules/task.
 # =============================================================================
 
-from pydantic import BaseModel
-from typing import TypedDict
+import time
+from typing import Literal, TypedDict
+
+from pydantic import BaseModel, Field
+
+from rocketride.types.client import AppManifestEntry
 
 
 # =============================================================================
 # NESTED SHAPES
 # Lightweight TypedDicts documenting the element shape of AccountInfo's
-# ``organizations`` and ``subscribedApps`` lists. Mirrors the public
+# ``organizations`` and ``apps`` lists. Mirrors the public
 # ``OrgInfo`` / ``TeamInfo`` defined in ``rocketride.types.client`` but kept
 # local to avoid a server→client cross-package import.
 # =============================================================================
@@ -54,14 +58,6 @@ class OrgInfo(TypedDict):
     name: str
     permissions: list[str]
     teams: list[TeamInfo]
-
-
-class SubscribedApp(TypedDict):
-    """Shape of an entry inside ``AccountInfo.subscribedApps``."""
-
-    appId: str
-    # One of: 'active', 'trialing', 'past_due', 'incomplete'
-    status: str
 
 
 # =============================================================================
@@ -98,9 +94,10 @@ class AccountInfo(BaseModel):
     # Full org/team/permissions structure — all permission checks resolve through this
     organizations: list[OrgInfo] = []
 
-    # Subscribed apps for the user's primary org. Empty list for free-tier orgs
-    # with no paid subscriptions.
-    subscribedApps: list[SubscribedApp] = []
+    # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
+    # OSS: all apps with appStatus="free", onDesktop=True.
+    # SaaS: populated from app_users table, enriched with full manifest + billing info.
+    apps: list[AppManifestEntry] = []
 
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []
@@ -122,6 +119,26 @@ class AccountInfo(BaseModel):
 
 
 # =============================================================================
+# DEPLOYMENT RECORD
+# =============================================================================
+
+
+class DeploymentRecord(BaseModel):
+    """Persistent deployment control record — single source of truth on disk."""
+
+    pipeline: dict
+    # Cron expression (e.g. "*/15 * * * *") or "manual" for on-demand only.
+    schedule: str = 'manual'
+
+    # 'active' | 'paused' | 'errored'
+    state: Literal['active', 'paused', 'errored'] = 'active'
+
+    created_by: str  # client_id of the user who deployed
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+# =============================================================================
 # PERMISSION HELPERS
 # =============================================================================
 
@@ -130,15 +147,44 @@ class AccountInfo(BaseModel):
 # without storing redundant data in the database.
 _FULL_TEAM_PERMISSIONS = [
     'team.admin',
-    'read',
-    'write',
-    'execute',
     'task.control',
     'task.data',
     'task.monitor',
     'task.debug',
     'task.store',
 ]
+
+
+def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> list[str]:
+    """
+    Return the caller's effective permissions for a task owned by the given team.
+
+    Unlike ``resolve_team_permissions`` this does **not** raise when the caller
+    has no relationship to the team — it returns an empty list instead,
+    signalling "no access".
+
+    Resolution order (first match wins):
+      1. Walk ``account_info.organizations``.
+      2. For each org, walk its teams looking for *task_team_id*.
+      3. If found and org has ``org.admin`` → full permissions.
+      4. If found → that team's stored permissions.
+      5. Not found in any org → ``[]`` (no access).
+
+    Args:
+        account_info: The authenticated caller's session.
+        task_team_id: The ``teamId`` from the task's TASK_CONTROL.
+
+    Returns:
+        Effective permission list, or empty list if the caller has no
+        membership in the task's team.
+    """
+    for org in account_info.organizations:
+        for team in org.get('teams', []):
+            if team['id'] == task_team_id:
+                if 'org.admin' in org.get('permissions', []):
+                    return list(_FULL_TEAM_PERMISSIONS)
+                return list(team.get('permissions', []))
+    return []
 
 
 def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[str]:
