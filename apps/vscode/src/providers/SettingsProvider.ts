@@ -245,12 +245,10 @@ export class SettingsProvider {
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
 			voiceBuilder: {
 				enabled: config.voiceBuilder.enabled,
-				plannerBaseUrl: config.voiceBuilder.plannerBaseUrl,
-				plannerModel: config.voiceBuilder.plannerModel,
-				hasDeepgramApiKey: !!config.voiceBuilder.deepgramApiKey,
-				deepgramApiKey: '',
-				hasPlannerApiKey: !!config.voiceBuilder.plannerApiKey,
-				plannerApiKey: '',
+				llmProvider: config.voiceBuilder.llmProvider,
+				llmProfile: config.voiceBuilder.llmProfile,
+				hasLlmApiKey: !!config.voiceBuilder.llmApiKey,
+				llmApiKey: '',
 			},
 
 			// Integration settings

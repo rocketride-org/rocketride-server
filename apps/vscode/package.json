@@ -212,16 +212,15 @@
 					"default": false,
 					"description": "Enable push-to-talk Voice Builder in the pipeline editor"
 				},
-				"rocketride.voiceBuilder.plannerBaseUrl": {
+				"rocketride.voiceBuilder.llmProvider": {
 					"type": "string",
-					"default": "https://api.openai.com/v1",
-					"description": "OpenAI-compatible base URL used by Voice Builder for project edits",
-					"format": "uri"
+					"default": "",
+					"description": "Optional RocketRide LLM provider used by Voice Builder, such as llm_gemini or llm_anthropic. If empty, Voice Builder reuses the first LLM node in the open pipeline."
 				},
-				"rocketride.voiceBuilder.plannerModel": {
+				"rocketride.voiceBuilder.llmProfile": {
 					"type": "string",
-					"default": "gpt-4o-mini",
-					"description": "OpenAI-compatible model used by Voice Builder for project edits"
+					"default": "",
+					"description": "Optional provider profile/model for the Voice Builder LLM node."
 				},
 				"rocketride.connectionMode": {
 					"type": "string",

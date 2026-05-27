@@ -71,12 +71,10 @@ export interface ConnectionGroupSettings {
 
 export interface VoiceBuilderSettings {
 	enabled: boolean;
-	plannerBaseUrl: string;
-	plannerModel: string;
-	hasDeepgramApiKey: boolean;
-	deepgramApiKey: string;
-	hasPlannerApiKey: boolean;
-	plannerApiKey: string;
+	llmProvider: string;
+	llmProfile: string;
+	hasLlmApiKey: boolean;
+	llmApiKey: string;
 }
 
 /** Root settings object persisted by the extension. */
@@ -324,12 +322,10 @@ export const Settings: React.FC = () => {
 		envVars: {},
 		voiceBuilder: {
 			enabled: false,
-			plannerBaseUrl: 'https://api.openai.com/v1',
-			plannerModel: 'gpt-4o-mini',
-			hasDeepgramApiKey: false,
-			deepgramApiKey: '',
-			hasPlannerApiKey: false,
-			plannerApiKey: '',
+			llmProvider: '',
+			llmProfile: '',
+			hasLlmApiKey: false,
+			llmApiKey: '',
 		},
 		autoAgentIntegration: true,
 		integrationCopilot: false,

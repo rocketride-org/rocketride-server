@@ -34,7 +34,7 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { Mic, MicOff, Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
@@ -250,6 +250,7 @@ export default function Canvas(): ReactElement {
 		error?: string | null;
 	}>({ state: 'ready' });
 	const { isStarting: isVoiceStarting, isRecording: isVoiceRecording, error: recorderError, start: startRecording, stop: stopRecording } = usePushToTalkRecorder();
+	const voiceSetupErrors = useMemo(() => voiceBuilder?.status.errors.filter((error) => error === 'Voice Builder is disabled') ?? [], [voiceBuilder?.status.errors]);
 
 	// Auto-hide config snackbar after 6 seconds
 	useEffect(() => {
@@ -283,7 +284,7 @@ export default function Canvas(): ReactElement {
 			return;
 		}
 
-		if (voiceBuilder.status.errors.length > 0) {
+		if (voiceSetupErrors.length > 0) {
 			setVoicePanelState({ state: 'error', error: null });
 			return;
 		}
@@ -313,7 +314,7 @@ export default function Canvas(): ReactElement {
 
 		setVoicePanelState({ state: 'recording', error: null });
 		await startRecording();
-	}, [isVoiceRecording, loadData, onContentChanged, startRecording, stopRecording, voiceBuilder]);
+	}, [isVoiceRecording, loadData, onContentChanged, startRecording, stopRecording, voiceBuilder, voiceSetupErrors]);
 
 	// --- Callback for when a source node is added from the welcome screen ----
 	const onNodeAdded = useCallback(
@@ -460,7 +461,7 @@ export default function Canvas(): ReactElement {
 					transcript={voicePanelState.transcript}
 					summary={voicePanelState.summary}
 					error={voicePanelState.error}
-					setupErrors={voiceBuilder.status.errors}
+					setupErrors={voiceSetupErrors}
 					model={voiceBuilder.status.model}
 					isRecording={isVoiceRecording}
 					isStarting={isVoiceStarting}

@@ -128,7 +128,7 @@ export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settin
 			<div style={S.card}>
 				<SettingsCardHeader title="Voice Builder" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
 				<div style={S.cardBody}>
-					<div style={S.sectionDescription}>Configure push-to-talk pipeline editing from the canvas toolbar</div>
+					<div style={S.sectionDescription}>Configure push-to-talk pipeline editing from the canvas toolbar. Voice Builder uses RocketRide pipelines for transcription and planning.</div>
 					<div style={S.formGrid}>
 						<div style={S.checkboxGroup}>
 							<label style={S.checkboxLabel}>
@@ -137,38 +137,28 @@ export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settin
 							</label>
 						</div>
 						<div style={S.formGroup}>
-							<label htmlFor="voiceBuilderDeepgramApiKey" style={S.label}>
-								Deepgram API Key
+							<label htmlFor="voiceBuilderLlmProvider" style={S.label}>
+								LLM Provider
 							</label>
-							<input id="voiceBuilderDeepgramApiKey" type="password" value={settings.voiceBuilder.deepgramApiKey} placeholder={settings.voiceBuilder.hasDeepgramApiKey ? 'Stored key' : 'Enter Deepgram API key'} onChange={(e) => updateVoiceBuilder({ deepgramApiKey: e.target.value, hasDeepgramApiKey: e.target.value.trim().length > 0 })} />
-							{settings.voiceBuilder.hasDeepgramApiKey && !settings.voiceBuilder.deepgramApiKey && (
-								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored Deepgram API key" onClick={() => updateVoiceBuilder({ deepgramApiKey: '', hasDeepgramApiKey: false })}>
+							<input id="voiceBuilderLlmProvider" type="text" value={settings.voiceBuilder.llmProvider} placeholder="Optional, e.g. llm_gemini" onChange={(e) => updateVoiceBuilder({ llmProvider: e.target.value })} />
+							<div style={S.helpText}>Leave empty to reuse the first configured LLM node in the open pipeline.</div>
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderLlmProfile" style={S.label}>
+								LLM Profile
+							</label>
+							<input id="voiceBuilderLlmProfile" type="text" value={settings.voiceBuilder.llmProfile} placeholder="Optional provider profile/model" onChange={(e) => updateVoiceBuilder({ llmProfile: e.target.value })} />
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderLlmApiKey" style={S.label}>
+								LLM API Key
+							</label>
+							<input id="voiceBuilderLlmApiKey" type="password" value={settings.voiceBuilder.llmApiKey} placeholder={settings.voiceBuilder.hasLlmApiKey ? 'Stored key' : 'Optional provider API key'} onChange={(e) => updateVoiceBuilder({ llmApiKey: e.target.value, hasLlmApiKey: e.target.value.trim().length > 0 })} />
+							{settings.voiceBuilder.hasLlmApiKey && !settings.voiceBuilder.llmApiKey && (
+								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored Voice Builder LLM API key" onClick={() => updateVoiceBuilder({ llmApiKey: '', hasLlmApiKey: false })}>
 									Clear stored key
 								</button>
 							)}
-						</div>
-						<div style={S.formGroup}>
-							<label htmlFor="voiceBuilderPlannerApiKey" style={S.label}>
-								Planner API Key
-							</label>
-							<input id="voiceBuilderPlannerApiKey" type="password" value={settings.voiceBuilder.plannerApiKey} placeholder={settings.voiceBuilder.hasPlannerApiKey ? 'Stored key' : 'Enter planner API key'} onChange={(e) => updateVoiceBuilder({ plannerApiKey: e.target.value, hasPlannerApiKey: e.target.value.trim().length > 0 })} />
-							{settings.voiceBuilder.hasPlannerApiKey && !settings.voiceBuilder.plannerApiKey && (
-								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored planner API key" onClick={() => updateVoiceBuilder({ plannerApiKey: '', hasPlannerApiKey: false })}>
-									Clear stored key
-								</button>
-							)}
-						</div>
-						<div style={S.formGroup}>
-							<label htmlFor="voiceBuilderPlannerBaseUrl" style={S.label}>
-								Planner Base URL
-							</label>
-							<input id="voiceBuilderPlannerBaseUrl" type="url" value={settings.voiceBuilder.plannerBaseUrl} onChange={(e) => updateVoiceBuilder({ plannerBaseUrl: e.target.value })} />
-						</div>
-						<div style={S.formGroup}>
-							<label htmlFor="voiceBuilderPlannerModel" style={S.label}>
-								Planner Model
-							</label>
-							<input id="voiceBuilderPlannerModel" type="text" value={settings.voiceBuilder.plannerModel} onChange={(e) => updateVoiceBuilder({ plannerModel: e.target.value })} />
 						</div>
 					</div>
 				</div>

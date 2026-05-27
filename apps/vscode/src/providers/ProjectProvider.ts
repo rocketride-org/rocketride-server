@@ -79,18 +79,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		return undefined;
 	}
 
-	private getVoiceBuilderRuntime(): { config: IVoiceBuilderConfig; secrets: IVoiceBuilderSecrets; status: ReturnType<typeof getVoiceBuilderStatus> } {
+	private getVoiceBuilderRuntime(currentProject: Record<string, any> = {}, services: Record<string, unknown> = {}): { config: IVoiceBuilderConfig; secrets: IVoiceBuilderSecrets; status: ReturnType<typeof getVoiceBuilderStatus> } {
 		const voiceBuilder = ConfigManager.getInstance().getConfig().voiceBuilder;
 		const config = {
 			enabled: voiceBuilder.enabled,
-			plannerBaseUrl: voiceBuilder.plannerBaseUrl,
-			plannerModel: voiceBuilder.plannerModel,
+			llmProvider: voiceBuilder.llmProvider,
+			llmProfile: voiceBuilder.llmProfile,
 		};
 		const secrets = {
-			deepgramApiKey: voiceBuilder.deepgramApiKey,
-			plannerApiKey: voiceBuilder.plannerApiKey,
+			llmApiKey: voiceBuilder.llmApiKey,
 		};
-		return { config, secrets, status: getVoiceBuilderStatus(config, secrets) };
+		return { config, secrets, status: getVoiceBuilderStatus(config, secrets, currentProject, services) };
 	}
 
 	// =========================================================================
@@ -341,7 +340,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
-						voiceStatus: this.getVoiceBuilderRuntime().status,
+						voiceStatus: this.getVoiceBuilderRuntime(project ?? {}, cached.services).status,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 
@@ -391,16 +390,21 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 				case 'voice:process': {
 					try {
-						const { config, secrets } = this.getVoiceBuilderRuntime();
+						const currentProject = data.currentProject as Record<string, any>;
+						const services = data.services as Record<string, unknown>;
+						const { config, secrets } = this.getVoiceBuilderRuntime(currentProject, services);
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
 						const result = await processVoiceBuilderRecording(
 							{
 								audioBase64: data.audioBase64 as string,
 								mimeType: data.mimeType as string | undefined,
-								currentProject: data.currentProject as Record<string, any>,
-								services: data.services as Record<string, unknown>,
+								currentProject,
+								services,
 							},
 							config,
-							secrets
+							secrets,
+							client
 						);
 						webview.postMessage({ type: 'voice:processResponse', requestId: data.requestId, ...result });
 					} catch (error: unknown) {

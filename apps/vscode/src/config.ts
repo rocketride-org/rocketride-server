@@ -111,15 +111,13 @@ export interface SettingsSnapshot {
 
 export interface VoiceBuilderConfig {
 	enabled: boolean;
-	plannerBaseUrl: string;
-	plannerModel: string;
-	deepgramApiKey: string;
-	plannerApiKey: string;
+	llmProvider: string;
+	llmProfile: string;
+	llmApiKey: string;
 }
 
 export interface VoiceBuilderSnapshot extends VoiceBuilderConfig {
-	hasDeepgramApiKey?: boolean;
-	hasPlannerApiKey?: boolean;
+	hasLlmApiKey?: boolean;
 }
 
 /**
@@ -146,10 +144,9 @@ export class ConfigManager {
 
 	private static readonly DEFAULT_VOICE_BUILDER: VoiceBuilderConfig = {
 		enabled: false,
-		plannerBaseUrl: 'https://api.openai.com/v1',
-		plannerModel: 'gpt-4o-mini',
-		deepgramApiKey: '',
-		plannerApiKey: '',
+		llmProvider: '',
+		llmProfile: '',
+		llmApiKey: '',
 	};
 
 	// Cached configuration
@@ -194,7 +191,7 @@ export class ConfigManager {
 		this.disposables.push(
 			context.secrets.onDidChange(async (event) => {
 				if (this.isBatchApplying) return;
-				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey' || event.key === 'rocketride.voiceBuilder.deepgramApiKey' || event.key === 'rocketride.voiceBuilder.plannerApiKey') {
+				if (event.key === 'rocketride.development.apiKey' || event.key === 'rocketride.deployment.apiKey' || event.key === 'rocketride.voiceBuilder.llmApiKey') {
 					await this.refreshConfig();
 				}
 			})
@@ -266,10 +263,9 @@ export class ConfigManager {
 		const vc = vscode.workspace.getConfiguration(`${this.configSection}.voiceBuilder`);
 		return {
 			enabled: vc.get<boolean>('enabled', ConfigManager.DEFAULT_VOICE_BUILDER.enabled),
-			plannerBaseUrl: vc.get<string>('plannerBaseUrl', ConfigManager.DEFAULT_VOICE_BUILDER.plannerBaseUrl),
-			plannerModel: vc.get<string>('plannerModel', ConfigManager.DEFAULT_VOICE_BUILDER.plannerModel),
-			deepgramApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.deepgramApiKey'),
-			plannerApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.plannerApiKey'),
+			llmProvider: vc.get<string>('llmProvider', ConfigManager.DEFAULT_VOICE_BUILDER.llmProvider),
+			llmProfile: vc.get<string>('llmProfile', ConfigManager.DEFAULT_VOICE_BUILDER.llmProfile),
+			llmApiKey: await this.getSecretFromStorage('rocketride.voiceBuilder.llmApiKey'),
 		};
 	}
 
@@ -417,7 +413,7 @@ export class ConfigManager {
 		}
 	}
 
-	public async setVoiceBuilderSecret(key: 'deepgramApiKey' | 'plannerApiKey', apiKey: string): Promise<void> {
+	public async setVoiceBuilderSecret(key: 'llmApiKey', apiKey: string): Promise<void> {
 		await this.setSecret(`rocketride.voiceBuilder.${key}`, apiKey);
 		if (this.config) {
 			this.config.voiceBuilder[key] = apiKey.trim();
@@ -511,8 +507,8 @@ export class ConfigManager {
 
 			// --- Voice Builder settings ---
 			await wc.update('voiceBuilder.enabled', s.voiceBuilder.enabled, vscode.ConfigurationTarget.Global);
-			await wc.update('voiceBuilder.plannerBaseUrl', s.voiceBuilder.plannerBaseUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('voiceBuilder.plannerModel', s.voiceBuilder.plannerModel, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.llmProvider', s.voiceBuilder.llmProvider, vscode.ConfigurationTarget.Global);
+			await wc.update('voiceBuilder.llmProfile', s.voiceBuilder.llmProfile, vscode.ConfigurationTarget.Global);
 
 			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
@@ -526,11 +522,8 @@ export class ConfigManager {
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
 			await this.setApiKey('deployment', s.deployment.apiKey);
-			if (s.voiceBuilder.deepgramApiKey.trim() || s.voiceBuilder.hasDeepgramApiKey === false) {
-				await this.setVoiceBuilderSecret('deepgramApiKey', s.voiceBuilder.deepgramApiKey);
-			}
-			if (s.voiceBuilder.plannerApiKey.trim() || s.voiceBuilder.hasPlannerApiKey === false) {
-				await this.setVoiceBuilderSecret('plannerApiKey', s.voiceBuilder.plannerApiKey);
+			if (s.voiceBuilder.llmApiKey.trim() || s.voiceBuilder.hasLlmApiKey === false) {
+				await this.setVoiceBuilderSecret('llmApiKey', s.voiceBuilder.llmApiKey);
 			}
 
 			// --- Single cache refresh from final state ---

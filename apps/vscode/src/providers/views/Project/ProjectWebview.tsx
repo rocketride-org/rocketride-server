@@ -258,7 +258,7 @@ const ProjectWebview: React.FC = () => {
 						pendingVoiceProcesses.current.delete(requestId);
 						reject(new Error('Timed out processing voice command'));
 					}
-				}, 45000);
+				}, 120000);
 			});
 		},
 		[sendMessage, servicesJson]
