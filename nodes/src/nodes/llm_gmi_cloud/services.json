@@ -230,16 +230,16 @@
 				"apikey": "",
 				"modelTotalTokens": 200000
 			},
-			"gemini-3-pro": {
-				"title": "Gemini 3 Pro",
-				"model": "google/gemini-3-pro-preview",
+			"gemini-3.1-pro": {
+				"title": "Gemini 3.1 Pro",
+				"model": "google/gemini-3.1-pro-preview",
 				"serverbase": "https://api.gmi-serving.com/v1",
 				"apikey": "",
 				"modelTotalTokens": 128000
 			},
-			"gemini-3-flash": {
-				"title": "Gemini 3 Flash",
-				"model": "google/gemini-3-flash-preview",
+			"gemini-3.1-flash": {
+				"title": "Gemini 3.1 Flash",
+				"model": "google/gemini-3.1-flash-preview",
 				"serverbase": "https://api.gmi-serving.com/v1",
 				"apikey": "",
 				"modelTotalTokens": 128000
@@ -256,7 +256,7 @@
 		"model": {
 			"type": "string",
 			"title": "Model",
-			"description": "GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models"
+			"description": "GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3.1-flash-preview). Full list: https://www.gmicloud.ai/models"
 		},
 		"modelTotalTokens": {
 			"type": "number",
@@ -345,12 +345,12 @@
 			"object": "claude-sonnet-4-5",
 			"properties": ["llm.cloud.apikey"]
 		},
-		"gmi_cloud.gemini-3-pro": {
-			"object": "gemini-3-pro",
+		"gmi_cloud.gemini-3.1-pro": {
+			"object": "gemini-3.1-pro",
 			"properties": ["llm.cloud.apikey"]
 		},
-		"gmi_cloud.gemini-3-flash": {
-			"object": "gemini-3-flash",
+		"gmi_cloud.gemini-3.1-flash": {
+			"object": "gemini-3.1-flash",
 			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.profile": {
@@ -437,12 +437,12 @@
 					"properties": ["gmi_cloud.claude-sonnet-4-5"]
 				},
 				{
-					"value": "gemini-3-pro",
-					"properties": ["gmi_cloud.gemini-3-pro"]
+					"value": "gemini-3.1-pro",
+					"properties": ["gmi_cloud.gemini-3.1-pro"]
 				},
 				{
-					"value": "gemini-3-flash",
-					"properties": ["gmi_cloud.gemini-3-flash"]
+					"value": "gemini-3.1-flash",
+					"properties": ["gmi_cloud.gemini-3.1-flash"]
 				}
 			]
 		}
