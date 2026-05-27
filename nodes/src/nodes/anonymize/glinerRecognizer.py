@@ -124,8 +124,6 @@ class GliNERRecognizer:
             yield labels[i : i + batch_size]
 
     def predict(self, text, labels, batch_size=32):
-        import concurrent.futures
-
         cleaned_labels = [self.normalize_label(label) for label in labels]
 
         # Use larger chunks with overlap to avoid missing entities at boundaries
@@ -137,28 +135,20 @@ class GliNERRecognizer:
         chunk_offsets = []
         for i in range(0, len(text), CHUNK_SIZE - OVERLAP):
             chunk = text[i : i + CHUNK_SIZE]
-            if chunk:  # Skip empty chunks
+            if chunk:
                 chunks.append(chunk)
                 chunk_offsets.append(i)
 
-        # Precompute all label batches
         label_batches = list(self.batch_labels(cleaned_labels, batch_size))
 
         all_results = []
+        total_chunks = len(chunks)
 
-        # Process chunks in parallel if possible
-        def process_chunk(chunk_idx):
-            chunk = chunks[chunk_idx]
-            offset = chunk_offsets[chunk_idx]
-            chunk_results = []
-
-            # Process all label batches for this chunk
+        for chunk_idx, (chunk, offset) in enumerate(zip(chunks, chunk_offsets)):
             for label_batch in label_batches:
                 try:
-                    # Use a timeout to avoid hanging on problematic chunks
                     results = self.model.predict_entities(chunk, label_batch)
 
-                    # Adjust offsets and add to results
                     for res in results:
                         res['start'] += offset
                         res['end'] += offset
@@ -167,35 +157,16 @@ class GliNERRecognizer:
                         if chunk_idx > 0 and res['start'] < offset + OVERLAP:
                             continue
 
-                        chunk_results.append(res)
+                        all_results.append(res)
 
                 except Exception as e:
                     debug(f'Anonymize: GLiNER Error on chunk {chunk_idx} with labels {label_batch}: {str(e)}')
 
-            return chunk_results
+            completed = chunk_idx + 1
+            if completed % 5 == 0 or completed == total_chunks:
+                debug(f'Anonymize: Processing text chunks: {completed}/{total_chunks} complete')
 
-        # Use ThreadPoolExecutor for parallel processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(process_chunk, i) for i in range(len(chunks))]
-
-            # Collect results as they complete
-            total_chunks = len(futures)
-            completed = 0
-
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    chunk_results = future.result()
-                    all_results.extend(chunk_results)
-
-                    # Simple progress logging
-                    completed += 1
-                    if completed % 5 == 0 or completed == total_chunks:
-                        debug(f'Anonymize: Processing text chunks: {completed}/{total_chunks} complete')
-
-                except Exception as e:
-                    debug(f'Anonymize: Error processing chunk: {str(e)}')
-
-        # Remove duplicates (entities that appear in overlapping regions)
+        # Remove duplicates from overlapping regions
         seen = set()
         unique_results = []
         for res in sorted(all_results, key=lambda x: (x['start'], x['end'])):

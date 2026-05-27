@@ -64,9 +64,18 @@
 	//     in the shape
 	//
 	"fields": {
+		"anonymize": {
+			"hidden": false
+		},
 		"text_output.target.parameters": {
 			"object": "parameters",
-			"properties": ["anonymize"]
+			"properties": [
+				"smb.storePath",
+				"smb.server",
+				"smb.username",
+				"smb.password",
+				"anonymize"
+			]
 		}
 	},
 	//
@@ -78,7 +87,12 @@
 		{
 			"section": "Transform",
 			"title": "Text Output",
-			"properties": ["type", "text_output.target.parameters", "target.mode"]
+			"properties": [
+				"type",
+				"name",
+				"text_output.target.parameters",
+				"target.mode"
+			]
 		}
 	]
 }

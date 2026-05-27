@@ -22,6 +22,7 @@
 # =============================================================================
 
 import errno
+import os
 import re
 from threading import Lock
 from typing import Any
@@ -29,6 +30,9 @@ from zlib import crc32
 
 import engLib
 from engLib import Filters
+from depends import depends  # type: ignore
+
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 
 class Endpoint:
@@ -69,13 +73,12 @@ class Endpoint:
             )
 
             if not syntaxOnly:
-                # Do not try to connect as validation is run by Platform
-                # where SMB share may not be available
-                # self.connect()
-                pass
+                self.connect()
 
         except ValueError as e:
             engLib.error(e)
+        except Exception as e:
+            engLib.warning(e)
 
     def getConfigSubKey(self):
         """Call from engLib, target service uniqueness key."""

@@ -24,7 +24,7 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 
 
 # ----------------------------------
@@ -32,21 +32,7 @@ from rocketlib import IGlobalBase, OPEN_MODE
 # ----------------------------------
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Read the requirements file
-            import os
-
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-
-            # Load any dependencies
-            from depends import depends  # type: ignore
-
-            depends(requirements)
+        pass
 
     def endGlobal(self):
         pass
