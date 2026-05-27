@@ -71,7 +71,7 @@ describe('RocketRideClient Integration Tests', () => {
 	afterEach(async () => {
 		if (client.isConnected()) {
 			// Use a bounded timeout so teardown never hangs the suite
-			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+			await Promise.race([client.disconnect(), new Promise<void>((_, reject) => setTimeout(() => reject(new Error('disconnect timeout exceeded')), 10000))]);
 		}
 	});
 
@@ -1669,7 +1669,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 						}
 					})
 				),
-				new Promise<void>((resolve) => setTimeout(resolve, 15000)),
+				new Promise<void>((_, reject) => setTimeout(() => reject(new Error('pipeline cleanup timeout exceeded')), 15000)),
 			]);
 			pipelineTokens = [];
 		});
@@ -2042,7 +2042,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					expect(uniqueTexts.size).toBe(SENDS_PER_CLIENT * 2);
 				} finally {
 					if (clientB.isConnected()) {
-						await Promise.race([clientB.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
+						await Promise.race([clientB.disconnect(), new Promise<void>((_, reject) => setTimeout(() => reject(new Error('disconnect timeout exceeded')), 10000))]);
 					}
 				}
 			},
