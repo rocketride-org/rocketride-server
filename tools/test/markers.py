@@ -48,3 +48,8 @@ requires_qwen = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_QWEN_KEY'),
     reason='ROCKETRIDE_QWEN_KEY not set',
 )
+
+requires_baidu_qianfan = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_BAIDU_QIANFAN_KEY'),
+    reason='ROCKETRIDE_BAIDU_QIANFAN_KEY not set',
+)

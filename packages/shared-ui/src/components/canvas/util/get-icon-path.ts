@@ -27,6 +27,7 @@ const isUrl = (path: string) => /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(pat
 // Import all connector icons
 import amazonS3Icon from '../../../assets/nodes/amazon-s3.svg';
 import anthropicIcon from '../../../assets/nodes/anthropic.svg';
+import baiduQianfanIcon from '../../../assets/nodes/baidu-qianfan.svg';
 import rocketrideIcon from '../../../assets/rocketride/rocketride-light.svg';
 import astradbIcon from '../../../assets/nodes/astra_db.svg';
 import audioPlayerIcon from '../../../assets/nodes/audio-player.svg';
@@ -121,6 +122,7 @@ import pipetoolIcon from '../../../assets/nodes/pipetool.svg';
 const iconMap: Record<string, string> = {
 	'amazon-s3': amazonS3Icon,
 	anthropic: anthropicIcon,
+	'baidu-qianfan': baiduQianfanIcon,
 	rocketride: rocketrideIcon,
 	astra_db: astradbIcon,
 	'audio-player': audioPlayerIcon,
@@ -224,6 +226,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'embedding-text',
 	// LLMs
 	'anthropic',
+	'baidu-qianfan',
 	'bland-ai',
 	'gmi_cloud',
 	'ollama',

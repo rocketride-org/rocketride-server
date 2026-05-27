@@ -382,6 +382,36 @@
 				// "qwen-turbo": 131072,
 				// "qwen-max": 32768
 			}
+		},
+		// ----------------------------------------------------------------------
+		// Baidu Qianfan — ERNIE text chat models through OpenAI-compatible API
+		// Excludes embedding, rerank, image, vision, audio and speech variants.
+		// ----------------------------------------------------------------------
+		"llm_baidu_qianfan": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_BAIDU_QIANFAN_KEY",
+			"module": "baidu_qianfan",
+			"models_endpoint": "https://qianfan.baidubce.com/v2/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["ernie-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "rerank", "image", "vision", "audio", "speech", "tts"]
+			},
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["ernie-4-5-turbo-128k", "2026-10-09"],
+				["ernie-4-5-turbo-32k", "2026-10-09"],
+				["ernie-5-0-thinking-preview", "2026-10-09"]
+			],
+			"default_context_window": 128000,
+			"token_limit_overrides": {
+				"ernie-4.5-turbo-128k": 128000,
+				"ernie-4.5-turbo-32k": 32768,
+				"ernie-5.0-thinking-preview": 128000
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -419,6 +449,7 @@
 		"deepseek-": "DeepSeek ",
 		"grok-": "Grok ",
 		"sonar": "Sonar",
+		"ernie-": "ERNIE ",
 		"qwen-": "Qwen ",
 		"text-embedding-": "Text Embedding ",
 		"o1": "o1",
@@ -462,7 +493,11 @@
 			// "gpt-4o-mini": 16384,
 			// // Google Gemini
 			// "gemini-2.5-pro": 65536,
-			// "gemini-2.5-flash": 65536
+			// "gemini-2.5-flash": 65536,
+			// // Baidu Qianfan
+			"ernie-4.5-turbo-128k": 4096,
+			"ernie-4.5-turbo-32k": 4096,
+			"ernie-5.0-thinking-preview": 8192
 		}
 	},
 	// --------------------------------------------------------------------------

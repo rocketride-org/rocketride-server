@@ -67,17 +67,18 @@ python tools/src/sync_models.py --provider llm_openai --model-source openrouter 
 
 ## Providers
 
-| Provider key       | Node               | API key env var             |
-| ------------------ | ------------------ | --------------------------- |
-| `llm_openai`       | `llm_openai`       | `ROCKETRIDE_OPENAI_KEY`     |
-| `embedding_openai` | `embedding_openai` | `ROCKETRIDE_OPENAI_KEY`     |
-| `llm_anthropic`    | `llm_anthropic`    | `ROCKETRIDE_ANTHROPIC_KEY`  |
-| `llm_gemini`       | `llm_gemini`       | `ROCKETRIDE_GEMINI_KEY`     |
-| `llm_mistral`      | `llm_mistral`      | `ROCKETRIDE_MISTRAL_KEY`    |
-| `llm_deepseek`     | `llm_deepseek`     | `ROCKETRIDE_DEEPSEEK_KEY`   |
-| `llm_xai`          | `llm_xai`          | `ROCKETRIDE_XAI_KEY`        |
-| `llm_perplexity`   | `llm_perplexity`   | `ROCKETRIDE_PERPLEXITY_KEY` |
-| `llm_qwen`         | `llm_qwen`         | `ROCKETRIDE_QWEN_KEY`       |
+| Provider key         | Node                 | API key env var                   |
+| -------------------- | -------------------- | --------------------------------- |
+| `llm_openai`         | `llm_openai`         | `ROCKETRIDE_OPENAI_KEY`           |
+| `embedding_openai`   | `embedding_openai`   | `ROCKETRIDE_OPENAI_KEY`           |
+| `llm_anthropic`      | `llm_anthropic`      | `ROCKETRIDE_ANTHROPIC_KEY`        |
+| `llm_gemini`         | `llm_gemini`         | `ROCKETRIDE_GEMINI_KEY`           |
+| `llm_mistral`        | `llm_mistral`        | `ROCKETRIDE_MISTRAL_KEY`          |
+| `llm_deepseek`       | `llm_deepseek`       | `ROCKETRIDE_DEEPSEEK_KEY`         |
+| `llm_xai`            | `llm_xai`            | `ROCKETRIDE_XAI_KEY`              |
+| `llm_perplexity`     | `llm_perplexity`     | `ROCKETRIDE_PERPLEXITY_KEY`       |
+| `llm_qwen`           | `llm_qwen`           | `ROCKETRIDE_QWEN_KEY`             |
+| `llm_baidu_qianfan`  | `llm_baidu_qianfan`  | `ROCKETRIDE_BAIDU_QIANFAN_KEY`    |
 
 If an API key env var is not set the provider is skipped with a warning (not an error).
 Set keys in a `.env` file in the repo root or export them in the shell.
