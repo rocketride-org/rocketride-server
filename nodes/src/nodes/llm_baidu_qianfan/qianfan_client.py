@@ -72,12 +72,12 @@ class Chat(ChatBase):
         """
         if isinstance(error, AuthenticationError):
             return False
-        elif isinstance(error, APIError):
-            return False
         elif isinstance(error, RateLimitError):
             return True
         elif isinstance(error, APIConnectionError):
             return True
+        elif isinstance(error, APIError):
+            return False
         else:
             return False
 
@@ -87,11 +87,11 @@ class Chat(ChatBase):
         """
         if isinstance(error, AuthenticationError):
             return ValueError('Baidu Qianfan API key is invalid or unauthorized.')
-        elif isinstance(error, APIError):
-            return ValueError('An error occurred with the Baidu Qianfan API.')
         elif isinstance(error, RateLimitError):
             return ValueError('Baidu Qianfan rate limit exceeded. Please try again later.')
         elif isinstance(error, APIConnectionError):
             return ValueError('Failed to connect to the Baidu Qianfan API.')
+        elif isinstance(error, APIError):
+            return ValueError('An error occurred with the Baidu Qianfan API.')
         else:
             return super().map_exception(error)
