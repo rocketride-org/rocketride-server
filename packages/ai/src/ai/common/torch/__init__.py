@@ -1,9 +1,17 @@
 import os
-from rocketlib import debug
-from depends import depends
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
+from rocketlib import debug
+from depends import depends, has_nvidia_gpu
+
+_torch_dir = os.path.dirname(os.path.realpath(__file__))
+if has_nvidia_gpu():
+    debug('NVIDIA GPU detected — installing CUDA torch build')
+    _requirements = os.path.join(_torch_dir, 'requirements_gpu.txt')
+else:
+    debug('No NVIDIA GPU detected — installing CPU-only torch build')
+    _requirements = os.path.join(_torch_dir, 'requirements_cpu.txt')
+
+depends(_requirements)
 
 # We should have installed torch now
 import torch

@@ -1,0 +1,10 @@
+# CPU-only PyTorch build for machines without an NVIDIA GPU.
+# Selected at runtime by packages/ai/src/ai/common/torch/__init__.py when
+# no NVIDIA hardware is detected. Avoids pulling the ~1.4 GiB nvidia-*-cu12
+# stack on AMD / Intel / Apple-Intel boxes where it would only fail to download.
+#
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.10.0 ; platform_system == 'Darwin' and platform_machine == 'arm64'
+torch==2.10.0+cpu; platform_system != 'Darwin'
+torchvision==0.25.0 ; platform_system == 'Darwin' and platform_machine == 'arm64'
+torchvision==0.25.0+cpu ; platform_system != 'Darwin'

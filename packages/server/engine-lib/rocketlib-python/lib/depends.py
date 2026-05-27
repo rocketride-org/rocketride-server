@@ -63,6 +63,70 @@ REQUIREMENTS_GLOBS = [
 # Track processed requirements to avoid redundant installs in same session
 _processed: set[str] = set()
 
+# Cached NVIDIA detection result (None == not yet checked)
+_nvidia_cache: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# NVIDIA Detection
+# ---------------------------------------------------------------------------
+
+
+def has_nvidia_gpu() -> bool:
+    """
+    Return True iff an NVIDIA GPU is present.
+
+    Drives selection between ``requirements_gpu.txt`` (CUDA torch build,
+    ~2 GiB) and ``requirements_cpu.txt`` (CPU-only torch). Result is cached
+    process-wide so the probe runs at most once per startup.
+    """
+    global _nvidia_cache
+    if _nvidia_cache is not None:
+        return _nvidia_cache
+
+    _nvidia_cache = _probe_nvidia_gpu()
+    debug(f'NVIDIA GPU detected: {_nvidia_cache}')
+    return _nvidia_cache
+
+
+def _probe_nvidia_gpu() -> bool:
+    """Probe the OS for NVIDIA hardware. See has_nvidia_gpu() for the cached entry point."""
+    # Darwin has not shipped with discrete NVIDIA GPUs in supported configs for years.
+    if sys.platform == 'darwin':
+        return False
+
+    if sys.platform.startswith('linux'):
+        # Loaded NVIDIA kernel module is the most reliable positive signal.
+        if os.path.exists('/proc/driver/nvidia/version'):
+            return True
+        # Fall back to PCI scan: vendor ID 10de == NVIDIA Corporation.
+        try:
+            out = subprocess.run(
+                ['lspci', '-nn'],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+        return '10de:' in out.stdout.lower()
+
+    if sys.platform == 'win32':
+        try:
+            out = subprocess.run(
+                ['nvidia-smi', '-L'],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+        return out.returncode == 0 and 'GPU' in out.stdout
+
+    return False
+
 
 # ---------------------------------------------------------------------------
 # File Locking
@@ -409,8 +473,16 @@ def bootstrap():
 
 
 def _find_requirement_files() -> list[str]:
-    """Find all requirement files matching the glob patterns."""
+    """Find all requirement files matching the glob patterns.
+
+    Variant files named ``*_gpu.txt`` and ``*_cpu.txt`` are filtered against
+    the result of :func:`has_nvidia_gpu`, so only one half of any pair is
+    fed into the combined constraints. Without this filter, mutually
+    exclusive torch pins (``+cu128`` vs ``+cpu``) would make uv's constraint
+    compile fail outright.
+    """
     executable_dir = _get_executable_dir()
+    nvidia = has_nvidia_gpu()
     found = []
 
     for pattern in REQUIREMENTS_GLOBS:
@@ -418,6 +490,11 @@ def _find_requirement_files() -> list[str]:
         matches = glob(full_pattern, recursive=True)
         for path in matches:
             abs_path = os.path.abspath(path)
+            name = os.path.basename(abs_path).lower()
+            if nvidia and name.endswith('_cpu.txt'):
+                continue
+            if not nvidia and name.endswith('_gpu.txt'):
+                continue
             if os.path.isfile(abs_path) and abs_path not in found:
                 found.append(abs_path)
 
