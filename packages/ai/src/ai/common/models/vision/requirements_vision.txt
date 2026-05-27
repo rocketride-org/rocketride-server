@@ -1,3 +1,4 @@
+# contract-check: skip-install  reason: ~50 MB on top of the transformers baseline for an opt-in vision-embedding loader. PR lane skips; nightly --install-all installs and verifies.
 # Vision (CLIP / ViT) image embedding
 # torch via ai.common.torch
 
