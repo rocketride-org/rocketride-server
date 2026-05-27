@@ -133,6 +133,33 @@ def test_verify_import_reports_non_importerror_without_crashing(monkeypatch):
     assert 'some_pkg' in result.message
 
 
+def test_verify_import_reports_broken_submodule_not_symbol_missing(monkeypatch, stub_module):
+    """
+    A submodule that exists but whose import raises ModuleNotFoundError for a
+    *nested* dependency must be reported as a real failure — not masked as
+    'symbol not found'. Only a ModuleNotFoundError naming the probed module
+    itself means the submodule is genuinely absent.
+    """
+    import importlib as _il
+
+    real_import = _il.import_module
+    target = f'{stub_module}.Widget'  # 'Widget' isn't an attr → probes submodule
+
+    def _fake(name, *a, **k):
+        if name == target:
+            # Submodule exists but a nested import is missing.
+            raise ModuleNotFoundError("No module named 'nested_dep'", name='nested_dep')
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr('contract_checks.runner.importlib.import_module', _fake)
+    result = verify_import(ImportRequirement(module=stub_module, symbols=('Widget',)))
+    assert not result.ok
+    assert 'nested_dep' in result.message
+    assert 'ModuleNotFoundError' in result.message
+    # Must NOT be reported as a missing symbol.
+    assert 'not found in module' not in result.message
+
+
 def test_verify_any_of_passes_when_one_alternative_resolves(stub_module):
     """A successful second alternative is enough; earlier failures don't matter."""
     group = AnyOf(

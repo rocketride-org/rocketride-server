@@ -86,21 +86,38 @@ def verify_import(req: ImportRequirement) -> CheckResult:
             continue
         # Submodule fallback: `from PIL import Image` resolves via
         # `import PIL.Image` when Image isn't an attribute on the package.
+        target = f'{req.module}.{sym}'
         try:
-            importlib.import_module(f'{req.module}.{sym}')
+            importlib.import_module(target)
             continue
-        except ImportError:
-            pass  # genuinely not a submodule → fall through to "symbol not found"
+        except ModuleNotFoundError as e:
+            # Only fall through to "symbol not found" when the *probed* module
+            # is the missing one. A different missing name means the submodule
+            # exists but a nested import failed — report that honestly.
+            if e.name != target:
+                return CheckResult(
+                    ok=False,
+                    message=f'importing submodule {target} raised ModuleNotFoundError: {e}',
+                    where=target,
+                )
+        except ImportError as e:
+            # Submodule exists but its import raised (circular import,
+            # "cannot import name", …) — a real failure, not "not found".
+            return CheckResult(
+                ok=False,
+                message=f'importing submodule {target} raised ImportError: {e}',
+                where=target,
+            )
         except Exception as e:
             return CheckResult(
                 ok=False,
-                message=f'importing submodule {req.module}.{sym} raised {type(e).__name__}: {e}',
-                where=f'{req.module}.{sym}',
+                message=f'importing submodule {target} raised {type(e).__name__}: {e}',
+                where=target,
             )
         return CheckResult(
             ok=False,
             message=f'symbol {sym!r} not found in module {req.module!r}',
-            where=f'{req.module}.{sym}',
+            where=target,
         )
     return CheckResult(ok=True, message='ok', where=req.module)
 
