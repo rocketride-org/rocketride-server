@@ -20,7 +20,11 @@ run-name: check-externals ${{ github.event_name == 'schedule' && '(nightly)' || 
 # otherwise (packages/server/scripts/tasks.js: server:download). This framework
 # targets Python/JS/YAML changes, which leave the engine hash unchanged, so the
 # prebuilt downloads cleanly — no vcpkg/submodules/compilers needed here, which
-# is why neither job sets `submodules: recursive`. If a FUTURE PR changes engine
+# is why neither job sets `submodules: recursive`. The prebuilt still links
+# libc++/libgomp at runtime, though; _build.yaml gets those from its compile
+# toolchain, so this lane installs them explicitly (see the runtime-libraries
+# step) and pins ubuntu-22.04 to match the prebuilt's jammy build target.
+# If a FUTURE PR changes engine
 # C++ source, the prebuilt won't match and server:download falls through to a
 # full compile — this lane would then need the vcpkg/submodule/nuget setup that
 # _build.yaml carries (or to reuse a built engine via workflow_run). Add it then.
@@ -66,7 +70,7 @@ jobs:
   pr:
     name: check-externals (PR)
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # NON-BLOCKING during stabilization. Flip to false in PR3 to make it a
     # required check (and add it to the CI OK aggregator's needs:).
     continue-on-error: true
@@ -81,6 +85,10 @@ jobs:
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
           version: 10.33.0
+
+      - name: Install engine runtime libraries
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1
 
       - name: Run check-externals (markers respected)
         # The builder task's own steps build the engine + the four trees, then
@@ -116,7 +124,7 @@ jobs:
   nightly:
     name: check-externals (nightly)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
     # PHASE 1: issues: write is NOT needed yet (auto-issue step is commented
     # out below). Uncomment the permission when enabling that step.
@@ -133,6 +141,10 @@ jobs:
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
           version: 10.33.0
+
+      - name: Install engine runtime libraries
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1
 
       - name: Run check-externals
         # --rebuild-cache: full uv pip compile from scratch (catches upstream
