@@ -34,6 +34,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as os from 'os';
 import * as lockfile from 'proper-lockfile';
+import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
 
@@ -222,7 +223,15 @@ export class EngineInstaller {
 		}
 
 		try {
-			return await this.installUnderLock(versionSpec, progress, token, githubToken);
+			const exePath = await this.installUnderLock(versionSpec, progress, token, githubToken);
+			// Run the runtime-dep check on EVERY install attempt, not just fresh
+			// downloads. installUnderLock has three return paths (fresh download,
+			// "already up to date" short-circuit, GitHub-unreachable fallback);
+			// users whose engine was installed before this check existed only hit
+			// the latter two, so putting the check here is the only way to reach
+			// them without forcing a manual uninstall+reinstall.
+			await this.checkLinuxRuntimeDeps(exePath);
+			return exePath;
 		} finally {
 			try { await release(); } catch { /* ignore stale lock */ }
 		}
@@ -348,6 +357,9 @@ export class EngineInstaller {
 			if (!fs.existsSync(exePath)) {
 				throw new Error(`Engine extraction completed but executable not found at: ${exePath}`);
 			}
+
+			// (Runtime dep check runs in install() after this returns, so it
+			// covers fresh downloads AND "already installed" short-circuits.)
 
 			// Write version file so we know what's installed
 			this.writeVersionJson({ tag: release.tag_name, publishedAt: release.published_at });
@@ -701,6 +713,66 @@ export class EngineInstaller {
 	/** Simple delay helper. */
 	private delay(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	// =========================================================================
+	// LINUX RUNTIME DEPENDENCY CHECK
+	// =========================================================================
+
+	private static readonly LIB_TO_PACKAGE: Record<string, string> = {
+		'libc++.so.1': 'libc++1',
+		'libc++abi.so.1': 'libc++abi1',
+		'libgomp.so.1': 'libgomp1',
+	};
+
+	private async checkLinuxRuntimeDeps(exePath: string): Promise<void> {
+		if (process.platform !== 'linux') return;
+
+		let lddOutput = '';
+		try {
+			lddOutput = execFileSync('ldd', [exePath], { encoding: 'utf8' });
+		} catch { return; }
+
+		const packages = [...new Set(
+			lddOutput.split('\n')
+				.filter(l => l.includes('=> not found'))
+				.map(l => l.trim().match(/^(\S+)/)?.[1])
+				.map(lib => lib ? EngineInstaller.LIB_TO_PACKAGE[lib] : undefined)
+				.filter((p): p is string => !!p),
+		)];
+		if (!packages.length) return;
+
+		// One-click install assumes apt; on non-Debian distros show the list and let the user handle it.
+		const hasApt = fs.existsSync('/usr/bin/apt') || fs.existsSync('/bin/apt');
+		if (!hasApt) {
+			void vscode.window.showWarningMessage(
+				`RocketRide needs these system libraries: ${packages.join(', ')}. Install them with your system package manager.`,
+				{ modal: true },
+			);
+			return;
+		}
+
+		const choice = await vscode.window.showWarningMessage(
+			`RocketRide needs these system libraries: ${packages.join(', ')}.`,
+			{ modal: true, detail: 'Without these libraries the engine cannot start.' },
+			'Install',
+		);
+		if (choice !== 'Install') return;
+
+		try {
+			await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: 'Installing system libraries...', cancellable: false },
+				() => new Promise<void>((resolve, reject) => {
+					execFile('pkexec', ['apt', 'install', '-y', ...packages], { timeout: 5 * 60 * 1000 }, (err, _stdout, stderr) => {
+						if (err) reject(new Error(stderr?.trim() || err.message));
+						else resolve();
+					});
+				}),
+			);
+			void vscode.window.showInformationMessage('System libraries installed.');
+		} catch (err) {
+			void vscode.window.showErrorMessage(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 }
 
