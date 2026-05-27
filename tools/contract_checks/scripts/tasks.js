@@ -58,7 +58,7 @@ function makeRunChecksAction(options = {}) {
     return {
         // No description -> internal; reached as the final step of
         // `check-externals:run`, or invoked directly for fast dev iteration.
-        run: async (_ctx, task) => {
+        run: async (ctx, task) => {
             if (options.rebuildCache) {
                 const constraints = path.join(ENGINE_CACHE_DIR, 'constraints.txt');
                 const hashFile = path.join(ENGINE_CACHE_DIR, 'requirements.hash');
@@ -103,7 +103,7 @@ function makeRunTestsAction(options = {}) {
     return {
         // No description -> internal; reached as the final step of
         // `check-externals:test`.
-        run: async (_ctx, task) => {
+        run: async (ctx, task) => {
             const extraArgs = ['-v', '--tb=short'];
 
             // Accept both --pattern and --pytest-pattern; this lane is real

@@ -116,6 +116,23 @@ def test_verify_import_accepts_lazy_loaded_submodule():
     assert result.ok, result.message
 
 
+def test_verify_import_reports_non_importerror_without_crashing(monkeypatch):
+    """
+    A module that raises a non-ImportError at import (version guard, missing
+    native lib) must yield a failed CheckResult — not propagate and abort the
+    whole run. Regression for the too-narrow `except ImportError`.
+    """
+
+    def _boom(_name, *_a, **_k):
+        raise RuntimeError('native lib missing')
+
+    monkeypatch.setattr('contract_checks.runner.importlib.import_module', _boom)
+    result = verify_import(ImportRequirement(module='some_pkg', symbols=()))
+    assert not result.ok
+    assert 'RuntimeError' in result.message
+    assert 'some_pkg' in result.message
+
+
 def test_verify_any_of_passes_when_one_alternative_resolves(stub_module):
     """A successful second alternative is enough; earlier failures don't matter."""
     group = AnyOf(
@@ -429,10 +446,9 @@ def test_version_matches_simple_specs():
 
 def test_version_matches_propagates_bad_spec():
     """Malformed specs raise — caller (cli dispatch) catches and reports."""
-    import pytest as _pytest
     from contract_checks.engine_env import version_matches
 
-    with _pytest.raises(Exception):
+    with pytest.raises(Exception):
         version_matches('<= not a spec', '2.0.0')
 
 
@@ -765,8 +781,9 @@ def test_install_loop_continues_on_per_file_failure(tmp_path, capsys, monkeypatc
     assert '[install-failed]' in err
     assert 'requirements_bad.txt' in err
     assert 'simulated failure' in err
-    # Sanity: the good file wasn't reported as failed.
-    assert 'requirements_good.txt' not in err.split('[install-failed]')[1] if '[install-failed]' in err else True
+    # Sanity: the good file wasn't reported as failed (stderr only carries
+    # [install-failed] lines, so the good file must not appear at all).
+    assert 'requirements_good.txt' not in err
 
 
 def test_install_loop_install_all_overrides_marker(tmp_path, capsys, monkeypatch):

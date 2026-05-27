@@ -88,7 +88,7 @@ jobs:
 
       - name: Install engine runtime libraries
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
 
       - name: Run check-externals (markers respected)
         # The builder task's own steps build the engine + the four trees, then
@@ -144,7 +144,7 @@ jobs:
 
       - name: Install engine runtime libraries
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
 
       - name: Run check-externals
         # --rebuild-cache: full uv pip compile from scratch (catches upstream

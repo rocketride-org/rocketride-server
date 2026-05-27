@@ -19,7 +19,7 @@ from contract_checks.trees import Tree
 
 # All self-tests use the same minimal tree config so we can focus on the
 # extractor's behavior, not the trees.py config.
-def _make_tree(root: Path, internal: set[str] = frozenset({'rocketlib', 'engLib'})) -> Tree:
+def _make_tree(root: Path, internal: frozenset[str] = frozenset({'rocketlib', 'engLib'})) -> Tree:
     """
     Build a throwaway :class:`Tree` rooted at ``root`` for a single self-test.
 
@@ -34,7 +34,7 @@ def _make_tree(root: Path, internal: set[str] = frozenset({'rocketlib', 'engLib'
     return Tree(
         name='self-test',
         root=root,
-        internal_packages=frozenset(internal),
+        internal_packages=internal,
     )
 
 
@@ -570,7 +570,7 @@ def test_internal_package_does_not_leak_into_heavy_class_detection(tmp_path: Pat
             client.users.list()
     """,
     )
-    tree = _make_tree(tmp_path, internal={'rocketlib', 'engLib'})
+    tree = _make_tree(tmp_path, internal=frozenset({'rocketlib', 'engLib'}))
     contract = extract_component(tree, tmp_path)
     # No third-party imports were used.
     assert contract.imports == []

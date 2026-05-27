@@ -75,10 +75,10 @@ def verify_import(req: ImportRequirement) -> CheckResult:
     """
     try:
         mod = importlib.import_module(req.module)
-    except ImportError as e:
+    except Exception as e:
         return CheckResult(
             ok=False,
-            message=f'cannot import module {req.module!r}: {e}',
+            message=f'cannot import module {req.module!r}: {type(e).__name__}: {e}',
             where=req.module,
         )
     for sym in req.symbols:
@@ -90,7 +90,13 @@ def verify_import(req: ImportRequirement) -> CheckResult:
             importlib.import_module(f'{req.module}.{sym}')
             continue
         except ImportError:
-            pass
+            pass  # genuinely not a submodule → fall through to "symbol not found"
+        except Exception as e:
+            return CheckResult(
+                ok=False,
+                message=f'importing submodule {req.module}.{sym} raised {type(e).__name__}: {e}',
+                where=f'{req.module}.{sym}',
+            )
         return CheckResult(
             ok=False,
             message=f'symbol {sym!r} not found in module {req.module!r}',
@@ -152,7 +158,7 @@ def verify_class_attrs(module: str, symbol: str, attrs: list[str]) -> CheckResul
     try:
         mod = importlib.import_module(module)
         cls = getattr(mod, symbol)
-    except (ImportError, AttributeError) as e:
+    except Exception as e:
         return CheckResult(
             ok=False,
             message=f'cannot reach {module}.{symbol}: {e}',
@@ -210,7 +216,7 @@ def verify_heavy_class(hc: HeavyClass) -> CheckResult:
     try:
         mod = importlib.import_module(module)
         cls = getattr(mod, class_name)
-    except (ImportError, AttributeError) as e:
+    except Exception as e:
         return CheckResult(
             ok=False,
             message=f'cannot reach {hc.qualname}: {e}',
