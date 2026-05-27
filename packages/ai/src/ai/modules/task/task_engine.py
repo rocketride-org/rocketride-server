@@ -31,6 +31,7 @@ Global Resources:
 import os
 import asyncio
 import sys
+import traceback
 import json
 import tempfile
 import time
@@ -69,6 +70,24 @@ _logger = get_task_logger(__name__)
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
+
+
+# Path sanitization helper to prevent exposing server structure in logs
+def _sanitize_path(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    sensitive_roots = [
+        os.path.expanduser('~'),
+        os.getcwd(),
+        os.environ.get('USERPROFILE', ''),
+        os.environ.get('HOME', ''),
+        os.environ.get('GITHUB_WORKSPACE', ''),
+    ]
+    for root in sensitive_roots:
+        if root and len(root) > 3:
+            text = text.replace(root, '<workspace>')
+            text = text.replace(root.replace('\\', '/'), '<workspace>')
+    return text
 
 
 # Development environment optimization
@@ -311,6 +330,9 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
+        # Instance-level structured logger to avoid collision between engines
+        self.logger = get_task_logger(f"task_engine.{self.id}")
+
     # Only environment variables with this prefix are permitted to resolve in pipelines.
     # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
     ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
@@ -534,7 +556,10 @@ class Task(DAPBase):
                     stop=stop_after_attempt(10),
                     wait=wait_fixed(0.15),
                     reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'),
+                    before_sleep=lambda retry_state: self.debug_message(
+                        f'Data connection attempt {retry_state.attempt_number} failed, '
+                        f'retrying in 0.15s: {retry_state.outcome.exception()}'
+                    ),
                 )
                 async def _connect_data_client():
                     # Don't retry if subprocess has died
@@ -847,15 +872,27 @@ class Task(DAPBase):
                         apikey=task_apikey,
                     )
 
-        _logger.info(
-            'Task terminated',
-            extra={
-                'task_id': self.id,
-                'step': 'termination',
-                'exit_code': self._status.exitCode,
-                'final_state': self._status.state,
-            },
-        )
+        exit_code = self._status.exitCode
+        if exit_code and exit_code != 0:
+            self.logger.warning(
+                'Task terminated with error',
+                extra={
+                    'task_id': self.id,
+                    'step': 'termination',
+                    'exit_code': exit_code,
+                    'final_state': self._status.state,
+                },
+            )
+        else:
+            self.logger.info(
+                'Task terminated',
+                extra={
+                    'task_id': self.id,
+                    'step': 'termination',
+                    'exit_code': exit_code or 0,
+                    'final_state': self._status.state,
+                },
+            )
         self.debug_message('Resource cleanup completed successfully')
 
     def _on_metrics_updated(self) -> None:
@@ -1245,7 +1282,11 @@ class Task(DAPBase):
 
             # Check sliding timeout (resets on events)
             if time_since_last_event >= CONST_MAX_READY_TIME:
-                raise TimeoutError(f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. Task stuck in state {current_state} (NONE=0, STARTING=1, INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)')
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. '
+                    f'Task stuck in state {current_state} (NONE=0, STARTING=1, '
+                    f'INITIALIZING=2, RUNNING=3, STOPPING=4, COMPLETED=5, CANCELLED=6)'
+                )
 
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
@@ -1443,7 +1484,9 @@ class Task(DAPBase):
             # Start fresh (full initialization)
             await self.start_task()
 
-            self._server.debug_message(f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})')
+            self._server.debug_message(
+                f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
+            )
 
         except Exception as e:
             self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
@@ -1483,7 +1526,7 @@ class Task(DAPBase):
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
-            _logger.info(
+            self.logger.info(
                 'Task starting',
                 extra={'task_id': self.id, 'step': 'start'},
             )
@@ -1603,7 +1646,7 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
-            _logger.info(
+            self.logger.info(
                 'Subprocess created',
                 extra={
                     'task_id': self.id,
@@ -1687,10 +1730,21 @@ class Task(DAPBase):
 
         except Exception as e:
             await self._terminated()
-            _logger.error(
+            tb = traceback.format_exc()
+            has_valid_tb = tb and 'NoneType: None' not in tb
+            tb_lines = tb.splitlines() if has_valid_tb else []
+
+            sanitized_error = _sanitize_path(str(e))
+            sanitized_tb = [_sanitize_path(line) for line in tb_lines]
+
+            self.logger.error(
                 'Task startup failed',
-                extra={'task_id': self.id, 'step': 'error', 'error': str(e)},
-                exc_info=True,
+                extra={
+                    'task_id': self.id,
+                    'step': 'error',
+                    'error': sanitized_error,
+                    'traceback': sanitized_tb,
+                },
             )
             self.debug_message(f'Task startup failed: {e}')
             raise

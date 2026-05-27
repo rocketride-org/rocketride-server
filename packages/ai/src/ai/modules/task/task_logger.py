@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
 
 
 class _StructuredFormatter(logging.Formatter):
@@ -30,16 +29,21 @@ class _StructuredFormatter(logging.Formatter):
         if record.exc_info:
             payload['exception'] = self.formatException(record.exc_info)
 
-        return json.dumps(payload, default=str)
+        def safe_default(obj):
+            try:
+                return str(obj)
+            except Exception:
+                return "<unserializable>"
+
+        return json.dumps(payload, default=safe_default)
 
 
-def get_task_logger(name: str) -> logging.Logger:
+def get_task_logger(name: str = "task_engine") -> logging.Logger:
     logger = logging.getLogger(name)
-
+    logger.propagate = False
+    logger.setLevel(logging.DEBUG)
     if not logger.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(_StructuredFormatter())
         logger.addHandler(handler)
-        logger.propagate = False
-
     return logger
