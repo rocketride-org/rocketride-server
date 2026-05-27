@@ -25,6 +25,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { getVoiceBuilderStatus, processVoiceBuilderRecording, type IVoiceBuilderConfig, type IVoiceBuilderSecrets } from './voice/voiceBuilder';
+import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 
 // =============================================================================
 // CONSTANTS
@@ -111,6 +112,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.broadcastSubscriptionStatus();
 		});
 
+		const envKeysChangedListener = this.connectionManager.on('shell:envKeysChanged', () => {
+			this.broadcastEnvKeys();
+		});
+
 		const connectionStateListener = this.connectionManager.on('shell:statusChange', async (connectionStatus) => {
 			try {
 				if (connectionStatus.state === ConnectionState.CONNECTED) {
@@ -126,7 +131,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.broadcastServicesToAllEditors(payload);
 		});
 
-		this.disposables.push(eventListener, accountUpdateListener, connectionStateListener, servicesUpdatedListener);
+		this.disposables.push(eventListener, accountUpdateListener, envKeysChangedListener, connectionStateListener, servicesUpdatedListener);
 	}
 
 	// =========================================================================
@@ -183,6 +188,31 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected, isSubscribed: subscribed }).then(undefined, (err: unknown) => {
 					this.logger.error(`Failed to post connectionState to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	/**
+	 * Re-fetches env key names from the server and broadcasts them to all
+	 * open editor webviews so the autocomplete list stays in sync after
+	 * variables are added or removed on the Environment page.
+	 */
+	private async broadcastEnvKeys(): Promise<void> {
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+
+		let envKeys: string[];
+		try {
+			envKeys = await client.account.getEnvironmentKeys();
+		} catch {
+			return;
+		}
+
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview.postMessage({ type: 'project:envKeysUpdate', envKeys }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post envKeysUpdate to webview: ${err}`);
 				});
 			}
 		}
@@ -328,6 +358,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
 					const cached = this.connectionManager.getCachedServices();
 					const client = this.connectionManager.getClient();
+					let envKeys: string[] | undefined;
+					try {
+						envKeys = await client?.account?.getEnvironmentKeys();
+					} catch {
+						envKeys = undefined;
+					}
 
 					// Send everything in one message
 					webview.postMessage({
@@ -341,6 +377,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
 						voiceStatus: this.getVoiceBuilderRuntime(project ?? {}, cached.services).status,
+						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 
@@ -447,6 +484,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						if (source) {
 							await this.stopPipeline(source, document);
 						}
+					}
+					break;
+				}
+
+				// Missing env vars — webview detected ROCKETRIDE_* refs not in envKeys
+				case 'status:missingEnvVars': {
+					const keys = data.keys as string[];
+					if (keys?.length) {
+						await handleMissingEnvVars(keys);
 					}
 					break;
 				}
@@ -692,6 +738,8 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 		}
 	}
+
+
 
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {

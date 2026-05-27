@@ -27,7 +27,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport, BxLock } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
@@ -306,8 +306,6 @@ const SidebarViewWebview: React.FC = () => {
 			const commands: Record<string, string> = {
 				new: 'rocketride.sidebar.files.createFile',
 				monitor: 'rocketride.page.monitor.open',
-				deploy: 'rocketride.page.deploy.open',
-				templates: 'rocketride.page.templates.open',
 			};
 			const cmd = commands[target];
 			if (cmd) sendMessage({ type: 'command', command: cmd });
@@ -393,13 +391,18 @@ const SidebarViewWebview: React.FC = () => {
 		}
 	};
 
+	// ── Flat vs popup mode ──────────────────────────────────────────────────
+	// Flat: shared connection + no cloud account → show status inline, no popup.
+	// Popup: independent deploy target OR cloud account → full popup menu.
+	const anyConnected = connection.state === 'connected' || deployConnectionState === 'connected';
+	const useFlatFooter = !deployTargetMode && !cloudConnected;
+
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
+		if (useFlatFooter) return [];
+
 		const items: SidebarFooterMenuItem[] = [];
 
 		// ── Development section ─────────────────────────────────────────────
-		// "Development" header with live status text (e.g. "Connected (Local)").
-		// Clicking the status line opens Settings focused on the dev section.
-		// If cloud mode, a "Team: {name} >" item opens a team submenu.
 		const devStatus = connectionStatusText(connection.state, developmentMode, devProgressMessage);
 		const devTeamLine = developmentMode === 'cloud' && devTeamName ? `Team: ${devTeamName}` : undefined;
 		items.push({
@@ -413,7 +416,6 @@ const SidebarViewWebview: React.FC = () => {
 		});
 
 		// ── Deployment section ──────────────────────────────────────────────
-		// Same pattern as Development. Only shown when deploy target is configured.
 		if (deployTargetMode) {
 			const deployStatus = connectionStatusText(deployConnectionState, deployTargetMode, deployProgressMessage);
 			const deployTeamLine = deployTargetMode === 'cloud' && deployTeamName ? `Team: ${deployTeamName}` : undefined;
@@ -428,24 +430,44 @@ const SidebarViewWebview: React.FC = () => {
 			});
 		}
 
-		// ── Account / Settings / Log out ─────────────────────────────────────
-		// cloudConnected is computed by the extension host via isCloudConnected()
-		// Billing is a tab inside Account — no separate menu item needed.
+		// ── Account / Environment / Settings / Log out ──────────────────────
 		if (cloudConnected) {
 			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) });
 		}
 
-		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
+		// Environment is visible whenever at least one connection is active,
+		// regardless of whether the server is OSS or SaaS.
+		if (anyConnected) {
+			items.push({ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !cloudConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.environment.open' }) });
+		}
+
+		// Settings is always shown. Divider only when neither Account nor
+		// Environment was shown above (i.e. not connected and not cloud).
+		items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !cloudConnected && !anyConnected, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }) });
 
 		if (cloudConnected) {
 			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.cloud.logout' }) });
 		}
 
 		return items;
-	}, [sendMessage, cloudConnected, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
+	}, [sendMessage, cloudConnected, useFlatFooter, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
+
+	// ── Flat-mode connection status ─────────────────────────────────────────
+	const flatConnectionStatus = useMemo(() => {
+		if (!useFlatFooter) return undefined;
+		const state = connection.state === 'connected' ? 'connected' as const : connection.state === 'connecting' ? 'connecting' as const : 'disconnected' as const;
+		// Line 1: connection state label (never the progress message).
+		// Line 2: progress/action message when the engine is doing something.
+		const modeStr = modeLabel(developmentMode);
+		const stateLabel = connection.state === 'connected' ? `Connected (${modeStr})` : connection.state === 'connecting' ? 'Connecting...' : connection.state === 'downloading-engine' ? 'Downloading engine...' : connection.state === 'starting-engine' ? 'Starting engine...' : connection.state === 'stopping-engine' ? 'Stopping engine...' : connection.state === 'auth-failed' ? 'Sign-in required' : 'Disconnected';
+		return { state, text: stateLabel, message: devProgressMessage };
+	}, [useFlatFooter, connection.state, developmentMode, devProgressMessage]);
+
+	const handleSettingsClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }), [sendMessage]);
+	const handleEnvironmentClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.environment.open' }), [sendMessage]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} onEnvironmentClick={anyConnected ? handleEnvironmentClick : undefined} onSettingsClick={handleSettingsClick} connectionStatus={flatConnectionStatus} menuItems={footerMenuItems} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 

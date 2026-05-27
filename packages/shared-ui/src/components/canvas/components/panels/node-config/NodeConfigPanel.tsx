@@ -131,19 +131,8 @@ const styles = {
 		minHeight: 0,
 		paddingTop: '8px',
 	},
-	footer: { flexShrink: 0, paddingTop: '8px', display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end' },
-	saveButton: {
-		padding: '6px 20px',
-		fontSize: '13px',
-		fontFamily: 'var(--rr-font-family-widget)',
-		fontWeight: 500,
-		color: 'var(--rr-fg-button)',
-		backgroundColor: 'var(--rr-bg-button)',
-		border: 'none',
-		borderRadius: '3px',
-		cursor: 'pointer',
-	},
-	saveButtonDisabled: { opacity: 0.5, cursor: 'not-allowed' },
+	footer: { flexShrink: 0, paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' },
+	footerHint: { fontSize: '11px', color: 'var(--rr-text-disabled)', marginRight: 'auto' },
 	errorBox: {
 		width: '100%',
 		padding: '10px 14px',
@@ -170,9 +159,9 @@ const styles = {
 		position: 'absolute' as const,
 		left: 0,
 		top: 0,
-		width: 2,
+		width: 4,
 		height: '100%',
-		background: 'var(--rr-brand)',
+		background: 'var(--rr-sash-hover)',
 	},
 };
 
@@ -199,7 +188,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
-	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
+	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, envKeys = [] } = useFlowProject();
 	const { getPreference, setPreference, isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------
@@ -298,15 +287,31 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		[node.id, updateNode]
 	);
 
-	// --- Friendly auth error messages ---------------------------------------
-	const transformErrors = useCallback((errors: RJSFValidationError[]) => {
-		return errors.map((error) => {
-			if (['accessToken', 'refreshToken', 'userToken'].includes(error.params?.missingProperty ?? '')) {
-				error.stack = 'Authentication required';
-			}
-			return error;
-		});
-	}, []);
+	// --- Friendly auth error messages + env var bypass -----------------------
+	const transformErrors = useCallback(
+		(errors: RJSFValidationError[]) => {
+			return errors
+				.filter((error) => {
+					// Suppress validation errors for fields whose value is an env var reference
+					if (error.property) {
+						const fieldPath = error.property.replace(/^\./, '').split('.');
+						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+						const fieldValue = fieldPath.reduce((obj: any, key) => obj?.[key], formValues);
+						if (typeof fieldValue === 'string' && /^\$\{ROCKETRIDE_\w+\}$/.test(fieldValue)) {
+							return false;
+						}
+					}
+					return true;
+				})
+				.map((error) => {
+					if (['accessToken', 'refreshToken', 'userToken'].includes(error.params?.missingProperty ?? '')) {
+						error.stack = 'Authentication required';
+					}
+					return error;
+				});
+		},
+		[formValues],
+	);
 
 	// --- Save: details only (no schema) ------------------------------------
 	const handleSaveDetailsOnly = useCallback(() => {
@@ -549,6 +554,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 										googlePickerClientId,
 										nodeId: node.id,
 										formDataErrors: node.data.formDataErrors,
+										envKeys,
 									}}
 									disabled={false}
 									validator={validator}
@@ -564,8 +570,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 						{/* Footer */}
 						<div style={styles.footer}>
 							{validationError && <div style={styles.errorBox}>{validationError}</div>}
+							{envKeys.length > 0 && <span style={styles.footerHint}>Type $&#123; in a field to pick from your variables</span>}
 							<button
-								style={{ ...styles.saveButton, ...(disableSave ? styles.saveButtonDisabled : {}) }}
+								style={{ ...commonStyles.buttonPrimary, ...(disableSave ? commonStyles.buttonDisabled : {}) }}
 								disabled={disableSave}
 								onClick={() => {
 									if (schema) {
@@ -575,7 +582,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 									}
 								}}
 							>
-								{isSubmitting ? 'Validating...' : 'Save Changes'}
+								{isSubmitting ? 'Validating...' : 'Save'}
 							</button>
 						</div>
 					</div>

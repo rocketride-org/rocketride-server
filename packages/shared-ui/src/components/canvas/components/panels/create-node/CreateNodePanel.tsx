@@ -26,24 +26,11 @@ import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
 import { IService, IServiceCapabilities } from '../../../types';
 import { commonStyles } from '../../../../../themes/styles';
+import { CATEGORY_TITLES } from './categoryTitles';
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-const CATEGORY_TITLES: Record<string, string> = {
-	source: 'Source',
-	embedding: 'Embedding',
-	llm: 'LLM',
-	database: 'Database',
-	filter: 'Filter',
-	image: 'Image',
-	preprocessor: 'Preprocessor',
-	store: 'Store',
-	agent: 'Agent',
-	tool: 'Tool',
-	other: 'Other',
-};
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 600;
@@ -80,9 +67,9 @@ const styles = {
 		position: 'absolute' as const,
 		left: 0,
 		top: 0,
-		width: 2,
+		width: 4,
 		height: '100%',
-		background: 'var(--rr-brand)',
+		background: 'var(--rr-sash-hover)',
 	},
 	panel: {
 		position: 'relative' as const,
@@ -251,6 +238,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 	const [handleHover, setHandleHover] = useState(false);
 	// Track which groups are expanded. Only "source" is open by default.
 	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(['source']));
+	const savedExpandedGroups = useRef<Set<string> | null>(null);
 	const resizeStart = useRef({ mouseX: 0, width: 0 });
 
 	// --- Resize handlers ---
@@ -348,6 +336,20 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 		for (const key of sortedKeys) sorted[key] = groups[key];
 		return sorted;
 	}, [inventory, search]);
+
+	// Auto-expand all matching categories while searching; restore on clear
+	useEffect(() => {
+		if (search) {
+			if (!savedExpandedGroups.current) {
+				savedExpandedGroups.current = new Set(expandedGroups);
+			}
+			setExpandedGroups(new Set(Object.keys(groupedInventory)));
+		} else if (savedExpandedGroups.current) {
+			setExpandedGroups(savedExpandedGroups.current);
+			savedExpandedGroups.current = null;
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [search, groupedInventory]);
 
 	// --- Click to add ---
 

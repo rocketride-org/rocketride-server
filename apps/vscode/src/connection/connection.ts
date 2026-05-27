@@ -49,7 +49,7 @@ import { RocketRideClient, DAPMessage, TraceType, AuthenticationException } from
 import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
 import { EngineRegistry, EngineManager, type EngineStatusEvent } from '../engine';
 import { getUserConfigDir, getSystemInstallDir } from '../engine/config/config-migration';
-import { getLogger } from '../shared/util/output';
+import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
@@ -135,12 +135,21 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	/**
+	 * Whether this manager should react to engine status events.
+	 * Overridden by DeployManager to return false in shared mode.
+	 */
+	protected shouldHandleEngineStatus(): boolean {
+		return true;
+	}
+
+	/**
 	 * Handles status events from EngineManager.
 	 * When engine is 'ready', initiates WebSocket connection.
 	 * When engine errors or goes idle, updates connection status.
 	 */
 	private handleEngineStatus(event: EngineStatusEvent & { mode?: ConnectionMode }): void {
 		if (this.isDisposing) return;
+		if (!this.shouldHandleEngineStatus()) return;
 
 		switch (event.phase) {
 			case 'working': {
@@ -372,9 +381,9 @@ export class ConnectionManager extends EventEmitter {
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
 			onTrace: (traceType: number, message: any) => {
 				if (traceType === TraceType.Request) {
-					this.logger.output(`${icons.send} ${message.command} ${JSON.stringify(message.arguments ?? {})}`);
+					this.logger.output(`${icons.send} ${message.command} ${safeJSONStringify(message.arguments ?? {})}`);
 				} else if (traceType === TraceType.Success) {
-					this.logger.output(`${icons.receive} ${message.command} ${JSON.stringify(message.body ?? {})}`);
+					this.logger.output(`${icons.receive} ${message.command} ${safeJSONStringify(message.body ?? {})}`);
 				} else {
 					this.logger.output(`${icons.error} ${message.command} ${message.message ?? 'failed'}`);
 				}
@@ -390,7 +399,7 @@ export class ConnectionManager extends EventEmitter {
 						}
 					}
 				} else if (message.event?.startsWith('apaevt_')) {
-					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
+					this.logger.output(`${icons.info} ${message.event}: ${safeJSONStringify(message.body)}`);
 				}
 
 				// Transform apaext_account into a dedicated shell:accountUpdate
@@ -562,7 +571,8 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	public getHttpUrl(): string {
 		if (this.engineUri) {
-			const url = new URL(this.engineUri);
+			const normalized = RocketRideClient.normalizeUri(this.engineUri);
+			const url = new URL(normalized);
 			const httpProtocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
 			return `${httpProtocol}//${url.hostname}:${url.port || (httpProtocol === 'https:' ? '443' : '80')}`;
 		}

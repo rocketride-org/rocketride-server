@@ -48,6 +48,7 @@ const ProjectWebview: React.FC = () => {
 		enabled: false,
 		errors: ['Voice Builder status has not loaded'],
 	});
+	const [envKeys, setEnvKeys] = useState<string[]>([]);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
 	const [checkoutPlans, setCheckoutPlans] = useState<CheckoutPlan[]>([]);
@@ -99,6 +100,7 @@ const ProjectWebview: React.FC = () => {
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
+				setEnvKeys(msg.envKeys ?? []);
 				break;
 			}
 			case 'shell:init':
@@ -145,6 +147,9 @@ const ProjectWebview: React.FC = () => {
 				}
 				break;
 			}
+			case 'project:envKeysUpdate':
+				setEnvKeys(msg.envKeys);
+				break;
 			case 'shell:connectionChange':
 				if (msg.isConnected) {
 					setStatusMap({});
@@ -279,6 +284,13 @@ const ProjectWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	const handleMissingEnvVars = useCallback(
+		(keys: string[]) => {
+			sendMessage({ type: 'status:missingEnvVars', keys });
+		},
+		[sendMessage]
+	);
+
 	const handleViewStateChange = useCallback(
 		(vs: ViewState) => {
 			// Persist to VS Code webview state (survives tab switches)
@@ -356,7 +368,7 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} voiceBuilder={voiceBuilder} isReadonly={isReadonly} />
+			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} voiceBuilder={voiceBuilder} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
 		</>
 	);

@@ -55,8 +55,18 @@ async function writeIfChanged(uri: vscode.Uri, content: string): Promise<boolean
  */
 function firstSentence(description: string | undefined): string {
 	if (!description) return '';
-	// Strip HTML tags
-	const text = description.replace(/<[^>]*>/g, '').trim();
+	// Strip HTML tags. Loop until idempotent so nested or malformed tags like
+	// `<scri<x>pt>` collapse fully — a single regex pass would leave `<script>`
+	// behind after consuming only the inner `<x>`. Defense-in-depth: the
+	// output here lands in a JSON catalog file, not rendered as HTML, but
+	// the consumer surface may grow.
+	let stripped = description;
+	let prev: string;
+	do {
+		prev = stripped;
+		stripped = stripped.replace(/<[^>]*>/g, '');
+	} while (stripped !== prev);
+	const text = stripped.trim();
 	// Take first sentence (ends with . ! or ?)
 	const match = text.match(/^[^.!?]*[.!?]/);
 	return match ? match[0].trim() : text;

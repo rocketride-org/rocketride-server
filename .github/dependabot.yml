@@ -66,6 +66,14 @@ updates:
       - dependency-name: "@rsbuild/*"
       - dependency-name: "@rslib/*"
       - dependency-name: "@rspack/*"
+      # @types/vscode is constrained by apps/vscode/package.json's
+      # engines.vscode field — vsce package fails the build if
+      # @types/vscode exceeds engines.vscode. PR #921 hit this when the
+      # npm-development group bumped @types/vscode 1.108→1.120 while
+      # engines.vscode stayed at ^1.99. Pinned manually in apps/vscode/
+      # to ~1.99 instead; bumps land via an explicit engines.vscode
+      # PR when the team raises the supported VS Code floor.
+      - dependency-name: "@types/vscode"
 
   # ---------------------------------------------------------------------------
   # npm — packages/client-typescript (published SDK)

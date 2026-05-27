@@ -19,10 +19,36 @@ import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, 
 // =============================================================================
 
 /** All messages the extension host can send to the ProjectWebview. */
-export type ProjectHostToWebview = { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; isReadonly?: boolean; voiceStatus?: { enabled: boolean; errors: string[]; model?: string } } | { type: 'project:update'; project: any } | { type: 'project:services'; services: Record<string, any> } | { type: 'project:validateResponse'; requestId: number; result: any; error?: string } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'voice:processResponse'; requestId: number; transcript?: string; project?: any; summary?: string; error?: string } | { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:viewActivated'; viewId: string } | { type: 'shell:event'; event: unknown };
+export type ProjectHostToWebview =
+	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; isReadonly?: boolean; voiceStatus?: { enabled: boolean; errors: string[]; model?: string }; envKeys?: string[] }
+	| { type: 'project:update'; project: any }
+	| { type: 'project:services'; services: Record<string, any> }
+	| { type: 'project:validateResponse'; requestId: number; result: any; error?: string }
+	| { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean }
+	| { type: 'project:initialState'; state: ViewState }
+	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
+	| { type: 'project:envKeysUpdate'; envKeys: string[] }
+	| { type: 'voice:processResponse'; requestId: number; transcript?: string; project?: any; summary?: string; error?: string }
+	| { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean }
+	| { type: 'shell:themeChange'; tokens: Record<string, string> }
+	| { type: 'shell:connectionChange'; isConnected: boolean }
+	| { type: 'shell:viewActivated'; viewId: string }
+	| { type: 'shell:event'; event: unknown };
 
 /** All messages the ProjectWebview can send to the extension host. */
-export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string } | { type: 'voice:process'; requestId: number; audioBase64: string; mimeType?: string; currentProject: any; services: Record<string, any> } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string } | { type: 'trace:clear' };
+export type ProjectWebviewToHost =
+	| { type: 'view:ready' }
+	| { type: 'view:initialized' }
+	| { type: 'project:contentChanged'; project: any }
+	| { type: 'project:validate'; requestId: number; pipeline: any }
+	| { type: 'project:requestSave' }
+	| { type: 'project:viewStateChange'; viewState: ViewState }
+	| { type: 'project:prefsChange'; prefs: Record<string, unknown> }
+	| { type: 'project:openLink'; url: string; displayName?: string }
+	| { type: 'voice:process'; requestId: number; audioBase64: string; mimeType?: string; currentProject: any; services: Record<string, any> }
+	| { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string }
+	| { type: 'status:missingEnvVars'; keys: string[] }
+	| { type: 'trace:clear' };
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL
@@ -39,7 +65,7 @@ export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initia
 // =============================================================================
 
 /** All messages the extension host can send to the AccountWebview. */
-export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:env'; scope: 'org' | 'team' | 'user'; scopeId?: string; env: Record<string, string> } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
+export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
 
 /** All messages the AccountWebview can send to the extension host. */
 export type AccountWebviewToHost =
@@ -60,6 +86,12 @@ export type AccountWebviewToHost =
 	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
-	| { type: 'account:getEnv'; scope: 'org' | 'team' | 'user'; scopeId?: string }
-	| { type: 'account:saveEnv'; scope: 'org' | 'team' | 'user'; env: Record<string, string>; scopeId?: string }
 	| { type: 'account:sectionChange'; section: string };
+
+// =============================================================================
+// ENVIRONMENT PAGE PROTOCOL
+// =============================================================================
+
+// Re-export from standalone file so extension-host imports don't drag in
+// the `shared/modules/*` dependencies above.
+export type { EnvironmentSlotState, EnvironmentHostToWebview, EnvironmentWebviewToHost } from './environmentTypes';

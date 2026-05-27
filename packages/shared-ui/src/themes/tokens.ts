@@ -38,6 +38,7 @@ export type ThemeTokens = {
 	'--rr-color-success': string;
 	'--rr-border': string;
 	'--rr-border-hover': string;
+	'--rr-sash-hover': string;
 	'--rr-border-focus': string;
 	'--rr-border-input': string;
 	'--rr-border-paper': string;

@@ -48,6 +48,7 @@ import { StatusProvider } from './providers/StatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
+import { EnvironmentProvider } from './providers/EnvironmentProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
 import { AuthProvider } from './providers/AuthProvider';
 import { AgentManager } from './agents/agent-manager';
@@ -267,8 +268,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
 				welcome = new WelcomeProvider(context, context.extensionUri);
-				new AccountProvider(context);
-				new AuthProvider(context, context.extensionUri);
+				const account = new AccountProvider(context);
+				const environment = new EnvironmentProvider(context);
+				const auth = new AuthProvider(context, context.extensionUri);
+				context.subscriptions.push(account, environment, auth);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);
@@ -388,6 +391,9 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 	const agentManager = new AgentManager();
 
 	const commands = [
+		vscode.commands.registerCommand('rocketride.sidebar.documentation.open', () => {
+			vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org/'));
+		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.connect', async () => {
 			await connectionManager?.connect();
 		}),

@@ -41,9 +41,6 @@ interface AccountWebviewMessage {
 	params?: Record<string, unknown>;
 	appId?: string;
 	packId?: string;
-	scope?: 'org' | 'team' | 'user';
-	scopeId?: string;
-	env?: Record<string, string>;
 }
 
 // =============================================================================
@@ -229,42 +226,7 @@ export class AccountProvider {
 				await this.handleBuyCredits(message.packId as string);
 				break;
 
-			// -- Environment variables --------------------------------------------
-			case 'account:getEnv': {
-				const { client: envGetClient } = this.resolveClient();
-				if (!envGetClient) {
-					this.postError(panel, 'Not connected');
-					break;
-				}
-				try {
-					// Fetch env vars for the requested scope from the server
-					const env = await envGetClient.account.getEnv(message.scope!, message.scopeId);
-					await panel.webview.postMessage({
-						type: 'account:env',
-						scope: message.scope,
-						scopeId: message.scopeId,
-						env,
-					});
-				} catch (err: unknown) {
-					this.postError(panel, err instanceof Error ? err.message : String(err));
-				}
-				break;
-			}
-
-			case 'account:saveEnv': {
-				const { client: envSaveClient } = this.resolveClient();
-				if (!envSaveClient) {
-					this.postError(panel, 'Not connected');
-					break;
-				}
-				try {
-					// Persist env vars for the requested scope on the server
-					await envSaveClient.account.setEnv(message.scope!, message.env!, message.scopeId);
-				} catch (err: unknown) {
-					this.postError(panel, err instanceof Error ? err.message : String(err));
-				}
-				break;
-			}
+			// Environment variables removed — now handled by EnvironmentProvider.
 
 			// -- Section navigation (lazy loading) --------------------------------
 			case 'account:sectionChange':
@@ -778,7 +740,7 @@ export class AccountProvider {
 				this.handleSectionChange(panel, AccountProvider.currentSection).catch((error) => {
 					console.error(`[AccountProvider] Section reload error: ${error}`);
 				});
-				// Notify the webview so it can re-fetch env data
+				// Notify the webview that account data has changed
 				panel.webview.postMessage({ type: 'account:accountUpdate' }).then(undefined, (err: unknown) => {
 					console.error(`[AccountProvider] Failed to post accountUpdate: ${err}`);
 				});
