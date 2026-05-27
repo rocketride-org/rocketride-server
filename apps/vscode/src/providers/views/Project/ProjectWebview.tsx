@@ -48,7 +48,7 @@ const ProjectWebview: React.FC = () => {
 		enabled: false,
 		errors: ['Voice Builder status has not loaded'],
 	});
-	const [envKeys, setEnvKeys] = useState<string[]>([]);
+	const [envKeys, setEnvKeys] = useState<string[] | undefined>(undefined);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
 	const [checkoutPlans, setCheckoutPlans] = useState<CheckoutPlan[]>([]);
@@ -100,7 +100,7 @@ const ProjectWebview: React.FC = () => {
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
-				setEnvKeys(msg.envKeys ?? []);
+				setEnvKeys(msg.envKeys);
 				break;
 			}
 			case 'shell:init':

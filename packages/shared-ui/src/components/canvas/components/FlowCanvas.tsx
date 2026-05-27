@@ -250,7 +250,7 @@ export default function Canvas(): ReactElement {
 		error?: string | null;
 	}>({ state: 'ready' });
 	const { isStarting: isVoiceStarting, isRecording: isVoiceRecording, error: recorderError, start: startRecording, stop: stopRecording } = usePushToTalkRecorder();
-	const voiceSetupErrors = useMemo(() => voiceBuilder?.status.errors.filter((error) => error === 'Voice Builder is disabled') ?? [], [voiceBuilder?.status.errors]);
+	const voiceSetupErrors = useMemo(() => voiceBuilder?.status.errors ?? [], [voiceBuilder?.status.errors]);
 
 	// Auto-hide config snackbar after 6 seconds
 	useEffect(() => {
