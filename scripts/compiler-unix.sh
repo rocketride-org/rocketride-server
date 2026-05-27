@@ -353,7 +353,7 @@ check_linux_dependencies() {
                 if ! command_exists "gpg"; then
                     echo "✗ gnupg: gpg not available"
                     COMMANDS+=("    # Install package gnupg")
-                    COMMANDS+=("    $SUDO apt install gnupg")
+                    COMMANDS+=("    $SUDO apt install -y gnupg")
                 else
                     echo "✓ gnupg: gpg available"
                 fi
