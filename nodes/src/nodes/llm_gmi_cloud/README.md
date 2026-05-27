@@ -32,20 +32,21 @@ GMI Cloud has three tiers:
 
 **Shared (always-on)** — available immediately, API key only:
 
-| Profile                 | Model                                 | Context |
-| ----------------------- | ------------------------------------- | ------- |
-| DeepSeek V3 _(default)_ | `deepseek-ai/DeepSeek-V3-0324`        | 163,840 |
-| DeepSeek V3.2           | `deepseek-ai/DeepSeek-V3.2`           | 163,840 |
-| DeepSeek R1             | `deepseek-ai/DeepSeek-R1`             | 131,072 |
-| DeepSeek Prover V2      | `deepseek-ai/DeepSeek-Prover-V2-671B` | 131,072 |
-| GPT-5.2                 | `openai/gpt-5.2`                      | 128,000 |
-| GPT-5.1                 | `openai/gpt-5.1`                      | 128,000 |
-| GPT-5                   | `openai/gpt-5`                        | 128,000 |
-| GPT-4o                  | `openai/gpt-4o`                       | 128,000 |
-| Claude Opus 4.5         | `anthropic/claude-opus-4.5`           | 200,000 |
-| Claude Sonnet 4.5       | `anthropic/claude-sonnet-4.5`         | 200,000 |
-| Gemini 3 Pro            | `google/gemini-3-pro-preview`         | 128,000 |
-| Gemini 3 Flash          | `google/gemini-3-flash-preview`       | 128,000 |
+| Profile                 | Model                                  | Context |
+| ----------------------- | -------------------------------------- | ------- |
+| DeepSeek V3 _(default)_ | `deepseek-ai/DeepSeek-V3-0324`         | 163,840 |
+| DeepSeek V3.2           | `deepseek-ai/DeepSeek-V3.2`            | 163,840 |
+| DeepSeek R1             | `deepseek-ai/DeepSeek-R1`              | 131,072 |
+| DeepSeek Prover V2      | `deepseek-ai/DeepSeek-Prover-V2-671B`  | 131,072 |
+| GPT-5.2                 | `openai/gpt-5.2`                       | 128,000 |
+| GPT-5.1                 | `openai/gpt-5.1`                       | 128,000 |
+| GPT-5                   | `openai/gpt-5`                         | 128,000 |
+| GPT-4o                  | `openai/gpt-4o`                        | 128,000 |
+| Claude Opus 4.5         | `anthropic/claude-opus-4.5`            | 200,000 |
+| Claude Sonnet 4.5       | `anthropic/claude-sonnet-4.5`          | 200,000 |
+| Gemini 3.1 Pro          | `google/gemini-3.1-pro-preview`        | 128,000 |
+| Gemini 3 Flash          | `google/gemini-3-flash-preview`        | 128,000 |
+| Gemini 3.1 Flash Lite   | `google/gemini-3.1-flash-lite-preview` | 128,000 |
 
 **Deploy-on-demand** — deploy first at [console.gmicloud.ai](https://console.gmicloud.ai), then paste the provided endpoint URL into the **Endpoint URL** field:
 
