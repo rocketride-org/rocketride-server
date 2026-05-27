@@ -230,7 +230,7 @@ export class EngineInstaller {
 			// users whose engine was installed before this check existed only hit
 			// the latter two, so putting the check here is the only way to reach
 			// them without forcing a manual uninstall+reinstall.
-			this.checkLinuxRuntimeDeps(exePath);
+			await this.checkLinuxRuntimeDeps(exePath);
 			return exePath;
 		} finally {
 			try { await release(); } catch { /* ignore stale lock */ }
@@ -741,6 +741,16 @@ export class EngineInstaller {
 				.filter((p): p is string => !!p),
 		)];
 		if (!packages.length) return;
+
+		// One-click install assumes apt; on non-Debian distros show the list and let the user handle it.
+		const hasApt = fs.existsSync('/usr/bin/apt') || fs.existsSync('/bin/apt');
+		if (!hasApt) {
+			void vscode.window.showWarningMessage(
+				`RocketRide needs these system libraries: ${packages.join(', ')}. Install them with your system package manager.`,
+				{ modal: true },
+			);
+			return;
+		}
 
 		const choice = await vscode.window.showWarningMessage(
 			`RocketRide needs these system libraries: ${packages.join(', ')}.`,
