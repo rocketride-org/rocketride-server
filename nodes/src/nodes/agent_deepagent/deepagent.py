@@ -386,7 +386,7 @@ class DeepAgentDriver(AgentBase):
             # itself must become async.
             state = asyncio.run(
                 agent.ainvoke(
-                    {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
+                    {'messages': [HumanMessage(content=safe_str(question.getPrompt() or ''))]},
                     config={'callbacks': [_SSECallbackHandler(_send_sse)]},
                 )
             )
@@ -576,7 +576,7 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         for entry in raw_calls:
             if not isinstance(entry, dict):
                 continue
-            name = _safe_str(entry.get('name', '')).strip()
+            name = safe_str(entry.get('name', '')).strip()
             if not name:
                 continue
             args = entry.get('args') or {}
