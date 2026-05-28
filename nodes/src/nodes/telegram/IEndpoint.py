@@ -41,7 +41,6 @@ from rocketlib import (
     getObject,
     AVI_ACTION,
 )
-from ai.web import WebServer
 
 
 class IEndpoint(IEndpointBase):
@@ -56,7 +55,6 @@ class IEndpoint(IEndpointBase):
     _MAX_FILE_BYTES: int = 20 * 1024 * 1024  # 20 MB — Telegram's own bot file limit
 
     target: IEndpointBase | None = None
-    _server: WebServer | None = None
     _poll_task: asyncio.Task | None = None
     _http_session = None  # aiohttp.ClientSession
     _bot_token: str = ''
@@ -586,18 +584,14 @@ class IEndpoint(IEndpointBase):
     # -------------------------------------------------------------------------
 
     def _run(self):
-        """Block until shutdown, using the shared WebServer from ``node.py`` if available.
+        """Register on the shared WebServer from ``node.py`` and block on shutdown.
 
-        When EaaS spawns this subprocess with ``--data_port=N``, ``node.py``
+        EaaS spawns this subprocess with ``--data_port=N``; ``node.py``
         bootstraps a shared :class:`WebServer` on the background event loop
         and exposes it as ``ai.node.shared_web_server``. We register our
         target endpoint and (in webhook mode) the inbound POST route on
         that server, then block on a shutdown event so ``scanObjects()``
         doesn't return.
-
-        Legacy fallback (direct CLI invocation without ``--data_port``,
-        unit tests): the shared server is ``None``, and we build our own
-        ``WebServer`` and run it blocking — today's behavior preserved.
 
         Note on cloud reachability: telegram webhook mode is inherently
         self-hosted-only regardless of routing. Cloud users share a
@@ -621,12 +615,6 @@ class IEndpoint(IEndpointBase):
 
         shared = node.shared_web_server
 
-        if shared is None:
-            # Legacy / direct invocation path — construct and run our
-            # own server, blocking exactly as before.
-            return self._run_legacy_self_hosted_server()
-
-        # Shared-server path: register on the existing server.
         shared.app.state.target = self.target
 
         if self._mode == 'webhook':
@@ -673,38 +661,6 @@ class IEndpoint(IEndpointBase):
             shutdown_future.result(timeout=10)
         except Exception as e:
             debug(f'telegram _shutdown raised: {e}')
-
-    def _run_legacy_self_hosted_server(self):
-        """Legacy path: construct and run a dedicated ``WebServer``.
-
-        Used only when ``ai.node.shared_web_server`` is ``None`` — i.e.
-        when ``node.py`` was invoked without ``--data_port`` (direct CLI
-        invocations, unit tests). EaaS always passes ``--data_port`` in
-        production, so this branch never runs there.
-        """
-        debug('telegram shared web server is not setup, using LEGACY self-hosted WebServer path')
-
-        from ai.node import _parse_data_host_port
-
-        data_host, data_port = _parse_data_host_port(default_port=5567)
-
-        self._server = WebServer(
-            config={
-                'port': data_port,
-                'host': data_host,
-            },
-            on_startup=self._startup,
-            on_shutdown=self._shutdown,
-        )
-        self._server.app.state.target = self.target
-
-        # Register webhook route using the path from the configured webhook URL
-        # so that the local handler matches what Telegram will POST to.
-        if self._mode == 'webhook':
-            webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
-            self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
-
-        self._server.run()
 
     def scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None]):
         """Entry point called by the RocketRide engine to start the node.
