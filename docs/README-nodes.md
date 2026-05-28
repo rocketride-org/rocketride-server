@@ -110,6 +110,8 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 
 ## Adding a New Node
 
+> For a full end-to-end walkthrough — fork, create the node, load it into the engine, run it, test it, and open a PR — see [Authoring a Node](README-authoring-a-node.md).
+
 1. Create a directory in `nodes/src/nodes/<node_name>/`
 2. Implement the required interfaces:
 

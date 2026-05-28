@@ -117,14 +117,19 @@ Copy your node into the installed engine's `nodes/` folder, then quit & relaunch
 | **Windows** | `%LOCALAPPDATA%\RocketRide\engine\nodes\`                |
 | **Linux**   | `~/.config/RocketRide/engine/nodes/`                     |
 
+macOS / Linux:
+
 ```bash
 # macOS
 cp -R nodes/src/nodes/llm_acme "$HOME/Library/Application Support/RocketRide/engine/nodes/"
 
 # Linux
 cp -R nodes/src/nodes/llm_acme "$HOME/.config/RocketRide/engine/nodes/"
+```
 
-# Windows (PowerShell)
+Windows (PowerShell):
+
+```powershell
 Copy-Item -Recurse -Force .\nodes\src\nodes\llm_acme "$env:LOCALAPPDATA\RocketRide\engine\nodes\"
 ```
 
