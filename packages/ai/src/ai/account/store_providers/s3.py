@@ -443,6 +443,17 @@ class S3Store(IStore):
                 raise StorageError(f'File not found: {filename}')
             raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        glob_pattern=None,
+    ) -> list:
+        raise NotImplementedError
+
     async def _upload_part(self, context: dict, data: bytes) -> None:
         """Upload a single part and record its ETag."""
         client = self._get_client()

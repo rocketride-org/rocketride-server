@@ -84,3 +84,14 @@ class MemoryStore(IStore):
 
     async def list_files(self, prefix: str = '') -> list:
         return sorted(f for f in self._files if f.startswith(prefix))
+
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        glob_pattern=None,
+    ) -> list:
+        raise NotImplementedError
