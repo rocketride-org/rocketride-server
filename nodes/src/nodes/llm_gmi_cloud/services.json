@@ -221,8 +221,8 @@
 				"modelTotalTokens": 200000
 			},
 			"gemini-3-pro": {
-				"title": "Gemini 3 Pro",
-				"model": "google/gemini-3-pro-preview",
+				"title": "Gemini 3.1 Pro",
+				"model": "google/gemini-3.1-pro-preview",
 				"serverbase": "https://api.gmi-serving.com/v1",
 				"apikey": "",
 				"modelTotalTokens": 128000
@@ -230,6 +230,13 @@
 			"gemini-3-flash": {
 				"title": "Gemini 3 Flash",
 				"model": "google/gemini-3-flash-preview",
+				"serverbase": "https://api.gmi-serving.com/v1",
+				"apikey": "",
+				"modelTotalTokens": 128000
+			},
+			"gemini-3-1-flash-lite": {
+				"title": "Gemini 3.1 Flash Lite",
+				"model": "google/gemini-3.1-flash-lite-preview",
 				"serverbase": "https://api.gmi-serving.com/v1",
 				"apikey": "",
 				"modelTotalTokens": 128000
@@ -343,6 +350,10 @@
 			"object": "gemini-3-flash",
 			"properties": ["llm.cloud.apikey"]
 		},
+		"gmi_cloud.gemini-3-1-flash-lite": {
+			"object": "gemini-3-1-flash-lite",
+			"properties": ["llm.cloud.apikey"]
+		},
 		"gmi_cloud.profile": {
 			"title": "Model",
 			"description": "GMI Cloud LLM model",
@@ -433,6 +444,10 @@
 				{
 					"value": "gemini-3-flash",
 					"properties": ["gmi_cloud.gemini-3-flash"]
+				},
+				{
+					"value": "gemini-3-1-flash-lite",
+					"properties": ["gmi_cloud.gemini-3-1-flash-lite"]
 				}
 			]
 		}
