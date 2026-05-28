@@ -1085,8 +1085,9 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             info.ui["ui:order"].append(logicalType);
         }
 
-        // Setup the default
-        field["properties"]["provider"]["default"] = defaultProvider;
+        // Setup the default - respect explicit default from combo field definition if provided
+        Text explicitDefault = fieldInfo.lookup<Text>("default", "");
+        field["properties"]["provider"]["default"] = explicitDefault ? explicitDefault : defaultProvider;
 
         // Set the enum values
         field["properties"]["provider"]["enum"] = enumValues;
