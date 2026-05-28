@@ -75,8 +75,8 @@ def test_run_uses_shared_server_when_available_and_sets_target():
     with (
         patch('ai.node.shared_web_server', shared),
         patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_emit_ready_status_sync'),
-        patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+        patch.object(IEndpoint, '_startup'),
+        patch.object(IEndpoint, '_shutdown'),
     ):
         ep._run()
 
@@ -95,8 +95,8 @@ def test_run_does_not_construct_a_new_WebServer_when_shared_is_available():
     with (
         patch('ai.node.shared_web_server', shared),
         patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_emit_ready_status_sync'),
-        patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+        patch.object(IEndpoint, '_startup'),
+        patch.object(IEndpoint, '_shutdown'),
         patch('webhook.IEndpoint.WebServer') as web_server_cls,
     ):
         ep._run()
@@ -116,8 +116,8 @@ def test_run_does_not_call_use_data_when_shared_server_is_used():
     with (
         patch('ai.node.shared_web_server', shared),
         patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_emit_ready_status_sync'),
-        patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+        patch.object(IEndpoint, '_startup'),
+        patch.object(IEndpoint, '_shutdown'),
     ):
         ep._run()
 
@@ -138,8 +138,8 @@ def test_run_blocks_until_shutdown_event_is_set():
         with (
             patch('ai.node.shared_web_server', shared),
             patch('webhook.IEndpoint.threading.Event', return_value=real_event),
-            patch.object(IEndpoint, '_emit_ready_status_sync'),
-            patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+            patch.object(IEndpoint, '_startup'),
+            patch.object(IEndpoint, '_shutdown'),
         ):
             ep._run()
         returned.append('done')
@@ -157,8 +157,8 @@ def test_run_blocks_until_shutdown_event_is_set():
     assert returned == ['done'], '_run() did not return after _shutdown_event was set'
 
 
-def test_run_drives_startup_and_shutdown_sync_helpers():
-    """The shared-server path calls _emit_ready_status_sync and _emit_shutdown_status_sync."""
+def test_run_drives_startup_and_shutdown():
+    """The shared-server path calls `_startup` then `_shutdown` once each."""
     ep = _make_endpoint()
     shared = _shared_server_mock()
 
@@ -168,12 +168,12 @@ def test_run_drives_startup_and_shutdown_sync_helpers():
     with (
         patch('ai.node.shared_web_server', shared),
         patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_emit_ready_status_sync') as ready_mock,
-        patch.object(IEndpoint, '_emit_shutdown_status_sync') as shutdown_mock,
+        patch.object(IEndpoint, '_startup') as startup_mock,
+        patch.object(IEndpoint, '_shutdown') as shutdown_mock,
     ):
         ep._run()
 
-    ready_mock.assert_called_once()
+    startup_mock.assert_called_once()
     shutdown_mock.assert_called_once()
 
 
@@ -187,8 +187,8 @@ def test_run_exposes_shutdown_event_for_external_signaling():
         with (
             patch('ai.node.shared_web_server', shared),
             patch('webhook.IEndpoint.threading.Event', return_value=real_event),
-            patch.object(IEndpoint, '_emit_ready_status_sync'),
-            patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+            patch.object(IEndpoint, '_startup'),
+            patch.object(IEndpoint, '_shutdown'),
         ):
             ep._run()
 
@@ -256,27 +256,23 @@ def test_legacy_path_constructs_own_WebServer_and_calls_run():
 # ---------------------------------------------------------------------------
 
 
-def test_run_startup_failure_does_not_block_main_path():
-    """A failure in _emit_ready_status_sync is caught by its own try/except (not _run's concern)."""
+def test_run_startup_failure_propagates():
+    """`_startup` swallows its own exceptions; if patched to raise, _run does NOT catch."""
     ep = _make_endpoint()
     shared = _shared_server_mock()
     pre_set_event = threading.Event()
     pre_set_event.set()
 
-    # _emit_ready_status_sync swallows exceptions internally (see implementation
-    # in webhook.IEndpoint). Even if its body raises, the helper returns
-    # cleanly so _run() proceeds to the wait().
+    # `_startup` swallows exceptions internally (see implementation in
+    # webhook.IEndpoint). Even if its body raises, the real method
+    # returns cleanly so _run() proceeds to the wait(). Here we mock it
+    # to raise — that bypasses the internal try/except, so the exception
+    # propagates. `_run()` does NOT add a second layer of try/except.
     with (
         patch('ai.node.shared_web_server', shared),
         patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_emit_ready_status_sync', side_effect=RuntimeError('startup boom')),
-        patch.object(IEndpoint, '_emit_shutdown_status_sync'),
+        patch.object(IEndpoint, '_startup', side_effect=RuntimeError('startup boom')),
+        patch.object(IEndpoint, '_shutdown'),
     ):
-        # _emit_ready_status_sync raising at the call site DOES propagate
-        # because the sync helper's try/except is inside the helper body
-        # (which we've mocked away). In practice this can't happen — the
-        # real helper catches its own exceptions — but assert _run()'s
-        # contract: it does not add another layer of try/except, so a
-        # patched-to-raise helper does propagate.
         with pytest.raises(RuntimeError, match='startup boom'):
             ep._run()

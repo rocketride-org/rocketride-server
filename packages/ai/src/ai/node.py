@@ -21,6 +21,10 @@ from engLib import debug
 # guarantees the listener is up before EaaS gets a chance to connect.
 _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS = 10.0
 
+# Bound for waiting on ``serve()`` after ``server.stop()`` — guards
+# against a stuck uvicorn hanging subprocess shutdown forever.
+_SHARED_SERVER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
 # Module-level reference to the shared subprocess WebServer.
 # Set by `run()` when `--data_port` is provided in `sys.argv`; remains None
 # otherwise. Source nodes (webhook, telegram) discover this from inside
@@ -69,6 +73,21 @@ def _stop_event_loop():
         _loop_thread = None
 
 
+def _parse_data_host_port(default_port: Optional[int] = None) -> Tuple[str, Optional[int]]:
+    """Parse ``--data_host`` / ``--data_port`` from ``sys.argv``.
+
+    ``default_port=None`` lets the caller treat absence as "no shared
+    server requested" (used by ``_setup_shared_web_server``). A numeric
+    default keeps the legacy self-hosted fallback in webhook/telegram
+    working when EaaS didn't pass the flag.
+    """
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--data_host', type=str, default='localhost')
+    parser.add_argument('--data_port', type=int, default=default_port)
+    args, _unknown = parser.parse_known_args(sys.argv)
+    return args.data_host, args.data_port
+
+
 def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     """Bootstrap the shared subprocess WebServer when ``--data_port`` is set.
 
@@ -94,12 +113,9 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         future returned by ``asyncio.run_coroutine_threadsafe`` so the
         caller can clean it up in a ``finally`` block.
     """
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--data_host', type=str, default='localhost')
-    parser.add_argument('--data_port', type=int, default=None)
-    args, _unknown = parser.parse_known_args(sys.argv)
+    data_host, data_port = _parse_data_host_port(default_port=None)
 
-    if args.data_port is None:
+    if data_port is None:
         # Legacy / test invocation — no shared server. Source nodes that
         # need a WebServer fall back to their pre-refactor self-hosted path.
         return None, None
@@ -117,12 +133,16 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         startup_ready.set()
 
     server = WebServer(
-        config={'host': args.data_host, 'port': args.data_port},
+        config={'host': data_host, 'port': data_port},
         on_startup=_on_startup,
     )
-    # Register /task/data immediately. The `data` module's lazy-target
-    # contract (see modules/data) means it tolerates state.target being
-    # unset at this point — source nodes (if any) write it later.
+    # Mount `/task/data` — the WebSocket EaaS uses to send DAP traffic
+    # (data ops, cprofile, future trace control). Done here, NOT in a
+    # source node's `_run()`, so sourceless pipelines (agentic, RAG,
+    # batch) are reachable by EaaS too — that's the whole reason this
+    # PR moved the server out of source nodes. The `data` module's
+    # lazy-target contract lets it load before any source has set
+    # `state.target`.
     server.use('data')
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
@@ -171,9 +191,15 @@ def _teardown_shared_web_server(server: Optional[Any], future: Optional[Any]) ->
     except Exception as e:
         debug(f'shared WebServer stop() raised: {e}')
 
+    # `server.stop()` only flips `should_exit`; `serve()` keeps running
+    # until uvicorn closes sockets, drains in-flight requests, and fires
+    # `on_shutdown`. Wait for `serve()` to actually return BEFORE the
+    # caller's `_stop_event_loop()` closes `server_loop` underneath it.
+    # Swallow any exception so cleanup never masks the original error
+    # path that triggered teardown.
     if future is not None:
         try:
-            future.result(timeout=5)
+            future.result(timeout=_SHARED_SERVER_SHUTDOWN_TIMEOUT_SECONDS)
         except Exception as e:
             debug(f'shared WebServer serve() future raised: {e}')
 
@@ -244,7 +270,7 @@ def run():
     # engine.exe spawns this file as a script, so Python loads it as
     # `sys.modules['__main__']`. The `global shared_web_server` above
     # therefore writes to `__main__.shared_web_server`. When source nodes
-    # later do `from ai import node as ai_node`, Python would otherwise
+    # later do `from ai import node`, Python would otherwise
     # import the file AGAIN as `sys.modules['ai.node']` — a SEPARATE module
     # that would re-run all top-level code, INCLUDING creating a second
     # `server_loop` daemon thread (see `_create_loop()` at module top).
@@ -262,9 +288,7 @@ def run():
     # any reader. No lock needed; Python's GIL guarantees atomicity of
     # the attribute store.
     try:
-        import sys as _sys
-
-        _ai_node_mod = _sys.modules.setdefault('ai.node', _sys.modules[__name__])
+        _ai_node_mod = sys.modules.setdefault('ai.node', sys.modules[__name__])
         _ai_node_mod.shared_web_server = shared_web_server
     except Exception as e:
         debug(f'failed to mirror shared_web_server into ai.node: {e}')
@@ -291,9 +315,7 @@ def run():
         shared_web_server = None
         # Mirror the reset to ai.node (see comment at the assignment above).
         try:
-            import sys as _sys
-
-            _ai_node_mod = _sys.modules.get('ai.node')
+            _ai_node_mod = sys.modules.get('ai.node')
             if _ai_node_mod is not None:
                 _ai_node_mod.shared_web_server = None
         except Exception:

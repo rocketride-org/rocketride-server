@@ -22,8 +22,6 @@
 # =============================================================================
 
 import json
-import argparse
-import sys
 import asyncio
 import secrets
 import threading
@@ -619,9 +617,9 @@ class IEndpoint(IEndpointBase):
         # required — node.py assigns to its module-level
         # `shared_web_server` at runtime, after this file has been
         # imported.
-        from ai import node as ai_node
+        from ai import node
 
-        shared = ai_node.shared_web_server
+        shared = node.shared_web_server
 
         if shared is None:
             # Legacy / direct invocation path — construct and run our
@@ -685,15 +683,15 @@ class IEndpoint(IEndpointBase):
         production, so this branch never runs there.
         """
         debug('telegram shared web server is not setup, using LEGACY self-hosted WebServer path')
-        parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument('--data_host', type=str, default='localhost')
-        parser.add_argument('--data_port', type=int, default=5567)
-        parsed_args, _ = parser.parse_known_args(sys.argv)
+
+        from ai.node import _parse_data_host_port
+
+        data_host, data_port = _parse_data_host_port(default_port=5567)
 
         self._server = WebServer(
             config={
-                'port': parsed_args.data_port,
-                'host': parsed_args.data_host,
+                'port': data_port,
+                'host': data_host,
             },
             on_startup=self._startup,
             on_shutdown=self._shutdown,

@@ -91,41 +91,27 @@ class DataConn(DAPConn):
     """
 
     def __init__(self, server: 'DataServer', **kwargs) -> None:
-        """
-        Initialize a new DataConnection instance.
+        """Initialize a new DataConnection instance.
 
-        Sets up the connection with the data server and prepares it for handling
-        DAP commands. The target endpoint is NOT captured here — it's resolved
-        lazily on every access via the :pyattr:`_target` property so source
-        nodes that bind ``state.target`` AFTER a WebSocket connect (the typical
-        race window in CI under load) still produce a correct target lookup.
+        The target endpoint is NOT captured here — it's resolved lazily on
+        every access via the :pyattr:`_target` property so source nodes that
+        bind ``state.target`` AFTER a WebSocket connect still produce a
+        correct target lookup.
 
         Args:
             server (DataServer): The data server managing operations and monitors.
-                                Used for operation lifecycle management and for
-                                lazy ``state.target`` access via ``server._target``.
             **kwargs: Additional arguments passed to parent DAPConn constructor.
-                     May include transport, logging, and other DAP-specific settings.
         """
-        # Create connection name for logging and identification
-        # This helps distinguish data connections in logs from other DAP connections
         module_name = 'DATA'
-
-        # Initialize parent DAPConn with transport and module identification
-        # Note: transport should be passed via kwargs or created here
         super().__init__(module=module_name, **kwargs)
 
-        # Store server reference for operation management AND lazy target lookup.
-        # Must be set before reading `self._target` (the property delegates to
-        # `self._server._target` via DataServer's own lazy property).
+        # `self._server` must be set before reading `self._target` — the
+        # property delegates to `self._server._target`.
         self._server = server
 
-        # Get the specified thread count. Target may be None at this point for
-        # sourceless pipelines (agentic) OR because the source-node `_run()` has
-        # not yet executed `state.target = self.target` (CI race window). The
-        # snapshot here only sizes the asyncio semaphore for this connection;
-        # defaulting to 4 when target isn't yet bound is acceptable — the
-        # semaphore is a soft concurrency limit, not a correctness boundary.
+        # Thread count is snapshotted only for sizing the asyncio semaphore
+        # (soft concurrency limit, not a correctness boundary). Defaulting
+        # to 4 when target isn't yet bound at __init__ time is fine.
         snapshot_target = self._target
         if snapshot_target is not None:
             self._thread_count = snapshot_target.taskConfig.get('threadCount', 4)
@@ -159,17 +145,10 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time.
 
-        Source nodes set ``server.app.state.target`` from their ``_run()``
-        method, which the C engine invokes AFTER ``node.py`` has bootstrapped
-        the shared WebServer. EaaS can open a ``/task/data`` WebSocket BEFORE
-        the source has had a chance to bind — capturing the target value at
-        connection time then locks in ``None`` for the connection's lifetime,
-        causing silent empty-result pipelines under CI load (Ubuntu).
-
-        Delegating to ``self._server._target`` (DataServer's own lazy property)
-        re-reads ``state.target`` on every access. Returns ``None`` if no
-        source has registered a target yet; callers route through
-        :pyfunc:`_require_target` to surface a controlled error in that case.
+        EaaS can open a ``/task/data`` WebSocket BEFORE source nodes bind
+        ``state.target`` in their ``_run()``. Snapshotting at connection
+        time then locks in ``None`` for the connection's lifetime,
+        producing silent empty-result pipelines under CI load.
         """
         return self._server._target
 
