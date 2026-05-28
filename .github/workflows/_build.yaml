@@ -167,6 +167,40 @@ jobs:
           CXX: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang++-15' || '' }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
+      # TEMP DIAGNOSTIC (ci/ubuntu-detect-diag) — capture the real vcpkg
+      # detect_compiler error + run a minimal Ninja-generator repro to isolate
+      # whether the failure is cmake<->ninja or compiler discovery. Remove after.
+      - name: Dump detect_compiler logs + minimal repro (Ubuntu, on failure)
+        if: failure() && matrix.platform == 'ubuntu'
+        run: |
+          set +e
+          BT=build/vcpkg/buildtrees/detect_compiler
+          echo "===== err.log ====="; cat "$BT"/*-err.log 2>/dev/null || echo "(none)"
+          echo "===== out.log (tail) ====="; cat "$BT"/*-out.log 2>/dev/null | tail -50 || echo "(none)"
+          echo "===== CMakeError.log ====="; find "$BT" -name CMakeError.log -exec cat {} \; 2>/dev/null | head -80
+          echo
+          echo "===== versions ====="
+          echo "system ninja: $(/usr/local/bin/ninja --version)"
+          VCMAKE=$(ls build/vcpkg/downloads/tools/cmake-*/cmake-*/bin/cmake 2>/dev/null | head -1)
+          echo "vcpkg cmake:  $VCMAKE ($("$VCMAKE" --version 2>&1 | head -1))"
+          echo
+          echo "===== minimal Ninja-generator probe (vcpkg cmake + system ninja + clang-15) ====="
+          rm -rf /tmp/np && mkdir -p /tmp/np && cd /tmp/np
+          printf 'cmake_minimum_required(VERSION 3.20)\nproject(p C CXX)\n' > CMakeLists.txt
+          "$VCMAKE" -G Ninja -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja -DCMAKE_C_COMPILER=/usr/bin/clang-15 -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 -B b -S . 2>&1 | head -50
+          echo "probe exit: $?"
+          echo
+          echo "===== same probe but vcpkg-OWN ninja if present ====="
+          VNINJA=$(ls build/vcpkg/downloads/tools/ninja*/*/ninja build/vcpkg/downloads/tools/ninja*/ninja 2>/dev/null | head -1)
+          echo "vcpkg ninja: ${VNINJA:-<none downloaded>}"
+          if [ -n "$VNINJA" ]; then
+            rm -rf /tmp/np2 && mkdir -p /tmp/np2 && cd /tmp/np2
+            printf 'cmake_minimum_required(VERSION 3.20)\nproject(p C CXX)\n' > CMakeLists.txt
+            "$VCMAKE" -G Ninja -DCMAKE_MAKE_PROGRAM="$VNINJA" -DCMAKE_C_COMPILER=/usr/bin/clang-15 -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 -B b -S . 2>&1 | head -40
+            echo "probe2 exit: $?"
+          fi
+          exit 0
+
       - name: Test
         if: inputs.codeql == false
         # Integration tests boot a local server on :5565 and connect a test
