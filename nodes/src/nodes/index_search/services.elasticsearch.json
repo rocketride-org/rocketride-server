@@ -184,7 +184,7 @@
 			"description": "Enable document storage",
 			"default": true
 		},
-		"elasticsearch.mode": {
+		"elasticsearch.store_mode": {
 			"title": "Store Mode",
 			"type": "boolean",
 			"default": true,
@@ -259,15 +259,15 @@
 		},
 		"elasticsearch.self-managed": {
 			"object": "self-managed",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.cloud-hosted": {
 			"object": "cloud-hosted",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.cloud-serverless": {
 			"object": "cloud-serverless",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.profile": {
 			"title": "Deployment Type",
