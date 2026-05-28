@@ -184,21 +184,22 @@ jobs:
           VCMAKE=$(ls build/vcpkg/downloads/tools/cmake-*/cmake-*/bin/cmake 2>/dev/null | head -1)
           echo "vcpkg cmake:  $VCMAKE ($("$VCMAKE" --version 2>&1 | head -1))"
           echo
-          echo "===== minimal Ninja-generator probe (vcpkg cmake + system ninja + clang-15) ====="
-          rm -rf /tmp/np && mkdir -p /tmp/np && cd /tmp/np
-          printf 'cmake_minimum_required(VERSION 3.20)\nproject(p C CXX)\n' > CMakeLists.txt
-          "$VCMAKE" -G Ninja -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja -DCMAKE_C_COMPILER=/usr/bin/clang-15 -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 -B b -S . 2>&1 | head -50
-          echo "probe exit: $?"
+          echo "===== libc++ PACKAGE state ====="
+          dpkg -l | grep -iE "libc\+\+|libcxx|^.i  clang|lld" || echo "(none)"
           echo
-          echo "===== same probe but vcpkg-OWN ninja if present ====="
-          VNINJA=$(ls build/vcpkg/downloads/tools/ninja*/*/ninja build/vcpkg/downloads/tools/ninja*/ninja 2>/dev/null | head -1)
-          echo "vcpkg ninja: ${VNINJA:-<none downloaded>}"
-          if [ -n "$VNINJA" ]; then
-            rm -rf /tmp/np2 && mkdir -p /tmp/np2 && cd /tmp/np2
-            printf 'cmake_minimum_required(VERSION 3.20)\nproject(p C CXX)\n' > CMakeLists.txt
-            "$VCMAKE" -G Ninja -DCMAKE_MAKE_PROGRAM="$VNINJA" -DCMAKE_C_COMPILER=/usr/bin/clang-15 -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 -B b -S . 2>&1 | head -40
-            echo "probe2 exit: $?"
-          fi
+          echo "===== libc++ FILES on disk ====="
+          find /usr -name 'libc++*.so*' -o -name 'libc++*.a' 2>/dev/null | sort
+          echo
+          echo "===== clang-15 libc++ search dirs ====="
+          clang++-15 -stdlib=libc++ -print-search-dirs 2>&1 | head -5
+          echo
+          echo "===== DIRECT libc++ link test (the actual failure) ====="
+          printf 'int main(){return 0;}\n' > /tmp/t.cpp
+          clang++-15 -stdlib=libc++ /tmp/t.cpp -o /tmp/t 2>&1 | head -10
+          echo "link exit: $?"
+          echo
+          echo "===== does apt think libc++-15-dev is installed? ====="
+          apt-cache policy libc++-15-dev libc++abi-15-dev 2>&1 | grep -E "libc|Installed|Candidate" | head -8
           exit 0
 
       - name: Test
