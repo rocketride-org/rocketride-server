@@ -3,17 +3,12 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for webhook IEndpoint._run() — discovery + shutdown contract.
+"""Unit tests for webhook IEndpoint._run() — shared-server registration contract.
 
 Pins the contract introduced when the source node stopped owning its own
 WebServer and started reusing the shared one bootstrapped by node.py:
-
-- With `ai.node.shared_web_server` set: `_run()` registers
-  `shared.app.state.target = self.target`, drives `_startup` manually,
-  and blocks on `self._shutdown_event` until signalled.
-- With `ai.node.shared_web_server` is None: `_run()` falls back to the
-  legacy `_run_legacy_self_hosted_server()` path (today's behavior —
-  constructs its own WebServer and calls .run()).
+`_run()` registers `shared.app.state.target = self.target`, drives
+`_startup` directly, and blocks on `self._shutdown_event` until signalled.
 """
 
 import sys
@@ -82,27 +77,6 @@ def test_run_uses_shared_server_when_available_and_sets_target():
 
     # target was registered on the shared server
     assert shared.app.state.target is ep.target
-
-
-def test_run_does_not_construct_a_new_WebServer_when_shared_is_available():
-    """The whole point of the refactor: shared-server path never builds its own."""
-    ep = _make_endpoint()
-    shared = _shared_server_mock()
-
-    pre_set_event = threading.Event()
-    pre_set_event.set()
-
-    with (
-        patch('ai.node.shared_web_server', shared),
-        patch('webhook.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch.object(IEndpoint, '_startup'),
-        patch.object(IEndpoint, '_shutdown'),
-        patch('webhook.IEndpoint.WebServer') as web_server_cls,
-    ):
-        ep._run()
-
-    # WebServer constructor was never called.
-    web_server_cls.assert_not_called()
 
 
 def test_run_does_not_call_use_data_when_shared_server_is_used():
@@ -211,44 +185,6 @@ def test_run_exposes_shutdown_event_for_external_signaling():
     # Release so the thread exits cleanly.
     real_event.set()
     t.join(timeout=2.0)
-
-
-# ---------------------------------------------------------------------------
-# Legacy fallback: shared server is None
-# ---------------------------------------------------------------------------
-
-
-def test_run_falls_back_to_legacy_when_shared_server_is_None():
-    """With ai.node.shared_web_server=None, _run() delegates to the legacy path."""
-    ep = _make_endpoint()
-
-    with patch('ai.node.shared_web_server', None), patch.object(ep, '_run_legacy_self_hosted_server') as legacy:
-        ep._run()
-
-    legacy.assert_called_once()
-
-
-def test_legacy_path_constructs_own_WebServer_and_calls_run():
-    """The legacy fallback preserves today's behavior — own server, .run() blocking."""
-    ep = _make_endpoint()
-
-    mock_server_instance = MagicMock(name='WebServer-instance')
-    mock_server_instance.app.state = MagicMock()
-
-    with (
-        patch('webhook.IEndpoint.WebServer', return_value=mock_server_instance) as web_server_cls,
-        patch.object(sys, 'argv', ['node.py']),
-    ):
-        ep._run_legacy_self_hosted_server()
-
-    # WebServer was constructed
-    web_server_cls.assert_called_once()
-    # .use('data') was called
-    mock_server_instance.use.assert_called_once_with('data')
-    # .run() was called (blocking — but mocked, so returns immediately)
-    mock_server_instance.run.assert_called_once()
-    # target was assigned
-    assert mock_server_instance.app.state.target is ep.target
 
 
 # ---------------------------------------------------------------------------

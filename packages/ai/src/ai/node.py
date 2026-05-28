@@ -73,23 +73,21 @@ def _stop_event_loop():
         _loop_thread = None
 
 
-def _parse_data_host_port(default_port: Optional[int] = None) -> Tuple[str, Optional[int]]:
+def _parse_data_host_port() -> Tuple[str, Optional[int]]:
     """Parse ``--data_host`` / ``--data_port`` from ``sys.argv``.
 
-    ``default_port=None`` lets the caller treat absence as "no shared
-    server requested" (used by ``_setup_shared_web_server``). A numeric
-    default keeps the legacy self-hosted fallback in webhook/telegram
-    working when EaaS didn't pass the flag.
+    Returns ``data_port=None`` when the flag is absent — caller decides
+    whether that's an error.
     """
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--data_host', type=str, default='localhost')
-    parser.add_argument('--data_port', type=int, default=default_port)
+    parser.add_argument('--data_port', type=int, default=None)
     args, _unknown = parser.parse_known_args(sys.argv)
     return args.data_host, args.data_port
 
 
-def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
-    """Bootstrap the shared subprocess WebServer when ``--data_port`` is set.
+def _setup_shared_web_server() -> Tuple[Any, Any]:
+    """Bootstrap the shared subprocess WebServer.
 
     EaaS spawns every subprocess with ``--data_port=N`` so DAP traffic
     (data flow, profiling, future trace control) can reach this process
@@ -103,25 +101,26 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     ``_run()`` method, then write ``state.target`` for the ``data``
     module to pick up lazily.
 
-    Legacy invocations (direct ``python node.py`` without ``--data_port``)
-    keep working: this function returns ``(None, None)`` and source nodes
-    fall back to constructing their own WebServer.
+    Raises:
+        RuntimeError: when ``--data_port`` is missing from ``sys.argv``.
+            EaaS passes it unconditionally; a missing flag means the
+            subprocess was invoked outside the supported path (direct
+            developer invocation, broken test setup, etc.).
 
     Returns:
-        A tuple ``(server, future)`` — both ``None`` if ``--data_port``
-        is absent; otherwise the WebServer instance and the concurrent
-        future returned by ``asyncio.run_coroutine_threadsafe`` so the
-        caller can clean it up in a ``finally`` block.
+        A tuple ``(server, future)`` — the WebServer instance and the
+        concurrent future returned by ``asyncio.run_coroutine_threadsafe``
+        so the caller can clean it up in a ``finally`` block.
     """
-    data_host, data_port = _parse_data_host_port(default_port=None)
+    data_host, data_port = _parse_data_host_port()
 
     if data_port is None:
-        # Legacy / test invocation — no shared server. Source nodes that
-        # need a WebServer fall back to their pre-refactor self-hosted path.
-        return None, None
+        raise RuntimeError(
+            'node.py requires `--data_port=N` to be passed in sys.argv. '
+            'EaaS supplies this unconditionally for every subprocess; if you '
+            'see this, the subprocess was invoked outside the supported path.'
+        )
 
-    # Local import: keeps the cold-start cost paid only when needed and
-    # avoids dragging the FastAPI/uvicorn dep into legacy invocations.
     from ai.web import WebServer
 
     # Event the on_startup callback sets when the server is ready to
@@ -137,12 +136,7 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         on_startup=_on_startup,
     )
     # Mount `/task/data` — the WebSocket EaaS uses to send DAP traffic
-    # (data ops, cprofile, future trace control). Done here, NOT in a
-    # source node's `_run()`, so sourceless pipelines (agentic, RAG,
-    # batch) are reachable by EaaS too — that's the whole reason this
-    # PR moved the server out of source nodes. The `data` module's
-    # lazy-target contract lets it load before any source has set
-    # `state.target`.
+    # (data ops, cprofile, future trace control).
     server.use('data')
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
@@ -154,10 +148,7 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     signalled = startup_ready.wait(timeout=_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS)
 
     # Fail fast if `serve()` exited before signalling startup (e.g. bind
-    # error, permission denied, port already in use). Without this check
-    # we'd publish a dead `shared_web_server` whose `/task/data` is
-    # unreachable for the rest of the subprocess lifetime, and source
-    # nodes would silently fail when they try to write `state.target`.
+    # error, permission denied, port already in use).
     if future.done():
         future.result()  # re-raises the exception from serve()
 

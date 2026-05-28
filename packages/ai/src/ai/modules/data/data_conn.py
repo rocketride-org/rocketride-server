@@ -23,7 +23,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
-from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
+from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
@@ -96,7 +96,9 @@ class DataConn(DAPConn):
         The target endpoint is NOT captured here — it's resolved lazily on
         every access via the :pyattr:`_target` property so source nodes that
         bind ``state.target`` AFTER a WebSocket connect still produce a
-        correct target lookup.
+        correct target lookup. The semaphore + thread-count are likewise
+        deferred (see :pyfunc:`_ensure_pipe_sem`) — `target.taskConfig`
+        isn't available at WebSocket-connect time on a cold subprocess.
 
         Args:
             server (DataServer): The data server managing operations and monitors.
@@ -109,23 +111,15 @@ class DataConn(DAPConn):
         # property delegates to `self._server._target`.
         self._server = server
 
-        # Thread count is snapshotted only for sizing the asyncio semaphore
-        # (soft concurrency limit, not a correctness boundary). Defaulting
-        # to 4 when target isn't yet bound at __init__ time is fine.
-        snapshot_target = self._target
-        if snapshot_target is not None:
-            self._thread_count = snapshot_target.taskConfig.get('threadCount', 4)
-        else:
-            self._thread_count = 4
+        # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
+        self._thread_count: Optional[int] = None
+        self._pipe_sem: Optional[asyncio.Semaphore] = None
+        self._pipe_sem_init_lock = asyncio.Lock()
 
         # Mapping a pipe id to its DataConnPipe instance for tracking active data streams
         # This allows us to correlate DAP commands with specific pipe instances and their metadata
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
-
-        # Use asyncio.Semaphore for non-blocking semaphore operations
-        # This prevents thread pool starvation while still limiting concurrent pipes
-        self._pipe_sem = asyncio.Semaphore(self._thread_count)
 
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
@@ -138,34 +132,47 @@ class DataConn(DAPConn):
 
         # Log initialization for debugging and monitoring
         self.debug_message(
-            f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
+            f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
+
+    async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
+        """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
+
+        Folds two concerns:
+
+        1. The race-window wait that used to live at the top of `_open` —
+           EaaS may send `data/open` BEFORE the source node's `_run()` has
+           bound `state.target`. Poll the lazy `_target` property for up
+           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
+        2. The semaphore size — read `target.taskConfig['threadCount']`
+           once target is actually available. Doing this in `__init__`
+           would always see `None` and silently default to 4, ignoring
+           any user-configured `threadCount`.
+
+        Idempotent. The lock guards against concurrent first-`_open`
+        calls on the same connection racing to init the semaphore.
+        """
+        if self._pipe_sem is not None:
+            return self._pipe_sem
+        async with self._pipe_sem_init_lock:
+            if self._pipe_sem is not None:  # double-check after acquiring lock
+                return self._pipe_sem
+            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+            while self._target is None and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            target = self._target
+            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._pipe_sem = asyncio.Semaphore(self._thread_count)
+            self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
+            return self._pipe_sem
 
     @property
     def _target(self) -> Optional['IServiceEndpoint']:
-        """Read the source target lazily — never snapshot at connection time.
-
-        EaaS can open a ``/task/data`` WebSocket BEFORE source nodes bind
-        ``state.target`` in their ``_run()``. Snapshotting at connection
-        time then locks in ``None`` for the connection's lifetime,
-        producing silent empty-result pipelines under CI load.
-        """
+        """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.
-
-        Data-bearing operations (open / write / close) need a source target —
-        the IEndpointBase instance whose ``getPipe`` / ``putPipe`` methods
-        route data into the pipeline. For sourceless pipelines (agentic,
-        etc.) no source registers a target and any data operation here is
-        a usage error, not a programming bug — we surface it as a clean
-        ``RuntimeError`` instead of the bare ``AttributeError`` that would
-        otherwise come from ``None.putPipe()``.
-
-        Process-scope DAP commands (``rrext_cprofile_*``, future
-        ``rrext_trace_*``) do NOT call this helper — they don't need a
-        target and work on agentic pipelines too.
 
         Returns:
             The registered ``IServiceEndpoint`` target.
@@ -500,9 +507,14 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
+        # Lazy-init the semaphore using the now-bound target's threadCount
+        # config. Also folds the race-window wait for `state.target` — see
+        # `_ensure_pipe_sem` docstring.
+        pipe_sem = await self._ensure_pipe_sem()
+
         # Acquire semaphore in async context (non-blocking for event loop)
         self.debug_message(f'Waiting for semaphore slot (max: {self._thread_count})...')
-        await self._pipe_sem.acquire()
+        await pipe_sem.acquire()
 
         try:
             self.debug_message('Acquired semaphore slot for new pipe')
@@ -556,10 +568,7 @@ class DataConn(DAPConn):
                     return pipe_id
 
                 except Exception:
-                    # Clean up pipe if allocated. Use _require_target() so a
-                    # missing source surfaces as a clean RuntimeError instead
-                    # of an AttributeError; the inner try/except still swallows
-                    # either kind to avoid masking the original exception.
+                    # Clean up pipe if allocated.
                     if pipe_instance:
                         try:
                             self._require_target().putPipe(pipe_instance)

@@ -27,6 +27,7 @@ patch lands they fail; after it lands they pass.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -289,22 +290,29 @@ async def test_dataconn_init_with_server_target_None_does_not_AttributeError():
         await conn.disconnect()
 
 
-async def test_dataconn_init_with_server_target_None_uses_default_thread_count():
-    """When server._target is None at init, _thread_count falls back to 4 (the existing default)."""
+async def test_dataconn_ensure_pipe_sem_defaults_thread_count_when_target_None(monkeypatch):
+    """When `_ensure_pipe_sem` runs with no target bound, _thread_count falls back to 4."""
+    from ai.modules.data import data_conn as data_conn_mod
     from ai.modules.data.data_conn import DataConn
+
+    # Dial down the wait so the test doesn't block 5s on the missing target.
+    monkeypatch.setattr(data_conn_mod, 'CONST_DATA_OPEN_TARGET_WAIT', 0.05)
 
     server_mock = MagicMock()
     server_mock._target = None
     transport_mock = MagicMock()
     conn = DataConn(server=server_mock, transport=transport_mock)
     try:
+        # Deferred: not set at __init__ — only after _ensure_pipe_sem.
+        assert conn._thread_count is None
+        await conn._ensure_pipe_sem()
         assert conn._thread_count == 4
     finally:
         await conn.disconnect()
 
 
-async def test_dataconn_init_with_server_target_set_reads_taskConfig_threadCount():
-    """When server._target is set at init, _thread_count comes from target.taskConfig (unchanged)."""
+async def test_dataconn_ensure_pipe_sem_reads_taskConfig_threadCount():
+    """When `_ensure_pipe_sem` runs with target bound, _thread_count comes from target.taskConfig."""
     from ai.modules.data.data_conn import DataConn
 
     target = MagicMock()
@@ -315,12 +323,13 @@ async def test_dataconn_init_with_server_target_set_reads_taskConfig_threadCount
 
     conn = DataConn(server=server_mock, transport=transport_mock)
     try:
+        await conn._ensure_pipe_sem()
         assert conn._thread_count == 16
     finally:
         await conn.disconnect()
 
 
-async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
+async def test_dataconn_ensure_pipe_sem_defaults_when_threadCount_missing():
     """When target exists but lacks a 'threadCount' entry, default to 4."""
     from ai.modules.data.data_conn import DataConn
 
@@ -332,7 +341,41 @@ async def test_dataconn_init_with_target_no_threadCount_falls_back_to_default():
 
     conn = DataConn(server=server_mock, transport=transport_mock)
     try:
+        await conn._ensure_pipe_sem()
         assert conn._thread_count == 4
+    finally:
+        await conn.disconnect()
+
+
+async def test_dataconn_ensure_pipe_sem_waits_for_late_target_bind():
+    """_ensure_pipe_sem polls for `state.target` to appear within the wait window.
+
+    Pins the race fix: webhook/telegram source nodes bind state.target from
+    their _run() AFTER the data module is already serving /task/data on the
+    shared subprocess server. EaaS's first data/open can arrive in that
+    narrow window. `_ensure_pipe_sem` waits up to CONST_DATA_OPEN_TARGET_WAIT
+    seconds and uses the late-bound target's threadCount once it appears.
+    """
+    from ai.modules.data.data_conn import DataConn
+
+    server_mock = MagicMock()
+    server_mock._target = None
+    transport_mock = MagicMock()
+    conn = DataConn(server=server_mock, transport=transport_mock)
+    try:
+        # Simulate source node binding target after a short async delay.
+        target = MagicMock()
+        target.taskConfig = {'threadCount': 8}
+
+        async def _late_bind():
+            await asyncio.sleep(0.1)
+            server_mock._target = target
+
+        asyncio.create_task(_late_bind())
+
+        # _ensure_pipe_sem should poll, see the late bind, and use threadCount=8.
+        await conn._ensure_pipe_sem()
+        assert conn._thread_count == 8
     finally:
         await conn.disconnect()
 

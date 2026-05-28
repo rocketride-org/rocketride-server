@@ -26,7 +26,6 @@ import os
 import threading
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, debug
 from typing import Any, Dict, Callable
-from ai.web import WebServer
 
 
 from depends import depends  # type: ignore
@@ -45,7 +44,6 @@ class IEndpoint(IEndpointBase):
     incoming requests.
 
     Attributes:
-        server: The FastAPI server instance.
         target: The target endpoint to send data to. Created before the call to scanObjects
     """
 
@@ -54,11 +52,8 @@ class IEndpoint(IEndpointBase):
     def _startup(self):
         """Emit the per-logical-type readiness status message.
 
-        Pure-sync — just C-extension calls (``monitorOther`` / ``monitorStatus``)
-        plus a ``json.dumps``. The shared-server path calls it directly from
-        :pyfunc:`_run`; the legacy self-hosted path registers it as
-        ``on_startup=`` on its own ``WebServer`` (Starlette's lifespan hooks
-        accept sync callables, so no ``async def`` wrapper is needed).
+        Pure-sync — C-extension calls (``monitorOther`` / ``monitorStatus``)
+        plus a ``json.dumps``. Called directly from :pyfunc:`_run`.
         """
         try:
             if self.endpoint.logicalType == 'chat':
@@ -117,18 +112,14 @@ class IEndpoint(IEndpointBase):
             debug(f'Error during shutdown: {e}')
 
     def _run(self):
-        """Block until shutdown, using the shared WebServer from ``node.py`` if available.
+        """Register on the shared WebServer from ``node.py`` and block on shutdown.
 
-        When EaaS spawns this subprocess with ``--data_port=N``, ``node.py``
+        EaaS spawns this subprocess with ``--data_port=N``; ``node.py``
         bootstraps a shared :class:`WebServer` on the background event loop
-        and exposes it as ``ai.node.shared_web_server``. We just register
-        our target endpoint on that server's ``app.state.target`` (the
+        and exposes it as ``ai.node.shared_web_server``. We register our
+        target endpoint on that server's ``app.state.target`` (the
         ``data`` module reads it lazily on each WebSocket connection) and
         block on a shutdown event so ``scanObjects()`` doesn't return.
-
-        Legacy fallback (direct CLI invocation without ``--data_port``,
-        unit tests, etc.): the shared server is ``None``, and we build our
-        own ``WebServer`` and run it blocking — today's behavior preserved.
         """
         # Discover the shared server lazily — the import MUST be inside
         # this function (not at module top), because `node.py:run()`
@@ -137,12 +128,7 @@ class IEndpoint(IEndpointBase):
         # the pre-assignment value (None) forever.
         from ai import node
 
-        shared = node.shared_web_server
-
-        if shared is None:
-            return self._run_legacy_self_hosted_server()
-
-        shared.app.state.target = self.target
+        node.shared_web_server.app.state.target = self.target
 
         self._startup()
 
@@ -150,32 +136,6 @@ class IEndpoint(IEndpointBase):
         self._shutdown_event.wait()
 
         self._shutdown()
-
-    def _run_legacy_self_hosted_server(self):
-        """Legacy path: construct and run a dedicated ``WebServer``.
-
-        Used only when ``ai.node.shared_web_server`` is ``None`` — i.e.
-        when ``node.py`` was invoked without ``--data_port`` (direct CLI
-        invocations, unit tests). EaaS always passes ``--data_port`` in
-        production, so this branch never runs there.
-        """
-        debug('webhook shared web server is not setup, using LEGACY self-hosted WebServer path')
-
-        from ai.node import _parse_data_host_port
-
-        data_host, data_port = _parse_data_host_port(default_port=5567)
-
-        self.server = WebServer(
-            config={
-                'port': data_port,
-                'host': data_host,
-            },
-            on_startup=self._startup,
-            on_shutdown=self._shutdown,
-        )
-        self.server.app.state.target = self.target
-        self.server.use('data')
-        self.server.run()
 
     def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None]):
         """

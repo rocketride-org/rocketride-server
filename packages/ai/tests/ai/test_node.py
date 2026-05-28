@@ -69,28 +69,24 @@ def _fire_startup_callback_async(on_startup) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_setup_returns_None_when_data_port_absent(monkeypatch):
-    """No --data_port → return (None, None); legacy invocation stays untouched."""
+def test_setup_raises_when_data_port_absent(monkeypatch):
+    """No --data_port → raise. EaaS passes it unconditionally; absence is a usage error."""
     monkeypatch.setattr(sys, 'argv', ['node.py'])
 
-    server, future = node._setup_shared_web_server()
-
-    assert server is None
-    assert future is None
+    with pytest.raises(RuntimeError, match='data_port'):
+        node._setup_shared_web_server()
 
 
-def test_setup_returns_None_when_only_debug_args_present(monkeypatch):
-    """Debug args alone (no --data_port) don't trigger the shared server."""
+def test_setup_raises_when_only_debug_args_present(monkeypatch):
+    """Debug args alone (no --data_port) still trigger the error — only --data_port matters."""
     monkeypatch.setattr(
         sys,
         'argv',
         ['node.py', '--debug_port=5555', '--debug_host=localhost', '--wait_for_client'],
     )
 
-    server, future = node._setup_shared_web_server()
-
-    assert server is None
-    assert future is None
+    with pytest.raises(RuntimeError, match='data_port'):
+        node._setup_shared_web_server()
 
 
 # ---------------------------------------------------------------------------

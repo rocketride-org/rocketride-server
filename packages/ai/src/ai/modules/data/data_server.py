@@ -58,12 +58,6 @@ class DataServer(DAPBase):
     def __init__(self, server: 'WebServer', **kwargs) -> None:
         """Initialize the DataServer with a back-reference for lazy target lookup.
 
-        The DataServer does not capture a snapshot of the target endpoint at
-        construction. Instead, it reads ``server.app.state.target`` on every
-        access via the :pyattr:`_target` property, so it picks up the value
-        that a source node (webhook, telegram) writes later via
-        ``shared_web_server.app.state.target = self.target``.
-
         For sourceless pipelines (agentic, etc.) ``state.target`` is never
         set; ``_target`` returns ``None`` and data-bearing operations on
         ``DataConn`` raise a controlled error via ``_require_target()``.
@@ -72,9 +66,7 @@ class DataServer(DAPBase):
             server: The parent WebServer; used for lazy ``state.target`` reads.
             **kwargs: Additional arguments passed to the parent ``DAPBase``.
         """
-        # Hold the server reference for lazy target lookup. We deliberately
-        # do NOT store a separate _target attribute — it would let stale
-        # snapshots leak past a state.target reassignment.
+        # Hold the server reference for lazy target lookup.
         self._server = server
 
         # Initialize parent with server identification
@@ -132,9 +124,7 @@ class DataServer(DAPBase):
         # Create the transport and accept the connection
         transport = TransportWebSocket()
 
-        # Do NOT pass `target=self._target` — DataConn reads it lazily via
-        # its own property. Snapshotting here used to lock in `None` when
-        # the WebSocket opened before the source bound `state.target`.
+        # Allocate a new connection
         conn = DataConn(server=self, transport=transport)
 
         # Signal we are connected

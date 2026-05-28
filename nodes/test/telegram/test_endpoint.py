@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for telegram IEndpoint._run() — discovery + dual-mode contract.
+"""Unit tests for telegram IEndpoint._run() — dual-mode shared-server contract.
 
 Pins the contract for the source node's two delivery modes:
 
@@ -15,9 +15,6 @@ Pins the contract for the source node's two delivery modes:
 
 Both modes: NOT constructing a new WebServer, NOT calling .use('data')
 (the shared server's `data` module is eager-loaded by node.py).
-
-Legacy fallback (shared_web_server is None): construct own WebServer
-and run() blocking — today's behavior, preserved.
 """
 
 import asyncio
@@ -152,27 +149,6 @@ def test_webhook_mode_sets_target_on_shared_server():
     assert shared.app.state.target is ep.target
 
 
-def test_webhook_mode_does_not_construct_new_WebServer():
-    """Webhook mode must not build a competing WebServer when shared is set."""
-    ep = _make_endpoint(mode='webhook', webhook_url='https://example.com/telegram/webhook')
-    shared = _shared_server_mock()
-    pre_set_event = threading.Event()
-    pre_set_event.set()
-
-    with (
-        patch('ai.node.shared_web_server', shared),
-        patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch(
-            'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
-        ),
-        patch('telegram.IEndpoint.WebServer') as web_server_cls,
-    ):
-        ep._run()
-
-    web_server_cls.assert_not_called()
-
-
 # ---------------------------------------------------------------------------
 # Shared-server path: POLLING mode
 # ---------------------------------------------------------------------------
@@ -216,27 +192,6 @@ def test_polling_mode_sets_target_on_shared_server():
         ep._run()
 
     assert shared.app.state.target is ep.target
-
-
-def test_polling_mode_does_not_construct_new_WebServer():
-    """Polling mode must not build a competing WebServer when shared is set."""
-    ep = _make_endpoint(mode='polling')
-    shared = _shared_server_mock()
-    pre_set_event = threading.Event()
-    pre_set_event.set()
-
-    with (
-        patch('ai.node.shared_web_server', shared),
-        patch('telegram.IEndpoint.threading.Event', return_value=pre_set_event),
-        patch(
-            'telegram.IEndpoint.asyncio.run_coroutine_threadsafe',
-            return_value=MagicMock(result=MagicMock(return_value=None)),
-        ),
-        patch('telegram.IEndpoint.WebServer') as web_server_cls,
-    ):
-        ep._run()
-
-    web_server_cls.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -294,66 +249,6 @@ def test_run_drives_startup_and_shutdown_callbacks_in_shared_path():
     assert schedule_mock.call_count == 2, (
         f'expected run_coroutine_threadsafe to schedule both lifespan hooks; got {schedule_mock.call_count} call(s)'
     )
-
-
-# ---------------------------------------------------------------------------
-# Legacy fallback: shared server is None
-# ---------------------------------------------------------------------------
-
-
-def test_run_falls_back_to_legacy_when_shared_server_is_None():
-    """With shared_web_server=None, _run() delegates to the legacy path."""
-    ep = _make_endpoint(mode='polling')
-
-    with patch('ai.node.shared_web_server', None), patch.object(ep, '_run_legacy_self_hosted_server') as legacy:
-        ep._run()
-
-    legacy.assert_called_once()
-
-
-def test_legacy_path_constructs_own_WebServer_with_polling_mode():
-    """Legacy fallback in polling mode: own WebServer, no route, .run() blocking."""
-    ep = _make_endpoint(mode='polling')
-    mock_server_instance = MagicMock(name='WebServer-instance')
-    mock_server_instance.app.state = MagicMock()
-
-    with (
-        patch('telegram.IEndpoint.WebServer', return_value=mock_server_instance) as web_server_cls,
-        patch.object(sys, 'argv', ['node.py']),
-    ):
-        # Need to populate self._mode etc. as _run_legacy reads from self
-        # not from config. _run() normally does that step; we mimic it.
-        ep._mode = 'polling'
-        ep._webhook_url = ''
-        ep._bot_token = 'test'
-        ep._run_legacy_self_hosted_server()
-
-    web_server_cls.assert_called_once()
-    # No webhook route added in polling mode
-    mock_server_instance.add_route.assert_not_called()
-    mock_server_instance.run.assert_called_once()
-
-
-def test_legacy_path_constructs_own_WebServer_with_webhook_mode():
-    """Legacy fallback in webhook mode: own WebServer, /telegram/webhook route, .run()."""
-    ep = _make_endpoint(mode='webhook', webhook_url='https://example.com/telegram/webhook')
-    mock_server_instance = MagicMock(name='WebServer-instance')
-    mock_server_instance.app.state = MagicMock()
-
-    with (
-        patch('telegram.IEndpoint.WebServer', return_value=mock_server_instance) as web_server_cls,
-        patch.object(sys, 'argv', ['node.py']),
-    ):
-        ep._mode = 'webhook'
-        ep._webhook_url = 'https://example.com/telegram/webhook'
-        ep._bot_token = 'test'
-        ep._run_legacy_self_hosted_server()
-
-    web_server_cls.assert_called_once()
-    # Webhook route was registered
-    mock_server_instance.add_route.assert_called_once()
-    assert mock_server_instance.add_route.call_args.args[0] == '/telegram/webhook'
-    mock_server_instance.run.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
