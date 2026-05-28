@@ -22,6 +22,7 @@
 
 """In-memory IStore implementation for testing."""
 
+import re
 from typing import Optional
 
 from ..store import IStore, StorageError, VersionMismatchError
@@ -42,20 +43,24 @@ class MemoryStore(IStore):
         self._versions: dict[str, int] = {}
 
     async def write_file(self, filename: str, data: str) -> None:
+        _check_path(filename)
         self._files[filename] = data
         self._versions[filename] = self._versions.get(filename, 0) + 1
 
     async def read_file(self, filename: str) -> str:
+        _check_path(filename)
         if filename not in self._files:
             raise StorageError(f'File not found: {filename}')
         return self._files[filename]
 
     async def read_file_with_metadata(self, filename: str) -> tuple:
+        _check_path(filename)
         if filename not in self._files:
             raise StorageError(f'File not found: {filename}')
         return self._files[filename], str(self._versions[filename])
 
     async def write_file_atomic(self, filename: str, data: str, expected_version: Optional[str] = None) -> str:
+        _check_path(filename)
         if expected_version is not None and filename in self._files:
             current = str(self._versions[filename])
             if current != expected_version:
@@ -69,6 +74,7 @@ class MemoryStore(IStore):
         return str(self._versions[filename])
 
     async def delete_file(self, filename: str, expected_version: Optional[str] = None) -> None:
+        _check_path(filename)
         if filename not in self._files:
             raise StorageError(f'File not found: {filename}')
         if expected_version is not None:
@@ -83,6 +89,7 @@ class MemoryStore(IStore):
         del self._versions[filename]
 
     async def list_files(self, prefix: str = '') -> list:
+        _check_path(prefix)
         return sorted(f for f in self._files if f.startswith(prefix))
 
     async def list_entries(
@@ -92,6 +99,54 @@ class MemoryStore(IStore):
         recursive: bool = True,
         include_files: bool = True,
         include_dirs: bool = True,
-        glob_pattern=None,
+        name_pattern: Optional[str] = None,
     ) -> list:
-        raise NotImplementedError
+        _check_path(prefix)
+
+        # Basic check is enough for in-memory store for testing
+        if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
+            raise StorageError(f'Invalid name pattern: {name_pattern}')
+        if name_pattern == '..':
+            raise StorageError(f'Path traversal detected: {name_pattern}')
+
+        prefix_dir = prefix.rstrip('/')
+
+        re_pattern = r'^' + ((re.escape(prefix_dir) + r'/') if prefix_dir else r'')
+        if recursive:
+            re_pattern += r'([^/]+/)*'
+        if name_pattern:
+            for c in name_pattern:
+                if c == '*':
+                    re_pattern += r'[^/]*'
+                elif c == '?':
+                    re_pattern += r'[^/]'
+                else:
+                    re_pattern += re.escape(c)
+        else:
+            re_pattern += r'[^/]+'
+        re_pattern += r'$'
+        re_pattern = re.compile(re_pattern)
+
+        result = []
+        seen_dirs = set() if include_dirs else None
+        for filepath in self._files:
+            if include_dirs:
+                parts = filepath.split('/')[:-1]
+                dir_path = ''
+                for part in parts:
+                    dir_path += ('/' if dir_path else '') + part
+                    if dir_path not in seen_dirs:
+                        seen_dirs.add(dir_path)
+                        if re_pattern.match(dir_path):
+                            result.append(dir_path + '/')
+
+            if include_files and re_pattern.match(filepath):
+                result.append(filepath)
+
+        return sorted(result)
+
+
+def _check_path(filename: str) -> None:
+    # Basic check is enough for in-memory store for testing
+    if '..' in filename:
+        raise StorageError(f'Path traversal detected: {filename}')

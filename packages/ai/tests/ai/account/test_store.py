@@ -24,29 +24,17 @@ from ai.account.file_store import FileStore
 from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
 from ai.account.store_providers.azure import AzureBlobStore
 from ai.account.store_providers.filesystem import FilesystemStore
+from ai.account.store_providers.memory import MemoryStore
 from ai.account.store_providers.s3 import S3Store
 
 
-# ============================================================================
-# Filesystem Tests (Real I/O)
-# ============================================================================
+class BaseStoreTest:
+    """Base test class for Store implementations.
 
-
-class TestFilesystemStore:
-    """Test filesystem storage with real file operations."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        """Create temporary directory for tests."""
-        temp_path = tempfile.mkdtemp()
-        yield temp_path
-        shutil.rmtree(temp_path, ignore_errors=True)
-
-    @pytest.fixture
-    def store(self, temp_dir):
-        """Create filesystem store instance."""
-        url = f'filesystem://{temp_dir}'
-        return FilesystemStore(url)
+    This class defines common tests for all Store implementations. Each specific
+    backend (filesystem, memory, S3, Azure) will have its own test class that
+    inherits from this and provides the appropriate store fixture.
+    """
 
     @pytest.mark.asyncio
     async def test_write_and_read_file(self, store):
@@ -61,19 +49,6 @@ class TestFilesystemStore:
         content = await store.read_file(filename)
 
         assert content == data
-
-    @pytest.mark.asyncio
-    async def test_write_creates_directories(self, store, temp_dir):
-        """Test that write_file creates parent directories."""
-        filename = 'deep/nested/path/file.txt'
-        data = 'Test data'
-
-        await store.write_file(filename, data)
-
-        # Verify directory structure was created
-        full_path = Path(temp_dir) / 'deep' / 'nested' / 'path' / 'file.txt'
-        assert full_path.exists()
-        assert full_path.read_text() == data
 
     @pytest.mark.asyncio
     async def test_overwrite_existing_file(self, store):
@@ -290,13 +265,13 @@ class TestFilesystemStore:
         assert 'Path traversal detected' in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_list_entries_no_matches(self, populated_store):
+    async def test_list_entries_prefix_nonexistent(self, populated_store):
         result = await populated_store.list_entries('nonexistent')
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_list_entries_glob(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='*.txt')
+    async def test_list_entries_pattern(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*.txt')
         assert result == [
             'a.txt',
             'sub/c.txt',
@@ -304,18 +279,13 @@ class TestFilesystemStore:
         ]
 
     @pytest.mark.asyncio
-    async def test_list_entries_glob_non_recursive(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='*.txt', recursive=False)
+    async def test_list_entries_pattern_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*.txt', recursive=False)
         assert result == ['a.txt']
 
     @pytest.mark.asyncio
-    async def test_list_entries_glob_with_path(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='sub/*.txt')
-        assert result == ['sub/c.txt']
-
-    @pytest.mark.asyncio
-    async def test_list_entries_glob_files(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='*', include_dirs=False)
+    async def test_list_entries_pattern_files(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*', include_dirs=False)
         assert result == [
             'a.txt',
             'b.json',
@@ -326,81 +296,86 @@ class TestFilesystemStore:
         ]
 
     @pytest.mark.asyncio
-    async def test_list_entries_glob_dirs(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='*', include_files=False)
+    async def test_list_entries_pattern_dirs(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*', include_files=False)
         assert result == [
             'sub/',
             'sub/nested/',
         ]
 
     @pytest.mark.asyncio
-    async def test_list_entries_prefix_glob(self, populated_store):
-        result = await populated_store.list_entries('sub', glob_pattern='*.txt')
+    async def test_list_entries_prefix_pattern(self, populated_store):
+        result = await populated_store.list_entries('sub', name_pattern='*.txt')
         assert result == [
             'sub/c.txt',
             'sub/nested/e.txt',
         ]
 
     @pytest.mark.asyncio
-    async def test_list_entries_prefix_glob_non_recursive(self, populated_store):
-        result = await populated_store.list_entries('sub', glob_pattern='*.txt', recursive=False)
+    async def test_list_entries_prefix_pattern_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', name_pattern='*.txt', recursive=False)
         assert result == ['sub/c.txt']
 
     @pytest.mark.asyncio
-    async def test_list_entries_rglob(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='**/*.txt')
-        assert result == [
-            'a.txt',
-            'sub/c.txt',
-            'sub/nested/e.txt',
-        ]
-
-    @pytest.mark.asyncio
-    async def test_list_entries_rglob_non_recursive(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='**/*.txt', recursive=False)
-        # recursive glob overrides non-recursive flag
-        assert result == [
-            'a.txt',
-            'sub/c.txt',
-            'sub/nested/e.txt',
-        ]
-
-    @pytest.mark.asyncio
-    async def test_list_entries_rglob_with_path(self, populated_store):
-        result = await populated_store.list_entries(glob_pattern='sub/**/*.txt')
-        assert result == [
-            'sub/c.txt',
-            'sub/nested/e.txt',
-        ]
-
-    @pytest.mark.asyncio
-    async def test_list_entries_prefix_rglob(self, populated_store):
-        result = await populated_store.list_entries('sub', glob_pattern='**/*.txt')
-        assert result == [
-            'sub/c.txt',
-            'sub/nested/e.txt',
-        ]
-
-    @pytest.mark.asyncio
-    async def test_list_entries_prefix_rglob_non_recursive(self, populated_store):
-        result = await populated_store.list_entries('sub', glob_pattern='**/*.txt', recursive=False)
-        # recursive glob overrides non-recursive flag
-        assert result == [
-            'sub/c.txt',
-            'sub/nested/e.txt',
-        ]
-
-    @pytest.mark.asyncio
-    async def test_list_entries_rglob_traversal_protection(self, populated_store):
+    async def test_list_entries_pattern_traversal_protection(self, populated_store):
         with pytest.raises(StorageError) as exc_info:
-            await populated_store.list_entries(glob_pattern='sub/../../**/*.txt')
+            await populated_store.list_entries(name_pattern='..')
         assert 'Path traversal detected' in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_list_entries_rglob_non_recursive_traversal_protection(self, populated_store):
+    async def test_list_entries_pattern_name_protection(self, populated_store):
         with pytest.raises(StorageError) as exc_info:
-            await populated_store.list_entries(glob_pattern='sub/../../tmp*/*.txt', recursive=False)
-        assert 'Path traversal detected' in str(exc_info.value)
+            await populated_store.list_entries(name_pattern='sub/*.txt')
+        assert 'Invalid name pattern' in str(exc_info.value)
+
+
+# ============================================================================
+# Filesystem Tests (Real I/O)
+# ============================================================================
+
+
+class TestFilesystemStore(BaseStoreTest):
+    """Test filesystem storage with real file operations."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for tests."""
+        temp_path = tempfile.mkdtemp()
+        yield temp_path
+        shutil.rmtree(temp_path, ignore_errors=True)
+
+    @pytest.fixture
+    def store(self, temp_dir):
+        """Create filesystem store instance."""
+        url = f'filesystem://{temp_dir}'
+        return FilesystemStore(url)
+
+    @pytest.mark.asyncio
+    async def test_write_creates_directories(self, store, temp_dir):
+        """Test that write_file creates parent directories."""
+        filename = 'deep/nested/path/file.txt'
+        data = 'Test data'
+
+        await store.write_file(filename, data)
+
+        # Verify directory structure was created
+        full_path = Path(temp_dir) / 'deep' / 'nested' / 'path' / 'file.txt'
+        assert full_path.exists()
+        assert full_path.read_text() == data
+
+
+# ============================================================================
+# Memory Tests
+# ============================================================================
+
+
+class TestMemoryStore(BaseStoreTest):
+    """Test in-memory storage."""
+
+    @pytest.fixture
+    def store(self):
+        """Create in-memory store instance."""
+        return MemoryStore()
 
 
 # ============================================================================

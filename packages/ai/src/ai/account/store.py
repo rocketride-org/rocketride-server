@@ -329,7 +329,7 @@ class IStore(ABC):
         recursive: bool = True,
         include_files: bool = True,
         include_dirs: bool = True,
-        glob_pattern: Optional[str] = None,
+        name_pattern: Optional[str] = None,
     ) -> list:
         """
         Browse files and/or folders under a prefix.
@@ -344,7 +344,7 @@ class IStore(ABC):
             include_files: Include regular files in the result.
             include_dirs: Include directory entries (with trailing ``/``) in the
                 result.
-            glob_pattern: Optional glob pattern applied to each result path.
+            name_pattern: Optional file name pattern applied to each result path.
 
         Returns:
             Sorted list of relative paths.  Directory entries end with ``/``.
