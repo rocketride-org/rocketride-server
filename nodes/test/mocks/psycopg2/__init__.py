@@ -154,7 +154,7 @@ class MockCursor:
 
         # Apply LIMIT
         limit = self._extract_limit(query, params)
-        if limit:
+        if limit is not None:
             results = results[:limit]
 
         self._results = results
@@ -182,7 +182,7 @@ class MockCursor:
                     query_vector = p.tolist()
                 elif isinstance(p, (list, tuple)) and len(p) > 3:
                     query_vector = list(p)
-                elif isinstance(p, int) and p < 1000:
+                elif isinstance(p, int) and not isinstance(p, bool) and p < 1000:
                     limit = p
                 else:
                     filter_params.append(p)
@@ -318,7 +318,7 @@ class MockCursor:
         if 'limit' in query.lower() and params:
             # Last param is often the limit
             for p in reversed(params):
-                if isinstance(p, int) and p < 10000:
+                if isinstance(p, int) and not isinstance(p, bool) and p < 10000:
                     return p
         return None
 
@@ -331,7 +331,7 @@ class MockCursor:
         """Check if data matches filter parameters."""
         # Check isDeleted
         is_deleted = data.get('isdeleted', False)
-        if False in params and is_deleted:
+        if any(p is False for p in params) and is_deleted:
             return False
         return True
 

@@ -133,7 +133,7 @@ class Filter:
             elif op == 'like':
                 # Simple wildcard matching
                 pattern = value.replace('*', '')
-                results.append(pattern.lower() in str(prop_value).lower() if prop_value else False)
+                results.append(pattern.lower() in str(prop_value).lower() if prop_value is not None else False)
             elif op == 'greater_or_equal':
                 results.append(prop_value >= value if prop_value is not None else False)
             elif op == 'less_or_equal':
