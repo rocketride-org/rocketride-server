@@ -9,17 +9,22 @@ Tests cover:
 - Error handling
 """
 
+import asyncio
+import configparser
 import os
-import pytest
-import tempfile
 import shutil
+import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
-from ai.account.store import Store, StorageError
+import pytest
+
+from ai.account.file_store import FileStore
+from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
+from ai.account.store_providers.azure import AzureBlobStore
 from ai.account.store_providers.filesystem import FilesystemStore
 from ai.account.store_providers.s3 import S3Store
-from ai.account.store_providers.azure import AzureBlobStore
 
 
 # ============================================================================
@@ -148,6 +153,255 @@ class TestFilesystemStore:
         assert content == data
         assert len(content) == 1024 * 1024
 
+    # -------------------------------------------------------------------------
+    # list_entries
+    # -------------------------------------------------------------------------
+
+    @pytest.fixture
+    def populated_store(self, store):
+        """Filesystem store pre-populated with a known directory tree."""
+
+        async def _setup():
+            await store.write_file('a.txt', '')
+            await store.write_file('b.json', '')
+            await store.write_file('sub/c.txt', '')
+            await store.write_file('sub/d.json', '')
+            await store.write_file('sub/nested/e.txt', '')
+            await store.write_file('sub/nested/f.json', '')
+
+        asyncio.get_event_loop().run_until_complete(_setup())
+        return store
+
+    @pytest.mark.asyncio
+    async def test_list_entries_default(self, populated_store):
+        result = await populated_store.list_entries()
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_files(self, populated_store):
+        result = await populated_store.list_entries(include_dirs=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_dirs(self, populated_store):
+        result = await populated_store.list_entries(include_files=False)
+        assert result == [
+            'sub/',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(recursive=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive_files(self, populated_store):
+        result = await populated_store.list_entries(include_dirs=False, recursive=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive_dirs(self, populated_store):
+        result = await populated_store.list_entries(include_files=False, recursive=False)
+        assert result == [
+            'sub/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix(self, populated_store):
+        result = await populated_store.list_entries('sub')
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_files(self, populated_store):
+        result = await populated_store.list_entries('sub', include_dirs=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_dirs(self, populated_store):
+        result = await populated_store.list_entries('sub', include_files=False)
+        assert result == [
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', recursive=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_files_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', include_dirs=False, recursive=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_dirs_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', include_files=False, recursive=False)
+        assert result == [
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_traversal_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries('sub/../..')
+
+        assert 'Path traversal detected' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_entries_no_matches(self, populated_store):
+        result = await populated_store.list_entries('nonexistent')
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_entries_glob(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='*.txt')
+        assert result == [
+            'a.txt',
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_glob_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='*.txt', recursive=False)
+        assert result == ['a.txt']
+
+    @pytest.mark.asyncio
+    async def test_list_entries_glob_with_path(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='sub/*.txt')
+        assert result == ['sub/c.txt']
+
+    @pytest.mark.asyncio
+    async def test_list_entries_glob_files(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='*', include_dirs=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_glob_dirs(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='*', include_files=False)
+        assert result == [
+            'sub/',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_glob(self, populated_store):
+        result = await populated_store.list_entries('sub', glob_pattern='*.txt')
+        assert result == [
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_glob_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', glob_pattern='*.txt', recursive=False)
+        assert result == ['sub/c.txt']
+
+    @pytest.mark.asyncio
+    async def test_list_entries_rglob(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='**/*.txt')
+        assert result == [
+            'a.txt',
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_rglob_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='**/*.txt', recursive=False)
+        # recursive glob overrides non-recursive flag
+        assert result == [
+            'a.txt',
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_rglob_with_path(self, populated_store):
+        result = await populated_store.list_entries(glob_pattern='sub/**/*.txt')
+        assert result == [
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_rglob(self, populated_store):
+        result = await populated_store.list_entries('sub', glob_pattern='**/*.txt')
+        assert result == [
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_rglob_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', glob_pattern='**/*.txt', recursive=False)
+        # recursive glob overrides non-recursive flag
+        assert result == [
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_rglob_traversal_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries(glob_pattern='sub/../../**/*.txt')
+        assert 'Path traversal detected' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_entries_rglob_non_recursive_traversal_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries(glob_pattern='sub/../../tmp*/*.txt', recursive=False)
+        assert 'Path traversal detected' in str(exc_info.value)
+
 
 # ============================================================================
 # Store Factory Tests
@@ -221,8 +475,6 @@ class TestStoreFactory:
 
     def test_tilde_expansion(self):
         """Test tilde expansion to user home directory."""
-        from pathlib import Path
-
         url = 'filesystem://~/.rocketlib/test-storage'
         store = Store.create(url=url)
 
@@ -259,9 +511,6 @@ class TestS3Store:
     @pytest.fixture
     def mock_s3_client(self, monkeypatch):
         """Create mock S3 client."""
-        import sys
-        from unittest.mock import MagicMock  # noqa: F811
-
         # Mock boto3 module
         mock_boto3 = MagicMock()
         mock_client = Mock()
@@ -304,8 +553,6 @@ class TestS3Store:
         assert client is not None
 
         # Verify boto3.client was called without explicit credentials
-        import sys
-
         if 'boto3' in sys.modules:
             mock_boto3 = sys.modules['boto3']
             # Check that client was called with just region_name (no explicit credentials)
@@ -422,8 +669,6 @@ class TestS3Store:
     @pytest.mark.asyncio
     async def test_write_fails_after_max_retries(self, store, mock_s3_client, monkeypatch):
         """Test that write fails after max retries (with instant retry for speed)."""
-        from ai.account.store import STORE_MAX_RETRY_ATTEMPTS
-        import asyncio
 
         # Mock asyncio.sleep to make retries instant
         async def instant_sleep(seconds):
@@ -534,8 +779,6 @@ class TestS3Store:
 
         Scenario: File keeps getting deleted between check and write, exhausting all retries.
         """
-        from ai.account.store import STORE_MAX_RETRY_ATTEMPTS
-        import asyncio
 
         # Mock asyncio.sleep to make retries instant
         async def instant_sleep(seconds):
@@ -572,9 +815,6 @@ class TestS3Store:
         To see which credential source is actually used, run:
         python rocketlib-ai/tests/ai/account/check_aws_credentials.py
         """
-        import os
-        from pathlib import Path
-
         # Temporarily remove STORE_SECRET_KEY if set
         original_store_secret = os.environ.pop('STORE_SECRET_KEY', None)
         original_aws_key = os.environ.pop('AWS_ACCESS_KEY_ID', None)
@@ -665,10 +905,6 @@ class TestS3Store:
 
         This creates a temporary credentials file and verifies boto3 reads it.
         """
-        import os
-        import configparser
-        from unittest.mock import patch, MagicMock
-
         # Create temporary .aws directory
         aws_dir = tmp_path / '.aws'
         aws_dir.mkdir()
@@ -748,9 +984,6 @@ class TestAzureBlobStore:
     @pytest.fixture
     def mock_blob_client(self, monkeypatch):
         """Create mock Azure Blob client."""
-        import sys
-        from unittest.mock import MagicMock  # noqa: F811
-
         # Mock Azure modules
         mock_azure_storage = MagicMock()
         mock_azure_core = MagicMock()
@@ -873,8 +1106,6 @@ class TestStoreFileStore:
 
     def test_get_file_store_returns_file_store(self, store):
         """Test that get_file_store returns a FileStore instance."""
-        from ai.account.file_store import FileStore
-
         fs = store.get_file_store('test-user')
         assert isinstance(fs, FileStore)
 
@@ -942,8 +1173,6 @@ class TestStoreIntegration:
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, temp_dir):
         """Test concurrent file operations."""
-        import asyncio
-
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
         fs = store.get_file_store('test-user')

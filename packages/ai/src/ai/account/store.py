@@ -321,6 +321,39 @@ class IStore(ABC):
         """
         pass
 
+    @abstractmethod
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        glob_pattern: Optional[str] = None,
+    ) -> list:
+        """
+        Browse files and/or folders under a prefix.
+
+        Directories are returned with a trailing ``/`` to distinguish them from
+        files.
+
+        Args:
+            prefix: Path prefix to list under (relative to store root).
+            recursive: When ``True`` (default) descend into all sub-directories.
+                When ``False`` list only the immediate children of ``prefix``.
+            include_files: Include regular files in the result.
+            include_dirs: Include directory entries (with trailing ``/``) in the
+                result.
+            glob_pattern: Optional glob pattern applied to each result path.
+
+        Returns:
+            Sorted list of relative paths.  Directory entries end with ``/``.
+
+        Raises:
+            StorageError: If the underlying listing operation fails.
+        """
+        pass
+
 
 class Store:
     """

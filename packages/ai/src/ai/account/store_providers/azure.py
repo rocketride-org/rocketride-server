@@ -423,6 +423,17 @@ class AzureBlobStore(IStore):
                 raise StorageError(f'File not found: {filename}')
             raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        glob_pattern=None,
+    ) -> list:
+        raise NotImplementedError
+
     async def _stage_block(self, context: dict, data: bytes) -> None:
         """Stage a single block and record its ID."""
         import base64

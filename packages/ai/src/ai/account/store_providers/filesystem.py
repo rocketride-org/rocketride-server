@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import fnmatch
 from ..store import IStore, StorageError, VersionMismatchError
 
 # Import platform-specific locking
@@ -316,6 +317,67 @@ class FilesystemStore(IStore):
 
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix}: {e}') from e
+
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        glob_pattern: Optional[str] = None,
+    ) -> list:
+        """
+        List files and/or directories under prefix.
+
+        ``recursive`` controls traversal depth; ``glob_pattern`` filters entry
+        names using pathlib's native glob semantics where ``*`` does not cross
+        directory boundaries (shell-style).  When both are combined:
+
+        - ``recursive=True,  glob_pattern="*.txt"``  → ``rglob("*.txt")``  — all ``.txt`` files anywhere beneath prefix
+        - ``recursive=False, glob_pattern="*.txt"``  → ``glob("*.txt")``   — only ``.txt`` files directly under prefix
+        - ``recursive=True,  glob_pattern="**/*.txt"`` → ``rglob("**/*.txt")`` — explicit deep match, same as above
+
+        Using pathlib's ``glob``/``rglob`` also avoids a full-tree scan when the
+        pattern can prune branches early.
+        """
+        try:
+            search_path = self._get_full_path(prefix) if prefix else self._root_path
+
+            if glob_pattern and '..' in glob_pattern:
+                raise StorageError(f'Path traversal detected: {glob_pattern}')
+
+            if not search_path.exists():
+                return []
+
+            result = []
+
+            if search_path.is_file():
+                if include_files:
+                    rel = str(search_path.relative_to(self._root_path)).replace('\\', '/')
+                    if glob_pattern is None or fnmatch.fnmatch(search_path.name, glob_pattern):
+                        result.append(rel)
+                return result
+
+            pattern = glob_pattern or '*'
+            items = search_path.rglob(pattern) if recursive else search_path.glob(pattern)
+
+            for item in items:
+                if item.is_file():
+                    if include_files:
+                        rel = str(item.relative_to(self._root_path)).replace('\\', '/')
+                        result.append(rel)
+                elif item.is_dir():
+                    if include_dirs:
+                        rel = str(item.relative_to(self._root_path)).replace('\\', '/') + '/'
+                        result.append(rel)
+
+            return sorted(result)
+
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to list entries with prefix {prefix}: {e}') from e
 
     # =========================================================================
     # Handle-Based I/O
