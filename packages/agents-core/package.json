@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "jest"
+    "test": "jest",
+    "sync-bundle": "ts-node scripts/sync-bundle.ts"
   },
   "devDependencies": {
     "@jest/globals": "^30.4.1",
@@ -20,6 +21,7 @@
     "@types/node": "^20.19.41",
     "jest": "^29.0.0",
     "ts-jest": "^29.4.10",
+    "ts-node": "^10.9.0",
     "typescript": "^5.0.0"
   }
 }
