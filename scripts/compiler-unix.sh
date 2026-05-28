@@ -59,15 +59,18 @@ detect_linux_distro() {
 
 # Detect installed clang version (12 or later)
 detect_installed_clang() {
-    # Try to find any clang version 12 or later that's already installed
-    for ver in 18 17 16 15 14 13 12; do
-        if command_exists "clang-$ver"; then
-            echo "$ver"
-            return 0
-        fi
-    done
-    
-    # Check if generic 'clang' command exists and get its version
+    # Prefer the distro-DEFAULT unversioned `clang` when it's >=12. The image
+    # provisions the matching libc++ stack — including the UNVERSIONED
+    # libc++-dev / libc++abi-dev that own the multiarch symlink
+    # /usr/lib/x86_64-linux-gnu/libc++.so, which is what the linker resolves
+    # `-lc++` against. Picking a DIFFERENT (higher) versioned clang here makes
+    # the libc++ check below force-install libc++-<higher>-dev, and apt resolves
+    # the conflict by REMOVING the unversioned libc++-dev — deleting that
+    # symlink and breaking every `-stdlib=libc++` link with
+    # `/usr/bin/ld: cannot find -lc++`. Seen on GHA ubuntu-22.04 image
+    # 20260525: default clang is 14 but clang-15 is also present, so taking the
+    # highest version silently broke the build. Aligning to the default keeps
+    # compiler and its fully-installed libc++ in lockstep, no apt mutation.
     if command_exists "clang"; then
         CLANG_VER=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
         if [ "$CLANG_VER" -ge 12 ] 2>/dev/null; then
@@ -75,7 +78,15 @@ detect_installed_clang() {
             return 0
         fi
     fi
-    
+
+    # Fallback: highest installed versioned clang (no usable default `clang`).
+    for ver in 18 17 16 15 14 13 12; do
+        if command_exists "clang-$ver"; then
+            echo "$ver"
+            return 0
+        fi
+    done
+
     return 1
 }
 
@@ -136,15 +147,10 @@ select_linux_triplet() {
         # Use generic triplet and set CC/CXX to point to the installed version
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
 
-        # Always pin to the versioned binary (clang-${CLANG_VERSION}) rather
-        # than the unversioned `clang` alias. The alias can resolve to a
-        # DIFFERENT version than the highest-installed clang detected above:
-        # e.g. GHA ubuntu-22.04 image 20260525 ships `clang` → clang-14 while
-        # also providing clang-15. Using the alias there pairs a clang-14
-        # compiler with the libc++-${CLANG_VERSION}-dev (15) runtime installed
-        # below, and that mismatch breaks vcpkg's detect_compiler with a
-        # misleading "CMAKE_CXX_COMPILER not set" cascade. The versioned
-        # binary keeps compiler and libc++ in lockstep.
+        # CLANG_VERSION is the DEFAULT clang's version (see
+        # detect_installed_clang), so its libc++ stack — including the
+        # unversioned multiarch libc++.so the linker needs for `-lc++` — is
+        # already installed and consistent. Pin CC/CXX to that exact version.
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
         

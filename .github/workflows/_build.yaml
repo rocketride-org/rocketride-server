@@ -129,19 +129,6 @@ jobs:
           build-mode: manual
           queries: security-and-quality
 
-      # GHA ubuntu-22.04 image 20260525.x (rolled 2026-05-25) changed the
-      # unversioned `clang` alias from clang-15 → clang-14. The real fix is
-      # in scripts/compiler-unix.sh (pin CC/CXX to the versioned binary), but
-      # we also pin CC/CXX explicitly at the step env below as belt-and-
-      # suspenders, and dump compiler state here for visibility if it recurs.
-      # Safe to remove this diagnostic step once the image stabilises.
-      - name: Ubuntu compiler diagnostic
-        if: matrix.platform == 'ubuntu'
-        run: |
-          echo "clang (alias):   $(clang --version 2>&1 | head -1)"
-          echo "clang-15:        $(clang-15 --version 2>&1 | head -1)"
-          echo "cc resolves to:  $(readlink -f "$(command -v cc)" 2>/dev/null)"
-
       - name: Build
         # Pass the string inputs as env vars instead of template-interpolating
         # them into the run: body — GitHub expands ${{ ... }} before the shell
@@ -153,18 +140,11 @@ jobs:
         # variable, not the env var (env vars need $env:FULL_VERSION). Git
         # Bash is pre-installed on the GitHub-hosted Windows image, and
         # ./builder.cmd invokes correctly from bash.
-        #
-        # CC/CXX are scoped to Ubuntu so vcpkg's detect_compiler port can
-        # locate clang explicitly. EnableLanguage reads CC/CXX env before
-        # the PATH fallback, so this bypasses the broken chainload discovery
-        # without forcing the rocketride triplet to behave differently.
         shell: bash
         env:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
           BUILD_STAMP: ${{ inputs.build_stamp }}
-          CC: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang-15' || '' }}
-          CXX: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang++-15' || '' }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       - name: Test
