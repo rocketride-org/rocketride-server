@@ -89,6 +89,12 @@ export default defineConfig(({ command }) => {
 					// built app bundles at dist/server/static/shell/apps/*.
 					{ name: path.join(process.env.ROCKETRIDE_DIST_ROOT || path.resolve(__dirname, '../../dist'), 'server', 'static'), watch: false },
 				],
+				// Forward landing-page WebSocket connections to the engine.
+				// http-proxy-middleware accepts ws://, wss://, http://, and https:// targets
+				// with ws: true — no scheme normalisation needed.
+				proxy: {
+					'/api/chat': { target: env['ROCKETRIDE_URI'] ?? 'http://localhost:5565', ws: true, changeOrigin: true },
+				},
 			}),
 		},
 		plugins: [
