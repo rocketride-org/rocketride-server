@@ -159,12 +159,6 @@ function makeRunPytestAction(options = {}) {
                     '--ignore-glob', '**/test_*_full/**');
             }
 
-            if (!options.test_full) {
-                pytestArgs.push(
-                    '--ignore-glob', '**/test_*_full.py',
-                    '--ignore-glob', '**/test_*_full/**');
-            }
-
             // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
             const pytestOpts = options.pytest;
             const markersOpt = options.markers;
