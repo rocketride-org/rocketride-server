@@ -922,7 +922,11 @@ class WebServer:
         self._startTime = time.time()
 
         # Start the Uvicorn server
-        self.server.run()
+        try:
+            self.server.run()
+        except TypeError as e:
+            if "signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object" not in str(e):
+                raise
 
     async def serve(self):
         """
@@ -950,4 +954,8 @@ class WebServer:
         print(logo)
 
         # Start the Uvicorn server; this coroutine blocks until the server exits
-        await self.server.serve()
+        try:
+            await self.server.serve()
+        except TypeError as e:
+            if "signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object" not in str(e):
+                raise
