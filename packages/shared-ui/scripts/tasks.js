@@ -50,7 +50,7 @@ function makeTestAction() {
 			// output.
 			await execCommand(
 				'node',
-				['--test', '--test-reporter=spec', 'scripts'],
+				['--test', '--test-reporter=spec', 'scripts/*.test.mjs'],
 				{ task, cwd: APP_ROOT },
 			);
 		},
