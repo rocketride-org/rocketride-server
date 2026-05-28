@@ -24,7 +24,7 @@
 
 import { uploadAttachment, CHUNK_SIZE } from './uploadAttachment';
 
-describe('uploadAttachment (TDD §12.1)', () => {
+describe('uploadAttachment', () => {
 	function mkClient() {
 		let nextHandle = 0;
 		const writes: Array<{ handle: string; bytes: Uint8Array }> = [];

@@ -31,7 +31,7 @@ interface ChatInputProps {
 	/**
 	 * Send the user's message. The `attachments` arg is optional for
 	 * backwards compatibility with parents that have not yet been updated
-	 * to forward attachments (Slice C activation gating — see TDD §12.1).
+	 * to forward attachments (activation-gated).
 	 */
 	onSend: (message: string, attachments?: Attachment[]) => Promise<void>;
 	disabled: boolean;

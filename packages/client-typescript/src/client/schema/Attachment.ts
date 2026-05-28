@@ -27,7 +27,6 @@
  *
  * Distinct from `Doc` (text-oriented). Carries a filestore path; the
  * bytes live in the per-user filestore under the chat's directory.
- * See TDD §6.1.
  */
 export interface Attachment {
   /** uuid4 generated client-side at upload time. */

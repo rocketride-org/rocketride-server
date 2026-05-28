@@ -21,7 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Dispatcher contract: format: rocketride-attachment resolution (TDD §10.3, Q-H1, Q-H2).
+"""Dispatcher contract: format: rocketride-attachment resolution.
 
 These tests pin down the engine-side change that lights up multimodal tool
 calls: at ``tool.query`` the dispatcher caches @tool_function descriptors,
@@ -29,7 +29,7 @@ and at ``tool.invoke`` it walks the cached top-level ``inputSchema.properties``
 to swap any string-typed property declared as ``format: 'rocketride-attachment'``
 with a ``{path, mime, bytes}`` dict read from the per-account FileStore.
 
-Q-H2 is explicit: only the top-level ``properties`` are walked. Nested
+Only the top-level ``properties`` are walked. Nested
 objects, arrays of attachments, ``oneOf``/``anyOf``/``$ref`` are silently
 not resolved.
 """
@@ -111,7 +111,7 @@ def test_tool_invoke_resolves_attachment_path_to_bytes():
 
 
 def test_dispatcher_only_walks_top_level_properties():
-    """Q-H2: nested format: rocketride-attachment must NOT be resolved."""
+    """Nested format: rocketride-attachment must NOT be resolved."""
 
     class _Nested(IInstanceBase):
         @tool_function(

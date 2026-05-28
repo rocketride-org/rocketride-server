@@ -267,6 +267,7 @@ class AgentBase(ABC):
         *,
         role: Optional[str] = None,
         stop_words: Optional[List[str]] = None,
+        forward_attachments: bool = True,
     ) -> str:
         """
         Invoke the host LLM and return extracted, truncated text.
@@ -283,6 +284,16 @@ class AgentBase(ABC):
         carries its own role.  When `prompt` is messages, `role` is used to
         stamp the synthesized Question (defaults to ``''`` if not given).
 
+        `forward_attachments` controls whether the run-entry attachments are
+        propagated onto a *synthesized* Question (the `messages` branch).
+        Multimodal-capable drivers (langchain, deepagent) leave it ``True`` so
+        the model receives the attachment blocks.  Text-only frameworks whose
+        prompt assembly cannot carry multimodal content (crewai) pass
+        ``False`` so attachments are genuinely withheld from the LLM call —
+        otherwise the drop-and-warn at the driver layer would be cosmetic.
+        Ignored when `prompt` is a pre-built Question (caller's attachments
+        stand either way).
+
         This is the ONLY place in the agent package that builds engine
         envelopes.  Drivers never touch `IInvokeLLM` or construct
         `IInvokeLLM.Ask` directly.
@@ -293,6 +304,8 @@ class AgentBase(ABC):
             role: Role/persona string used when synthesizing a Question
                 from `messages`.  Ignored when `prompt` is already a Question.
             stop_words: Optional stop word list used to truncate returned text.
+            forward_attachments: Propagate run-entry attachments onto a
+                synthesized Question.  See above.
 
         Returns:
             Extracted model text, optionally truncated by stop words.
@@ -305,7 +318,8 @@ class AgentBase(ABC):
             transcript = messages_to_transcript(prompt)
             q = Question(role=role or '')
             q.addQuestion(transcript)
-            q.attachments = list(context.attachments)  # propagate from run-entry. TDD §8.1.
+            # Propagate from run-entry unless the driver opts out (text-only frameworks).
+            q.attachments = list(context.attachments) if forward_attachments else []
 
         result = context.llm.invoke(IInvokeLLM.Ask(question=q))
         return truncate_at_stop_words(extract_text(result), stop_words)
@@ -316,6 +330,7 @@ class AgentBase(ABC):
         prompt: Union[Question, Any],
         *,
         role: Optional[str] = None,
+        forward_attachments: bool = True,
     ) -> Any:
         """
         Invoke the host LLM and return the parsed JSON response.
@@ -336,6 +351,9 @@ class AgentBase(ABC):
                 or framework messages to flatten.
             role: Role/persona string used when synthesizing a Question
                 from `messages`.  Ignored when `prompt` is already a Question.
+            forward_attachments: Propagate run-entry attachments onto a
+                synthesized Question.  See ``call_llm`` for the rationale;
+                ignored when `prompt` is a pre-built Question.
 
         Returns:
             The parsed JSON object returned by the LLM (typically a dict).
@@ -348,7 +366,8 @@ class AgentBase(ABC):
             transcript = messages_to_transcript(prompt)
             q = Question(role=role or '')
             q.addQuestion(transcript)
-            q.attachments = list(context.attachments)  # propagate from run-entry. TDD §8.1.
+            # Propagate from run-entry unless the driver opts out (text-only frameworks).
+            q.attachments = list(context.attachments) if forward_attachments else []
 
         result = context.llm.invoke(IInvokeLLM.Ask(question=q))
         return result.getJson()

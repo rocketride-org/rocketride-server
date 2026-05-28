@@ -47,7 +47,7 @@ export interface QuestionHistory {
 	role: string;
 	/** The actual message content */
 	content: string;
-	/** Per-turn attachments. Absent on text-only turns; present on multimodal turns. TDD §6.3. */
+	/** Per-turn attachments. Absent on text-only turns; present on multimodal turns. */
 	attachments?: Attachment[];
 }
 

@@ -37,7 +37,6 @@ import jmespath
 from rocketlib import debug, error
 
 from ai.common.agent import AgentBase, AgentContext
-from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
 
 from .formatters import format_data
@@ -460,42 +459,13 @@ def _execute_wave_calls(
                     'total_chars': len(value),
                 }
 
-            # TDD §6.5 / §10.3 — fill any unset attachment-typed slot with a
-            # path-by-reference picked from AgentContext.attachments.  The
-            # dispatcher (Slice H) resolves the path to bytes before invoking
-            # the tool method.  LLM-decided args win via setdefault semantics.
-            try:
-                input_schema: Dict[str, Any] = {}
-                for _td in getattr(context.tools, 'list', None) or []:
-                    if (_td.get('name') if hasattr(_td, 'get') else getattr(_td, 'name', None)) == tool:
-                        _isch = _td.get('inputSchema') if hasattr(_td, 'get') else getattr(_td, 'inputSchema', None)
-                        if isinstance(_isch, dict):
-                            input_schema = _isch
-                        break
-                candidates = getattr(context, 'attachments', ()) or ()
-                picker_kwargs = pick_for_tool_call(
-                    input_schema=input_schema,
-                    candidates=candidates,
-                )
-                for _k, _v in picker_kwargs.items():
-                    if _k in args:
-                        continue
-                    args[_k] = _v
-                    # METRIC tool.call_with_attachment per slot the picker
-                    # actually filled (TDD §13).
-                    _mime = 'unknown'
-                    for _c in candidates:
-                        if getattr(_c, 'path', None) == _v:
-                            _mime = getattr(_c, 'mime', 'unknown')
-                            break
-                    logger.info(
-                        'METRIC tool.call_with_attachment tool_name=%s mime=%s',
-                        tool,
-                        _mime,
-                    )
-            except Exception:
-                # Picker is best-effort; never block a tool call on it.
-                pass
+            # NOTE: attachment-typed tool inputs are NOT forwarded for the
+            # RocketRide Wave. The Wave planner reasons over a plain-string
+            # prompt (it can't perceive attachments), so it cannot meaningfully
+            # decide which file a tool should act on. Tool-attachment forwarding
+            # is intentionally limited to perception-capable frameworks
+            # (deepagent/langchain). See
+            # claude/tasks/multimodal-manual-testing/DEFERRED-tool-attachment-routing.md
 
             # Regular tool — route through AgentBase.call_tool, which forwards
             # to context.tools.invoke (and ultimately the engine's control-plane

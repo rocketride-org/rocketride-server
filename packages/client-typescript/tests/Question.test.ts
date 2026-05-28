@@ -1,6 +1,6 @@
 import { Question, type Attachment } from '../src/client/schema';
 
-describe('Attachment schema (TDD §6.1)', () => {
+describe('Attachment schema', () => {
   test('Attachment object round-trips through Question.toDict / fromDict', () => {
     const att: Attachment = {
       attachment_id: '11111111-1111-1111-1111-111111111111',

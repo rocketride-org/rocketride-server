@@ -3,11 +3,11 @@
 """Pick attachments for tool calls based on inputSchema declarations.
 
 Each tool's input schema declares attachment-typed properties via
-``format: "rocketride-attachment"`` (TDD §6.5). The agent uses this
+``format: "rocketride-attachment"``. The agent uses this
 picker to select an Attachment from ``AgentContext.attachments`` for
 each such property, respecting ``x-rocketride-mimes`` patterns.
 Returns the filestore path (path-by-reference); the dispatcher
-(Slice H) resolves it to bytes before calling the tool method.
+resolves it to bytes before calling the tool method.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def pick_for_property(prop_schema: Dict[str, Any], candidates: Sequence[Attachme
 def pick_for_tool_call(input_schema: Dict[str, Any], candidates: Sequence[Attachment]) -> Dict[str, str]:
     """Return ``{prop_name: filestore_path}`` for every matched attachment slot.
 
-    Top-level walk only — mirrors the dispatcher's resolution scope
-    (TDD §10.3, Q-H2). Properties whose schema is not a dict, or that
+    Top-level walk only — mirrors the dispatcher's resolution scope.
+    Properties whose schema is not a dict, or that
     are not attachment-typed, or for which no candidate matches, are
     omitted from the returned mapping.
     """

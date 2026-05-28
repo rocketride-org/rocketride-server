@@ -25,5 +25,4 @@ from ai.common.llm_base import LLMBase
 
 
 class IInstance(LLMBase):
-    provider_shape = 'anthropic'
-    provider_name = 'anthropic'
+    pass

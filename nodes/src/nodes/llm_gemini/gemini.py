@@ -43,6 +43,11 @@ class Chat(ChatBase):
         >>> response = chat._chat('Hello, how are you?')
     """
 
+    # Selects the Gemini block-shape translator for attachment dispatch.
+    # Declared on the chat driver because that is the instance the dispatcher
+    # reads (a default of 'openai' here silently misroutes attachments).
+    provider_shape = 'gemini'
+
     _client: genai.Client
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -149,4 +154,9 @@ class Chat(ChatBase):
         response = self._client.models.generate_content(model=self._model, contents=prompt)
 
         # Extract and return the text response
+        return response.text
+
+    def _chat_blocks(self, parts):
+        """Send a multimodal parts list and return the response text."""
+        response = self._client.models.generate_content(model=self._model, contents=parts)
         return response.text

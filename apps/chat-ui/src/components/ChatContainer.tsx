@@ -23,7 +23,7 @@
  */
 
 import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { RocketRideClient, Chat } from 'rocketride';
+import { RocketRideClient, Chat, type Attachment } from 'rocketride';
 import { useRocketRideClient } from '../hooks/useRocketRide';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { ChatHeader } from './ChatHeader';
@@ -87,6 +87,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	// Initialize connection
 	const { isConnected, client } = useRocketRideClient(handleConnected, handleDisconnected, setStatusMessage);
 
+	// Ensure a Chat exists for the current session. Dedupes via creatingChatRef
+	// so concurrent callers (auto-resume fallback, paperclip upload, send) share
+	// one in-flight Chat.create.
+	const ensureChat = useCallback(async (): Promise<Chat | null> => {
+		if (!persistEnabled || !pipelineId || !client || !authToken) return null;
+		if (!creatingChatRef.current) {
+			creatingChatRef.current = (async () => {
+				try {
+					const created = await Chat.create({ client, token: authToken, pipelineId });
+					setCurrentChat(created);
+					return created;
+				} catch (err) {
+					console.warn('ChatContainer: Chat.create failed', err);
+					return null;
+				} finally {
+					creatingChatRef.current = null;
+				}
+			})();
+		}
+		return creatingChatRef.current;
+	}, [persistEnabled, client, authToken, pipelineId]);
+
 	// When persistence is on, auto-open the most recent chat ONCE per chat-ui
 	// session — so users land back in their last conversation after a window
 	// close/refresh.  Gated by a ref so subsequent transitions to currentChat=null
@@ -100,7 +122,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 		(async () => {
 			try {
 				const list = await client.chats.list({ pipelineId });
-				if (cancelled || list.length === 0) return;
+				if (cancelled) return;
+				if (list.length === 0) {
+					await ensureChat();
+					return;
+				}
 				list.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 				const recent = list[0];
 				if (!recent) return;
@@ -115,7 +141,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 		return () => {
 			cancelled = true;
 		};
-	}, [persistEnabled, client, pipelineId, authToken, hydrateFromChat]);
+	}, [persistEnabled, client, pipelineId, authToken, hydrateFromChat, ensureChat]);
 
 	const handleSelectChat = useCallback(
 		async (chatId: string) => {
@@ -132,13 +158,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	);
 
 	const handleNewChat = useCallback(() => {
-		// Defer creating the on-disk chat until the first send.
 		setCurrentChat(null);
 		setMessages([]);
 		hasWelcomedRef.current = false;
 		addSystemMessage("Hello! I'm your RocketRide assistant. How can I help you today?");
 		hasWelcomedRef.current = true;
-	}, [addSystemMessage, setMessages]);
+		void ensureChat();
+	}, [addSystemMessage, setMessages, ensureChat]);
 
 	const handleRenameChat = useCallback(
 		async (chatId: string, title: string) => {
@@ -163,18 +189,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 				if (currentChat?.id === chatId) {
 					setCurrentChat(null);
 					setMessages([]);
+					void ensureChat();
 				}
 				setListRefreshKey((k) => k + 1);
 			} catch (err) {
 				console.warn('ChatContainer: delete failed', err);
 			}
 		},
-		[client, authToken, currentChat, setMessages]
+		[client, authToken, currentChat, setMessages, ensureChat]
 	);
 
 	// Send message handler — creates a Chat lazily when persistence is on.
 	const handleSendMessage = useCallback(
-		async (text: string) => {
+		async (text: string, attachments?: Attachment[]) => {
 			if (!client || !authToken) {
 				addSystemMessage('Not connected. Please wait...');
 				return;
@@ -197,7 +224,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 				}
 				chat = await creatingChatRef.current;
 			}
-			await sendMessage(text, client, authToken, chat);
+			await sendMessage(text, client, authToken, chat, attachments);
 			if (chat) setListRefreshKey((k) => k + 1);
 		},
 		[client, authToken, sendMessage, addSystemMessage, persistEnabled, pipelineId, currentChat]
@@ -206,8 +233,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 	const handleClearChat = useCallback(() => {
 		clearMessages();
 		// When persistence is on, "clear" should start a fresh chat, not nuke the prior on-disk turns.
-		if (persistEnabled) setCurrentChat(null);
-	}, [clearMessages, persistEnabled]);
+		if (persistEnabled) {
+			setCurrentChat(null);
+			void ensureChat();
+		}
+	}, [clearMessages, persistEnabled, ensureChat]);
 
 	// Show error panel when disconnected and we have an error (after 5 attempts) or a specific error message (e.g. auth failed)
 	if (!isConnected && (statusMessage === 'CONNECTION_FAILED' || connectionErrorMessage)) {
@@ -239,7 +269,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 						</div>
 					</div>
 				</div>
-				<ChatInput onSend={handleSendMessage} disabled={true} />
+				<ChatInput onSend={handleSendMessage} disabled={true} {...(client ? { client } : {})} {...(currentChat?.id ? { chatId: currentChat.id } : {})} />
 			</div>
 		);
 	}
@@ -252,7 +282,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ authToken, pipelin
 			<div style={showSidebar ? { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 } : undefined}>
 				<ChatHeader isConnected={isConnected} onClearChat={handleClearChat} />
 				<ChatMessages messages={messages} isTyping={isTyping} statusMessage={statusMessage} />
-				<ChatInput onSend={handleSendMessage} disabled={!isConnected} />
+				<ChatInput onSend={handleSendMessage} disabled={!isConnected} {...(client ? { client } : {})} {...(currentChat?.id ? { chatId: currentChat.id } : {})} />
 			</div>
 		</div>
 	);

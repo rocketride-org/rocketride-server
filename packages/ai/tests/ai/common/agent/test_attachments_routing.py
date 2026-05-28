@@ -6,12 +6,12 @@
 """
 Contract tests for ``AgentContext.attachments`` propagation.
 
-Covers TDD §8.1 — the entry-point ``Question.attachments`` must be stamped
+The entry-point ``Question.attachments`` must be stamped
 onto ``AgentContext`` at the top of ``AgentBase.run_agent`` and threaded
 onto every synthesized Question in ``call_llm`` / ``call_llm_json`` so the
 provider-side translators in LLMBase can auto-forward them.
 
-Per Q-D1 the propagation is always-assign: even an empty list is stamped
+The propagation is always-assign: even an empty list is stamped
 onto the synthesized Question so downstream code can rely on the attribute
 existing.
 
@@ -49,7 +49,7 @@ from ai.common.agent.agent import AgentBase  # noqa: E402
 from ai.common.agent._internal.host import AgentContext  # noqa: E402
 
 
-# Local mirror of Slice A's Attachment schema. The agent layer never
+# Local mirror of the Attachment schema. The agent layer never
 # introspects Attachment fields — it just carries the list through — so a
 # duck-typed local definition is enough and avoids a cross-package import
 # from client-python into the ai test tree.
@@ -117,7 +117,7 @@ def _make_attachment(name: str) -> Attachment:
 
 def test_agent_context_stamps_attachments_from_question(monkeypatch):
     """Question.attachments must be visible on AgentContext.attachments
-    inside the driver's _run. Per TDD §8.1.
+    inside the driver's _run.
     """
     agent = _DummyAgent()
     invoker = _make_invoker()
@@ -148,8 +148,8 @@ def test_agent_context_stamps_attachments_from_question(monkeypatch):
 
 def test_call_llm_threads_attachments_onto_synthesized_question(monkeypatch):
     """When call_llm synthesizes a Question from a message list it must
-    stamp AgentContext.attachments onto that Question — always-assign per
-    Q-D1, even if the list is empty.
+    stamp AgentContext.attachments onto that Question — always-assign,
+    even if the list is empty.
     """
     agent = _DummyAgent()
     invoker = _make_invoker()

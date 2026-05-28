@@ -37,10 +37,9 @@ export interface Message {
 	resultKey?: string | undefined;
 	sseType?: string;
 	/**
-	 * Optional attachments on a user turn (Slice C of multimodal chat
-	 * sessions). Populated by the chat container when the user submits a
-	 * message with files; rendered as pills on the user bubble. See
-	 * TDD §12.1.
+	 * Optional attachments on a user turn. Populated by the chat container
+	 * when the user submits a message with files; rendered as pills on the
+	 * user bubble.
 	 */
 	attachments?: import('./Attachment').Attachment[];
 }

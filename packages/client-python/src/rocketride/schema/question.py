@@ -222,7 +222,7 @@ class QuestionHistory(BaseModel):
     content: str  # The message content
     attachments: Optional[List[Attachment]] = Field(
         default=None,
-        description='Per-turn attachments; None on text-only turns. TDD §6.3.',
+        description='Per-turn attachments; None on text-only turns.',
     )
 
 
@@ -408,7 +408,7 @@ class Question(BaseModel):
     )
     attachments: List[Attachment] = Field(
         default_factory=list,
-        description='Binary attachments on this user turn. TDD §6.2.',
+        description='Binary attachments on this user turn.',
     )
 
     @field_validator('chat_id')

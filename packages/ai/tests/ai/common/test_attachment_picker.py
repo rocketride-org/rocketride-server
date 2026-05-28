@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Aparavi Software AG
 # SPDX-License-Identifier: MIT
-"""Attachment picker contract (TDD §6.5, §10.3)."""
+"""Attachment picker contract."""
 
 from ai.common.schema import Attachment
 from ai.common.attachment_picker import pick_for_property, pick_for_tool_call

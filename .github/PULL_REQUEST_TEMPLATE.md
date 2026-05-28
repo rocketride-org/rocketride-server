@@ -20,8 +20,6 @@
 - [ ] No secrets or credentials included
 - [ ] Wiki updated (if applicable)
 - [ ] Breaking changes documented (if applicable)
-- [ ] For any new `Question(...)` constructor call inside an agent integration: does it inherit `attachments` from the entry-point question, or is the drop documented? (TDD §8.1, Slice D)
-- [ ] For new multimodal `@tool_function` tools: are all `format: "rocketride-attachment"` markers at the top level of `inputSchema.properties` (no nesting, no arrays)? (TDD §10.3, Q-H2)
 
 ## Linked Issue
 

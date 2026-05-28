@@ -26,7 +26,5 @@
  * Re-export of the canonical `Attachment` type from the RocketRide TypeScript
  * client SDK, so chat-ui code can import it via `@apptypes/Attachment` /
  * `../types/Attachment` without depending on SDK internals.
- *
- * See TDD §6.1.
  */
 export type { Attachment } from 'rocketride';

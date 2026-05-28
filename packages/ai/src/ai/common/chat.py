@@ -19,7 +19,7 @@ from rocketlib import debug
 
 # Telemetry logger — METRIC-prefixed structured lines emitted from this
 # module are picked up by a follow-up adapter that fans them out to the
-# MetricsManager surface (TDD §13). Privacy: MIME + counts only, never
+# MetricsManager surface. Privacy: MIME + counts only, never
 # filenames or paths.
 _telemetry_logger = logging.getLogger(__name__)
 from ai.common.schema import Answer, Question
@@ -47,11 +47,11 @@ class ChatBase:
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
 
-    # Provider block-shape selector for Question.attachments dispatch (TDD §7.2).
+    # Provider block-shape selector for Question.attachments dispatch.
     # Subclasses override; default 'openai' because most providers in the catalog
     # are OpenAI-compatible. Recognized values: 'openai' | 'anthropic' | 'gemini'
-    # | 'bedrock'. Slice F adds the other three translators; Slice G overrides
-    # this on each per-provider Chat subclass.
+    # | 'bedrock'. The non-OpenAI shapes each supply their own translator, and
+    # per-provider Chat subclasses override this value.
     provider_shape: str = 'openai'
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -72,7 +72,7 @@ class ChatBase:
             ConfigurationError: If the provider configuration is invalid or missing
         """
         # Remember the provider name for drop-and-warn telemetry tagging when
-        # a Question carries attachments the shape cannot represent (TDD §7.3).
+        # a Question carries attachments the shape cannot represent.
         self._provider = provider
 
         # Load the provider-specific configuration using the Config utility
@@ -350,7 +350,7 @@ class ChatBase:
         Default implementation refuses, so a node that advertises a
         ``provider_shape`` without overriding this method fails loudly rather
         than silently dropping every attachment back to text-only. Provider
-        Chat subclasses with multimodal support override this in Slice G.
+        Chat subclasses with multimodal support override this.
 
         Args:
             blocks: The translated content list for the provider (e.g. the
@@ -361,7 +361,7 @@ class ChatBase:
         """
         raise NotImplementedError(
             f"Provider '{self._provider}' does not support attachment blocks; "
-            'override _chat_blocks on the Chat subclass (TDD §7.2).'
+            'override _chat_blocks on the Chat subclass.'
         )
 
     def chat_string(self, prompt: str) -> str:
@@ -429,39 +429,20 @@ class ChatBase:
     def _get_file_store(self):
         """Return the per-account FileStore used to read attachment bytes.
 
-        ChatBase doesn't construct one itself; per TDD §7.1 the LLM node
-        injects ``self._file_store`` (Slice G). Until then, fall back to
-        resolving via :mod:`ai.account.store` using the ambient
-        ``ROCKETRIDE_CLIENT_ID`` env var — same boundary used by
-        ``AgentBase._read_chat_jsonl_bytes``. Returns an object exposing
+        ChatBase doesn't construct one itself; the LLM node injects
+        ``self._file_store``. Until then, fall back to the shared builder
+        that resolves via :mod:`ai.account.store` using the ambient
+        ``ROCKETRIDE_CLIENT_ID`` env var (the same fallback tool nodes use
+        for attachment resolution). Returns an object exposing
         ``read_bytes(path) -> bytes`` (sync).
         """
         injected = getattr(self, '_file_store', None)
         if injected is not None:
             return injected
 
-        import asyncio
-        import os
+        from ai.common.file_store import build_sync_account_file_store
 
-        from ai.account.store import Store
-
-        client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
-        if not client_id:
-            raise RuntimeError('ROCKETRIDE_CLIENT_ID env var is missing; cannot resolve filestore for attachments')
-        async_fs = Store.create().get_file_store(client_id)
-
-        class _SyncFileStoreShim:
-            def __init__(self, inner):
-                self._inner = inner
-
-            def read_bytes(self, path: str) -> bytes:
-                try:
-                    asyncio.get_running_loop()
-                except RuntimeError:
-                    return asyncio.run(self._inner.read(path))
-                raise RuntimeError('ChatBase attachment read cannot run inside an active event loop')
-
-        return _SyncFileStoreShim(async_fs)
+        return build_sync_account_file_store()
 
     def _chat_with_attachments(self, question: Question, attachments) -> str:
         """Dispatch a Question with attachments through the provider-shape translator.
@@ -469,8 +450,7 @@ class ChatBase:
         Picks the translator by ``self.provider_shape``, reads each
         attachment's bytes via the per-account FileStore, builds the
         provider-native content blocks, and invokes ``_chat_blocks``.
-        Unsupported MIMEs drop+warn per TDD §7.3; FileStore IO errors
-        propagate per Q-E1.
+        Unsupported MIMEs drop+warn; FileStore IO errors propagate.
         """
         from ai.common.llm_translate import (
             translate_anthropic_shape,
@@ -486,7 +466,7 @@ class ChatBase:
             for d in dropped:
                 # Structured METRIC log line — picked up by the follow-up
                 # logging-to-metrics adapter. MIME only, no path/filename
-                # (TDD §13 privacy invariant).
+                # (privacy invariant).
                 _telemetry_logger.info(
                     'METRIC attachment.dropped_unsupported provider=%s mime=%s',
                     d.provider,
@@ -495,7 +475,7 @@ class ChatBase:
 
         def _log_forwarded(provider_name, kept_count, sample_mimes):
             # One emission per surviving attachment per send. Tagged with
-            # provider and the per-attachment MIME so the §13 counter can
+            # provider and the per-attachment MIME so the counter can
             # be aggregated by both axes downstream.
             for mime in sample_mimes:
                 _telemetry_logger.info(
@@ -568,12 +548,12 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
-        # Per-shape attachment dispatch (TDD §7.1, §7.2). Backwards-compatible:
+        # Per-shape attachment dispatch. Backwards-compatible:
         # text-only Questions take the existing single-string fast path so no
-        # production behavior changes until Slice G wires per-node shapes.
-        # FileStore IO errors raise per Q-E1; unsupported MIMEs drop+warn.
+        # production behavior changes until per-node shapes are wired.
+        # FileStore IO errors raise; unsupported MIMEs drop+warn.
         attachments = list(getattr(question, 'attachments', []) or [])
-        # Per TDD §13 / Q-J1: emit count_per_message on every send (including
+        # Emit count_per_message on every send (including
         # zero) so the orphan-volume signal (upload_starts − Σ counts) is
         # computable from production logs without a reaper in v1.
         _telemetry_logger.info(

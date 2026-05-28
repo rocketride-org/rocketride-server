@@ -30,12 +30,33 @@ from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInv
 from .error import APERR, Ec
 
 # Telemetry surface — METRIC-prefixed log lines are picked up by a
-# follow-up metrics adapter (TDD §13).  Privacy: tool_name + MIME only,
+# follow-up metrics adapter.  Privacy: tool_name + MIME only,
 # never filename or path.
 _telemetry_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
+
+
+# Optional host-provided factory for resolving a per-account FileStore on
+# tool nodes.  rocketlib stays dependency-free: the ``ai`` layer registers a
+# builder here at import time (see ai.common.__init__) so attachment-accepting
+# tools can read bytes the same way the chat node does, without rocketlib ever
+# importing the account layer.  Unregistered -> tool attachment resolution
+# no-ops, which is the pre-existing behavior.
+_attachment_file_store_factory: Optional[Callable[[Any], Any]] = None
+
+
+def set_attachment_file_store_factory(factory: Optional[Callable[[Any], Any]]) -> None:
+    """Register (or clear) the per-account FileStore factory for tool nodes.
+
+    ``factory(node) -> file_store_or_None`` is consulted by
+    ``IInstanceBase._get_attachment_file_store`` as a last resort, after any
+    explicitly injected store. Keeps the dependency direction one-way
+    (``ai`` -> ``rocketlib``).
+    """
+    global _attachment_file_store_factory
+    _attachment_file_store_factory = factory
 
 
 # =========================================================================
@@ -1170,7 +1191,7 @@ class IInstanceBase:
             descriptors = self._build_tool_descriptors(methods)
             descriptors.extend(self._tool_query_dynamic())
 
-            # Cache by name for invoke-time schema walks (TDD §10.3, Q-H1).
+            # Cache by name for invoke-time schema walks.
             # We need the per-tool inputSchema at tool.invoke time to know
             # which top-level properties are declared as
             # ``format: 'rocketride-attachment'`` and therefore need their
@@ -1199,7 +1220,7 @@ class IInstanceBase:
 
             # Pre-resolve any format: 'rocketride-attachment' string paths
             # to {path, mime, bytes} dicts before the tool method sees them
-            # (TDD §10.3, Q-H2 — top-level properties only).
+            # (top-level properties only).
             self._resolve_attachment_inputs(tool_name, input_obj)
 
             # Try static @tool_function methods first
@@ -1231,7 +1252,7 @@ class IInstanceBase:
     # ``{path, mime, bytes}`` before the tool method runs, so tool
     # authors never write FileStore boilerplate.
     #
-    # Q-H2: only top-level properties are walked. Nested objects,
+    # Only top-level properties are walked. Nested objects,
     # arrays of attachments, oneOf/anyOf/$ref are silently NOT
     # resolved — keep the surface narrow until we have real demand.
     # ------------------------------------------------------------------
@@ -1286,7 +1307,7 @@ class IInstanceBase:
             mime = mimes[0] if mimes else None
             input_obj[prop_name] = {'path': path, 'mime': mime, 'bytes': data}
             # METRIC tool.attachment_resolved — fired per successfully
-            # resolved attachment-typed slot (TDD §13).  Privacy: tool
+            # resolved attachment-typed slot.  Privacy: tool
             # name + property name only, never the path itself.
             _telemetry_logger.info(
                 'METRIC tool.attachment_resolved tool_name=%s prop=%s',
@@ -1300,7 +1321,7 @@ class IInstanceBase:
         Resolution order:
 
         1. ``self._file_store`` — explicitly injected by the wiring layer
-           (LLM/agent nodes in Slice G; the engine instance in production).
+           (LLM/agent nodes; the engine instance in production).
         2. ``self.instance.fileStore`` — engine-provided handle, if any.
         3. ``None`` — caller must handle gracefully; see
            ``_resolve_attachment_inputs`` for the contract.
@@ -1318,6 +1339,10 @@ class IInstanceBase:
             fs = getattr(instance, 'fileStore', None) or getattr(instance, '_file_store', None)
             if fs is not None:
                 return fs
+        # Last resort: a host-registered factory (the ai layer's per-account
+        # FileStore builder).  None when no host has registered one.
+        if _attachment_file_store_factory is not None:
+            return _attachment_file_store_factory(self)
         return None
 
     # ------------------------------------------------------------------

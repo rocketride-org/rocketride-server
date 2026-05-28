@@ -43,10 +43,10 @@ from ai.common.schema import Question
 logger = logging.getLogger(__name__)
 
 # Per-process set of run_ids for which we have already emitted the
-# "Wave does not support multimodal forwarding" warning.  TDD §8.3 — Wave's
+# "Wave does not support multimodal forwarding" warning.  Wave's
 # q.addInstruction() / Question.addQuestion() prompt assembly is plain text;
-# forwarding multimodal blocks requires upstream framework work deferred
-# per TDD §16.  v1: drop attachments from the LLM call and warn at most
+# forwarding multimodal blocks requires upstream framework work that is
+# deferred.  v1: drop attachments from the LLM call and warn at most
 # once per run so the multi-wave loop does not spam the log.
 _attachment_drop_warned_runs: Set[str] = set()
 
@@ -214,14 +214,14 @@ def _build_wave_question(
     tools_block = (tools_block + '\n' + peek_descriptor) if tools_block != '(none)' else peek_descriptor
     q.addInstruction('Available Tools', tools_block)
 
-    # TDD §8.3 — Wave's prompt assembly is plain text via q.addInstruction()
+    # Wave's prompt assembly is plain text via q.addInstruction()
     # / q.addQuestion().  Forwarding multimodal blocks to the LLM call would
-    # require upstream framework work deferred per TDD §16.  v1: warn once
+    # require upstream framework work that is deferred.  v1: warn once
     # per run and let the picker (tools path) still satisfy attachment-typed
     # tool inputs from AgentContext.attachments.
     attachments = getattr(context, 'attachments', ()) or ()
     if attachments:
-        # Structured METRIC line per TDD §13. One emission per dropped
+        # Structured METRIC line. One emission per dropped
         # attachment so downstream aggregation can split by MIME. Privacy:
         # MIME only, never filename or path.
         for _att in attachments:

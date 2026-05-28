@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Aparavi Software AG
 # SPDX-License-Identifier: MIT
-"""Multimodal round-trip per FileStore backend (TDD §14.2).
+"""Multimodal round-trip per FileStore backend.
 
 Exercises the end-to-end Feature 2 happy path against each supported
 FileStore backend:
@@ -56,7 +56,7 @@ def _filestore_available_for(backend: str) -> bool:
 def test_upload_persist_reload_delete_round_trip(backend_url: str) -> None:
     """Stub: round-trip the full upload→persist→reload→delete cycle.
 
-    Steps the live version exercises (TDD §14.2):
+    Steps the live version exercises:
 
       1. Build a per-account FileStore against ``backend_url``.
       2. Upload a ~5 MB binary payload through the chunked write path
@@ -77,5 +77,5 @@ def test_upload_persist_reload_delete_round_trip(backend_url: str) -> None:
     if not _filestore_available_for(backend_url):
         pytest.skip(f'{backend_url} credentials not present in env')
     pytest.skip(
-        'Live FileStore + engine harness not yet wired; placeholder pending Slice J follow-up.',
+        'Live FileStore + engine harness not yet wired; placeholder pending follow-up.',
     )

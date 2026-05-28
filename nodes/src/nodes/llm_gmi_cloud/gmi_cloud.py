@@ -27,6 +27,7 @@ from typing import Any, Dict
 from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 
@@ -86,3 +87,8 @@ class Chat(ChatBase):
             return ValueError(f'GMI Cloud API error: {error}')
         else:
             return super().map_exception(error)
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

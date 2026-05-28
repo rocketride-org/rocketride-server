@@ -3,7 +3,7 @@
 """Attachment schema for binary attachments on chat messages.
 
 Distinct from Doc (text-oriented). Carries a filestore path; the bytes
-live in the per-user filestore under the chat's directory. See TDD §6.1.
+live in the per-user filestore under the chat's directory.
 """
 
 from pydantic import BaseModel, Field

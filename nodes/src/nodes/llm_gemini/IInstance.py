@@ -25,5 +25,4 @@ from ai.common.llm_base import LLMBase
 
 
 class IInstance(LLMBase):
-    provider_shape = 'gemini'
-    provider_name = 'gemini'
+    pass

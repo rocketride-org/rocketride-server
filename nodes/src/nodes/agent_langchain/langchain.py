@@ -178,9 +178,9 @@ def _build_langchain_tools(
         def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
             tool_name = _safe_str(getattr(self, 'name', ''))
 
-            # TDD §6.5 / §10.3 — fill any unset attachment-typed slot with a
+            # Fill any unset attachment-typed slot with a
             # path-by-reference picked from AgentContext.attachments. The
-            # dispatcher (Slice H) resolves the path to bytes before invoking
+            # dispatcher resolves the path to bytes before invoking
             # the tool method. LLM-decided args win via setdefault semantics.
             try:
                 input_schema = getattr(self, '_rr_input_schema', None) or {}
@@ -194,7 +194,7 @@ def _build_langchain_tools(
                         continue
                     framework_args[_k] = _v
                     # METRIC tool.call_with_attachment per slot we actually
-                    # filled from the picker (TDD §13). Lookup the MIME of
+                    # filled from the picker. Lookup the MIME of
                     # the source attachment whose path matches.
                     _mime = 'unknown'
                     for _c in candidates:

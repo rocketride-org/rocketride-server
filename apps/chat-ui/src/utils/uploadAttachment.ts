@@ -24,7 +24,7 @@
 
 import type { Attachment } from '../types/Attachment';
 
-/** 2 MB — half of FileStore.MAX_CHUNK_SIZE (4 MB) to leave protocol headroom. TDD §12.1. */
+/** 2 MB — half of FileStore.MAX_CHUNK_SIZE (4 MB) to leave protocol headroom. */
 export const CHUNK_SIZE = 2 * 1024 * 1024;
 
 /**
@@ -54,7 +54,7 @@ function extFromFilename(filename: string, mime: string): string {
  * `Attachment` record ready to attach to a `chat.send()` turn.
  *
  * The handle is always closed (success or failure) to avoid leaks on the
- * server side. See TDD §12.1.
+ * server side.
  */
 export async function uploadAttachment(opts: {
 	client: UploadClient;
@@ -70,8 +70,8 @@ export async function uploadAttachment(opts: {
 
 	// METRIC attachment.upload_start — fired before the first write so
 	// the orphan-volume signal (upload_starts − Σ count_per_message)
-	// is computable from production logs without a reaper in v1
-	// (TDD §13, Q-J1).  Privacy: MIME + size only, never filename.
+	// is computable from production logs without a reaper in v1.
+	// Privacy: MIME + size only, never filename.
 	console.info(
 		`METRIC attachment.upload_start mime=${mime} size_bytes=${bytes.byteLength}`,
 	);

@@ -223,3 +223,16 @@ downloads/maven-3.9.6.tar.gz
 # One of the python modules keeps installing this
 include/python3.12/greenlet/greenlet.h
 .rocketride/
+
+.claude-flow/
+.mcp.json
+CLAUDE.md
+claude/
+pipelines/
+test.json
+
+# Test/build artifacts
+jest_dx/
+pytest-of-*/
+uv.lock
+uv-*.lock

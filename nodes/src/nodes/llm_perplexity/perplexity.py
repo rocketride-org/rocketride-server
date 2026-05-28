@@ -41,6 +41,7 @@ from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.validation import validate_prompt
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 
@@ -201,6 +202,8 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Process a question and return an answer with retry logic."""
+        if getattr(question, 'attachments', None):
+            return super().chat(question)
         prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
@@ -231,3 +234,8 @@ class Chat(ChatBase):
         # All retries failed, format and raise the error
         user_friendly_error = self._format_user_error(str(last_error))
         raise Exception(user_friendly_error)
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

@@ -7,8 +7,8 @@
 
 Each translator turns a (prompt_text, attachments, file_store) triple into
 the provider's native content-block list. Unsupported attachment x provider
-pairs are dropped and reported per TDD §7.3. FileStore read failures
-raise per Q-E1 (data-plane breakage propagates).
+pairs are dropped and reported. FileStore read failures raise
+(data-plane breakage propagates).
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class AttachmentDropReport:
 
 # --- OpenAI shape -------------------------------------------------------
 #
-# Covers OpenAI-compat providers per TDD §9: openai, groq, mistral, fireworks,
+# Covers OpenAI-compat providers: openai, groq, mistral, fireworks,
 # together, cerebras, deepseek (and any other ``messages[0].content`` block
 # API). See ROCKETRIDE_COMPONENT_REFERENCE for provider list.
 
@@ -63,7 +63,7 @@ def translate_openai_shape(
 
     Attachments first, prompt text last (mirrors OpenAI examples). FileStore
     reads happen here; bytes are base64-inline. Drop-and-warn for unsupported
-    MIMEs. File-store IO errors propagate per Q-E1.
+    MIMEs. File-store IO errors propagate.
 
     Args:
         prompt_text: The synthesized question text.
@@ -95,7 +95,7 @@ def translate_openai_shape(
             blocks.append(
                 {
                     'type': 'file',
-                    'file': {'file_data': b64, 'filename': att.filename},
+                    'file': {'file_data': f'data:{att.mime};base64,{b64}', 'filename': att.filename},
                 }
             )
         elif att.mime in _OPENAI_AUDIO_FORMATS:
@@ -125,7 +125,7 @@ def translate_openai_shape(
 # --- Anthropic shape ----------------------------------------------------
 #
 # Native ``messages[*].content`` block list. Images and PDFs ride as
-# base64 sources; audio/video have no native carriage (TDD §7.2).
+# base64 sources; audio/video have no native carriage.
 
 _ANTHROPIC_IMAGE_MIMES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
 _ANTHROPIC_DOCUMENT_MIMES = {'application/pdf'}
@@ -141,7 +141,7 @@ def translate_anthropic_shape(
 
     Images become ``{'type': 'image', 'source': {'type': 'base64', ...}}``;
     PDFs become ``{'type': 'document', 'source': {'type': 'base64', ...}}``.
-    Unsupported MIMEs drop+warn. FileStore IO errors propagate per Q-E1.
+    Unsupported MIMEs drop+warn. FileStore IO errors propagate.
     """
     blocks: List[Dict[str, Any]] = []
     dropped: List[AttachmentDropReport] = []
@@ -213,7 +213,7 @@ def translate_gemini_shape(
 
     Every supported modality (image/pdf/audio/video) emits an
     ``{'inlineData': {'mimeType': ..., 'data': base64}}`` part. Unsupported
-    MIMEs drop+warn. FileStore IO errors propagate per Q-E1.
+    MIMEs drop+warn. FileStore IO errors propagate.
     """
     parts: List[Dict[str, Any]] = []
     dropped: List[AttachmentDropReport] = []
@@ -276,7 +276,7 @@ def translate_bedrock_shape(
 
     Images, documents, and videos each become their typed Converse block
     with ``source.bytes`` as raw bytes (not base64). Unsupported MIMEs
-    drop+warn. FileStore IO errors propagate per Q-E1.
+    drop+warn. FileStore IO errors propagate.
     """
     blocks: List[Dict[str, Any]] = []
     dropped: List[AttachmentDropReport] = []

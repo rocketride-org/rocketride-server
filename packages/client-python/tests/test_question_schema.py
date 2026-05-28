@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Aparavi Software AG
 # SPDX-License-Identifier: MIT
-"""Unit tests for Attachment schema and Question.attachments round-trip (TDD §6.1, §6.2, §6.3)."""
+"""Unit tests for Attachment schema and Question.attachments round-trip."""
 
 from rocketride.schema import Attachment, Question, QuestionHistory
 

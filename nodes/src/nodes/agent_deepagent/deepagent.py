@@ -176,10 +176,13 @@ def _build_deepagent_tools(
         def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
             tool_name = _safe_str(getattr(self, 'name', ''))
 
-            # TDD §6.5 / §10.3 — fill any unset attachment-typed slot with a
-            # path-by-reference picked from AgentContext.attachments. The
-            # dispatcher (Slice H) resolves the path to bytes before invoking
-            # the tool method. LLM-decided args win via setdefault semantics.
+            # Fill every attachment-typed slot with a path-by-reference picked
+            # from AgentContext.attachments, OVERRIDING any value the model
+            # supplied: the model can't know real filestore paths and will
+            # hallucinate one (e.g. file:/mnt/data/<hash>.png), so the picker
+            # owns these slots. pick_for_tool_call returns only attachment-typed
+            # slots, so the model's non-attachment args are left untouched. The
+            # dispatcher resolves the path to bytes before invoking the method.
             try:
                 input_schema = getattr(self, '_rr_input_schema', None) or {}
                 candidates = getattr(context, 'attachments', ()) or ()
@@ -188,11 +191,9 @@ def _build_deepagent_tools(
                     candidates=candidates,
                 )
                 for _k, _v in picker_kwargs.items():
-                    if _k in framework_args:
-                        continue
                     framework_args[_k] = _v
                     # METRIC tool.call_with_attachment per slot we actually
-                    # filled from the picker (TDD §13).
+                    # filled from the picker.
                     _mime = 'unknown'
                     for _c in candidates:
                         if getattr(_c, 'path', None) == _v:

@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Per-provider-shape attachment translator tests (TDD §7.2, §7.3)."""
+"""Per-provider-shape attachment translator tests."""
 
 import base64
 from unittest.mock import MagicMock
