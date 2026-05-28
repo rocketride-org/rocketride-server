@@ -37,7 +37,7 @@ git checkout develop && git pull upstream develop
 
 ## 2. Branch from an Issue
 
-Every PR must link to an issue, and branch names must follow `feat/RR-<issue#>-<desc>` (enforced).
+Every PR must link to an issue, and branch names must follow `<type>/RR-<issue#>-<desc>` (enforced), where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, or `hotfix`. Adding a node is a feature, so this guide uses `feat`.
 
 Open a GitHub issue, then:
 
