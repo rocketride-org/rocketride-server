@@ -132,12 +132,9 @@ class DataServer(DAPBase):
         # Create the transport and accept the connection
         transport = TransportWebSocket()
 
-        # Allocate a new connection. We do NOT pass `target=self._target` here:
-        # DataConn reads the target lazily via its own property delegating back
-        # to this server's `_target`, so connections that arrive before the
-        # source node binds `state.target` still resolve correctly once the
-        # source runs. Snapshotting here used to lock in `None` for the
-        # connection's lifetime (Ubuntu CI race producing empty `{}` results).
+        # Do NOT pass `target=self._target` — DataConn reads it lazily via
+        # its own property. Snapshotting here used to lock in `None` when
+        # the WebSocket opened before the source bound `state.target`.
         conn = DataConn(server=self, transport=transport)
 
         # Signal we are connected
