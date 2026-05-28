@@ -87,7 +87,8 @@ class TrOCRLoader(BaseLoader):
         # is installed and any conflicting opencv packages are removed
         from ai.common.opencv import cv2  # noqa: F401
 
-        from craft_text_detector import Craft
+        # disable contract check for craft_text_detector due to opencv conflict (see README)
+        from craft_text_detector import Craft  # contract-check: ignore  requirements_trocr.txt is `disable`d
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
         from ai.common.torch import torch
 

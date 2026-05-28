@@ -53,7 +53,8 @@ except Exception:
 
 # 3) Disable real token counting ONLY for Claude models to avoid transformer usage
 try:
-    import langchain_core.utils.tokenization as _tok  # type: ignore
+    # tokenization is optional, ignore it contract-check
+    import langchain_core.utils.tokenization as _tok  # type: ignore  # contract-check: ignore
 
     _orig_get_token_ids = _tok.get_token_ids
 

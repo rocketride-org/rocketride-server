@@ -1,3 +1,4 @@
+# contract-check: skip-install  reason: ~400 MB of ASR deps (ctranslate2, av, onnxruntime) for an opt-in feature. PR lane skips; nightly --install-all installs and verifies.
 # Requirements for Whisper loader
 # Direct imports only
 

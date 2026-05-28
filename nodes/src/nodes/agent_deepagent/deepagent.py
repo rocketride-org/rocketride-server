@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -105,6 +106,14 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
 
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
+        async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+            # Async hook for LangGraph's async path.  Bridges the blocking engine
+            # LLM RPC off the event loop so concurrent subagent LLM calls don't
+            # serialize on the orchestrator's loop.  The 3-attempt JSON-envelope
+            # retry loop stays inside _generate — LangGraph awaits one _agenerate
+            # per LLM call, retries are an implementation detail.
+            return await asyncio.to_thread(self._generate, messages, stop, run_manager, **kwargs)
+
     return RocketRideToolCallingChatModel()
 
 
@@ -181,6 +190,13 @@ def _build_deepagent_tools(
                 return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
             except Exception:
                 return _safe_str(out)
+
+        async def _arun(self, **framework_args: Any) -> str:  # noqa: ANN401
+            # Async hook for LangGraph's async ToolNode (asyncio.gather fan-out).
+            # Bridges the blocking engine RPC off the event loop via to_thread so
+            # multiple concurrent tool calls don't serialize on the orchestrator's
+            # loop.  Sync _run remains the single source of truth.
+            return await asyncio.to_thread(self._run, **framework_args)
 
     tools: List[Any] = []
     for td in tool_descriptors:
@@ -354,9 +370,22 @@ class DeepAgentDriver(AgentBase):
                 subagents=subagents_list if subagents_list else None,
             )
             stage = 'invoke'
-            state = agent.invoke(
-                {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
-                config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+            # Drive LangGraph via its async executor so multiple `task` tool_calls
+            # in one orchestrator turn fan out concurrently (asyncio.gather inside
+            # the async ToolNode).  HostTool._arun and
+            # RocketRideToolCallingChatModel._agenerate bridge the blocking engine
+            # RPCs off the event loop via asyncio.to_thread.
+            #
+            # asyncio.run is safe here because the caller chain is sync:
+            # AgentBase.run_agent -> IInstance.writeQuestions (plain def, called
+            # from the engine's C++ side).  If a future change makes any caller
+            # async, this needs to switch to `await agent.ainvoke(...)` and _run
+            # itself must become async.
+            state = asyncio.run(
+                agent.ainvoke(
+                    {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
+                    config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+                )
             )
         except Exception as e:
             raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {_safe_str(e)}') from e
@@ -472,17 +501,28 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
 
     The returned string is prepended to the message transcript before every LLM call so
     that models without native tool-calling support can still drive agentic behaviour via
-    the ``{"type":"tool_call",...}`` / ``{"type":"final",...}`` envelope schema.
+    the JSON envelope schema below.
+
+    Supports three response shapes:
+      - Single tool call: ``{"type":"tool_call","name":"...","args":{...}}``
+      - Parallel tool calls: ``{"type":"tool_calls","calls":[{"name":"...","args":{...}}, ...]}``
+      - Final answer: ``{"type":"final","content":"..."}``
+
+    The parallel form lets the orchestrator fan out independent steps in one turn — the
+    async LangGraph runtime dispatches them concurrently via ``asyncio.gather``.
     """
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
     return '\n'.join(
         [
             'system: You MUST respond with exactly one JSON object and nothing else.',
             'system: Allowed schemas:',
-            'system: Tool call:',
+            'system: Single tool call:',
             'system: {"type":"tool_call","name":"server.tool","args":{...}}',
+            'system: Parallel tool calls (use when steps are independent — runs concurrently):',
+            'system: {"type":"tool_calls","calls":[{"name":"server.tool","args":{...}}, {"name":"server.tool2","args":{...}}]}',
             'system: Final answer:',
             'system: {"type":"final","content":"..."}',
+            'system: Prefer "tool_calls" with multiple entries when steps are independent — this dispatches them in parallel and is much faster than issuing them one at a time across turns.',
             'system: Never wrap JSON in markdown. Never include extra keys unless required.',
             f'system: Available tools (name + description + args schema): {tools_json}',
         ]
@@ -616,6 +656,37 @@ def _parse_tool_call_envelope(raw: str) -> Any:
 
         tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
         return AIMessage(content='', tool_calls=[tool_call])
+
+    if msg_type == 'tool_calls':
+        # Plural form — one assistant message with multiple tool_calls.  LangGraph's
+        # async ToolNode dispatches the list concurrently via asyncio.gather, so this
+        # is the on-the-wire shape that unlocks subagent fan-out.
+        raw_calls = obj.get('calls')
+        if not isinstance(raw_calls, list) or not raw_calls:
+            return None
+
+        tool_calls: List[Dict[str, Any]] = []
+        for entry in raw_calls:
+            if not isinstance(entry, dict):
+                continue
+            name = _safe_str(entry.get('name', '')).strip()
+            if not name:
+                continue
+            args = entry.get('args') or {}
+            if not isinstance(args, dict):
+                args = {'input': args}
+            tool_calls.append(
+                {
+                    'id': f'call_{uuid.uuid4().hex[:12]}',
+                    'type': 'tool_call',
+                    'name': name,
+                    'args': args,
+                }
+            )
+
+        if not tool_calls:
+            return None
+        return AIMessage(content='', tool_calls=tool_calls)
 
     return None
 

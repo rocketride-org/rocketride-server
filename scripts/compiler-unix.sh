@@ -16,6 +16,17 @@ set -e
 # Navigate to project root
 cd "$(dirname "$0")/.."
 
+# Detect whether we're running as root (Docker container, automation,
+# minimal install) so the auto-install path doesn't unconditionally
+# invoke `sudo`. Containers typically don't ship `sudo`, so prefixing
+# `apt-get` with `sudo` crashes the install before any package lands.
+# `apt-get` itself works fine when called as root.
+if [ "$EUID" -eq 0 ]; then
+    SUDO=""
+else
+    SUDO="sudo"
+fi
+
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -175,8 +186,8 @@ select_linux_triplet() {
     if [ -n "$CC_RESOLVED" ] && [ -n "$CXX_RESOLVED" ]; then
         if [ "$CC_RESOLVED" != "$CC_LINK" ] || [ "$CXX_RESOLVED" != "$CXX_LINK" ]; then
             COMMANDS+=("    # Set default cc/c++ to $CC and $CXX")
-            COMMANDS+=("    sudo update-alternatives --install /usr/bin/cc cc $CC_PATH 100")
-            COMMANDS+=("    sudo update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100")
+            COMMANDS+=("    $SUDO update-alternatives --install /usr/bin/cc cc $CC_PATH 100")
+            COMMANDS+=("    $SUDO update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100")
         fi
     fi
 
@@ -214,6 +225,12 @@ select_macos_triplet() {
 # =============================================================================
 
 check_linux_sudo() {
+    # When already running as root (SUDO=""), apt-get is invoked directly
+    # — no point installing sudo just to satisfy a check that no longer
+    # gates anything.
+    if [ -z "$SUDO" ]; then
+        return 0
+    fi
     if ! command_exists "sudo"; then
         COMMANDS+=("    # Installing sudo")
         COMMANDS+=("    apt update")
@@ -230,11 +247,11 @@ check_linux_cmake() {
         if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
             echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.19)"
             COMMANDS+=("    # Upgrading CMake")
-            COMMANDS+=("    sudo apt install -y cmake")
+            COMMANDS+=("    $SUDO apt install -y cmake")
         fi
     else
         COMMANDS+=("    # Installing CMake")
-        COMMANDS+=("    sudo apt install -y cmake")
+        COMMANDS+=("    $SUDO apt install -y cmake")
     fi
 }
 
@@ -307,6 +324,18 @@ check_linux_dependencies() {
         "liblzma-dev"
         "libxmlsec1-dev"
         "zlib1g-dev"
+        # libc++ runtime libraries — the downloaded prebuilt engine
+        # binary is linked against clang's libc++/libc++abi (not GNU
+        # libstdc++), so executing it during `--autoinstall`'s pip
+        # bootstrap fails with:
+        #   error while loading shared libraries: libc++.so.1: cannot open
+        # The matching `libc++-${CLANG_VERSION}-dev` headers above only
+        # cover the build path; the prebuilt binary needs the *runtime*
+        # libs at execute time. libgomp1 is required by some bundled
+        # OMP-using transitive deps.
+        "libc++1"
+        "libc++abi1"
+        "libgomp1"
     )
 
     for package in "${REQUIRES[@]}"; do
@@ -324,7 +353,7 @@ check_linux_dependencies() {
                 if ! command_exists "gpg"; then
                     echo "✗ gnupg: gpg not available"
                     COMMANDS+=("    # Install package gnupg")
-                    COMMANDS+=("    sudo apt install gnupg")
+                    COMMANDS+=("    $SUDO apt install -y gnupg")
                 else
                     echo "✓ gnupg: gpg available"
                 fi
@@ -336,7 +365,7 @@ check_linux_dependencies() {
                 else
                     echo "✗ ca-certificates: package not installed and update-ca-certificates not on PATH"
                     COMMANDS+=("    # Install package ca-certificates")
-                    COMMANDS+=("    sudo apt install -y ca-certificates")
+                    COMMANDS+=("    $SUDO apt install -y ca-certificates")
                 fi
                 ;;
             libncurses-dev)
@@ -345,16 +374,28 @@ check_linux_dependencies() {
                    ! dpkg -l "libncurses5-dev" 2>/dev/null | grep -q "^ii"; then
                     echo "✗ libncurses-dev"
                     COMMANDS+=("    # Install development library (ncurses)")
-                    COMMANDS+=("    sudo apt install -y libncurses-dev")
+                    COMMANDS+=("    $SUDO apt install -y libncurses-dev")
                 else
                     echo "✓ ncurses"
+                fi
+                ;;
+            libc++1 | libc++abi1 | libgomp1)
+                # Runtime libraries (no CLI command), so check via dpkg
+                # rather than command_exists. Required to execute the
+                # downloaded prebuilt engine during pip bootstrap.
+                if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
+                    echo "✗ $package"
+                    COMMANDS+=("    # Install runtime library $package")
+                    COMMANDS+=("    $SUDO apt install -y $package")
+                else
+                    echo "✓ $package"
                 fi
                 ;;
             *-dev)
                 if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
                     echo "✗ $package"
                     COMMANDS+=("    # Install development library $package")
-                    COMMANDS+=("    sudo apt install -y $package")
+                    COMMANDS+=("    $SUDO apt install -y $package")
                 else
                     echo "✓ $package"
                 fi
@@ -371,7 +412,7 @@ check_linux_dependencies() {
                         if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
                             echo "✗ $package"
                             COMMANDS+=("    # Install package $package")
-                            COMMANDS+=("    sudo apt install -y $package")
+                            COMMANDS+=("    $SUDO apt install -y $package")
                         else
                             echo "✓ $package"
                         fi
@@ -386,7 +427,7 @@ check_linux_dependencies() {
                         echo "✗ $package: $cmd_name not available"
                     fi
                     COMMANDS+=("    # Install package $package")
-                    COMMANDS+=("    sudo apt install -y $package")
+                    COMMANDS+=("    $SUDO apt install -y $package")
                 else
                     if [ "$package" == "$cmd_name" ]; then
                         echo "✓ $package"
@@ -403,7 +444,7 @@ check_linux_dependencies() {
             echo "Auto-installing missing dependencies..."
             echo ""
             echo "Updating apt..."
-            sudo apt update
+            $SUDO apt update
             for cmd in "${COMMANDS[@]}"; do
                 if [[ "$cmd" == *"# "* ]]; then
                     echo "$cmd"
@@ -655,7 +696,7 @@ if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
     echo ""
     echo "=========================================="
     echo "Missing Python build tools. Please install:"
-    echo "  sudo apt install -y ${MISSING_TOOLS[*]}"
+    echo "  $SUDO apt install -y ${MISSING_TOOLS[*]}"
     echo ""
     echo "Or with pip (Ubuntu 24.04+ requires --break-system-packages):"
     echo "  pip install build wheel --break-system-packages"

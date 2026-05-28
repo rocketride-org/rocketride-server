@@ -1,0 +1,2 @@
+# Framework runtime uses only stdlib (ast, importlib, inspect, sys, pathlib).
+# Pytest itself is supplied by the engine env via nodes/test/requirements.txt.
