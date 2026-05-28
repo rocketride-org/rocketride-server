@@ -55,8 +55,9 @@ import uvicorn
 import asyncio
 import importlib
 import time
+from contextlib import asynccontextmanager, contextmanager
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+from typing import Generator
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Union, Tuple
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -120,6 +121,19 @@ async def _lifespan(app: FastAPI):
     yield
     # Call the shutdown method
     await app.state.server._on_shutdown()
+
+
+class _NoSignalUvicornServer(uvicorn.Server):
+    """Uvicorn server that skips signal handler capture/restore.
+
+    The C++ engine installs C-level signal handlers that Python cannot
+    represent as callables, so uvicorn's capture_signals() crashes on
+    teardown when it tries to restore them.
+    """
+
+    @contextmanager
+    def capture_signals(self) -> Generator[None, None, None]:
+        yield
 
 
 class WebServer:
@@ -388,7 +402,7 @@ class WebServer:
         )
 
         # Return the configured server instance
-        return uvicorn.Server(config)
+        return _NoSignalUvicornServer(config)
 
     async def _on_startup(self):
         """
