@@ -135,15 +135,18 @@ select_linux_triplet() {
         
         # Use generic triplet and set CC/CXX to point to the installed version
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
-        
-        # Check if generic clang/clang++ exist, otherwise use versioned ones
-        if command_exists "clang" && command_exists "clang++"; then
-            export CC=clang
-            export CXX=clang++
-        else
-            export CC=clang-${CLANG_VERSION}
-            export CXX=clang++-${CLANG_VERSION}
-        fi
+
+        # Always pin to the versioned binary (clang-${CLANG_VERSION}) rather
+        # than the unversioned `clang` alias. The alias can resolve to a
+        # DIFFERENT version than the highest-installed clang detected above:
+        # e.g. GHA ubuntu-22.04 image 20260525 ships `clang` → clang-14 while
+        # also providing clang-15. Using the alias there pairs a clang-14
+        # compiler with the libc++-${CLANG_VERSION}-dev (15) runtime installed
+        # below, and that mismatch breaks vcpkg's detect_compiler with a
+        # misleading "CMAKE_CXX_COMPILER not set" cascade. The versioned
+        # binary keeps compiler and libc++ in lockstep.
+        export CC=clang-${CLANG_VERSION}
+        export CXX=clang++-${CLANG_VERSION}
         
         # Check if required libc++ libraries are installed for this version
         if ! dpkg -l "libc++-${CLANG_VERSION}-dev" 2>/dev/null | grep -q "^ii"; then

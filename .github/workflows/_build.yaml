@@ -129,31 +129,18 @@ jobs:
           build-mode: manual
           queries: security-and-quality
 
-      # GHA ubuntu-22.04 image 20260525.x rolled out 2026-05-25 and broke
-      # vcpkg's detect_compiler port: cmake reports "CMAKE_MAKE_PROGRAM is
-       # not set" and "CMAKE_CXX_COMPILER not set, after EnableLanguage"
-      # even though vcpkg passes -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja
-      # on the cmdline. Root cause unconfirmed; the diagnostic dump below
-      # captures runner state, and the symlink + explicit compiler env vars
-      # below are a defensive workaround so the dot release isn't blocked on
-      # a hosted-runner regression. Remove this step once the upstream fix
-      # lands (track in #1014 follow-up).
-      - name: Ubuntu compiler/ninja diagnostic + workaround
+      # GHA ubuntu-22.04 image 20260525.x (rolled 2026-05-25) changed the
+      # unversioned `clang` alias from clang-15 → clang-14. The real fix is
+      # in scripts/compiler-unix.sh (pin CC/CXX to the versioned binary), but
+      # we also pin CC/CXX explicitly at the step env below as belt-and-
+      # suspenders, and dump compiler state here for visibility if it recurs.
+      # Safe to remove this diagnostic step once the image stabilises.
+      - name: Ubuntu compiler diagnostic
         if: matrix.platform == 'ubuntu'
         run: |
-          set -x
-          which ninja || true
-          ls -la /usr/local/bin/ninja /usr/bin/ninja 2>/dev/null || true
-          ninja --version 2>&1 || true
-          which clang clang-15 clang++ clang++-15 2>&1 || true
-          clang --version 2>&1 || true
-          dpkg -l ninja-build clang-15 2>/dev/null | head -10 || true
-          # Defensive: ensure /usr/local/bin/ninja resolves to a working binary.
-          if [ ! -x /usr/local/bin/ninja ] && command -v ninja >/dev/null 2>&1; then
-            sudo ln -sf "$(command -v ninja)" /usr/local/bin/ninja
-            echo "Created /usr/local/bin/ninja → $(readlink -f /usr/local/bin/ninja)"
-          fi
-          /usr/local/bin/ninja --version 2>&1 || echo "WARN: /usr/local/bin/ninja still not runnable"
+          echo "clang (alias):   $(clang --version 2>&1 | head -1)"
+          echo "clang-15:        $(clang-15 --version 2>&1 | head -1)"
+          echo "cc resolves to:  $(readlink -f "$(command -v cc)" 2>/dev/null)"
 
       - name: Build
         # Pass the string inputs as env vars instead of template-interpolating
@@ -176,8 +163,8 @@ jobs:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
           BUILD_STAMP: ${{ inputs.build_stamp }}
-          CC: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang' || '' }}
-          CXX: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang++' || '' }}
+          CC: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang-15' || '' }}
+          CXX: ${{ matrix.platform == 'ubuntu' && '/usr/bin/clang++-15' || '' }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       - name: Test
