@@ -37,6 +37,7 @@ import { useShellConnection, ConnectionManager, getClient } from 'shell-ui';
 import { commonStyles } from 'shared/themes/styles';
 import { MonitorView, parseActivityEvent } from 'shared';
 import type { DashboardResponse, ActivityEvent } from 'shared';
+import BillingRatesView from './BillingRatesView';
 
 // =============================================================================
 // CONSTANTS
@@ -49,11 +50,38 @@ const POLL_INTERVAL = 3000;
 // STYLES
 // =============================================================================
 
+type ViewId = 'dashboard' | 'billing-rates';
+
 const styles = {
 	container: {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
+	/** Top nav bar for switching between views. */
+	navBar: {
+		display: 'flex',
+		gap: 0,
+		borderBottom: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-paper)',
+		padding: '0 16px',
+	} as CSSProperties,
+
+	navTab: {
+		padding: '10px 16px',
+		fontSize: 13,
+		fontWeight: 500,
+		color: 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		border: 'none',
+		background: 'transparent',
+		borderBottom: '2px solid transparent',
+		fontFamily: 'var(--rr-font-family)',
+	} as CSSProperties,
+
+	navTabActive: {
+		color: 'var(--rr-text-primary)',
+		borderBottomColor: 'var(--rr-color-primary, #2196f3)',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -71,6 +99,7 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	const { isConnected } = useShellConnection();
 	const [data, setData] = useState<DashboardResponse | null>(null);
 	const [events, setEvents] = useState<ActivityEvent[]>([]);
+	const [activeView, setActiveView] = useState<ViewId>('dashboard');
 	const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 	// =========================================================================
@@ -130,12 +159,33 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 
 	return (
 		<div style={styles.container}>
-			<MonitorView
-				data={data}
-				events={events}
-				isConnected={isConnected}
-				onRefresh={fetchDashboard}
-			/>
+			{/* View switcher */}
+			<div style={styles.navBar}>
+				<button
+					style={{ ...styles.navTab, ...(activeView === 'dashboard' ? styles.navTabActive : {}) }}
+					onClick={() => setActiveView('dashboard')}
+				>
+					Dashboard
+				</button>
+				<button
+					style={{ ...styles.navTab, ...(activeView === 'billing-rates' ? styles.navTabActive : {}) }}
+					onClick={() => setActiveView('billing-rates')}
+				>
+					Billing Rates
+				</button>
+			</div>
+
+			{/* Active view */}
+			{activeView === 'billing-rates' ? (
+				<BillingRatesView />
+			) : (
+				<MonitorView
+					data={data}
+					events={events}
+					isConnected={isConnected}
+					onRefresh={fetchDashboard}
+				/>
+			)}
 		</div>
 	);
 };

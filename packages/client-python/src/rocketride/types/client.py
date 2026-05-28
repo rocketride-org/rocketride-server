@@ -313,6 +313,7 @@ class ConnectResult(TypedDict, total=False):
     locale: str
     defaultTeam: str
     organizations: list[OrgInfo]
+    sysPermissions: list[str]
     capabilities: list[str]
     apps: list[AppManifestEntry]
 

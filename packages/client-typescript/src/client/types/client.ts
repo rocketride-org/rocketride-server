@@ -372,6 +372,13 @@ export interface ConnectResult {
 	apps: AppManifestEntry[];
 
 	/**
+	 * Platform-level permissions set manually in the database.
+	 * Examples: ['sys.admin', 'sys.view']. Empty for normal users.
+	 * Never set via API — requires direct database access.
+	 */
+	sysPermissions: string[];
+
+	/**
 	 * Server capability tags describing the account provider in use.
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */

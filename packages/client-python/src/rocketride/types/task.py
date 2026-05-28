@@ -75,7 +75,7 @@ Usage:
                 print(f"Error: {error}")
 """
 
-from typing import List, Dict, Union
+from typing import Any, List, Dict, Union
 from enum import Enum
 from pydantic import BaseModel, Field
 
@@ -413,12 +413,40 @@ class TASK_STATUS(BaseModel):
     )
 
     # Resource Utilization Metrics (user-facing, normalized)
+    # DEPRECATED: Use 'usage' instead. Will be removed after 2026-11-27.
     metrics: TASK_METRICS = Field(
         default_factory=TASK_METRICS,
-        description='Real-time resource utilization metrics (CPU normalized to 0-100%, memory in MB, GPU memory in MB)',
+        description='DEPRECATED (use usage). Real-time resource utilization metrics.',
     )
 
     # Token Usage (user-facing billing - cumulative tokens from task start)
+    # DEPRECATED: Use 'usage' instead. Will be removed after 2026-11-27.
     tokens: TASK_TOKENS = Field(
-        default_factory=TASK_TOKENS, description='Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00)'
+        default_factory=TASK_TOKENS,
+        description='DEPRECATED (use usage). Cumulative token usage for CPU, memory, GPU.',
+    )
+
+    # Unified usage — flat dict of all accumulated billing metrics.
+    # Keys match metric_key from the metrics_conversions DB table.
+    # Values are cumulative totals in their native units (ms, sec, GB·sec, counts).
+    # Includes a '_tokens' sub-dict with token charges per metric (value × rate).
+    # 1 token = $0.01. Example:
+    #   usage = {
+    #     'cpu_compute': 45.2,          # seconds
+    #     'cpu_memory': 72.0,           # GB·sec
+    #     'gpu_compute': 640.0,         # ms
+    #     'gpu_memory': 0.077,          # GB·sec
+    #     'gpu_inference_count': 150,   # count
+    #     'requests': 50,               # count
+    #     '_tokens': {                  # token charges per metric
+    #       'cpu_compute': 9.04,
+    #       'cpu_memory': 0.36,
+    #       'gpu_compute': 0.64,
+    #       'gpu_memory': 0.077,
+    #       'total': 10.12,
+    #     },
+    #   }
+    usage: Dict[str, Any] = Field(
+        default_factory=dict,
+        description='Cumulative resource usage metrics with token charges. Keys are metric names, values are accumulated totals. _tokens sub-dict has per-metric token charges (1 token = $0.01).',
     )

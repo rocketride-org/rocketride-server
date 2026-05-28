@@ -118,6 +118,16 @@ class AccountBase(ABC):
         """
         return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
 
+    @staticmethod
+    def get_billing_rates() -> dict[str, float]:
+        """
+        Return cached billing rates (metric_key → tokens_per_unit).
+
+        OSS default returns empty dict (no billing).
+        SaaS override loads from metrics_conversions DB table at startup.
+        """
+        return {}
+
     async def init_account(self, server) -> None:
         """
         Register HTTP routes onto the WebServer instance and run async startup work.
@@ -211,6 +221,19 @@ class AccountBase(ABC):
             request: Raw DAP request dict.
         """
         raise NotImplementedError('App marketplace requires SaaS mode')
+
+    async def handle_billing_rates(self, conn, request):
+        """
+        Dispatch an ``rrext_billing_rates`` DAP command.
+
+        OSS raises NotImplementedError — billing rate management requires SaaS.
+        The SaaS implementation delegates to ``billing_rates_handler.handle()``.
+
+        Args:
+            conn:    ``TaskConn`` instance.
+            request: Raw DAP request dict.
+        """
+        raise NotImplementedError('Billing rate management requires SaaS mode')
 
     async def handle_public(self, conn, request):
         """

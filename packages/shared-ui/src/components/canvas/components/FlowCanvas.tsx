@@ -231,7 +231,28 @@ export default function Canvas(): ReactElement {
 	}, [setViewport]);
 
 	// --- Auto-layout -------------------------------------------------------
-	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onContentUpdated);
+	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onContentUpdated, isReadonly);
+
+	// --- Auto-layout on load when node positions are missing ----------------
+	// When a pipeline is loaded and all nodes sit at (0,0) — i.e. no saved
+	// positions — automatically run the ELK layout once nodes are measured.
+	const didAutoLayoutRef = useRef(false);
+
+	useEffect(() => {
+		// Reset when a new project starts loading (isFlowReady goes false)
+		if (!isFlowReady) {
+			didAutoLayoutRef.current = false;
+			return;
+		}
+		if (nodes.length === 0 || didAutoLayoutRef.current) return;
+
+		// Check if all nodes lack meaningful positions (all at origin)
+		const allAtOrigin = nodes.every((n) => n.position.x === 0 && n.position.y === 0);
+		if (allAtOrigin) {
+			didAutoLayoutRef.current = true;
+			autoLayout();
+		}
+	}, [isFlowReady, nodes, autoLayout]);
 
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
@@ -341,7 +362,7 @@ export default function Canvas(): ReactElement {
 			<ToolbarButton title="Fit to screen" onClick={() => fitView()}>
 				<FitIcon color="currentColor" size={18} />
 			</ToolbarButton>
-			{!isLocked && (
+			{(!isLocked || isReadonly) && (
 				<ToolbarButton title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0}>
 					<TidyIcon color="currentColor" size={18} />
 				</ToolbarButton>

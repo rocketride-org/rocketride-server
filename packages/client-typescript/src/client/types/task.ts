@@ -322,13 +322,51 @@ export interface TASK_STATUS {
 
 	// Resource Utilization Metrics
 
-	/** Real-time resource utilization metrics (CPU normalized to 0-100%, memory in MB, GPU memory in MB) */
+	/**
+	 * DEPRECATED (use `usage`). Will be removed after 2026-11-27.
+	 * Real-time resource utilization metrics.
+	 */
 	metrics: TASK_METRICS;
 
 	// Token Usage
 
-	/** Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00) */
+	/**
+	 * DEPRECATED (use `usage`). Will be removed after 2026-11-27.
+	 * Cumulative token usage for CPU, memory, GPU.
+	 */
 	tokens: TASK_TOKENS;
+
+	// Unified Usage
+
+	/**
+	 * Cumulative resource usage metrics with token charges.
+	 *
+	 * Flat dict of all accumulated billing metrics. Keys match `metric_key`
+	 * from the `metrics_conversions` DB table. Values are cumulative totals
+	 * in native units (ms, sec, GB·sec, counts).
+	 *
+	 * The `_tokens` sub-object contains per-metric token charges
+	 * (value × rate from metrics_conversions). 1 token = $0.01.
+	 *
+	 * Example:
+	 * ```json
+	 * {
+	 *   "cpu_compute": 45.2,
+	 *   "cpu_memory": 72.0,
+	 *   "gpu_compute": 640.0,
+	 *   "gpu_memory": 0.077,
+	 *   "requests": 50,
+	 *   "_tokens": {
+	 *     "cpu_compute": 9.04,
+	 *     "cpu_memory": 0.36,
+	 *     "gpu_compute": 0.64,
+	 *     "gpu_memory": 0.077,
+	 *     "total": 10.12
+	 *   }
+	 * }
+	 * ```
+	 */
+	usage: Record<string, number | Record<string, number>>;
 }
 
 /**

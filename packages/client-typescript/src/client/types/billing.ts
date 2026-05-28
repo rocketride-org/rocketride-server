@@ -143,3 +143,32 @@ export interface CreditPack {
 	/** Human-readable label, e.g. "55k credits (10% bonus)". */
 	nickname: string;
 }
+
+// =============================================================================
+// BILLING RATES (metrics_conversions table)
+// =============================================================================
+
+/**
+ * Token conversion rate for a billing metric.
+ *
+ * Each metric key from the subprocess >MET* report maps to a rate
+ * that converts the raw value to tokens. 1 token = $0.01 (one cent).
+ *
+ * Managed via rrext_billing_rates (sys.admin required).
+ */
+export interface BillingRate {
+	/** Metric key matching the >MET* report dict (e.g. 'gpu_compute'). */
+	metric_key: string;
+
+	/** Tokens charged per unit of this metric. */
+	tokens_per_unit: number;
+
+	/** Human-readable unit (e.g. 'ms', 'sec', 'GB-sec', 'count'). */
+	unit: string;
+
+	/** What this metric measures. */
+	description: string;
+
+	/** ISO 8601 timestamp of last update. */
+	updated_at: string | null;
+}

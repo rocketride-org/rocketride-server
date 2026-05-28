@@ -115,15 +115,23 @@ def run():
     install_gpu_guard()
 
     # This will actually do the dependency loading and start the main process
-    from rocketlib import processArguments, monitorStatus
+    from rocketlib import processArguments, monitorStatus, monitorMetrics
 
     # Update the status
     monitorStatus('Loading pipeline')
+
+    # Start periodic metrics reporter (every 5s → >MET* stdout)
+    from ai.web.metrics import metrics
+
+    metrics.start_reporter(monitorMetrics, interval=5.0)
 
     try:
         # Start the main engine process (this will block)
         processArguments(sys.argv)
     finally:
+        # Stop metrics reporter (sends final report before exit)
+        metrics.stop_reporter()
+
         # Stop the event loop on exit
         _stop_event_loop()
 

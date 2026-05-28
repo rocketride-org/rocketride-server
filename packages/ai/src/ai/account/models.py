@@ -99,6 +99,10 @@ class AccountInfo(BaseModel):
     # SaaS: populated from app_users table, enriched with full manifest + billing info.
     apps: list[AppManifestEntry] = []
 
+    # Platform-level permissions — set manually in the database, never via API.
+    # Examples: ['sys.admin', 'sys.view']. Empty for normal users.
+    sysPermissions: list[str] = []
+
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []
 

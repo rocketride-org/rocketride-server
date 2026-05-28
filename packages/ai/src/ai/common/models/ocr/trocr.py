@@ -394,13 +394,12 @@ class TrOCR:
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same shape as model server response
-        metrics.add_time(
+        metrics.add(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
             }
         )
 

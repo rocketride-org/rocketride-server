@@ -742,9 +742,7 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 2:
                     _, json_str = parts
                     metrics = json.loads(json_str)
-                    await self._transport_receive(
-                        {'type': 'event', 'event': 'apaevt_status_metrics', 'body': {'metrics': metrics}}
-                    )
+                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_metrics', 'body': metrics})
                 else:
                     await self._transport_receive(
                         {

@@ -117,3 +117,9 @@ class AccountCommands(DAPConn):
     async def on_rrext_account_billing(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Delegate ``rrext_account_billing`` to the account handler."""
         return await account.handle_account(self, request)
+
+    # ── rrext_billing_rates ─────────────────────────────────────────────────
+
+    async def on_rrext_billing_rates(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Delegate ``rrext_billing_rates`` to the billing rates handler (sys.admin)."""
+        return await account.handle_billing_rates(self, request)

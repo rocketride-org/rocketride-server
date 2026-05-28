@@ -82,7 +82,7 @@ interface UseAutoLayoutReturn {
  * @param setNodes - ReactFlow node setter.
  * @param onContentUpdated - Callback to mark the project as dirty.
  */
-export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.Dispatch<React.SetStateAction<FlowNode[]>>, onContentUpdated: () => void): UseAutoLayoutReturn {
+export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.Dispatch<React.SetStateAction<FlowNode[]>>, onContentUpdated: () => void, isReadonly?: boolean): UseAutoLayoutReturn {
 	const [isLayouting, setIsLayouting] = useState(false);
 	const { fitView } = useReactFlow();
 
@@ -199,7 +199,10 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 				})
 			);
 
-			onContentUpdated();
+			// Skip dirty-marking for readonly pipelines — layout is view-only
+			if (!isReadonly) {
+				onContentUpdated();
+			}
 
 			// Fit the viewport to the new layout after React commits
 			requestAnimationFrame(() => {
@@ -208,7 +211,7 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 		} finally {
 			setIsLayouting(false);
 		}
-	}, [nodes, edges, setNodes, onContentUpdated, fitView]);
+	}, [nodes, edges, setNodes, onContentUpdated, isReadonly, fitView]);
 
 	return { autoLayout, isLayouting };
 }

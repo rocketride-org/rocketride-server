@@ -443,13 +443,12 @@ class GLiNER:
 
         # Report all perf counters — same shape as model server response
         # No postprocess for GLiNER — inference returns final entities directly
-        metrics.add_time(
+        metrics.add(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': 0,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': 0,
+                'gpu_queue_wait': 0,
             }
         )
 

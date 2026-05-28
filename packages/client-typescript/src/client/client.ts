@@ -25,7 +25,7 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, BillingRate } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -2277,6 +2277,42 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getDashboard(): Promise<DashboardResponse> {
 		return this.call<DashboardResponse>('rrext_dashboard', {});
+	}
+
+	// ============================================================================
+	// BILLING RATES (sys.admin)
+	// ============================================================================
+
+	/**
+	 * List all billing metric conversion rates.
+	 * Requires sys.admin privilege.
+	 */
+	async getBillingRates(): Promise<{ rates: BillingRate[]; count: number }> {
+		return this.call<{ rates: BillingRate[]; count: number }>('rrext_billing_rates', { subcommand: 'list' });
+	}
+
+	/**
+	 * Create a new billing metric conversion rate.
+	 * Requires sys.admin privilege.
+	 */
+	async createBillingRate(rate: { metric_key: string; tokens_per_unit: number; unit: string; description?: string }): Promise<{ success: boolean; metric_key: string }> {
+		return this.call<{ success: boolean; metric_key: string }>('rrext_billing_rates', { subcommand: 'create', ...rate });
+	}
+
+	/**
+	 * Update an existing billing metric conversion rate.
+	 * Requires sys.admin privilege.
+	 */
+	async updateBillingRate(update: { metric_key: string; tokens_per_unit?: number; unit?: string; description?: string }): Promise<{ success: boolean; metric_key: string }> {
+		return this.call<{ success: boolean; metric_key: string }>('rrext_billing_rates', { subcommand: 'update', ...update });
+	}
+
+	/**
+	 * Delete a billing metric conversion rate.
+	 * Requires sys.admin privilege.
+	 */
+	async deleteBillingRate(metric_key: string): Promise<{ success: boolean; metric_key: string }> {
+		return this.call<{ success: boolean; metric_key: string }>('rrext_billing_rates', { subcommand: 'delete', metric_key });
 	}
 
 	// ============================================================================

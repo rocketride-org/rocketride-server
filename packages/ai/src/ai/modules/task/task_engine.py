@@ -973,9 +973,8 @@ class Task(DAPBase):
 
         # Handle subprocess billing metrics (from >MET* protocol)
         elif event_type == 'apaevt_status_metrics':
-            new_metrics = body.get('metrics', {})
             if self._task_metrics:
-                self._task_metrics.merge_subprocess_metrics(new_metrics)
+                self._task_metrics.merge_subprocess_metrics(body)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':

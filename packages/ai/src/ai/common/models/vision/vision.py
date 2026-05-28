@@ -266,7 +266,7 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     """
     Run loader pipeline for a single image (local facade helper).
 
-    Times each phase for billing — reports perf counters via metrics.add_time().
+    Times each phase for billing — reports perf counters via metrics.add().
     """
     # Preprocess phase — convert image to model input tensors
     t0 = time.perf_counter()
@@ -284,13 +284,12 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     t_post = (time.perf_counter() - t0) * 1000
 
     # Report all perf counters — same shape as model server response
-    metrics.add_time(
+    metrics.add(
         {
-            'preprocess': t_pre,
-            'gpu': t_gpu,
-            'postprocess': t_post,
-            'queue_wait': 0,
-            'latency': t_pre + t_gpu + t_post,
+            'gpu_preprocess': t_pre,
+            'gpu_compute': t_gpu,
+            'gpu_postprocess': t_post,
+            'gpu_queue_wait': 0,
         }
     )
 
