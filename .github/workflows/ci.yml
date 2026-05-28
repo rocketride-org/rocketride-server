@@ -59,6 +59,7 @@ jobs:
               - 'builder'
               - 'builder.cmd'
               - '.github/workflows/**'
+              - 'package.json'
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
