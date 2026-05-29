@@ -27,6 +27,7 @@ packages:
 
   # Client libraries
   - 'packages/client-typescript'
+  - 'packages/agents-core'
 
   # Applications
   - 'apps/chat-ui'

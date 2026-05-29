@@ -329,7 +329,9 @@ module.exports = {
 			name: 'client-typescript:build',
 			action: () => ({
 				description: 'Build client-typescript',
-				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync'],
+				// agents-core:build must run first — the CLI (compile-cli) imports
+				// @rocketride/agents-core and tsc needs its built dist/ types.
+				steps: ['agents-core:build', 'client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync'],
 			}),
 		},
 		{
