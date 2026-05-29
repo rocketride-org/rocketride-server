@@ -23,27 +23,21 @@
 """
 Shell static file handler.
 
-Serves the shell-ui web application (Module Federation host) and built-in
-app bundles from ``dist/server/static/shell/``.
+Serves the shell-ui web application (Module Federation host) from
+``dist/server/static/shell/`` and MF remote app bundles from
+``dist/server/static/apps/``.
 
-All content lives under one directory tree:
+Directory layout:
   - ``static/shell/index.html``              — SPA entry point
   - ``static/shell/static/``                 — JS/CSS bundles
   - ``static/shell/themes/``                 — theme JSON files
   - ``static/shell/favicon.svg``             — favicon
-  - ``static/shell/apps/<app>/``             — MF remote app bundles
-
-Request flow:
-  1. Strip the ``/shell/`` prefix from the URL path.
-  2. Resolve the remaining path within ``static/shell/``.
-  3. Guard against path traversal (``../`` escapes).
-  4. If the file exists, serve it directly.
-  5. Otherwise fall back to ``index.html`` for client-side routing.
-  6. Return 503 if the shell has not been built.
+  - ``static/apps/<app>/``                   — MF remote app bundles
 
 Routes:
   GET /                    — shell SPA entry point
-  GET /shell/{file_path}   — all shell assets (JS, CSS, themes, apps)
+  GET /shell/{file_path}   — shell assets (JS, CSS, themes)
+  GET /apps/{file_path}    — MF remote app bundles
 """
 
 import os
@@ -58,9 +52,11 @@ from ai.web import Request
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
 
-# Shell root: dist/server/static/shell/
-# Everything (SPA, themes, app bundles) lives under this single tree.
+# Shell root: dist/server/static/shell/ — SPA, themes, JS/CSS bundles.
 _shell_root = os.path.join(_root_dir, 'static', 'shell')
+
+# Apps root: dist/server/static/apps/ — MF remote app bundles.
+_apps_root = os.path.join(_root_dir, 'static', 'apps')
 
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
@@ -109,7 +105,6 @@ async def shell_static(request: Request):
     # "/" → index.html
     # "/shell/static/js/main.js" → static/js/main.js
     # "/shell/themes/dark.json" → themes/dark.json
-    # "/shell/apps/home-ui/remoteEntry.js" → apps/home-ui/remoteEntry.js
     raw_path = request.url.path.lstrip('/')
 
     # Strip the "shell/" prefix for shell-specific routes
@@ -138,3 +133,37 @@ async def shell_static(request: Request):
         status_code=503,
         detail='Shell UI not built. Run: ./builder shell-ui:build',
     )
+
+
+async def apps_static(request: Request):
+    """
+    Serve MF remote app bundles from ``dist/server/static/apps/``.
+
+    Handles ``GET /apps/{path}`` — resolves the path within the apps root
+    and returns the file directly. No SPA fallback (these are JS/CSS assets).
+
+    Args:
+        request: Incoming HTTP request.
+
+    Returns:
+        FileResponse for the matched file.
+
+    Raises:
+        HTTPException: 404 if file not found, 503 if apps dir missing.
+    """
+    # "/apps/home-ui/remoteEntry.js" → home-ui/remoteEntry.js
+    raw_path = request.url.path.lstrip('/')
+    if raw_path.startswith('apps/'):
+        raw_path = raw_path[len('apps/') :]
+
+    if not raw_path:
+        raise HTTPException(status_code=404, detail='Not found')
+
+    # Resolve safely within the apps root
+    file_path = _resolve_safe(_apps_root, raw_path)
+
+    # Serve the file if it exists
+    if file_path.exists() and file_path.is_file():
+        return FileResponse(file_path)
+
+    raise HTTPException(status_code=404, detail='Not found')

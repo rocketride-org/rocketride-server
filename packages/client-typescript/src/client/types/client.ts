@@ -397,7 +397,7 @@ export interface AppManifestEntry {
 	/** Short description of the app. */
 	description?: string;
 
-	/** URL path to the app's icon (e.g. "/shell/apps/rocket-ui/icon.svg"). */
+	/** URL path to the app's icon (e.g. "/apps/rocket-ui/icon.svg"). */
 	icon?: string;
 
 	/** Category tags for filtering (e.g. ["pipelines", "ai"]). */

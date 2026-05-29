@@ -182,7 +182,7 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
-					icon = `/shell/${APPS_BASE}/${dirName}/icon.svg`;
+					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
 				} catch {
 					task.output = `Warning: icon not found at ${appManifest.icon}`;
 				}
@@ -195,7 +195,7 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
-					readme = `/shell/${APPS_BASE}/${dirName}/README.md`;
+					readme = `/${APPS_BASE}/${dirName}/README.md`;
 				} catch {
 					task.output = `Warning: readme not found at ${appManifest.readme}`;
 				}
@@ -212,7 +212,7 @@ function registerApp(appRoot) {
 				icon,
 				categories:    appManifest.categories ?? [],
 				settings:      appManifest.settings ?? [],
-				entry:         `/shell/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
 				// App monetization mode
 				mode,
 				// Shell compatibility filter (omitted = all shells)

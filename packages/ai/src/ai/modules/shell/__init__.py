@@ -27,23 +27,24 @@ Registers public HTTP routes so the shell can be loaded by browsers
 without authentication. The shell itself handles auth in the browser
 (APIKEY for OSS, Zitadel OIDC for SaaS).
 
-All files live under ``dist/server/static/shell/``:
-  - ``shell/index.html``                  — SPA entry point
-  - ``shell/static/js/*.js``              — JS bundles
-  - ``shell/static/css/*.css``            — CSS bundles
-  - ``shell/themes/*.json``               — theme token files
-  - ``shell/favicon.svg``                 — favicon
-  - ``shell/apps/<app>/remoteEntry.js``   — MF remote app bundles
+Static files:
+  - ``static/shell/index.html``           — SPA entry point
+  - ``static/shell/static/js/*.js``       — JS bundles
+  - ``static/shell/static/css/*.css``     — CSS bundles
+  - ``static/shell/themes/*.json``        — theme token files
+  - ``static/shell/favicon.svg``          — favicon
+  - ``static/apps/<app>/remoteEntry.js``  — MF remote app bundles
 
 Routes registered:
     GET /                           — shell SPA entry point (index.html)
-    GET /shell/{file_path:path}     — all shell assets, themes, and app bundles
+    GET /shell/{file_path:path}     — shell assets (JS, CSS, themes)
+    GET /apps/{file_path:path}      — MF remote app bundles
 """
 
 from typing import Any, Dict
 
 from ai.web import WebServer
-from .shell import shell_static
+from .shell import shell_static, apps_static
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -66,13 +67,22 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         public=True,
     )
 
-    # ── All shell assets ────────────────────────────────────────────────
-    # Single catch-all route for everything under /shell/ — JS, CSS,
-    # themes, favicon, and app bundles.  The handler strips the /shell/
-    # prefix and resolves within dist/server/static/shell/.
+    # ── Shell assets ──────────────────────────────────────────────────
+    # Catch-all for everything under /shell/ — JS, CSS, themes, favicon.
+    # The handler strips the /shell/ prefix and resolves within
+    # dist/server/static/shell/.
     server.add_route(
         path='/shell/{file_path:path}',
         routeHandler=shell_static,
+        methods=['GET'],
+        public=True,
+    )
+
+    # ── MF remote app bundles ───────────────────────────────────────────
+    # Serves app bundles from dist/server/static/apps/.
+    server.add_route(
+        path='/apps/{file_path:path}',
+        routeHandler=apps_static,
         methods=['GET'],
         public=True,
     )

@@ -80,7 +80,7 @@ const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
 function createAppModule({ name, description, appRoot, dev = false }) {
 	// Derived paths
 	const buildDir       = path.join(BUILD_ROOT, 'apps', name);
-	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'shell', 'apps', name);
+	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'apps', name);
 
 	// Build input tracking
 	const srcDir       = path.join(appRoot, 'src');
