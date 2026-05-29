@@ -1,0 +1,52 @@
+{
+    "ml_sklearn": {
+        "name": "ML sklearn",
+        "description": "Applies a trained scikit-learn model to process text through the pipeline.",
+        "icon": "python.svg",
+        "group": "preprocessor",
+        "color": "#f97316",
+        "runtime": "python",
+        "pipe": {
+            "lanes": {
+                "answers": {
+                    "in": true,
+                    "out": true
+                }
+            }
+        },
+        "preconfig": {
+            "default": {
+                "object": "default",
+                "properties": []
+            }
+        },
+        "profiles": {
+            "ml_sklearn.default": {
+                "object": "default",
+                "properties": []
+            }
+        },
+        "fields": [],
+        "shape": {
+            "inputs": [
+                {
+                    "name": "answers",
+                    "type": "answers"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "answers",
+                    "type": "answers"
+                }
+            ]
+        },
+        "test": {
+            "answers": [
+                {
+                    "text": "hello world"
+                }
+            ]
+        }
+    }
+}
