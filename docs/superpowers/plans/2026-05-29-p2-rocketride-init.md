@@ -341,6 +341,7 @@ First, add these imports at the **top** of `src/cli/init.ts`, immediately after 
 import * as fs from 'fs';
 import * as path from 'path';
 import { AgentManager, defaultBundle, syncServiceCatalog } from '@rocketride/agents-core';
+import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 ```
 
 Then append the following to `src/cli/init.ts` (after `resolveAgents`):
@@ -523,12 +524,11 @@ git commit -m "test(cli): cover runInit catalog sync + graceful skip"
 
 - [ ] **Step 1: Add imports, `defaultFetchCatalog`, and `registerInitCommand` to `init.ts`**
 
-First, add these imports at the **top** of `src/cli/init.ts`, alongside the existing imports (after the `import * as path from 'path';` line added in Task 3). They are used by `registerInitCommand` / `defaultFetchCatalog` below:
+First, add these imports at the **top** of `src/cli/init.ts`, alongside the existing imports (after the agents-core / constants imports added in Task 3). They are used by `registerInitCommand` / `defaultFetchCatalog` below:
 
 ```ts
 import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
-import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 ```
 
 Then append the following to `src/cli/init.ts`:
