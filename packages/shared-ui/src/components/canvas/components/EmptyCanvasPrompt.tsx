@@ -42,7 +42,7 @@ import { IService, IServiceCapabilities } from '../types';
 import { templates as templateCatalog } from '../templates';
 import { commonStyles } from '../../../themes/styles';
 import type { ITemplate } from '../templates/types';
-import { getIconPath } from '../util/get-icon-path';
+import { Icon } from '../util/Icon';
 import { resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import TemplatePickerDialog from './TemplatePickerDialog';
@@ -249,19 +249,8 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 								onMouseEnter={() => setHoveredKey(key)}
 								onMouseLeave={() => setHoveredKey(null)}
 							>
-								{(() => {
-									const icon = getIconPath(service.icon);
-									return (
-										<img
-											src={icon}
-											alt=""
-											style={{
-												...styles.itemIcon,
-												filter: icon.includes('#td') ? 'var(--icon-filter)' : undefined,
-											}}
-										/>
-									);
-								})()}
+								<Icon name={service.icon} style={styles.itemIcon} />
+
 								<span style={styles.itemTitle}>{service.title ?? key}</span>
 							</button>
 						))}

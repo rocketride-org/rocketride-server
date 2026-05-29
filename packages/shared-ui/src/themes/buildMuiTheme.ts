@@ -59,7 +59,7 @@ export function buildMuiTheme(tokens: ThemeTokens): Theme {
 			MuiCssBaseline: {
 				styleOverrides: {
 					':root': {
-						'--icon-filter': tokens['--rr-icon-filter'],
+						'--icon-color': tokens['--rr-icon-color'],
 					},
 				},
 			},

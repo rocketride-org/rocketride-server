@@ -61,7 +61,7 @@ export type ThemeTokens = {
 	'--rr-grey-200': string;
 	'--rr-grey-400': string;
 	'--rr-grey-500': string;
-	'--rr-icon-filter': string;
+	'--rr-icon-color': string;
 	'--rr-font-family': string;
 	'--rr-font-size': string;
 	'--rr-font-size-sm': string;
