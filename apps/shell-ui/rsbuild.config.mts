@@ -77,7 +77,7 @@ export default defineConfig(({ command }) => {
 			port: 3000,
 			// Serve everything from the root path — no sub-directory prefix.
 			base: '/',
-			// In dev, also serve MF remotes and vscode webview assets from build/.
+			// In dev, also serve built app bundles and static assets.
 			// public/ is served automatically by rsbuild in both dev and prod.
 			...(isDev && {
 				// Explicit array replaces rsbuild's default public/ serving entirely,
@@ -85,9 +85,9 @@ export default defineConfig(({ command }) => {
 				publicDir: [
 					// Serve static assets (favicon, manifests, etc.) from the app's public/ folder.
 					{ name: path.resolve(__dirname, 'public'), watch: false },
-					// Serve from dist/server/static/ so /shell/apps/* resolves to the
-					// built app bundles at dist/server/static/shell/apps/*.
-					{ name: path.join(process.env.ROCKETRIDE_DIST_ROOT || path.resolve(__dirname, '../../dist'), 'server', 'static'), watch: false },
+					// Serve build/ so /apps/* resolves to built MF remote bundles
+					// and /apps.json resolves to the generated app manifest.
+					{ name: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? path.resolve(__dirname, '../../build')), watch: false },
 				],
 			}),
 		},

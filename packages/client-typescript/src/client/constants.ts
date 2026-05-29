@@ -52,7 +52,7 @@ export const CONST_DEFAULT_WEB_LOCAL = `${CONST_DEFAULT_WEB_PROTOCOL}${CONST_DEF
  * Default cloud RocketRide service endpoint URL.
  * Used when no custom URI is provided in the client configuration.
  */
-export const CONST_DEFAULT_WEB_CLOUD = 'https://cloud.rocketride.ai:80';
+export const CONST_DEFAULT_WEB_CLOUD = 'https://api.rocketride.ai:80';
 
 /**
  * @deprecated Use CONST_DEFAULT_WEB_CLOUD instead.

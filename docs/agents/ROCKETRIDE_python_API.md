@@ -55,7 +55,7 @@ You can configure the client using a `.env` file:
 ```env
 # .env file
 ROCKETRIDE_APIKEY=your-api-key-here
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ```
 
 The client will automatically parse the `.env` file if it exists and use the values as defaults. The priority order is:
@@ -76,7 +76,7 @@ You can override `.env` settings by passing parameters directly to the construct
 ```python
 # Override for testing or special cases
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key'
 )
 ```
@@ -89,7 +89,7 @@ The SDK automatically performs template variable substitution in pipeline config
 
 ```env
 ROCKETRIDE_APIKEY=your-api-key
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
@@ -264,7 +264,7 @@ async def on_connect_error(error: str) -> None:
 
 # Create client with automatic reconnection enabled
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key',
     persist=True,                # Enable automatic reconnection (exponential backoff)
     max_retry_time=60000,        # Stop retrying after 60 seconds (None = retry forever)
@@ -288,7 +288,7 @@ await client.disconnect()
 from rocketride import RocketRideClient
 
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key'
 )
 
@@ -369,7 +369,7 @@ RocketRideClient(uri: str, auth: str, **kwargs)
 
 **Parameters:**
 
-- `uri` (str): Server URI (default: uses `ROCKETRIDE_URI` from `.env` or `https://cloud.rocketride.ai`)
+- `uri` (str): Server URI (default: uses `ROCKETRIDE_URI` from `.env` or `https://api.rocketride.ai`)
 - `auth` (str): API key for authentication (can also use `ROCKETRIDE_APIKEY` in `.env`)
 - `on_event` (EventCallback, optional): Event handler for server events
 - `on_connected` (ConnectCallback, optional): Connection established callback
@@ -864,7 +864,7 @@ async def on_disconnected(reason: str, has_error: bool) -> None:
         print('Disconnected gracefully')
 
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='api_key',
     on_connected=on_connected,
     on_disconnected=on_disconnected
@@ -899,7 +899,7 @@ async def event_notification(event: Dict[str, Any]) -> None:
 
 # Create the client
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your_api_key',
     on_event=event_notification,
 )
