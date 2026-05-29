@@ -174,6 +174,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Documentation
 
+- Adding a pipeline node? Follow the [Authoring a Node](docs/README-authoring-a-node.md) guide for the full end-to-end flow.
 - Update README files when adding new features
 - Add inline comments for complex code
 - Update API documentation for public interfaces

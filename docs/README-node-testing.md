@@ -2,6 +2,8 @@
 
 This framework enables automated testing of Python pipeline nodes by defining test configurations directly in `service*.json` files.
 
+> New to building nodes? Start with [Authoring a Node](README-authoring-a-node.md) for the full end-to-end flow; this doc covers the testing step in depth.
+>
 > **Note:** Only nodes with `"node": "python"` in their service file are supported by this test framework.
 
 ## Quick Start
