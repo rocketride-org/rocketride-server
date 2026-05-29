@@ -1,0 +1,39 @@
+name: Self-assign issues
+
+# Lets community contributors and interns claim issues WITHOUT being granted
+# write/triage: commenting "/assign" on an issue assigns the commenter,
+# "/unassign" removes them. The workflow's GITHUB_TOKEN performs the
+# assignment, so no per-person role hand-out is needed for self-service
+# claiming. (Requested by Josh — pairs with the fork-and-PR contribution
+# model.)
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  assign:
+    # Only on issues (not PR comments), and only for the /assign|/unassign verbs.
+    if: >-
+      ${{ !github.event.issue.pull_request &&
+          (startsWith(github.event.comment.body, '/assign') ||
+           startsWith(github.event.comment.body, '/unassign')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const user = context.payload.comment.user.login;
+            const unassign = context.payload.comment.body.trim().startsWith('/unassign');
+            if (unassign) {
+              await github.rest.issues.removeAssignees({ owner, repo, issue_number, assignees: [user] });
+            } else {
+              await github.rest.issues.addAssignees({ owner, repo, issue_number, assignees: [user] });
+            }
+            await github.rest.reactions.createForIssueComment({
+              owner, repo, comment_id: context.payload.comment.id, content: 'eyes',
+            });
