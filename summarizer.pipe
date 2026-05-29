@@ -1,0 +1,29 @@
+{
+  "id": "summarizer",
+  "name": "Weather Data Summarizer",
+  "description": "Summarizes weather data and highlights anomalies",
+  "nodes": [
+    {
+      "id": "input",
+      "type": "webhook",
+      "label": "Input Weather Data"
+    },
+    {
+      "id": "llm",
+      "type": "llm",
+      "config": {
+        "provider": "mock",
+        "prompt": "Summarize the weather data and highlight anomalies:\n\n{{input}}"
+      }
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "label": "Summary Output"
+    }
+  ],
+  "edges": [
+    { "from": "input", "to": "llm" },
+    { "from": "llm", "to": "output" }
+  ]
+}
