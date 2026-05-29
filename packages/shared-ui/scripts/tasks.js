@@ -36,21 +36,30 @@
  * shared-ui build helpers are broken.
  */
 const path = require('path');
+const { readdir } = require('node:fs/promises');
 const { execCommand } = require('../../../scripts/lib');
 
 // packages/shared-ui (one level up from this file)
 const APP_ROOT = path.join(__dirname, '..');
+const SCRIPTS_DIR = path.join(APP_ROOT, 'scripts');
 
 function makeTestAction() {
 	return {
 		description: 'Testing shared-ui',
 		run: async (ctx, task) => {
-			// Node's built-in test runner discovers `*.test.mjs` files under
-			// the given directory. Using `--test-reporter=spec` for readable
-			// output.
+			// Pass explicit paths: `scripts` arg breaks on Node 26, `*.test.mjs` glob breaks on Node 20.
+			const testFiles = (await readdir(SCRIPTS_DIR))
+				.filter((f) => f.endsWith('.test.mjs'))
+				.map((f) => path.join('scripts', f));
+
+			if (testFiles.length === 0) {
+				task.output = 'No test files found under scripts/';
+				return;
+			}
+
 			await execCommand(
 				'node',
-				['--test', '--test-reporter=spec', 'scripts/*.test.mjs'],
+				['--test', '--test-reporter=spec', ...testFiles],
 				{ task, cwd: APP_ROOT },
 			);
 		},
