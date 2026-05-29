@@ -190,11 +190,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 			// Run the auth bootstrap
 			try {
+				console.log('[Shell] calling bootstrap...');
 				const result = await cm.bootstrap({
 					apps: config.apps,
 					workspaceDir: config.workspaceDir,
 					onThemeChange: config.themeConfig?.onThemeChange,
 				});
+				console.log('[Shell] bootstrap returned, mounted=%s, result=%s', mountedRef.current, !!result);
 
 				if (!mountedRef.current) return;
 
@@ -202,6 +204,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
 				}
+				console.log('[Shell] setting renderPhase=shell');
 				setRenderPhase('shell');
 			} catch (err) {
 				console.error('[Shell] Bootstrap failed:', err);
