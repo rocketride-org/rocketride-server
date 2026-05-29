@@ -18,8 +18,11 @@ import ReactDOM from 'react-dom/client';
 import '@fontsource-variable/figtree';
 import 'shared/themes/global.css';
 import { RocketRideClient } from 'rocketride';
-import { Shell } from 'shell-ui';
-import type { AppManifestEntry } from 'shell-ui';
+// Import directly from local source — NOT from 'shell-ui'. MF intercepts bare
+// 'shell-ui' imports and tries to load from the share scope, but this IS the
+// host that provides shell-ui, so the factory isn't registered yet → undefined.
+import Shell from './components/layout/Shell';
+import type { AppManifestEntry } from './workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './lib/appLoader';
 
