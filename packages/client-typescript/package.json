@@ -45,6 +45,7 @@
 		"typescript"
 	],
 	"dependencies": {
+		"@rocketride/agents-core": "workspace:*",
 		"commander": "^12.0.0",
 		"glob": "^10.5.0"
 	},
