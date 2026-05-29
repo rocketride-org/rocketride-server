@@ -193,9 +193,9 @@ function makeRunPytestAction(options = {}) {
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
 			const bracket = ctx.brackets?.['py-test-server'];
-			const port = bracket?.port || ctx.port;
+			if (!bracket?.port) throw new Error('py-test-server bracket missing — server did not start');
 			// Use existing server URI when set (e.g. ROCKETRIDE_URI=http://localhost:5678 for debugging)
-			const serverUri = bracket?.serverUri || `http://localhost:${port}`;
+			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
 
 			const testEnv = {
 				...process.env,
