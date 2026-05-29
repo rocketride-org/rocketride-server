@@ -14,7 +14,7 @@
  *   ProjectHost (Node.js) ↔ postMessage ↔ ProjectWebview (browser) → ProjectView (pure UI)
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
@@ -44,7 +44,11 @@ const ProjectWebview: React.FC = () => {
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
-	const [envKeys, setEnvKeys] = useState<string[]>([]);
+	const [voiceStatus, setVoiceStatus] = useState<{ enabled: boolean; errors: string[]; model?: string }>({
+		enabled: false,
+		errors: ['Voice Builder status has not loaded'],
+	});
+	const [envKeys, setEnvKeys] = useState<string[] | undefined>(undefined);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
 	const [checkoutPlans, setCheckoutPlans] = useState<CheckoutPlan[]>([]);
@@ -64,7 +68,9 @@ const ProjectWebview: React.FC = () => {
 
 	// Pending validate requests (request-ID → Promise resolver)
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
+	const pendingVoiceProcesses = useRef<Map<number, { resolve: (v: { transcript: string; project: any; summary?: string }) => void; reject: (e: any) => void }>>(new Map());
 	const validateCounter = useRef(0);
+	const voiceCounter = useRef(0);
 
 	// --- Messaging ------------------------------------------------------------
 
@@ -84,6 +90,7 @@ const ProjectWebview: React.FC = () => {
 				setIsConnected(msg.isConnected);
 				if (msg.isSubscribed !== undefined) setSubscribed(msg.isSubscribed);
 				setIsReadonly(msg.isReadonly ?? false);
+				setVoiceStatus(msg.voiceStatus ?? { enabled: false, errors: ['Voice Builder status unavailable'] });
 				setStatusMap(msg.statuses ?? {});
 				setViewState({
 					mode: vs?.mode ?? 'design',
@@ -93,7 +100,7 @@ const ProjectWebview: React.FC = () => {
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
-				setEnvKeys(msg.envKeys ?? []);
+				setEnvKeys(msg.envKeys);
 				break;
 			}
 			case 'shell:init':
@@ -116,6 +123,16 @@ const ProjectWebview: React.FC = () => {
 					pendingValidates.current.delete(msg.requestId);
 					if (msg.error) pending.reject(new Error(msg.error));
 					else pending.resolve(msg.result);
+				}
+				break;
+			}
+			case 'voice:processResponse': {
+				const pending = pendingVoiceProcesses.current.get(msg.requestId);
+				if (pending) {
+					pendingVoiceProcesses.current.delete(msg.requestId);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else if (msg.project && msg.transcript) pending.resolve({ transcript: msg.transcript, project: msg.project, summary: msg.summary });
+					else pending.reject(new Error('Voice Builder response did not include a transcript and project'));
 				}
 				break;
 			}
@@ -235,6 +252,31 @@ const ProjectWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	const processVoiceRecording = useCallback(
+		(audioBase64: string, mimeType: string | undefined, currentProject: any): Promise<{ transcript: string; project: any; summary?: string }> => {
+			return new Promise((resolve, reject) => {
+				const requestId = ++voiceCounter.current;
+				pendingVoiceProcesses.current.set(requestId, { resolve, reject });
+				sendMessage({ type: 'voice:process', requestId, audioBase64, mimeType, currentProject, services: servicesJson });
+				setTimeout(() => {
+					if (pendingVoiceProcesses.current.has(requestId)) {
+						pendingVoiceProcesses.current.delete(requestId);
+						reject(new Error('Timed out processing voice command'));
+					}
+				}, 120000);
+			});
+		},
+		[sendMessage, servicesJson]
+	);
+
+	const voiceBuilder = useMemo(
+		() => ({
+			status: voiceStatus,
+			processRecording: processVoiceRecording,
+		}),
+		[processVoiceRecording, voiceStatus]
+	);
+
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
 			sendMessage({ type: 'status:pipelineAction', action, source });
@@ -326,7 +368,7 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
+			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} voiceBuilder={voiceBuilder} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
 		</>
 	);

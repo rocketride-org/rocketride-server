@@ -85,6 +85,13 @@ export const Auth: React.FC = () => {
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		envVars: {},
+		voiceBuilder: {
+			enabled: false,
+			llmProvider: '',
+			llmProfile: '',
+			hasLlmApiKey: false,
+			llmApiKey: '',
+		},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
 		integrationClaudeCode: false,

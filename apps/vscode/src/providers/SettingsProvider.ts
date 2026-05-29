@@ -243,6 +243,13 @@ export class SettingsProvider {
 			// Top-level settings
 			defaultPipelinePath: config.defaultPipelinePath,
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
+			voiceBuilder: {
+				enabled: config.voiceBuilder.enabled,
+				llmProvider: config.voiceBuilder.llmProvider,
+				llmProfile: config.voiceBuilder.llmProfile,
+				hasLlmApiKey: !!config.voiceBuilder.llmApiKey,
+				llmApiKey: '',
+			},
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),

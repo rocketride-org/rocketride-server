@@ -19,11 +19,36 @@ import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, 
 // =============================================================================
 
 /** All messages the extension host can send to the ProjectWebview. */
-export type ProjectHostToWebview = { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; isReadonly?: boolean; envKeys?: string[] } | { type: 'project:update'; project: any } | { type: 'project:services'; services: Record<string, any> } | { type: 'project:validateResponse'; requestId: number; result: any; error?: string } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:viewActivated'; viewId: string } | { type: 'shell:event'; event: unknown }
-	| { type: 'project:envKeysUpdate'; envKeys: string[] };
+export type ProjectHostToWebview =
+	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; isReadonly?: boolean; voiceStatus?: { enabled: boolean; errors: string[]; model?: string }; envKeys?: string[] }
+	| { type: 'project:update'; project: any }
+	| { type: 'project:services'; services: Record<string, any> }
+	| { type: 'project:validateResponse'; requestId: number; result: any; error?: string }
+	| { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean }
+	| { type: 'project:initialState'; state: ViewState }
+	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
+	| { type: 'project:envKeysUpdate'; envKeys: string[] }
+	| { type: 'voice:processResponse'; requestId: number; transcript?: string; project?: any; summary?: string; error?: string }
+	| { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean }
+	| { type: 'shell:themeChange'; tokens: Record<string, string> }
+	| { type: 'shell:connectionChange'; isConnected: boolean }
+	| { type: 'shell:viewActivated'; viewId: string }
+	| { type: 'shell:event'; event: unknown };
 
 /** All messages the ProjectWebview can send to the extension host. */
-export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
+export type ProjectWebviewToHost =
+	| { type: 'view:ready' }
+	| { type: 'view:initialized' }
+	| { type: 'project:contentChanged'; project: any }
+	| { type: 'project:validate'; requestId: number; pipeline: any }
+	| { type: 'project:requestSave' }
+	| { type: 'project:viewStateChange'; viewState: ViewState }
+	| { type: 'project:prefsChange'; prefs: Record<string, unknown> }
+	| { type: 'project:openLink'; url: string; displayName?: string }
+	| { type: 'voice:process'; requestId: number; audioBase64: string; mimeType?: string; currentProject: any; services: Record<string, any> }
+	| { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string }
+	| { type: 'status:missingEnvVars'; keys: string[] }
+	| { type: 'trace:clear' };
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL

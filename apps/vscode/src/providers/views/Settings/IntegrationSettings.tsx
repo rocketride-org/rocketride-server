@@ -21,7 +21,8 @@
 // SOFTWARE.
 // =============================================================================
 
-import React from 'react';
+import React, { CSSProperties } from 'react';
+import { commonStyles } from 'shared/themes/styles';
 import { SettingsData, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
 
 // ============================================================================
@@ -76,42 +77,92 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 	},
 ];
 
+const clearSecretButtonStyle: CSSProperties = {
+	...commonStyles.buttonSecondarySmall,
+	alignSelf: 'flex-start',
+	marginTop: 6,
+};
+
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
 export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange, onSave, onCancel, dirty, saved }) => {
-	return (
-		<div style={S.card}>
-			<SettingsCardHeader title="Integrations" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
-			<div style={S.cardBody}>
-				<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
-				<div style={S.formGrid}>
-					<div style={S.formGroup}>
-						<div style={S.checkboxGroup}>
-							<label style={S.checkboxLabel}>
-								<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" style={S.checkboxInput} />
-								<span style={S.checkboxSpan}>Automatic Agent Integration</span>
-							</label>
-							<div id="autoAgentIntegration-help" style={S.checkboxHelpText}>
-								Automatically detect and install RocketRide documentation for coding agents on startup
-							</div>
+	const updateVoiceBuilder = (voiceBuilder: Partial<SettingsData['voiceBuilder']>) => {
+		onSettingsChange({ voiceBuilder } as Partial<SettingsData>);
+	};
 
-							{INTEGRATIONS.map(({ key, label, description }) => (
-								<React.Fragment key={key}>
-									<label style={S.checkboxLabel}>
-										<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} style={S.checkboxInput} />
-										<span style={S.checkboxSpan}>{label}</span>
-									</label>
-									<div id={`${key}-help`} style={S.checkboxHelpText}>
-										{description}
-									</div>
-								</React.Fragment>
-							))}
+	return (
+		<>
+			<div style={S.card}>
+				<SettingsCardHeader title="Integrations" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
+				<div style={S.cardBody}>
+					<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
+					<div style={S.formGrid}>
+						<div style={S.formGroup}>
+							<div style={S.checkboxGroup}>
+								<label style={S.checkboxLabel}>
+									<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" style={S.checkboxInput} />
+									<span style={S.checkboxSpan}>Automatic Agent Integration</span>
+								</label>
+								<div id="autoAgentIntegration-help" style={S.checkboxHelpText}>
+									Automatically detect and install RocketRide documentation for coding agents on startup
+								</div>
+
+								{INTEGRATIONS.map(({ key, label, description }) => (
+									<React.Fragment key={key}>
+										<label style={S.checkboxLabel}>
+											<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} style={S.checkboxInput} />
+											<span style={S.checkboxSpan}>{label}</span>
+										</label>
+										<div id={`${key}-help`} style={S.checkboxHelpText}>
+											{description}
+										</div>
+									</React.Fragment>
+								))}
+							</div>
 						</div>
 					</div>
 				</div>
 			</div>
-		</div>
+			<div style={S.card}>
+				<SettingsCardHeader title="Voice Builder" onSave={onSave} onCancel={onCancel} dirty={dirty} saved={saved} />
+				<div style={S.cardBody}>
+					<div style={S.sectionDescription}>Configure push-to-talk pipeline editing from the canvas toolbar. Voice Builder uses RocketRide pipelines for transcription and planning.</div>
+					<div style={S.formGrid}>
+						<div style={S.checkboxGroup}>
+							<label style={S.checkboxLabel}>
+								<input type="checkbox" checked={settings.voiceBuilder.enabled} onChange={(e) => updateVoiceBuilder({ enabled: e.target.checked })} style={S.checkboxInput} />
+								<span style={S.checkboxSpan}>Enable Voice Builder</span>
+							</label>
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderLlmProvider" style={S.label}>
+								LLM Provider
+							</label>
+							<input id="voiceBuilderLlmProvider" type="text" value={settings.voiceBuilder.llmProvider} placeholder="Optional, e.g. llm_gemini" onChange={(e) => updateVoiceBuilder({ llmProvider: e.target.value })} />
+							<div style={S.helpText}>Leave empty to reuse the first configured LLM node in the open pipeline.</div>
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderLlmProfile" style={S.label}>
+								LLM Profile
+							</label>
+							<input id="voiceBuilderLlmProfile" type="text" value={settings.voiceBuilder.llmProfile} placeholder="Optional provider profile/model" onChange={(e) => updateVoiceBuilder({ llmProfile: e.target.value })} />
+						</div>
+						<div style={S.formGroup}>
+							<label htmlFor="voiceBuilderLlmApiKey" style={S.label}>
+								LLM API Key
+							</label>
+							<input id="voiceBuilderLlmApiKey" type="password" value={settings.voiceBuilder.llmApiKey} placeholder={settings.voiceBuilder.hasLlmApiKey ? 'Stored key' : 'Optional provider API key'} onChange={(e) => updateVoiceBuilder({ llmApiKey: e.target.value, hasLlmApiKey: e.target.value.trim().length > 0 })} />
+							{settings.voiceBuilder.hasLlmApiKey && !settings.voiceBuilder.llmApiKey && (
+								<button type="button" style={clearSecretButtonStyle} aria-label="Clear stored Voice Builder LLM API key" onClick={() => updateVoiceBuilder({ llmApiKey: '', hasLlmApiKey: false })}>
+									Clear stored key
+								</button>
+							)}
+						</div>
+					</div>
+				</div>
+			</div>
+		</>
 	);
 };
