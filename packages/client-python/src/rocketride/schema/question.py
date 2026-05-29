@@ -51,11 +51,14 @@ Advanced Usage:
 """
 
 import json
+import re
 from enum import Enum
 from typing import Union, List, Dict, Optional, Any
 from pydantic import BaseModel, Field, field_validator
 from .doc import Doc
 from .doc_filter import DocFilter
+
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 
 
 class Answer(BaseModel):
@@ -391,6 +394,22 @@ class Question(BaseModel):
     questions: Optional[List[QuestionText]] = Field(
         default_factory=list, description='List of questions to ask (usually just one).'
     )
+    chat_id: Optional[str] = Field(
+        default=None,
+        description=(
+            'Identifies a persistent chat session; must be a UUID or None. '
+            'Carried client → engine so chat-aware agents can scope memory lookups.'
+        ),
+    )
+
+    @field_validator('chat_id')
+    @classmethod
+    def _validate_chat_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not _UUID_RE.match(value):
+            raise ValueError(f'chat_id must be None or a UUID string; got {value!r}')
+        return value
 
     def addInstruction(self, title: str, instruction: str):
         """
