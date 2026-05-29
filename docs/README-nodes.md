@@ -12,6 +12,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | -------------------- | ------------------------------------------ | --------------------------------------------------------- |
 | `llm_openai`         | OpenAI GPT models                          |                                                           |
 | `llm_anthropic`      | Anthropic Claude                           |                                                           |
+| `llm_baidu_qianfan`  | Baidu Qianfan / ERNIE                      | [README](../nodes/src/nodes/llm_baidu_qianfan/README.md) |
 | `llm_gemini`         | Google Gemini                              |                                                           |
 | `llm_bedrock`        | AWS Bedrock                                |                                                           |
 | `llm_ollama`         | Local Ollama models                        |                                                           |
