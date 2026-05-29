@@ -37,6 +37,8 @@ QDRANT_COLLECTION_RE = re.compile(r'^[A-Za-z0-9._-]{1,255}$')
 
 
 class IGlobal(IGlobalTransform):
+    serverName: str = 'qdrant'
+
     def beginGlobal(self):
         # Are we in config mode or some other mode?
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -56,8 +58,49 @@ class IGlobal(IGlobalTransform):
             # Get the passed configuration
             connConfig = self.getConnConfig()
 
+            # Resolve the namespace used for agent-facing tool names
+            # (qdrant.search/upsert/delete). Read from the merged config
+            # so it honors both profile defaults and user overrides.
+            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
+            if isinstance(resolved_name, str) and resolved_name.strip():
+                self.serverName = resolved_name.strip()
+
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
+
+            # Wire an embedder for the control-plane tool path (search/upsert).
+            # Mirrors autopipe pattern: only instantiate when embedding config present.
+            self._tool_embedding = None
+            self.embed_query = None
+            self.embed_model_name = None
+
+            try:
+                embed_provider, embed_config = Config.getMultiProviderConfig('embedding', connConfig)
+            except Exception:
+                embed_provider, embed_config = None, None
+
+            if embed_provider:
+                try:
+                    from ai.common.embedding import getEmbedding as _getEmbedding
+
+                    self._tool_embedding = _getEmbedding(embed_provider, embed_config, bag)
+                except Exception as exc:  # noqa: BLE001
+                    warning(f'{self.glb.logicalType}: tool path embedder unavailable: {exc}')
+                    self._tool_embedding = None
+
+            if self._tool_embedding is not None:
+                from ai.common.schema import Question as _Question, QuestionText as _QuestionText
+
+                def _embed_query(text: str, _emb=self._tool_embedding) -> list:
+                    qt = _QuestionText(text=text)
+                    q = _Question()
+                    q.questions = [qt]
+                    _emb.encodeQuestion(q)
+                    return list(qt.embedding or [])
+
+                self.embed_query = _embed_query
+                self.embed_model_name = getattr(self._tool_embedding, '_model', None)
 
             # Get the info about our store
             collection = self.store.collection
@@ -138,7 +181,9 @@ class IGlobal(IGlobalTransform):
             warning(_format_error(e))
 
     def endGlobal(self):
-        # Release the index and embeddings
+        self._tool_embedding = None
+        self.embed_query = None
+        self.embed_model_name = None
         self.store = None
 
 
