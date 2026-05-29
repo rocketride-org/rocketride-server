@@ -272,14 +272,14 @@ module.exports = {
 			name: 'vscode:compile',
 			action: () => ({
 				description: 'Compile vscode',
-				steps: ['client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
+				steps: ['agents-core:build', 'client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
 			}),
 		},
 		{
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['agents-core:build', 'client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{
