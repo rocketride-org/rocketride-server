@@ -147,6 +147,54 @@ jobs:
           BUILD_STAMP: ${{ inputs.build_stamp }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
+      # -----------------------------------------------------------------------
+      #  MinIO for the S3Store integration tests (Linux only).
+      #
+      #  packages/ai/tests/ai/account/test_store.py gates the live-S3 cases on
+      #  `pytest.importorskip('boto3')` + ROCKETRIDE_TEST_S3_ACCESS_KEY_ID, so
+      #  they skip unless a real S3 endpoint is wired up. We give them a local
+      #  MinIO. Service containers / docker aren't available on the win/macOS
+      #  runners, so this is Ubuntu-only; the tests skip cleanly elsewhere.
+      #
+      #  continue-on-error + writing the test vars to $GITHUB_ENV ONLY after
+      #  MinIO is confirmed healthy and the bucket exists: if anything here
+      #  fails the vars stay unset → the S3 tests skip → a MinIO hiccup can
+      #  never block a CI or release build.
+      #  (minio:latest is intentional — a stale pinned RELEASE tag would 404
+      #  and silently skip the suite; revisit pinning once we mirror the image.)
+      # -----------------------------------------------------------------------
+      - name: Start MinIO for S3Store tests (Linux)
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        continue-on-error: true
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then ready=1; break; fi
+            sleep 2
+          done
+          [ "${ready:-}" = "1" ] || { echo "MinIO did not become ready"; docker logs minio || true; exit 1; }
+          # Create the bucket + smoke a put/get so the backend is proven even
+          # before the S3Store tests land on develop (they live on feat/deploy-v2).
+          aws --endpoint-url http://localhost:9000 s3 mb s3://rocketride-test
+          printf 'minio smoke\n' > /tmp/minio-smoke.txt
+          aws --endpoint-url http://localhost:9000 s3 cp /tmp/minio-smoke.txt s3://rocketride-test/smoke.txt
+          aws --endpoint-url http://localhost:9000 s3 ls s3://rocketride-test/
+          # Expose the test vars (read by test_store.py) only now that S3 is live.
+          {
+            echo "ROCKETRIDE_TEST_S3_ENDPOINT=http://localhost:9000"
+            echo "ROCKETRIDE_TEST_S3_REGION=us-east-1"
+            echo "ROCKETRIDE_TEST_S3_ACCESS_KEY_ID=minioadmin"
+            echo "ROCKETRIDE_TEST_S3_SECRET_ACCESS_KEY=minioadmin"
+            echo "ROCKETRIDE_TEST_S3_BUCKET=rocketride-test"
+          } >> "$GITHUB_ENV"
+
       - name: Test
         if: inputs.codeql == false
         # Integration tests boot a local server on :5565 and connect a test
@@ -170,7 +218,11 @@ jobs:
         # (.env.template, the engine's built-in dev key).
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
-        run: ${{ matrix.builder_cmd }} test --verbose -s
+        # --pytest-preinstall=boto3: boto3 is an optional extra (commented out in
+        # account/requirements.txt), so without this the S3Store tests' importorskip
+        # would skip the live-S3 cases even with MinIO up. Harmless on win/macOS
+        # (those skip anyway — no ROCKETRIDE_TEST_S3_* set there).
+        run: ${{ matrix.builder_cmd }} test --verbose -s --pytest-preinstall="boto3"
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
