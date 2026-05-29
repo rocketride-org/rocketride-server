@@ -150,9 +150,17 @@ select_linux_triplet() {
         # CLANG_VERSION is the DEFAULT clang's version (see
         # detect_installed_clang), so its libc++ stack — including the
         # unversioned multiarch libc++.so the linker needs for `-lc++` — is
-        # already installed and consistent. Pin CC/CXX to that exact version.
-        export CC=clang-${CLANG_VERSION}
-        export CXX=clang++-${CLANG_VERSION}
+        # already installed and consistent. Prefer the versioned frontend, but
+        # fall back to the bare `clang`/`clang++` when no versioned symlink
+        # exists (clang via update-alternatives or a source build) — otherwise
+        # we'd set an invalid CC/CXX that only fails later at compile time.
+        if command_exists "clang-${CLANG_VERSION}" && command_exists "clang++-${CLANG_VERSION}"; then
+            export CC=clang-${CLANG_VERSION}
+            export CXX=clang++-${CLANG_VERSION}
+        else
+            export CC=clang
+            export CXX=clang++
+        fi
         
         # Check if required libc++ libraries are installed for this version
         if ! dpkg -l "libc++-${CLANG_VERSION}-dev" 2>/dev/null | grep -q "^ii"; then

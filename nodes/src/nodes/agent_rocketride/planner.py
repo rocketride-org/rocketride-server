@@ -36,8 +36,10 @@ from typing import Any, Dict, List
 
 from rocketlib import debug
 
-from ai.common.agent import AgentBase, AgentContext, safe_str
+from ai.common.agent import AgentBase, AgentContext
 from ai.common.schema import Question
+
+from ai.common.utils import safe_str
 
 
 # ---------------------------------------------------------------------------

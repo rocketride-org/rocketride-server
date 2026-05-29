@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import serviceIcon from '../../../../assets/service.svg';
+import ServiceIcon from '../../../../assets/service.svg';
 import { ServiceStatus, VersionOption, displayVersion, stateLabels, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
 import { MessageData } from '../../Settings/SettingsWebview';
 import { MessageDisplay } from '../../Settings/MessageDisplay';
@@ -158,7 +158,7 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 	return (
 		<>
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={serviceIcon} alt="Service" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<ServiceIcon role="img" aria-label="Service" style={{ width: 48, height: 48, flexShrink: 0 }} />
 				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Install as a system service on this machine. The service runs independently and starts automatically on boot.</div>
 			</div>
 

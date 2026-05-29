@@ -47,6 +47,7 @@ import { Settings } from 'lucide-react';
 import { Option } from '../../../../../../types/ui';
 import { sanitizeAndParseHtmlToReact } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
+import { Icon } from '../../../../util/Icon';
 import MoreMenu from './more-menu';
 import { useFlow, useNodeActionLabels, useCopy, usePaste } from '../../../../hooks';
 import { useFlowPreferences } from '../../../../context/FlowPreferencesContext';
@@ -80,7 +81,7 @@ interface INodeHeaderProps {
 	hideEdit?: boolean;
 	/** Node type, used to decide which menu items and edit affordances to show. */
 	nodeType?: string;
-	/** URL of the node icon image. */
+	/** Node icon identifier (filename like "openai.svg" or a full URL). */
 	icon?: string;
 	/** Display name for the node header. */
 	title?: string;
@@ -233,15 +234,7 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 			{/* Node icon */}
 			<ConditionalRender condition={icon}>
 				<div style={styles.boxImage}>
-					<img
-						style={{
-							...styles.nodeIcon,
-							// Apply icon filter for themed icons (identified by #td in URL)
-							filter: icon?.includes('#td') ? 'var(--icon-filter)' : undefined,
-						}}
-						width="auto"
-						src={icon}
-					/>
+					<Icon name={icon} style={styles.nodeIcon} />
 				</div>
 			</ConditionalRender>
 

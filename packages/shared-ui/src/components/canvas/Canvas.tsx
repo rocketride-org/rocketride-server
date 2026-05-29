@@ -149,24 +149,38 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
 
-		// Watch for VS Code theme attribute changes on <body>
-		const observer = new MutationObserver(() => setThemeVersion((v) => v + 1));
-		observer.observe(document.body, {
+		// Watch for theme attribute changes:
+		//   - VS Code webview switches kind via `data-vscode-theme-kind` /
+		//     `data-vscode-theme-id` on `<body>`.
+		//   - Non-VS Code apps flip light/dark via `data-theme` on `<html>`
+		//     (see rocketride-default.css header).
+		const bump = () => setThemeVersion((v) => v + 1);
+		const bodyObserver = new MutationObserver(bump);
+		bodyObserver.observe(document.body, {
 			attributes: true,
 			attributeFilter: ['class', 'data-vscode-theme-kind', 'data-vscode-theme-id'],
 		});
+		const rootObserver = new MutationObserver(bump);
+		rootObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ['data-theme'],
+		});
 
-		return () => observer.disconnect();
+		return () => {
+			bodyObserver.disconnect();
+			rootObserver.disconnect();
+		};
 	}, []);
 
 	// Rebuild MUI theme from --rr-* CSS custom properties
 	const currentTheme = useMemo(() => getMuiTheme(), [themeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Sync --icon-filter on <body> whenever the theme changes
-	useEffect(() => {
-		const iconFilter = currentTheme.palette.mode === 'dark' ? 'brightness(0) invert(1)' : 'none';
-		document.body.style.setProperty('--icon-filter', iconFilter);
-	}, [currentTheme]);
+	// NOTE: `--icon-color` is driven by the theme contract — see
+	// rocketride-default.css (`:root` + `[data-theme="dark"]` for the standalone
+	// case) and rocketride-vscode.css (`data-vscode-theme-kind` selectors for
+	// the webview case). `buildMuiTheme.ts` bridges the `--rr-icon-color`
+	// token to `--icon-color` via MuiCssBaseline. No runtime override is
+	// needed (or wanted — it would break per-theme customization).
 
 	// --- Render --------------------------------------------------------------
 

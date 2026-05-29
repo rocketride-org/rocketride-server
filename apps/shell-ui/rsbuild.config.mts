@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
 
@@ -98,6 +99,9 @@ export default defineConfig(({ command }) => {
 
 			// Standard React JSX transform + Fast Refresh support.
 			pluginReact(),
+
+			// SVGR + auto-currentcolor svgo plugin for node icons (used by canvas).
+			pluginRocketrideIcons(),
 
 			// Module Federation plugin — declares this bundle as the `cloud` host.
 			pluginModuleFederation({

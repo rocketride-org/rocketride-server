@@ -36,7 +36,9 @@ from typing import Any, Dict
 
 import requests
 
-from rocketlib import IInstanceBase, normalize_tool_input, tool_function, debug
+from rocketlib import IInstanceBase, tool_function, debug
+
+from ai.common.utils import normalize_tool_input
 
 from .IGlobal import IGlobal
 

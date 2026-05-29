@@ -22,13 +22,14 @@ from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 
+from ai.common.utils import safe_str
+
 from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
     extract_text,
     messages_to_transcript,
     now_iso,
     new_run_id,
-    safe_str,
     truncate_at_stop_words,
 )
 

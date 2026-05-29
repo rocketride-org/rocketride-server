@@ -45,7 +45,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from rocketlib import IInstanceBase, optional_str, require_str, tool_function
+from rocketlib import IInstanceBase, tool_function
+
+from ai.common.utils import optional_str, require_dict, require_str
 
 from .IGlobal import IGlobal
 
@@ -297,7 +299,7 @@ class IInstance(IInstanceBase):
         intentionally — defence-in-depth against direct method calls that
         bypass the tool dispatcher.
         """
-        args = _require_dict(args) if args is not None else {}
+        args = require_dict(args) if args is not None else {}
         self._check_ready()
         flag_attr = self._ALLOW_FLAG_BY_TOOL.get(tool_name)
         if flag_attr is None:
@@ -348,12 +350,6 @@ class IInstance(IInstanceBase):
 # ----------------------------------------------------------------------
 # Module-level helpers
 # ----------------------------------------------------------------------
-
-
-def _require_dict(args: Any) -> dict:
-    if not isinstance(args, dict):
-        raise ValueError('Tool input must be a JSON object (dict)')
-    return args
 
 
 def _run_async(coro):
