@@ -93,8 +93,9 @@ module.exports = {
 	description: 'Chat Interface Application',
 
 	actions: [
-		{ name: 'chat-ui:bundle', action: makeBundleAction },
-		{ name: 'chat-ui:copy',   action: makeCopyAction },
+		{ name: 'chat-ui:bundle',   action: makeBundleAction },
+		{ name: 'chat-ui:copy',     action: makeCopyAction },
+		{ name: 'chat-ui:register', action: () => ({ run: async () => {} }) },
 
 		{
 			name: 'chat-ui:build',
