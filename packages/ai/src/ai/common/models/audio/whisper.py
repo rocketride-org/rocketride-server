@@ -66,6 +66,54 @@ class WhisperLoader(BaseLoader):
         'compute_type': 'float16',
     }
 
+    # Cached result of GPU compatibility probe (None = not yet tested)
+    _gpu_compatible: Optional[bool] = None
+    _gpu_probe_lock = threading.Lock()
+
+    @classmethod
+    def _check_gpu_compatible(cls) -> bool:
+        """Return True if ctranslate2 GPU inference is stable on this machine.
+
+        Runs a tiny probe in a subprocess so that a ctranslate2 crash (SIGABRT
+        from heap corruption on some CUDA + cuBLAS combinations) doesn't kill
+        the caller.  Result is cached — probe runs at most once per process.
+        """
+        with cls._gpu_probe_lock:
+            if cls._gpu_compatible is not None:
+                return cls._gpu_compatible
+
+            import subprocess
+            import sys
+
+            probe_script = (
+                'import ctranslate2, numpy as np; '
+                'v = ctranslate2.get_supported_compute_types("cuda"); '
+                'assert v, "no cuda types"; '
+                # Allocate a tiny CUDA tensor via ctranslate2 to exercise the CUDA path
+                'sv = ctranslate2.StorageView([1], ctranslate2.DataType.FLOAT32, ctranslate2.Device.CUDA); '
+                'print("ok")'
+            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, '-c', probe_script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                cls._gpu_compatible = result.returncode == 0 and 'ok' in result.stdout
+            except Exception:
+                cls._gpu_compatible = False
+
+            if not cls._gpu_compatible:
+                logger.warning(
+                    'ctranslate2 CUDA probe failed (returncode=%s) — '
+                    'Whisper will use CPU. This is a known issue on some '
+                    'CUDA/cuBLAS version combinations.',
+                    getattr(result, 'returncode', 'N/A'),
+                )
+
+            return cls._gpu_compatible
+
     @classmethod
     def _get_model_lock(cls, model_id: int) -> threading.Lock:
         """Get or create a lock for a specific model instance."""
@@ -119,8 +167,20 @@ class WhisperLoader(BaseLoader):
             memory_gb = WhisperLoader._estimate_memory(model_name)
             logger.debug(f'Estimated memory: {memory_gb:.2f} GB')
 
-            gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
-            logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
+            # Probe GPU compatibility before allocating — ctranslate2 CUDA can
+            # cause an unrecoverable SIGABRT on certain CUDA/cuBLAS versions (e.g.
+            # cuBLAS 12.8.4 + H200).  Run the probe here so server mode gets the
+            # same protection as local mode.
+            if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible():
+                gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
+                logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
+            else:
+                gpu_index = -1
+                torch_device = 'cpu'
+                logger.warning(
+                    'ctranslate2 CUDA probe failed — Whisper will use CPU in server mode. '
+                    'This is a known issue on some CUDA/cuBLAS version combinations.'
+                )
             # CTranslate2 does not support float16 on CPU (Intel or ARM). Use int8 for speed;
             # use float32 in loader_options if you prefer max precision on CPU (slower, more RAM).
             # Refs: https://opennmt.net/CTranslate2/quantization.html (fallback table),
@@ -130,7 +190,10 @@ class WhisperLoader(BaseLoader):
         else:
             # === LOCAL MODE: Use specified device ===
             if device is None:
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible():
+                    device = 'cuda'
+                else:
+                    device = 'cpu'
 
             if device == 'cpu':
                 gpu_index = -1
