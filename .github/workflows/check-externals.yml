@@ -15,19 +15,16 @@ run-name: check-externals ${{ github.event_name == 'schedule' && '(nightly)' || 
 # only. The auto-issue-creation step is included but COMMENTED OUT — enable it
 # in a later phase once the lane has proven stable.
 #
-# ENGINE BUILD ASSUMPTION: the builder's server:build step downloads a PREBUILT
-# engine when the C++ source hash matches a published release, and only compiles
-# otherwise (packages/server/scripts/tasks.js: server:download). This framework
-# targets Python/JS/YAML changes, which leave the engine hash unchanged, so the
-# prebuilt downloads cleanly — no vcpkg/submodules/compilers needed here, which
-# is why neither job sets `submodules: recursive`. The prebuilt still links
-# libc++/libgomp at runtime, though; _build.yaml gets those from its compile
-# toolchain, so this lane installs them explicitly (see the runtime-libraries
-# step) and pins ubuntu-22.04 to match the prebuilt's jammy build target.
-# If a FUTURE PR changes engine
-# C++ source, the prebuilt won't match and server:download falls through to a
-# full compile — this lane would then need the vcpkg/submodule/nuget setup that
-# _build.yaml carries (or to reuse a built engine via workflow_run). Add it then.
+# ENGINE BUILD: server:download (packages/server/scripts/tasks.js) compares
+# contentHash(packages/server/) to the release manifest. The hash covers EVERY
+# file under that tree — including Python under engine-lib/ — so a pure-Python
+# edit there forces a full vcpkg compile. The vcpkg + nuget steps below READ
+# the binary cache that _build.yaml populates; this lane does not write to it.
+#
+# The prebuilt still links libc++/libgomp at runtime; _build.yaml gets those
+# from its compile toolchain, so this lane installs them explicitly (see the
+# runtime-libraries step) and pins ubuntu-22.04 to match the prebuilt's jammy
+# build target.
 
 on:
   pull_request:
@@ -61,7 +58,7 @@ env:
   GH_TOKEN: ${{ github.token }}
   VCPKG_NUGET_USER: ${{ github.repository_owner }}
   NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
-  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
+  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,read
 
 jobs:
   # ===========================================================================
@@ -74,12 +71,16 @@ jobs:
     # NON-BLOCKING during stabilization. Flip to false in PR3 to make it a
     # required check (and add it to the CI OK aggregator's needs:).
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
@@ -89,6 +90,25 @@ jobs:
       - name: Install engine runtime libraries
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
+
+      - name: Set up vcpkg
+        # Bootstrap vcpkg up-front so the next step can fetch its bundled
+        # nuget.exe before the builder starts compiling ports.
+        shell: bash
+        run: ./builder vcpkg:submodule-build
+
+      - name: Set up vcpkg nuget
+        # Without auth, binary-cache reads return nothing and every port
+        # recompiles from source — does not fit in the timeout.
+        shell: bash
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono "$NUGET_EXE" sources add \
+            -Source "$NUGET_FEED_URL" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$GH_TOKEN"
 
       - name: Run check-externals (markers respected)
         # The builder task's own steps build the engine + the four trees, then
@@ -126,16 +146,17 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
-    # PHASE 1: issues: write is NOT needed yet (auto-issue step is commented
-    # out below). Uncomment the permission when enabling that step.
-    # permissions:
-    #   contents: read
-    #   issues: write
+    permissions:
+      contents: read
+      packages: read
+      # PHASE 2: uncomment when enabling the auto-issue step below.
+      # issues: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
@@ -145,6 +166,26 @@ jobs:
       - name: Install engine runtime libraries
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
+
+      - name: Set up vcpkg
+        # Bootstrap vcpkg up-front so the next step can fetch its bundled
+        # nuget.exe before the builder starts compiling ports.
+        shell: bash
+        run: ./builder vcpkg:submodule-build
+
+      - name: Set up vcpkg nuget
+        # Without auth, binary-cache reads return nothing and every port
+        # recompiles from source — does not fit in the timeout. Let this step
+        # fail loudly rather than fall back to that silent slow path.
+        shell: bash
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono "$NUGET_EXE" sources add \
+            -Source "$NUGET_FEED_URL" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$GH_TOKEN"
 
       - name: Run check-externals
         # --rebuild-cache: full uv pip compile from scratch (catches upstream
