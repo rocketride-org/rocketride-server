@@ -244,10 +244,17 @@ class TransformersLoader(BaseLoader):
         try:
             return AutoTokenizer.from_pretrained(model_name)
         except Exception:
+            # Fast tokenizer conversion fails for SentencePiece/Tiktoken models
+            # (e.g. XLM-RoBERTa) — fall back to slow Python tokenizer
             try:
-                return AutoProcessor.from_pretrained(model_name)
+                return AutoTokenizer.from_pretrained(model_name, use_fast=False)
             except Exception:
-                return None
+                pass
+
+        try:
+            return AutoProcessor.from_pretrained(model_name)
+        except Exception:
+            return None
 
     @staticmethod
     def preprocess(
