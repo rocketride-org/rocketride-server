@@ -29,6 +29,7 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage
 
 # --- ANTI-SIGBUS PATCH: disable fast tokenizers and Claude-specific token counting ---
 # 1) Disable tokenizer parallelism
@@ -83,6 +84,11 @@ class Chat(ChatBase):
     Create an Anthropic chat bot.
     """
 
+    # Selects the Anthropic block-shape translator for attachment dispatch.
+    # Declared on the chat driver because that is the instance the dispatcher
+    # reads (a default of 'openai' here silently misroutes attachments).
+    provider_shape = 'anthropic'
+
     _llm: ChatAnthropic
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -111,3 +117,8 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

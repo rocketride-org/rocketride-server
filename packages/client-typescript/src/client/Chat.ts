@@ -38,6 +38,7 @@
  */
 
 import { Question, QuestionType, type QuestionHistory } from './schema/Question.js';
+import type { Attachment } from './schema/Attachment.js';
 import type { PIPELINE_RESULT } from './types/index.js';
 
 // Allow the Chat class to talk to RocketRideClient via a structural interface
@@ -240,7 +241,7 @@ export class Chat {
 	async send(
 		text: string,
 		opts?: {
-			attachments?: unknown[];
+			attachments?: Attachment[];
 			onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 			history?: QuestionHistory[];
 		}
@@ -248,6 +249,9 @@ export class Chat {
 		const run = async (): Promise<PIPELINE_RESULT> => {
 			const question = new Question({ type: QuestionType.PROMPT, chat_id: this.id });
 			question.addQuestion(text);
+			if (opts?.attachments && opts.attachments.length > 0) {
+				question.attachments = opts.attachments;
+			}
 			if (opts?.history) {
 				for (const item of opts.history) {
 					question.addHistory(item);

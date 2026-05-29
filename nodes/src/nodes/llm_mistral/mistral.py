@@ -259,6 +259,8 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Send a chat message to Mistral AI and get the response."""
+        if getattr(question, 'attachments', None):
+            return super().chat(question)
         prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
@@ -296,3 +298,12 @@ class Chat(ChatBase):
         # All retries failed or non-retryable error
         user_friendly_error = self._format_user_error(str(last_error))
         raise Exception(user_friendly_error)
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        chat_response = self._client.chat.complete(
+            model=self._model,
+            messages=[{'role': 'user', 'content': blocks}],
+            temperature=0.0,
+        )
+        return chat_response.choices[0].message.content

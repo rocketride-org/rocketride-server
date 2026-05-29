@@ -75,6 +75,7 @@ except Exception:
 # Import main classes for convenient access
 from .schema import (
     Answer,
+    Attachment,
     Question,
     QuestionExample,
     QuestionHistory,
@@ -177,6 +178,7 @@ from .core.constants import (
 # tools see a complete, explicit surface area for this package.
 __all__ = [
     'Answer',
+    'Attachment',
     'TeamInfo',
     'OrgInfo',
     'ConnectResult',

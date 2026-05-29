@@ -23,16 +23,21 @@
  */
 
 /**
- * Schema definitions for RocketRide data structures.
+ * First-class schema type for binary attachments on chat messages.
  *
- * Re-exports all schema classes and interfaces for convenient imports.
+ * Distinct from `Doc` (text-oriented). Carries a filestore path; the
+ * bytes live in the per-user filestore under the chat's directory.
  */
-
-export type { Attachment } from './Attachment.js';
-export * from './Doc.js';
-export * from './DocFilter.js';
-export * from './DocGroup.js';
-export * from './DocMetadata.js';
-export * from './Question.js';
-export { Chat, CatalogContentionError, ChatNotFoundError, CATALOG_SCHEMA_VERSION, CHAT_SCHEMA_VERSION, parseChatFile, extractAnswerText, mutateCatalog } from '../Chat.js';
-export type { ChatCatalogEntry, ChatHeader, ChatLine, ChatTurn, RocketRideChatClient } from '../Chat.js';
+export interface Attachment {
+  /** uuid4 generated client-side at upload time. */
+  attachment_id: string;
+  /** RFC 6838 MIME type, e.g. "image/png", "application/pdf". */
+  mime: string;
+  /** User-visible original filename. */
+  filename: string;
+  /** Byte length on disk. */
+  size_bytes: number;
+  /** Filestore path relative to the user root, e.g.
+   *  `.chats/<chat-guid>/<attachment-id>.<ext>`. */
+  path: string;
+}

@@ -10,11 +10,17 @@ implementations (e.g., OpenAI, Anthropic, etc.) that handle the actual
 communication with their respective APIs.
 """
 
+import logging
 import time
 import json
 import importlib
 from typing import Dict, Any
 from rocketlib import debug
+
+# Telemetry logger — emits METRIC-prefixed structured lines (MIME + counts
+# only, never filenames or paths) to the standard logger so attachment volume
+# is recoverable from production logs. No metrics adapter consumes these yet.
+_telemetry_logger = logging.getLogger(__name__)
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
@@ -40,6 +46,13 @@ class ChatBase:
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
 
+    # Provider block-shape selector for Question.attachments dispatch.
+    # Subclasses override; default 'openai' because most providers in the catalog
+    # are OpenAI-compatible. Recognized values: 'openai' | 'anthropic' | 'gemini'
+    # | 'bedrock'. The non-OpenAI shapes each supply their own translator, and
+    # per-provider Chat subclasses override this value.
+    provider_shape: str = 'openai'
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the ChatBase instance with provider configuration.
@@ -57,6 +70,10 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
+        # Remember the provider name for drop-and-warn telemetry tagging when
+        # a Question carries attachments the shape cannot represent.
+        self._provider = provider
+
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
@@ -326,6 +343,26 @@ class ChatBase:
         # This should never be reached due to the raise in the loop
         raise Exception('Unexpected exit from retry loop')
 
+    def _chat_blocks(self, blocks):
+        """Send a provider-native content-block list and return the text response.
+
+        Default implementation refuses, so a node that advertises a
+        ``provider_shape`` without overriding this method fails loudly rather
+        than silently dropping every attachment back to text-only. Provider
+        Chat subclasses with multimodal support override this.
+
+        Args:
+            blocks: The translated content list for the provider (e.g. the
+                OpenAI ``messages[0].content`` array of typed dicts).
+
+        Returns:
+            str: The model's response text.
+        """
+        raise NotImplementedError(
+            f"Provider '{self._provider}' does not support attachment blocks; "
+            'override _chat_blocks on the Chat subclass.'
+        )
+
     def chat_string(self, prompt: str) -> str:
         """
         Invoke the chat interface with string input, token management, and network retry handling.
@@ -388,6 +425,93 @@ class ChatBase:
         # Return the model's response
         return result
 
+    def _get_file_store(self):
+        """Return the per-account FileStore used to read attachment bytes.
+
+        Honours an injected ``self._file_store`` if one is ever set; otherwise
+        (the current production path) it builds one via the shared builder,
+        which resolves through :mod:`ai.account.store` using the ambient
+        ``ROCKETRIDE_CLIENT_ID`` env var. Returns an object exposing
+        ``read_bytes(path) -> bytes`` (sync).
+        """
+        injected = getattr(self, '_file_store', None)
+        if injected is not None:
+            return injected
+
+        from ai.common.file_store import build_sync_account_file_store
+
+        return build_sync_account_file_store()
+
+    def _chat_with_attachments(self, question: Question, attachments) -> str:
+        """Dispatch a Question with attachments through the provider-shape translator.
+
+        Picks the translator by ``self.provider_shape``, reads each
+        attachment's bytes via the per-account FileStore, builds the
+        provider-native content blocks, and invokes ``_chat_blocks``.
+        Unsupported MIMEs drop+warn; FileStore IO errors propagate.
+        """
+        from ai.common.llm_translate import (
+            translate_anthropic_shape,
+            translate_bedrock_shape,
+            translate_gemini_shape,
+            translate_openai_shape,
+        )
+
+        prompt_text = question.getPrompt()
+        shape = getattr(self, 'provider_shape', 'openai')
+
+        def _log_drops(dropped):
+            for d in dropped:
+                # Structured METRIC log line; MIME only, never path/filename
+                # (privacy invariant).
+                _telemetry_logger.info(
+                    'METRIC attachment.dropped_unsupported provider=%s mime=%s',
+                    d.provider,
+                    d.mime,
+                )
+
+        def _log_forwarded(kept_mimes):
+            # One emission per surviving attachment per send, tagged with
+            # provider + per-attachment MIME so it can be aggregated by both.
+            for mime in kept_mimes:
+                _telemetry_logger.info(
+                    'METRIC llm.attachment_forwarded provider=%s mime=%s',
+                    self._provider,
+                    mime,
+                )
+
+        def _kept_mimes(all_atts, dropped_list):
+            """Return the MIME list of attachments that survived translation."""
+            dropped_ids = {getattr(d, 'attachment_id', None) for d in dropped_list}
+            return [
+                getattr(a, 'mime', 'application/octet-stream')
+                for a in all_atts
+                if getattr(a, 'attachment_id', None) not in dropped_ids
+            ]
+
+        # Each shape supplies its own translator returning (blocks, dropped);
+        # the blocks go straight to _chat_blocks. Adding a provider shape is a
+        # one-line entry here, not another near-identical branch.
+        translators = {
+            'openai': translate_openai_shape,
+            'anthropic': translate_anthropic_shape,
+            'gemini': translate_gemini_shape,
+            'bedrock': translate_bedrock_shape,
+        }
+        translate = translators.get(shape)
+
+        if translate is None:
+            # Unknown shape: warn and fall back to text-only so the existing
+            # pipeline keeps working until per-node shapes land.
+            debug(f'provider_shape={shape!r} not recognized; falling back to text-only for provider {self._provider}')
+            return self.chat_string(prompt_text)
+
+        file_store = self._get_file_store()
+        blocks, dropped = translate(prompt_text, attachments, file_store, self._provider)
+        _log_drops(dropped)
+        _log_forwarded(_kept_mimes(attachments, dropped))
+        return self._chat_blocks(blocks)
+
     def chat(self, question: Question) -> Answer:
         """
         Chat using structured Question/Answer objects with JSON validation and network retry handling.
@@ -413,8 +537,24 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
-        # Use chat_string which already handles network retries and token management
-        response = self.chat_string(question.getPrompt())
+        # Per-shape attachment dispatch. Backwards-compatible:
+        # text-only Questions take the existing single-string fast path so no
+        # production behavior changes until per-node shapes are wired.
+        # FileStore IO errors raise; unsupported MIMEs drop+warn.
+        attachments = list(getattr(question, 'attachments', []) or [])
+        # Emit count_per_message on every send (including
+        # zero) so the orphan-volume signal (upload_starts − Σ counts) is
+        # computable from production logs without a reaper in v1.
+        _telemetry_logger.info(
+            'METRIC attachment.count_per_message provider=%s count=%d',
+            getattr(self, '_provider', 'unknown'),
+            len(attachments),
+        )
+        if attachments:
+            response = self._chat_with_attachments(question, attachments)
+        else:
+            # Use chat_string which already handles network retries and token management
+            response = self.chat_string(question.getPrompt())
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —

@@ -34,9 +34,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug, warning
 
 from ai.common.agent import AgentBase, AgentContext
 
@@ -193,6 +193,15 @@ class CrewBase(AgentBase):
     _DEFAULT_BACKSTORY = 'You are a specialized agent in a multi-agent pipeline with access to tools. Use your tools and reasoning to complete tasks effectively.'
     _DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
+    # Per-process set of (run_id) values for which we have already emitted
+    # the "CrewAI does not support multimodal forwarding" warning.
+    # CrewAI's Task(description=...) / Agent(backstory=...) surface is
+    # plain-string at the upstream API; forwarding multimodal blocks on the
+    # LLM call requires upstream framework work that is deferred.  We
+    # drop attachments from the LLM call and warn at most once per run so a
+    # multi-iteration crew does not spam the log.
+    _attachment_drop_warned_runs: Set[str] = set()
+
     # ─────────────────────────────────────────────────────────────────────
     # SHARED UTILITIES
     # ─────────────────────────────────────────────────────────────────────
@@ -260,12 +269,42 @@ class CrewBase(AgentBase):
                 available_functions: Optional[Dict[str, Any]] = None,
                 **kwargs: Any,
             ) -> Union[str, Any]:
+                # CrewAI's Task/Agent surface is plain-string at
+                # the upstream API.  We cannot pass multimodal blocks through
+                # CrewAI's prompt assembly without an upstream fork, which is
+                # deferred.  v1: drop attachments from the LLM call and
+                # warn once per run.  Tool-call attachment forwarding via the
+                # picker is unaffected (see HostTool._run below).
+                # Structured METRIC line. One log per dropped
+                # attachment so the counter aggregates cleanly by MIME.
+                # Privacy: MIME only — never filename or path.
+                attachments = getattr(outer_context, 'attachments', ()) or ()
+                if attachments:
+                    for _att in attachments:
+                        debug(
+                            'METRIC attachment.dropped_agent_unsupported framework=crewai '
+                            f'mime={getattr(_att, "mime", "application/octet-stream")}'
+                        )
+                    run_id = getattr(outer_context, 'run_id', '')
+                    if run_id and run_id not in CrewBase._attachment_drop_warned_runs:
+                        CrewBase._attachment_drop_warned_runs.add(run_id)
+                        warning(
+                            f'CrewAI does not support multimodal forwarding; '
+                            f'{len(attachments)} attachment(s) dropped from LLM call (run_id={run_id})'
+                        )
                 stop_words = getattr(self, 'stop', None)
+                # forward_attachments=False makes the drop above real: CrewAI
+                # flattens to a plain-string prompt, so without this the seam
+                # would re-propagate context.attachments onto the synthesized
+                # Question and the model would receive what we just "dropped".
+                # The tool-call picker (HostTool._run) reads context.attachments
+                # directly and is unaffected.
                 return outer_self.call_llm(
                     outer_context,
                     messages,
                     role=outer_role,
                     stop_words=stop_words,
+                    forward_attachments=False,
                 )
 
             async def acall(
@@ -363,6 +402,13 @@ class CrewBase(AgentBase):
             __str__ = __repr__
 
             def _run(self, **framework_args: Any) -> str:
+                # NOTE: attachment-typed tool inputs are NOT forwarded for
+                # CrewAI. CrewAI's model reasons over a plain-string prompt
+                # (it can't perceive attachments), so it cannot meaningfully
+                # decide which file a tool should act on. Tool-attachment
+                # forwarding is intentionally limited to perception-capable
+                # frameworks (deepagent/langchain). See
+                # claude/tasks/multimodal-manual-testing/DEFERRED-tool-attachment-routing.md
                 try:
                     out = outer_self.call_tool(outer_context, self.name, framework_args)
                 except Exception as e:
@@ -406,5 +452,6 @@ class CrewBase(AgentBase):
                     desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
 
             schema_cls = _make_args_schema(input_schema)
-            tools.append(HostTool(name=name, description=desc, args_schema=schema_cls))
+            tool = HostTool(name=name, description=desc, args_schema=schema_cls)
+            tools.append(tool)
         return tools

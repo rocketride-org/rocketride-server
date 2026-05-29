@@ -22,6 +22,7 @@
  * SOFTWARE.
  */
 
+import type { Attachment } from './Attachment.js';
 import { Doc } from './Doc.js';
 import { DocFilter } from './DocFilter.js';
 
@@ -46,6 +47,8 @@ export interface QuestionHistory {
 	role: string;
 	/** The actual message content */
 	content: string;
+	/** Per-turn attachments. Absent on text-only turns; present on multimodal turns. */
+	attachments?: Attachment[];
 }
 
 /**
@@ -191,6 +194,7 @@ export class Question {
 	documents: Doc[] = [];
 	questions: QuestionText[] = [];
 	chat_id: string | null = null;
+	attachments: Attachment[] = [];
 
 	constructor(
 		options: {
@@ -199,6 +203,7 @@ export class Question {
 			expectJson?: boolean;
 			role?: string;
 			chat_id?: string | null;
+			attachments?: Attachment[];
 		} = {}
 	) {
 		this.type = options.type || QuestionType.QUESTION;
@@ -215,6 +220,7 @@ export class Question {
 		this.expectJson = options.expectJson || false;
 		this.role = options.role || '';
 		this.chat_id = options.chat_id ?? null;
+		this.attachments = options.attachments ?? [];
 	}
 
 	/**
@@ -469,6 +475,7 @@ export class Question {
 			documents: this.documents,
 			questions: this.questions,
 			chat_id: this.chat_id,
+			attachments: this.attachments,
 		};
 	}
 
@@ -485,12 +492,16 @@ export class Question {
 			chat_id = rawChatId;
 		}
 
+		const rawAttachments = data.attachments;
+		const attachments: Attachment[] = Array.isArray(rawAttachments) ? (rawAttachments as Attachment[]) : [];
+
 		const question = new Question({
 			type: data.type as QuestionType,
 			filter: data.filter as DocFilter,
 			expectJson: data.expectJson as boolean,
 			role: data.role as string,
 			chat_id,
+			attachments,
 		});
 
 		question.instructions = (data.instructions || []) as QuestionInstruction[];

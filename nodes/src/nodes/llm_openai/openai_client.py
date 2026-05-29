@@ -28,6 +28,7 @@ OpenAI binding for the ChatLLM.
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -87,3 +88,8 @@ class Chat(ChatBase):
             return ValueError('Failed to connect to the OpenAI API.')
         else:
             return super().map_exception(error)
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

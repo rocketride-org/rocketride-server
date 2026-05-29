@@ -23,15 +23,33 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Paperclip, X } from 'lucide-react';
+import type { Attachment } from '../types/Attachment';
+import { uploadAttachment, type UploadClient } from '../utils/uploadAttachment';
 
 interface ChatInputProps {
-	onSend: (message: string) => Promise<void>;
+	/**
+	 * Send the user's message. The `attachments` arg is optional for
+	 * backwards compatibility with parents that have not yet been updated
+	 * to forward attachments (activation-gated).
+	 */
+	onSend: (message: string, attachments?: Attachment[]) => Promise<void>;
 	disabled: boolean;
+	/**
+	 * RocketRide client used to upload attachments via the chunked filestore
+	 * protocol. Optional — when undefined the 📎 button is hidden so the
+	 * component stays usable in non-persistent / legacy contexts.
+	 */
+	client?: UploadClient;
+	/**
+	 * Current chat id. Required for upload path construction; when missing,
+	 * the 📎 button is hidden.
+	 */
+	chatId?: string;
 }
 
 /**
- * Chat input component with send button
+ * Chat input component with send button and optional file attachments.
  *
  * Features:
  * - Auto-expanding multi-line text input
@@ -39,13 +57,17 @@ interface ChatInputProps {
  * - Clipboard paste support in VSCode webview
  * - Disabled state when not connected
  * - Auto-focus on mount
- * 
- * @param onSend - Callback function to send message
- * @param disabled - Whether input should be disabled
+ * - 📎 attach files (when `client` + `chatId` are provided) with chunked
+ *   upload; attachment pills render above the textarea while pending
  */
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, client, chatId }) => {
 	const [inputText, setInputText] = useState('');
+	const [pending, setPending] = useState<Attachment[]>([]);
+	const [uploading, setUploading] = useState<number>(0);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const attachEnabled = !!client && !!chatId;
 
 	/**
 	 * Focus input on mount and listen for paste messages from VSCode parent
@@ -77,22 +99,54 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	}, []);
 
 	/**
+	 * Upload selected files in parallel via the chunked filestore helper.
+	 * Each successful upload pushes a pill onto the pending list; failures
+	 * are surfaced via `console.error` and skipped (the user can retry).
+	 */
+	const handleFiles = async (files: FileList) => {
+		if (!client || !chatId) return;
+		const list = Array.from(files);
+		setUploading(n => n + list.length);
+		try {
+			const results = await Promise.allSettled(
+				list.map(file => uploadAttachment({ client, chatId, file }))
+			);
+			const uploaded: Attachment[] = [];
+			for (const r of results) {
+				if (r.status === 'fulfilled') uploaded.push(r.value);
+				else console.error('[chat-ui] attachment upload failed:', r.reason);
+			}
+			if (uploaded.length) setPending(prev => [...prev, ...uploaded]);
+		} finally {
+			setUploading(n => n - list.length);
+		}
+	};
+
+	const removePending = (id: string) => {
+		setPending(prev => prev.filter(a => a.attachment_id !== id));
+	};
+
+	/**
 	 * Handles send button click or Enter key press
 	 */
 	const handleSend = async () => {
-		if (!inputText.trim() || disabled) return;
+		if (disabled) return;
+		if (!inputText.trim() && pending.length === 0) return;
+		if (uploading > 0) return;
 
 		const message = inputText;
+		const atts = pending;
 		setInputText('');
+		setPending([]);
 		if (inputRef.current) {
 			inputRef.current.style.height = 'auto';
 		}
-		await onSend(message);
+		await onSend(message, atts);
 	};
 
 	/**
 	 * Handles keyboard input
-	 * 
+	 *
 	 * Enter: Send message
 	 * Shift+Enter: New line
 	 */
@@ -114,7 +168,56 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	return (
 		<div className="input-container">
 			<div className="input-content">
+				{(pending.length > 0 || uploading > 0) && (
+					<div className="attachment-pills attachment-pills--input">
+						{pending.map(a => (
+							<span key={a.attachment_id} className="attachment-pill" title={`${a.mime} · ${a.size_bytes} bytes`}>
+								<span className="attachment-pill-name">{a.filename}</span>
+								<button
+									type="button"
+									className="attachment-pill-remove"
+									onClick={() => removePending(a.attachment_id)}
+									title="Remove attachment"
+								>
+									<X className="w-3 h-3" />
+								</button>
+							</span>
+						))}
+						{uploading > 0 && (
+							<span className="attachment-pill attachment-pill--uploading">
+								Uploading {uploading}…
+							</span>
+						)}
+					</div>
+				)}
 				<div className="input-wrapper">
+					{attachEnabled && (
+						<>
+							<input
+								ref={fileInputRef}
+								type="file"
+								multiple
+								style={{ display: 'none' }}
+								onChange={(e) => {
+									if (e.target.files && e.target.files.length > 0) {
+										handleFiles(e.target.files);
+									}
+									// Reset so selecting the same file again re-fires onChange.
+									e.target.value = '';
+								}}
+								disabled={disabled}
+							/>
+							<button
+								type="button"
+								className="attach-btn"
+								title="Attach file"
+								onClick={() => fileInputRef.current?.click()}
+								disabled={disabled}
+							>
+								<Paperclip className="w-5 h-5" />
+							</button>
+						</>
+					)}
 					<div className="input-field-wrapper">
 						<textarea
 							ref={inputRef}
@@ -140,7 +243,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 
 					<button
 						onClick={handleSend}
-						disabled={!inputText.trim() || disabled}
+						disabled={disabled || uploading > 0 || (!inputText.trim() && pending.length === 0)}
 						className="send-btn"
 						title="Send message"
 						type="button"

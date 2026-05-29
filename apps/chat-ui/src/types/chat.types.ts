@@ -36,6 +36,12 @@ export interface Message {
 	timestamp: string;
 	resultKey?: string | undefined;
 	sseType?: string;
+	/**
+	 * Optional attachments on a user turn. Populated by the chat container
+	 * when the user submits a message with files; rendered as pills on the
+	 * user bubble.
+	 */
+	attachments?: import('./Attachment').Attachment[];
 }
 
 /**

@@ -23,7 +23,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Question, QuestionType, PIPELINE_RESULT, Chat, type ChatTurn } from 'rocketride';
+import { Question, QuestionType, PIPELINE_RESULT, Chat, type ChatTurn, type Attachment } from 'rocketride';
 import { Message } from '../types/chat.types';
 import { extractTextFromResult } from '../utils/pipelineUtils';
 
@@ -60,7 +60,7 @@ export const useChatMessages = () => {
 	 * @throws Error if not connected or API request fails
 	 */
 	const sendMessageToAPI = useCallback(
-		async (userMessage: string, client: any, authToken: string, chat?: Chat | null): Promise<ReturnType<typeof extractTextFromResult>> => {
+		async (userMessage: string, client: any, authToken: string, chat?: Chat | null, attachments?: Attachment[]): Promise<ReturnType<typeof extractTextFromResult>> => {
 			try {
 				if (!client || !authToken) {
 					throw new Error('Not connected to RocketRide. Please refresh the page.');
@@ -97,7 +97,9 @@ export const useChatMessages = () => {
 
 				let result: PIPELINE_RESULT;
 				if (chat) {
-					result = await chat.send(userMessage, { onSSE, history: eagerHistory });
+					const sendOpts: { onSSE: typeof onSSE; history: typeof eagerHistory; attachments?: Attachment[] } = { onSSE, history: eagerHistory };
+					if (attachments && attachments.length > 0) sendOpts.attachments = attachments;
+					result = await chat.send(userMessage, sendOpts);
 				} else {
 					const question = new Question({
 						type: QuestionType.PROMPT,
@@ -105,6 +107,9 @@ export const useChatMessages = () => {
 					});
 					question.addQuestion(userMessage);
 					eagerHistory.forEach((h) => question.addHistory(h));
+					if (attachments && attachments.length > 0) {
+						question.attachments = attachments;
+					}
 
 					result = await client.chat({
 						token: authToken,
@@ -134,15 +139,17 @@ export const useChatMessages = () => {
 	 * @returns Promise that resolves when message is sent and response received
 	 */
 	const sendMessage = useCallback(
-		async (text: string, client: any, authToken: string, chat?: Chat | null): Promise<void> => {
-			if (!text.trim()) return;
+		async (text: string, client: any, authToken: string, chat?: Chat | null, attachments?: Attachment[]): Promise<void> => {
+			if (!text.trim() && !(attachments && attachments.length > 0)) return;
 
-			// Add user message to chat
+			// Add user message to chat. Carry attachments so the user bubble
+			// renders pills for the message just sent (Message.tsx reads them).
 			const userMessage: Message = {
 				id: Date.now(),
 				text,
 				sender: 'user',
 				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				...(attachments && attachments.length > 0 ? { attachments } : {}),
 			};
 
 			setMessages((prev) => [...prev, userMessage]);
@@ -150,7 +157,7 @@ export const useChatMessages = () => {
 
 			try {
 				// Send to API and get response using authToken
-				const answers = await sendMessageToAPI(text, client, authToken, chat);
+				const answers = await sendMessageToAPI(text, client, authToken, chat, attachments);
 
 				// Add bot response(s) to chat
 				const botResponses: Message[] = answers.map((answer, index) => ({

@@ -23,16 +23,8 @@
  */
 
 /**
- * Schema definitions for RocketRide data structures.
- *
- * Re-exports all schema classes and interfaces for convenient imports.
+ * Re-export of the canonical `Attachment` type from the RocketRide TypeScript
+ * client SDK, so chat-ui code can import it via `@apptypes/Attachment` /
+ * `../types/Attachment` without depending on SDK internals.
  */
-
-export type { Attachment } from './Attachment.js';
-export * from './Doc.js';
-export * from './DocFilter.js';
-export * from './DocGroup.js';
-export * from './DocMetadata.js';
-export * from './Question.js';
-export { Chat, CatalogContentionError, ChatNotFoundError, CATALOG_SCHEMA_VERSION, CHAT_SCHEMA_VERSION, parseChatFile, extractAnswerText, mutateCatalog } from '../Chat.js';
-export type { ChatCatalogEntry, ChatHeader, ChatLine, ChatTurn, RocketRideChatClient } from '../Chat.js';
+export type { Attachment } from 'rocketride';

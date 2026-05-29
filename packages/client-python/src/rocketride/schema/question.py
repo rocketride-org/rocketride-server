@@ -55,6 +55,7 @@ import re
 from enum import Enum
 from typing import Union, List, Dict, Optional, Any
 from pydantic import BaseModel, Field, field_validator
+from .attachment import Attachment
 from .doc import Doc
 from .doc_filter import DocFilter
 
@@ -219,6 +220,10 @@ class QuestionHistory(BaseModel):
 
     role: str  # 'user', 'system', or 'assistant'
     content: str  # The message content
+    attachments: Optional[List[Attachment]] = Field(
+        default=None,
+        description='Per-turn attachments; None on text-only turns.',
+    )
 
 
 class QuestionInstruction(BaseModel):
@@ -400,6 +405,10 @@ class Question(BaseModel):
             'Identifies a persistent chat session; must be a UUID or None. '
             'Carried client → engine so chat-aware agents can scope memory lookups.'
         ),
+    )
+    attachments: List[Attachment] = Field(
+        default_factory=list,
+        description='Binary attachments on this user turn.',
     )
 
     @field_validator('chat_id')

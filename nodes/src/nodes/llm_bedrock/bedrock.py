@@ -29,12 +29,19 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_aws import ChatBedrock
+from langchain_core.messages import HumanMessage
 
 
 class Chat(ChatBase):
     """
     Create a Bedrock chat bot.
     """
+
+    # Selects the Bedrock (Converse) block-shape translator for attachment
+    # dispatch. Declared on the chat driver because that is the instance the
+    # dispatcher reads (a default of 'openai' here silently misroutes
+    # attachments).
+    provider_shape = 'bedrock'
 
     _llm: ChatBedrock
 
@@ -76,3 +83,8 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence
 
+from .schema.attachment import Attachment
 from .schema.question import Question, QuestionHistory, QuestionType
 
 CHAT_SCHEMA_VERSION = 1
@@ -292,12 +293,14 @@ class Chat:
         self,
         text: str,
         *,
-        attachments: Optional[Sequence[Any]] = None,  # parked for feature 2
+        attachments: Optional[Sequence[Attachment]] = None,
         on_sse: Optional[Callable[[str, dict], Awaitable[None]]] = None,
         history: Optional[Sequence[QuestionHistory]] = None,
     ) -> Any:
         question = Question(type=QuestionType.PROMPT, chat_id=self.id)
         question.addQuestion(text)
+        if attachments:
+            question.attachments = list(attachments)
         if history:
             for item in history:
                 question.addHistory(item)

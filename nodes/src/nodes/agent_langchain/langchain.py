@@ -28,9 +28,10 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent._internal.utils import pick_for_tool_call
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
@@ -173,6 +174,34 @@ def _build_langchain_tools(
 
         def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
             tool_name = _safe_str(getattr(self, 'name', ''))
+
+            # Fill any unset attachment-typed slot with a
+            # path-by-reference picked from AgentContext.attachments. The
+            # dispatcher resolves the path to bytes before invoking
+            # the tool method. LLM-decided args win via setdefault semantics.
+            try:
+                input_schema = getattr(self, '_rr_input_schema', None) or {}
+                candidates = getattr(context, 'attachments', ()) or ()
+                picker_kwargs = pick_for_tool_call(
+                    input_schema=input_schema if isinstance(input_schema, dict) else {},
+                    candidates=candidates,
+                )
+                for _k, _v in picker_kwargs.items():
+                    if _k in framework_args:
+                        continue
+                    framework_args[_k] = _v
+                    # METRIC tool.call_with_attachment per slot we actually
+                    # filled from the picker. Lookup the MIME of
+                    # the source attachment whose path matches.
+                    _mime = 'unknown'
+                    for _c in candidates:
+                        if getattr(_c, 'path', None) == _v:
+                            _mime = getattr(_c, 'mime', 'unknown')
+                            break
+                    debug(f'METRIC tool.call_with_attachment tool_name={tool_name} mime={_mime}')
+            except Exception:
+                # Picker is best-effort; never block a tool call on it.
+                pass
 
             try:
                 out = agent_base.call_tool(context, tool_name, framework_args)
