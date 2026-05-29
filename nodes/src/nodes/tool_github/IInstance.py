@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import base64
 
-from rocketlib import IInstanceBase, normalize_tool_input, require_int, require_str, tool_function
+from rocketlib import IInstanceBase, tool_function
+
+from ai.common.utils import normalize_tool_input, require_int, require_str
 
 from .github_client import (
     call,

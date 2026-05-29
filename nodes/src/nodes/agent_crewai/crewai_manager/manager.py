@@ -46,6 +46,8 @@ from ai.common.agent._internal.host import AgentHostServices
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
+from ai.common.utils import safe_str
+
 from ..crewai_base import CrewBase
 
 
@@ -153,7 +155,7 @@ class CrewManager(CrewBase):
         from rocketlib.types import IInvokeCrew
 
         pSelf = context.invoker
-        prompt = self._safe_str(question.getPrompt())
+        prompt = safe_str(question.getPrompt())
         debug('agent_crewai_manager _run start run_id={} prompt_len={}'.format(context.run_id, len(prompt)))
 
         # 1. Discover all connected sub-agents via per-node invoke (mirrors the tool
@@ -314,7 +316,7 @@ class CrewManager(CrewBase):
         tasks_out = getattr(result, 'tasks_output', None) or []
         final_text = ''
         for task_out in reversed(tasks_out):
-            candidate = self._safe_str(getattr(task_out, 'raw', None))
+            candidate = safe_str(getattr(task_out, 'raw', None))
             if not candidate:
                 continue
             stripped = _strip_react_preamble(candidate)
@@ -325,9 +327,9 @@ class CrewManager(CrewBase):
         if not final_text:
             # Fall back to result.raw with the same ReAct stripping.
             raw = (
-                self._safe_str(getattr(result, 'raw', None))
-                or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None))
-                or self._safe_str(result)
+                safe_str(getattr(result, 'raw', None))
+                or safe_str(getattr(getattr(result, 'result', None), 'raw', None))
+                or safe_str(result)
             )
             final_text = _strip_react_preamble(raw)
 

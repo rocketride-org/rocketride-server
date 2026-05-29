@@ -135,14 +135,20 @@ class IGlobal(IGlobalTransform):
 
 
 def _format_error(e: Exception) -> str:
+    """Concise error string for psycopg2 exceptions.
+
+    psycopg2 errors carry SQL fragment + caret context on subsequent lines
+    that are noisy in an LLM transcript, so we keep only the first line of
+    the message. Anything else (including the case where ``psycopg2`` is
+    not installed) falls back to ``str(e).strip()``.
+    """
     try:
         from psycopg2 import OperationalError, ProgrammingError  # type: ignore
         import socket
 
         if isinstance(e, (OperationalError, ProgrammingError, socket.timeout)):
             msg = str(e).strip()
-            # Trim verbose caret/context lines for concise output
-            return msg.splitlines()[0]
+            return msg.splitlines()[0] if msg else msg
     except Exception:
         pass
     return str(e).strip()

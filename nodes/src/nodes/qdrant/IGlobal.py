@@ -143,7 +143,16 @@ class IGlobal(IGlobalTransform):
 
 
 def _format_error(e: Exception) -> str:
-    """Concise, provider-first error string with early returns."""
+    """Concise error string for qdrant's httpx-based exceptions.
+
+    Behaviour:
+    - ``httpx.HTTPStatusError`` → ``"Error <status>: <body>"`` where the body
+      is the response's ``message`` / ``error`` JSON field if parseable,
+      otherwise the raw response text, otherwise ``reason_phrase``.
+    - ``httpx.RequestError`` / ``socket.timeout`` → ``str(e).strip()``.
+    - Anything else (including the case where ``httpx`` is not installed) →
+      ``str(e).strip()``.
+    """
     try:
         import httpx  # type: ignore
         import socket  # type: ignore
