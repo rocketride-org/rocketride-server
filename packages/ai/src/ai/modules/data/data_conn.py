@@ -22,8 +22,8 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, TYPE_CHECKING
-from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
+from typing import Dict, Any, Optional, TYPE_CHECKING
+from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
@@ -90,49 +90,36 @@ class DataConn(DAPConn):
     through the familiar DAP interface.
     """
 
-    def __init__(self, server: 'DataServer', target: IServiceEndpoint, **kwargs) -> None:
-        """
-        Initialize a new DataConnection instance.
+    def __init__(self, server: 'DataServer', **kwargs) -> None:
+        """Initialize a new DataConnection instance.
 
-        Sets up the connection with the data server and target endpoint, initializes
-        pipe mapping for tracking active data streams, and prepares the connection
-        for handling DAP commands related to data pipeline operations.
+        The target endpoint is NOT captured here — it's resolved lazily on
+        every access via the :pyattr:`_target` property so source nodes that
+        bind ``state.target`` AFTER a WebSocket connect still produce a
+        correct target lookup. The semaphore + thread-count are likewise
+        deferred (see :pyfunc:`_ensure_pipe_sem`) — `target.taskConfig`
+        isn't available at WebSocket-connect time on a cold subprocess.
 
         Args:
             server (DataServer): The data server managing operations and monitors.
-                                Used for operation lifecycle management and coordination.
-            target (IServiceEndpoint): The target endpoint for this connection.
-                                      Provides access to data processing pipes.
             **kwargs: Additional arguments passed to parent DAPConn constructor.
-                     May include transport, logging, and other DAP-specific settings.
         """
-        # Create connection name for logging and identification
-        # This helps distinguish data connections in logs from other DAP connections
         module_name = 'DATA'
-
-        # Get the specified thread count
-        self._thread_count = target.taskConfig.get('threadCount', 4)
-
-        # Initialize parent DAPConn with transport and module identification
-        # Note: transport should be passed via kwargs or created here
         super().__init__(module=module_name, **kwargs)
 
-        # Store server reference for operation management
-        # The server provides access to operation lifecycle, monitoring, and coordination
+        # `self._server` must be set before reading `self._target` — the
+        # property delegates to `self._server._target`.
         self._server = server
 
-        # Store target endpoint for pipe management
-        # The endpoint provides access to data processing pipes and their lifecycle
-        self._target = target
+        # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
+        self._thread_count: Optional[int] = None
+        self._pipe_sem: Optional[asyncio.Semaphore] = None
+        self._pipe_sem_init_lock = asyncio.Lock()
 
         # Mapping a pipe id to its DataConnPipe instance for tracking active data streams
         # This allows us to correlate DAP commands with specific pipe instances and their metadata
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
-
-        # Use asyncio.Semaphore for non-blocking semaphore operations
-        # This prevents thread pool starvation while still limiting concurrent pipes
-        self._pipe_sem = asyncio.Semaphore(self._thread_count)
 
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
@@ -145,8 +132,62 @@ class DataConn(DAPConn):
 
         # Log initialization for debugging and monitoring
         self.debug_message(
-            f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
+            f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
+
+    async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
+        """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
+
+        Folds two concerns:
+
+        1. The race-window wait that used to live at the top of `_open` —
+           EaaS may send `data/open` BEFORE the source node's `_run()` has
+           bound `state.target`. Poll the lazy `_target` property for up
+           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
+        2. The semaphore size — read `target.taskConfig['threadCount']`
+           once target is actually available. Doing this in `__init__`
+           would always see `None` and silently default to 4, ignoring
+           any user-configured `threadCount`.
+
+        Idempotent. The lock guards against concurrent first-`_open`
+        calls on the same connection racing to init the semaphore.
+        """
+        if self._pipe_sem is not None:
+            return self._pipe_sem
+        async with self._pipe_sem_init_lock:
+            if self._pipe_sem is not None:  # double-check after acquiring lock
+                return self._pipe_sem
+            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+            while self._target is None and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            target = self._target
+            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._pipe_sem = asyncio.Semaphore(self._thread_count)
+            self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
+            return self._pipe_sem
+
+    @property
+    def _target(self) -> Optional['IServiceEndpoint']:
+        """Read the source target lazily — never snapshot at connection time."""
+        return self._server._target
+
+    def _require_target(self) -> 'IServiceEndpoint':
+        """Return the registered source target, or raise a controlled error.
+
+        Returns:
+            The registered ``IServiceEndpoint`` target.
+
+        Raises:
+            RuntimeError: If no source node has registered a target.
+        """
+        if self._target is None:
+            raise RuntimeError(
+                'Data operation requires a registered source target, but none is set. '
+                'This pipeline has no source node (e.g., agentic pipeline); '
+                'data-bearing operations are not supported. Process-scope DAP '
+                'commands such as rrext_cprofile_* are unaffected.'
+            )
+        return self._target
 
     async def disconnect(self):
         """
@@ -319,7 +360,7 @@ class DataConn(DAPConn):
 
             # Return pipe to the endpoint for reuse
             if conn_pipe.pipe:
-                self._target.putPipe(conn_pipe.pipe)
+                self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
 
             # Release the entry
@@ -466,9 +507,14 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
+        # Lazy-init the semaphore using the now-bound target's threadCount
+        # config. Also folds the race-window wait for `state.target` — see
+        # `_ensure_pipe_sem` docstring.
+        pipe_sem = await self._ensure_pipe_sem()
+
         # Acquire semaphore in async context (non-blocking for event loop)
         self.debug_message(f'Waiting for semaphore slot (max: {self._thread_count})...')
-        await self._pipe_sem.acquire()
+        await pipe_sem.acquire()
 
         try:
             self.debug_message('Acquired semaphore slot for new pipe')
@@ -482,7 +528,7 @@ class DataConn(DAPConn):
                     entry = getObject(obj=obj)
 
                     # Get a pipe from the target endpoint
-                    pipe_instance = self._target.getPipe()
+                    pipe_instance = self._require_target().getPipe()
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
                     # Get the id and determine the lane
@@ -522,10 +568,10 @@ class DataConn(DAPConn):
                     return pipe_id
 
                 except Exception:
-                    # Clean up pipe if allocated
+                    # Clean up pipe if allocated.
                     if pipe_instance:
                         try:
-                            self._target.putPipe(pipe_instance)
+                            self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')

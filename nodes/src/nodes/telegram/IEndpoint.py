@@ -22,16 +22,13 @@
 # =============================================================================
 
 import json
-import os
-import argparse
-import sys
 import asyncio
 import secrets
+import threading
 import uuid
 from typing import Any, Callable, Dict
 from urllib.parse import urlparse
 from requests.status_codes import codes as status_codes
-import aiohttp
 from fastapi.responses import JSONResponse
 
 from rocketlib import (
@@ -44,12 +41,6 @@ from rocketlib import (
     getObject,
     AVI_ACTION,
 )
-from ai.web import WebServer
-
-from depends import depends  # type: ignore
-
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
 
 
 class IEndpoint(IEndpointBase):
@@ -64,7 +55,6 @@ class IEndpoint(IEndpointBase):
     _MAX_FILE_BYTES: int = 20 * 1024 * 1024  # 20 MB — Telegram's own bot file limit
 
     target: IEndpointBase | None = None
-    _server: WebServer | None = None
     _poll_task: asyncio.Task | None = None
     _http_session = None  # aiohttp.ClientSession
     _bot_token: str = ''
@@ -107,7 +97,9 @@ class IEndpoint(IEndpointBase):
         # Config was already loaded in _run() (sync context) — use stored values
         if not self._bot_token:
             monitorStatus('Telegram Bot: missing bot token')
-            return
+            raise RuntimeError('Telegram Bot startup aborted: bot token not configured')
+
+        import aiohttp
 
         self._http_session = aiohttp.ClientSession()
 
@@ -115,7 +107,7 @@ class IEndpoint(IEndpointBase):
             self._webhook_secret = secrets.token_hex(32)
             if not await self._setup_webhook():
                 monitorStatus('Telegram Bot: webhook setup failed')
-                return
+                raise RuntimeError('Telegram Bot startup aborted: webhook registration failed')
         else:
             await self._clear_webhook()
             self._poll_task = asyncio.create_task(self._poll_loop())
@@ -233,6 +225,10 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
+        # `aiohttp` is installed lazily by `IGlobal.beginGlobal`; import it here
+        # rather than at module top so this file loads in clean environments.
+        import aiohttp
+
         offset = 0
         poll_count = 0
         while True:
@@ -588,21 +584,22 @@ class IEndpoint(IEndpointBase):
     # -------------------------------------------------------------------------
 
     def _run(self):
-        """Bootstrap the WebServer and configure the update-delivery mode.
+        """Register on the shared WebServer from ``node.py`` and block on shutdown.
 
-        Parses ``--data_host`` and ``--data_port`` from sys.argv, reads and
-        caches the Telegram config (bot token, mode, webhook URL), creates the
-        WebServer instance, optionally registers the webhook POST route, and
-        starts the server (blocking until shutdown).
+        EaaS spawns this subprocess with ``--data_port=N``; ``node.py``
+        bootstraps a shared :class:`WebServer` on the background event loop
+        and exposes it as ``ai.node.shared_web_server``. We register our
+        target endpoint and (in webhook mode) the inbound POST route on
+        that server, then block on a shutdown event so ``scanObjects()``
+        doesn't return.
 
-        Returns:
-            None
+        Note on cloud reachability: telegram webhook mode is inherently
+        self-hosted-only regardless of routing. Cloud users share a
+        multi-tenant engine and cannot expose their pipeline's
+        subprocess port to Telegram; only polling mode works in cloud.
+        See the project plan ("HTTP-over-DAP pattern" / "push-message
+        source nodes") for the architectural reasoning.
         """
-        parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument('--data_host', type=str, default='localhost')
-        parser.add_argument('--data_port', type=int, default=5567)
-        parsed_args, _ = parser.parse_known_args(sys.argv)
-
         # Read config HERE (sync context)
         config = self._get_telegram_config()
         self._bot_token = config.get('botToken', '')
@@ -610,23 +607,60 @@ class IEndpoint(IEndpointBase):
         self._webhook_url = config.get('webhookUrl', '')
         debug(f'Telegram _run: mode={self._mode!r} token_present={bool(self._bot_token)}')
 
-        self._server = WebServer(
-            config={
-                'port': parsed_args.data_port,
-                'host': parsed_args.data_host,
-            },
-            on_startup=self._startup,
-            on_shutdown=self._shutdown,
-        )
-        self._server.app.state.target = self.target
+        # Discover the shared server. The lazy attribute lookup is
+        # required — node.py assigns to its module-level
+        # `shared_web_server` at runtime, after this file has been
+        # imported.
+        from ai import node
 
-        # Register webhook route using the path from the configured webhook URL
-        # so that the local handler matches what Telegram will POST to.
+        shared = node.shared_web_server
+
+        shared.app.state.target = self.target
+
         if self._mode == 'webhook':
+            # Register the inbound POST route so Telegram's callback URL
+            # resolves to our handler. Cloud users can't actually reach
+            # this externally (see docstring) but the registration is
+            # harmless and the route works for self-hosted users.
             webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
-            self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
+            shared.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
 
-        self._server.run()
+        # Drive our lifespan startup hook on the SHARED server_loop —
+        # not on a fresh asyncio.run() loop. _startup spawns a polling
+        # task via `asyncio.create_task(self._poll_loop())`. That task
+        # must outlive _startup itself (it runs for the whole pipeline
+        # lifetime). If we ran _startup inside `asyncio.run()`, the
+        # temporary loop would close when _startup returned and the
+        # polling task would die with it. Scheduling on `server_loop`
+        # (the existing daemon-thread loop that hosts the shared
+        # WebServer) gives the polling task a stable home for the
+        # duration of the subprocess.
+        from ai.node import server_loop
+
+        try:
+            startup_future = asyncio.run_coroutine_threadsafe(self._startup(), server_loop)
+            startup_future.result(timeout=30)
+        except Exception as e:
+            debug(f'telegram _startup raised: {e}')
+            raise
+
+        # Block scanObjects() until something signals shutdown. Today
+        # nothing in the codebase sets this event in production — the
+        # subprocess is killed by EaaS / `--autoterm` and the wait is
+        # interrupted by process termination, mirroring how uvicorn's
+        # `server.run()` blocked until the same external signal.
+        self._shutdown_event = threading.Event()
+        self._shutdown_event.wait()
+
+        # Same pattern for shutdown — _shutdown cancels the polling
+        # task and closes the aiohttp session, both of which were
+        # created on server_loop, so the cancel/await must also run on
+        # server_loop.
+        try:
+            shutdown_future = asyncio.run_coroutine_threadsafe(self._shutdown(), server_loop)
+            shutdown_future.result(timeout=10)
+        except Exception as e:
+            debug(f'telegram _shutdown raised: {e}')
 
     def scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None]):
         """Entry point called by the RocketRide engine to start the node.

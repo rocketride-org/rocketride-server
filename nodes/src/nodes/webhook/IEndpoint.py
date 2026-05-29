@@ -23,11 +23,9 @@
 
 import json
 import os
-import argparse
-import sys
+import threading
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, debug
 from typing import Any, Dict, Callable
-from ai.web import WebServer
 
 
 from depends import depends  # type: ignore
@@ -46,18 +44,16 @@ class IEndpoint(IEndpointBase):
     incoming requests.
 
     Attributes:
-        server: The FastAPI server instance.
         target: The target endpoint to send data to. Created before the call to scanObjects
     """
 
     target: IEndpointBase | None = None
 
-    async def _startup(self):
-        """
-        Perform startup initialization for the endpoint.
+    def _startup(self):
+        """Emit the per-logical-type readiness status message.
 
-        This method is called when the endpoint is started and can be
-        overridden in subclasses to perform additional initialization tasks.
+        Pure-sync — C-extension calls (``monitorOther`` / ``monitorStatus``)
+        plus a ``json.dumps``. Called directly from :pyfunc:`_run`.
         """
         try:
             if self.endpoint.logicalType == 'chat':
@@ -72,20 +68,10 @@ class IEndpoint(IEndpointBase):
                     'token-text': 'Private Token',
                     'token-key': '{token}',
                 }
-
-                # Output the info
-                monitorOther(
-                    'usr',
-                    json.dumps([info]),
-                )
-
-                # Chat is the source component, so when it's ready, all downstream
-                # components (embedding, LLM, etc.) have already been initialized
-                # This status message indicates the chat is ready to accept questions
+                monitorOther('usr', json.dumps([info]))
                 monitorStatus('Chat ready - system is ready to accept questions')
 
             elif self.endpoint.logicalType == 'dropper':
-                # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Drop now',
                     'button-link': '{host}/dropper?auth={public_auth}',
@@ -96,19 +82,10 @@ class IEndpoint(IEndpointBase):
                     'token-text': 'Private Token',
                     'token-key': '{token}',
                 }
-
-                # Output the info
-                monitorOther(
-                    'usr',
-                    json.dumps([info]),
-                )
-                # Chat is the source component, so when it's ready, all downstream
-                # components (embedding, LLM, etc.) have already been initialized
-                # This status message indicates the chat is ready to accept questions
+                monitorOther('usr', json.dumps([info]))
                 monitorStatus('Dropper ready - system is ready to process files')
 
             elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
-                # These should NOT be replacable strings!!!
                 url_text_map = {
                     'webhook': 'Webhook interface URL',
                     'adtoolchain': 'RocketRide DataToolchain interface URL',
@@ -121,64 +98,44 @@ class IEndpoint(IEndpointBase):
                     'token-text': 'Private Token',
                     'token-key': '{token}',
                 }
-
-                # Output the info
-                monitorOther(
-                    'usr',
-                    json.dumps([info]),
-                )
-
-                # Webhook is the source component, so when it's ready, all downstream
-                # components have already been initialized
-                # This status message indicates the webhook is ready to accept requests
+                monitorOther('usr', json.dumps([info]))
                 monitorStatus('Webhook ready - system is ready to accept requests')
 
         except Exception as e:
             debug(f'Error during startup: {e}')
 
-    async def _shutdown(self):
+    def _shutdown(self):
+        """Clear the per-source UI metadata published in :pyfunc:`_startup`."""
         try:
             monitorOther('usr')
         except Exception as e:
             debug(f'Error during shutdown: {e}')
 
     def _run(self):
+        """Register on the shared WebServer from ``node.py`` and block on shutdown.
+
+        EaaS spawns this subprocess with ``--data_port=N``; ``node.py``
+        bootstraps a shared :class:`WebServer` on the background event loop
+        and exposes it as ``ai.node.shared_web_server``. We register our
+        target endpoint on that server's ``app.state.target`` (the
+        ``data`` module reads it lazily on each WebSocket connection) and
+        block on a shutdown event so ``scanObjects()`` doesn't return.
         """
-        Initialize and run the FastAPI server with the specified configuration.
+        # Discover the shared server lazily — the import MUST be inside
+        # this function (not at module top), because `node.py:run()`
+        # assigns to the module-level `shared_web_server` at runtime; a
+        # top-of-file `from ai.node import shared_web_server` would capture
+        # the pre-assignment value (None) forever.
+        from ai import node
 
-        Args:
-            config (dict): The configuration dictionary containing parameters like endpoint, port, etc.
-        """
-        # Parse arguments
-        parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument('--data_host', type=str, default='localhost')
-        parser.add_argument('--data_port', type=int, default=5567)
+        node.shared_web_server.app.state.target = self.target
 
-        # Parse only the args we care about, ignore unknown ones
-        parsed_args, _ = parser.parse_known_args(sys.argv)
+        self._startup()
 
-        data_host = parsed_args.data_host
-        data_port = parsed_args.data_port
+        self._shutdown_event = threading.Event()
+        self._shutdown_event.wait()
 
-        # Create our server - we use the command line arguments passed over
-        # by eaas to determine the host and port
-        self.server = WebServer(
-            config={
-                'port': data_port,
-                'host': data_host,
-            },
-            on_startup=self._startup,
-            on_shutdown=self._shutdown,
-        )
-
-        # Save the target
-        self.server.app.state.target = self.target
-
-        # Create our data server to accept incoming data
-        self.server.use('data')
-
-        # Run the  server
-        self.server.run()
+        self._shutdown()
 
     def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None]):
         """
