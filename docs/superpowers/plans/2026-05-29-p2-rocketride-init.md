@@ -29,8 +29,9 @@ packages/client-typescript/
 - Files indent with **tabs** (the whole package uses tabs).
 - Tests import test globals from `@jest/globals` and source from `'../src/...'` (extensionless).
 - ts-jest uses the base `tsconfig.json` which has `noUnusedLocals: true` — **no unused locals/imports in `init.ts` or `init.test.ts`** or compile fails (TS6133).
-- Run a single test file: `pnpm -F rocketride exec jest init.test.ts`.
-- Typecheck/build the CLI: `pnpm -F rocketride exec tsc -p tsconfig.cli.json --noEmit`.
+- Run a single test file: `pnpm -F ./packages/client-typescript exec jest init.test.ts`.
+- Typecheck/build the CLI: `pnpm -F ./packages/client-typescript exec tsc -p tsconfig.cli.json --noEmit`.
+- **NOTE:** both `packages/client-typescript` and `apps/vscode` are named `rocketride`, so the bare name filter `-F rocketride` is ambiguous (matches both). Always use the **path-based** filter `-F ./packages/client-typescript` for this package.
 - `@rocketride/agents-core` must be built (`pnpm -F @rocketride/agents-core build`) before CLI tests/build, since both resolve it through its `dist/`.
 
 ---
@@ -72,7 +73,7 @@ Expected: finishes; `packages/client-typescript/node_modules/@rocketride/agents-
 
 Run:
 ```
-pnpm -F rocketride exec node -e "console.log(Object.keys(require('@rocketride/agents-core')))"
+pnpm -F ./packages/client-typescript exec node -e "console.log(Object.keys(require('@rocketride/agents-core')))"
 ```
 Expected: prints an array including `AgentManager`, `defaultBundle`, `syncServiceCatalog`.
 
@@ -141,10 +142,12 @@ describe('resolveAgents', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: FAIL — `Cannot find module '../src/cli/init'`.
 
-- [ ] **Step 3: Create `src/cli/init.ts` with the MIT header, imports, constants, and `resolveAgents`**
+- [ ] **Step 3: Create `src/cli/init.ts` with the MIT header, the `AGENT_SLUGS` constant, and `resolveAgents`**
+
+> **No imports in this task.** `resolveAgents` needs none, and ts-jest enforces `noUnusedLocals` per-file (TS6133), so front-loaded imports would fail the test run. Tasks 3 and 5 add imports at the top of the file as the code that uses them is introduced.
 
 ```ts
 /**
@@ -178,13 +181,6 @@ Expected: FAIL — `Cannot find module '../src/cli/init'`.
  * .env template, and (optionally) a service-catalog snapshot into the target
  * directory, by delegating to @rocketride/agents-core. No vscode dependency.
  */
-
-import * as fs from 'fs';
-import * as path from 'path';
-import { Command } from 'commander';
-import { AgentManager, defaultBundle, syncServiceCatalog } from '@rocketride/agents-core';
-import { RocketRideClient } from '../client/client';
-import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 
 /** Ergonomic CLI slugs mapped to agents-core canonical installer names. */
 const AGENT_SLUGS: Record<string, string> = {
@@ -220,7 +216,7 @@ export function resolveAgents(slugs: string[] | undefined): string[] | null {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: 3 passed (the `resolveAgents` describe block).
 
 - [ ] **Step 5: Commit**
@@ -334,12 +330,20 @@ describe('runInit (offline)', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: FAIL — `runInit`/`InitDeps` not exported from `init.ts`.
 
-- [ ] **Step 3: Add types, `.env` template, `scaffoldEnv`, and `runInit` to `init.ts`**
+- [ ] **Step 3: Add imports, types, `.env` template, `scaffoldEnv`, and `runInit` to `init.ts`**
 
-Append to `src/cli/init.ts` (after `resolveAgents`):
+First, add these imports at the **top** of `src/cli/init.ts`, immediately after the module doc comment (the `/** rocketride init — headless project scaffolding ... */` block) and before `const AGENT_SLUGS`. They are all used by the code added below:
+
+```ts
+import * as fs from 'fs';
+import * as path from 'path';
+import { AgentManager, defaultBundle, syncServiceCatalog } from '@rocketride/agents-core';
+```
+
+Then append the following to `src/cli/init.ts` (after `resolveAgents`):
 
 ```ts
 /** Contents written to a freshly-created .env. */
@@ -434,7 +438,7 @@ export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number
 
 - [ ] **Step 4: Run to verify the offline tests pass**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: all tests pass (3 from `resolveAgents` + 4 from `runInit (offline)`).
 
 - [ ] **Step 5: Commit**
@@ -499,7 +503,7 @@ describe('runInit (catalog)', () => {
 
 - [ ] **Step 2: Run to verify the catalog tests pass**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: all tests pass (3 + 4 + 2 = 9).
 
 - [ ] **Step 3: Commit**
@@ -517,9 +521,17 @@ git commit -m "test(cli): cover runInit catalog sync + graceful skip"
 - Modify: `packages/client-typescript/src/cli/init.ts` (add `defaultFetchCatalog` + `registerInitCommand`)
 - Modify: `packages/client-typescript/src/cli/rocketride.ts` (import + call in `createProgram()`)
 
-- [ ] **Step 1: Add `defaultFetchCatalog` and `registerInitCommand` to `init.ts`**
+- [ ] **Step 1: Add imports, `defaultFetchCatalog`, and `registerInitCommand` to `init.ts`**
 
-Append to `src/cli/init.ts`:
+First, add these imports at the **top** of `src/cli/init.ts`, alongside the existing imports (after the `import * as path from 'path';` line added in Task 3). They are used by `registerInitCommand` / `defaultFetchCatalog` below:
+
+```ts
+import { Command } from 'commander';
+import { RocketRideClient } from '../client/client';
+import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
+```
+
+Then append the following to `src/cli/init.ts`:
 
 ```ts
 /**
@@ -600,12 +612,12 @@ Then in `createProgram()`, immediately before `return program;` at the end of th
 
 - [ ] **Step 3: Typecheck the CLI build**
 
-Run: `pnpm -F rocketride exec tsc -p tsconfig.cli.json --noEmit`
+Run: `pnpm -F ./packages/client-typescript exec tsc -p tsconfig.cli.json --noEmit`
 Expected: exit 0, no diagnostics.
 
 - [ ] **Step 4: Run the full init test file again (nothing regressed)**
 
-Run: `pnpm -F rocketride exec jest init.test.ts`
+Run: `pnpm -F ./packages/client-typescript exec jest init.test.ts`
 Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
@@ -626,7 +638,7 @@ git commit -m "feat(cli): wire 'rocketride init' command into the program"
 Run:
 ```
 pnpm -F @rocketride/agents-core build
-pnpm -F rocketride exec tsc -p tsconfig.cli.json
+pnpm -F ./packages/client-typescript exec tsc -p tsconfig.cli.json
 ```
 Expected: `packages/client-typescript/dist/cli/cli/rocketride.js` exists.
 
