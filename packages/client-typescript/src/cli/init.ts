@@ -30,6 +30,11 @@
  * directory, by delegating to @rocketride/agents-core. No vscode dependency.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { AgentManager, defaultBundle, syncServiceCatalog } from '@rocketride/agents-core';
+import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
+
 /** Ergonomic CLI slugs mapped to agents-core canonical installer names. */
 const AGENT_SLUGS: Record<string, string> = {
 	'claude-code': 'Claude Code',
@@ -59,4 +64,93 @@ export function resolveAgents(slugs: string[] | undefined): string[] | null {
 		names.push(name);
 	}
 	return names;
+}
+
+/** Contents written to a freshly-created .env. */
+const ENV_TEMPLATE = `# RocketRide configuration
+ROCKETRIDE_APIKEY=
+ROCKETRIDE_URI=http://localhost:5565
+# ROCKETRIDE_PIPELINE=./my-pipeline.json
+# ROCKETRIDE_TOKEN=
+`;
+
+export interface InitOptions {
+	/** Agent slugs from --agent; undefined means all. */
+	agent?: string[];
+	/** commander sets this to false when --no-catalog is passed (default true). */
+	catalog?: boolean;
+	/** API key for the catalog fetch (from --apikey / ROCKETRIDE_APIKEY). */
+	apikey?: string;
+	/** Server URI for the catalog fetch (from --uri / ROCKETRIDE_URI). */
+	uri?: string;
+}
+
+export interface InitDeps {
+	/** Target directory; defaults to process.cwd(). Injected for test isolation. */
+	cwd?: string;
+	/** Line logger; production uses console.log. */
+	log: (msg: string) => void;
+	/**
+	 * Fetch the service catalog. Returns the services map, or null when no
+	 * apikey is available or the server cannot be reached. Injected so tests
+	 * run without a websocket.
+	 */
+	fetchCatalog: (opts: { apikey?: string; uri: string }) => Promise<Record<string, unknown> | null>;
+}
+
+/**
+ * Create .env from the template when absent (never overwrite — it may hold a
+ * real key), then ensure `.env` is listed in .gitignore so a later-filled-in
+ * key is not committed. Idempotent.
+ */
+function scaffoldEnv(cwd: string, log: (msg: string) => void): void {
+	const envPath = path.join(cwd, '.env');
+	if (!fs.existsSync(envPath)) {
+		fs.writeFileSync(envPath, ENV_TEMPLATE, 'utf8');
+		log('Created .env');
+	}
+
+	const gitignorePath = path.join(cwd, '.gitignore');
+	let gitignore = '';
+	try {
+		gitignore = fs.readFileSync(gitignorePath, 'utf8');
+	} catch {
+		// Will create.
+	}
+	if (!gitignore.split('\n').some((line) => line.trim() === '.env')) {
+		const next = gitignore.trimEnd() + (gitignore ? '\n' : '') + '.env\n';
+		fs.writeFileSync(gitignorePath, next, 'utf8');
+	}
+}
+
+/**
+ * Core init routine. Returns a process exit code. Throws on an unknown agent
+ * slug (validated before any file is written).
+ */
+export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number> {
+	const cwd = deps.cwd ?? process.cwd();
+	const agents = resolveAgents(opts.agent); // throws on bad slug before any write
+
+	const manager = new AgentManager();
+	const bundle = defaultBundle();
+	if (agents === null) {
+		await manager.installAll(bundle, cwd, deps.log);
+	} else {
+		await manager.installFromList(agents, bundle, cwd, deps.log);
+	}
+
+	scaffoldEnv(cwd, deps.log);
+
+	if (opts.catalog !== false) {
+		const uri = opts.uri || process.env.ROCKETRIDE_URI || CONST_DEFAULT_WEB_LOCAL;
+		const services = await deps.fetchCatalog({ apikey: opts.apikey, uri });
+		if (services && Object.keys(services).length > 0) {
+			await syncServiceCatalog(cwd, services, deps.log);
+		} else {
+			deps.log('⚠ Skipped service catalog (no apikey or server unreachable). Pass --no-catalog to silence.');
+		}
+	}
+
+	deps.log('RocketRide project initialized.');
+	return 0;
 }
