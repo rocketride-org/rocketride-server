@@ -11,6 +11,7 @@ Tests cover:
 
 import asyncio
 import configparser
+import json
 import os
 import shutil
 import sys
@@ -378,6 +379,64 @@ class TestMemoryStore(BaseStoreTest):
         return MemoryStore()
 
 
+# ===========================================================================
+# S3 Tests
+# ============================================================================
+
+
+class TestS3Store(BaseStoreTest):
+    """Test S3 storage with mocked boto3."""
+
+    @pytest.fixture
+    def test_config(self):
+        return {
+            'secret_key': {
+                'endpoint': os.getenv('ROCKETRIDE_TEST_S3_ENDPOINT'),
+                'region': os.getenv('ROCKETRIDE_TEST_S3_REGION'),
+                'access_key_id': os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'),
+                'secret_access_key': os.getenv('ROCKETRIDE_TEST_S3_SECRET_ACCESS_KEY'),
+            },
+            'bucket': os.getenv('ROCKETRIDE_TEST_S3_BUCKET'),
+        }
+
+    @pytest.fixture
+    def temp_dir(self, test_config):
+        """Create a temporary key prefix in the MinIO bucket, clean up after test."""
+        boto3 = pytest.importorskip('boto3', reason='boto3 is not available for S3 tests')
+        if not os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'):
+            pytest.skip('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID not configured for S3 tests')
+
+        import uuid
+
+        client = boto3.client(
+            's3',
+            endpoint_url=test_config['secret_key']['endpoint'],
+            aws_access_key_id=test_config['secret_key']['access_key_id'],
+            aws_secret_access_key=test_config['secret_key']['secret_access_key'],
+            region_name=test_config['secret_key']['region'],
+        )
+
+        try:
+            client.head_bucket(Bucket=test_config['bucket'])
+        except Exception:
+            client.create_bucket(Bucket=test_config['bucket'])
+
+        yield f'tmp_{uuid.uuid4().hex[:8]}'
+
+        paginator = client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=test_config['bucket'], Prefix='tmp_'):  # cleanup all tmp_-s to be safe
+            objects = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
+            if objects:
+                client.delete_objects(Bucket=test_config['bucket'], Delete={'Objects': objects})
+
+    @pytest.fixture
+    def store(self, test_config, temp_dir):
+        """Create S3 store instance."""
+        url = f's3://{test_config["bucket"]}/{temp_dir}'
+        secret_key = json.dumps(test_config['secret_key'])
+        return S3Store(url, secret_key)
+
+
 # ============================================================================
 # Store Factory Tests
 # ============================================================================
@@ -480,7 +539,7 @@ class TestStoreFactory:
 # ============================================================================
 
 
-class TestS3Store:
+class TestS3StoreMocked:
     """Test S3 storage with mocked boto3."""
 
     @pytest.fixture

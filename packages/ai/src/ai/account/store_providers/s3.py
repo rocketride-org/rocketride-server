@@ -1,6 +1,7 @@
 """AWS S3 storage implementation."""
 
 import asyncio
+from fnmatch import fnmatch
 import json
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -41,6 +42,7 @@ class S3Store(IStore):
         self._access_key_id = None
         self._secret_access_key = None
         self._region = 'us-east-1'
+        self._endpoint = None
 
         # Only parse secret_key if it's provided and not empty
         # Empty string or None will fall back to AWS credential chain (credentials file, env vars, IAM roles)
@@ -50,6 +52,7 @@ class S3Store(IStore):
                 self._access_key_id = creds.get('access_key_id')
                 self._secret_access_key = creds.get('secret_access_key')
                 self._region = creds.get('region', 'us-east-1')
+                self._endpoint = creds.get('endpoint')
             except json.JSONDecodeError:
                 raise ValueError('Invalid S3 credentials format (expected JSON)')
 
@@ -310,6 +313,79 @@ class S3Store(IStore):
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from S3: {e}') from e
 
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        name_pattern: Optional[str] = None,
+    ) -> list:
+        try:
+            if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
+                raise StorageError(f'Invalid name pattern: {name_pattern}')
+            if name_pattern == '..':
+                raise StorageError(f'Path traversal detected: {name_pattern}')
+
+            client = self._get_client()
+            key_prefix = self._get_key(prefix) if prefix else self._prefix
+            prefix_part_len = key_prefix.count('/') - self._prefix.count('/')
+
+            def _match(name):
+                return not name_pattern or fnmatch(name, name_pattern)
+
+            def _iter_keys():
+                paginator = client.get_paginator('list_objects_v2')
+                page_kwargs = {'Bucket': self._bucket}
+                if key_prefix:
+                    page_kwargs['Prefix'] = key_prefix + '/'
+                if not recursive:
+                    page_kwargs['Delimiter'] = '/'
+
+                for page in paginator.paginate(**page_kwargs):
+                    if include_dirs and not recursive:
+                        for prefix in page.get('CommonPrefixes', []):
+                            yield prefix['Prefix']
+
+                    for obj in page.get('Contents', []):
+                        yield obj['Key']
+
+            def _list_entries():
+                files = []
+                dirs = set() if include_dirs else None
+
+                for key in _iter_keys():
+                    store_root = (self._prefix + '/') if self._prefix else ''
+                    rel = key[len(store_root) :] if store_root and key.startswith(store_root) else key
+                    if not rel:  # key equals the prefix itself (directory marker object)
+                        continue
+
+                    if rel.endswith('/') and include_dirs and _match(rel.rstrip('/').split('/')[-1]):
+                        dirs.add(rel)
+
+                    else:
+                        parts = rel.split('/')
+
+                        if include_dirs:
+                            len(str(prefix_part_len) + prefix)
+                            for i in range(prefix_part_len + 1, len(parts)):
+                                if _match(parts[i - 1]):
+                                    dir = '/'.join(parts[:i]) + '/'
+                                    dirs.add(dir)
+
+                        if include_files and _match(parts[-1]):
+                            files.append(rel)
+
+                return sorted(files + (list(dirs) if include_dirs else []))
+
+            return await asyncio.to_thread(_list_entries)
+
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to list entries with prefix {prefix} from S3: {e}') from e
+
     # =========================================================================
     # Handle-Based I/O
     # =========================================================================
@@ -443,17 +519,6 @@ class S3Store(IStore):
                 raise StorageError(f'File not found: {filename}')
             raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
-    async def list_entries(
-        self,
-        prefix: str = '',
-        *,
-        recursive: bool = True,
-        include_files: bool = True,
-        include_dirs: bool = True,
-        glob_pattern=None,
-    ) -> list:
-        raise NotImplementedError
-
     async def _upload_part(self, context: dict, data: bytes) -> None:
         """Upload a single part and record its ETag."""
         client = self._get_client()
@@ -500,9 +565,14 @@ class S3Store(IStore):
                         aws_access_key_id=self._access_key_id,
                         aws_secret_access_key=self._secret_access_key,
                         region_name=self._region,
+                        endpoint_url=self._endpoint,
                     )
                 else:
-                    self._s3_client = boto3.client('s3', region_name=self._region)
+                    self._s3_client = boto3.client(
+                        's3',
+                        region_name=self._region,
+                        endpoint_url=self._endpoint,
+                    )
 
             except ImportError:
                 raise StorageError('boto3 library not installed. Install with: pip install boto3')
