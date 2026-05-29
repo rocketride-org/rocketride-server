@@ -108,7 +108,7 @@ inject a stub returning a fixed map or `null` without touching the network.
      ```
      # RocketRide configuration
      ROCKETRIDE_APIKEY=
-     ROCKETRIDE_URI=
+     ROCKETRIDE_URI=http://localhost:5565
      # ROCKETRIDE_PIPELINE=./my-pipeline.json
      # ROCKETRIDE_TOKEN=
      ```
