@@ -29,7 +29,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.pipe' });
@@ -80,7 +80,7 @@ Configuration object passed to `new RocketRideClient(config)`.
 | Property            | Type                                                     | Required | Description                                                                                                                                                                                                                                                                       |
 | ------------------- | -------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth`              | `string`                                                 | No       | API key. Optional: omit and set via `env.ROCKETRIDE_APIKEY` or `.env` (Node only), or set later with `setConnectionParams({ auth })` before calling `connect()`.                                                                                                                  |
-| `uri`               | `string`                                                 | No       | Server URI (e.g. `https://cloud.rocketride.ai` or `ws://localhost:8080`). Optional: omit and use `env.ROCKETRIDE_URI` or built-in default, or set later with `setConnectionParams({ uri })` before calling `connect()`.                                                           |
+| `uri`               | `string`                                                 | No       | Server URI (e.g. `https://api.rocketride.ai` or `ws://localhost:8080`). Optional: omit and use `env.ROCKETRIDE_URI` or built-in default, or set later with `setConnectionParams({ uri })` before calling `connect()`.                                                           |
 | `env`               | `Record<string, string>`                                 | No       | Override env; if omitted, `.env` is loaded in Node (only). Used for `${ROCKETRIDE_*}` substitution in pipeline config and for `ROCKETRIDE_APIKEY`/`ROCKETRIDE_URI` when not passed as `auth`/`uri`.                                                                               |
 | `persist`           | `boolean`                                                | No       | Enable automatic reconnection with exponential backoff. Default: `false`. **Use `true`** for long-lived UIs or when the server may restart; the client will retry (250ms -> 2500ms) and call `onConnectError` on each failure until `maxRetryTime` or success.                    |
 | `maxRetryTime`      | `number`                                                 | No       | Max time in ms to keep retrying connection. Default: no limit. **Use** (e.g. 300000 for 5 min) so you can show "gave up" after a bounded time instead of retrying forever.                                                                                                        |
@@ -98,7 +98,7 @@ Configuration object passed to `new RocketRideClient(config)`.
 ```typescript
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'wss://cloud.rocketride.ai',
+	uri: 'wss://api.rocketride.ai',
 	persist: true,
 	maxRetryTime: 300000,
 	requestTimeout: 30000,
@@ -122,7 +122,7 @@ Creates a client instance; it does **not** connect until you call `connect()`. Y
 **Example:**
 
 ```typescript
-const client = new RocketRideClient({ auth: 'my-key', uri: 'https://cloud.rocketride.ai' });
+const client = new RocketRideClient({ auth: 'my-key', uri: 'https://api.rocketride.ai' });
 await client.connect();
 ```
 
@@ -328,7 +328,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.json' });
@@ -343,7 +343,7 @@ await client.disconnect();
 ```typescript
 import { RocketRideClient } from 'rocketride';
 
-const status = await RocketRideClient.withConnection({ auth: 'my-key', uri: 'wss://cloud.rocketride.ai' }, async (client) => {
+const status = await RocketRideClient.withConnection({ auth: 'my-key', uri: 'wss://api.rocketride.ai' }, async (client) => {
 	const { token } = await client.use({ pipeline: { pipeline: myPipelineConfig } });
 	await client.send(token, JSON.stringify({ data: 1 }));
 	return await client.getTaskStatus(token);

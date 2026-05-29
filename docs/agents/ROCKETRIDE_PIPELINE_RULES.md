@@ -349,7 +349,7 @@ Pipeline configurations support environment variable substitution using the form
 
 ```env
 # Core Configuration
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_APIKEY=your-api-key
 
 # LLM API Keys

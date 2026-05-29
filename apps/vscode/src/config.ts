@@ -195,15 +195,9 @@ export class ConfigManager {
 		let hostUrl = gc.get<string>('hostUrl', '');
 		let apiKey = await this.getApiKeyFromStorage(group);
 
-		// Docker/Service: fixed URL and default API key
-		if (connectionMode === 'docker' || connectionMode === 'service') {
-			hostUrl = 'http://localhost:5565';
-			apiKey = apiKey || 'MYAPIKEY';
-		}
-
-		// Cloud: fall back to the build-time cloud endpoint
-		if (connectionMode === 'cloud' && !hostUrl) {
-			hostUrl = process.env.ROCKETRIDE_URI || 'http://localhost:5565';
+		// Cloud: build-time URI — ignore any stale hostUrl from other modes
+		if (connectionMode === 'cloud') {
+			hostUrl = process.env.ROCKETRIDE_URI || 'https://api.rocketride.ai';
 		}
 
 		return {
@@ -219,7 +213,7 @@ export class ConfigManager {
 		};
 	}
 
-	/**
+/**
 	 * Refreshes the cached configuration from all sources (VS Code settings
 	 * and secure storage). Public so that callers like applyAllSettings() and
 	 * EngineRegistry can force a cache refresh after external writes.
@@ -346,7 +340,7 @@ export class ConfigManager {
 				try {
 					new URL(RocketRideClient.normalizeUri(gc.hostUrl));
 				} catch {
-					errors.push(`${label}: Cloud URL must be a valid URL (e.g., https://cloud.rocketride.ai)`);
+					errors.push(`${label}: Cloud URL must be a valid URL (e.g., https://api.rocketride.ai)`);
 				}
 			}
 		} else if (gc.connectionMode === 'onprem') {

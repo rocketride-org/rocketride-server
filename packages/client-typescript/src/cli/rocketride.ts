@@ -41,7 +41,7 @@
  * Configuration:
  * The client supports configuration via .env file with the following variables:
  * - ROCKETRIDE_APIKEY: Your RocketRide API key (required for authentication)
- * - ROCKETRIDE_URI: The RocketRide server URI (defaults to wss://cloud.rocketride.ai)
+ * - ROCKETRIDE_URI: The RocketRide server URI (defaults to wss://api.rocketride.ai)
  * - ROCKETRIDE_PIPELINE: Path to your default pipeline configuration file
  * - ROCKETRIDE_TOKEN: Task token for existing pipelines
  *

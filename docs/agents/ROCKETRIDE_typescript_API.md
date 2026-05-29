@@ -68,7 +68,7 @@ You can configure the client using a `.env` file:
 ```env
 # .env file
 ROCKETRIDE_APIKEY=your-api-key-here
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ```
 
 The client will automatically parse the `.env` file if it exists (Node.js only) and use the values as defaults. The priority order is:
@@ -90,7 +90,7 @@ You can override `.env` settings by passing configuration directly to the constr
 // Override for testing or special cases
 const client = new RocketRideClient({
 	auth: 'your-api-key',
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 ```
 
@@ -102,7 +102,7 @@ The SDK automatically performs template variable substitution in pipeline config
 
 ```env
 ROCKETRIDE_APIKEY=your-api-key
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
@@ -202,7 +202,7 @@ The CLI supports `.env` file configuration. See the Configuration section above.
 import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 	auth: 'your-api-key',
 });
 
@@ -236,7 +236,7 @@ import { RocketRideClient } from 'rocketride';
 // Requires TypeScript 5.2+ and Node.js with Symbol.asyncDispose support
 await using client = new RocketRideClient({
 	auth: 'your-api-key',
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 
 // Client is automatically connected and will be disconnected when leaving scope
@@ -272,7 +272,7 @@ import { RocketRideClient } from 'rocketride';
 // Create client with automatic reconnection enabled
 const client = new RocketRideClient({
 	auth: 'your-api-key',
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 	persist: true, // Enable automatic reconnection (exponential backoff)
 	maxRetryTime: 60000, // Stop retrying after 60 seconds (omit to retry forever)
 	onConnected: async (info) => {
@@ -301,7 +301,7 @@ await client.disconnect();
 import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 	auth: 'your-api-key',
 });
 
@@ -364,7 +364,7 @@ new RocketRideClient(config?: RocketRideClientConfig)
 **Configuration Options:**
 
 - `auth?: string` - API key for authentication (can also use `ROCKETRIDE_APIKEY` in `.env`)
-- `uri?: string` - Server URI (default: `https://cloud.rocketride.ai`, can also use `ROCKETRIDE_URI` in `.env`)
+- `uri?: string` - Server URI (default: `https://api.rocketride.ai`, can also use `ROCKETRIDE_URI` in `.env`)
 - `onEvent?: (event: DAPMessage) => void` - Event handler for server events
 - `onConnected?: (connectionInfo?: string) => Promise<void>` - Connection established callback
 - `onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>` - Connection lost callback
