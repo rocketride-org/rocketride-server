@@ -74,7 +74,7 @@ export async function syncServiceCatalog(
   }
 
   const catalog = serviceNames.map((name) => {
-    const svc = services[name] as Record<string, unknown>;
+    const svc = (services[name] ?? {}) as Record<string, unknown>;
     const entry: Record<string, unknown> = {
       name,
       classType: svc.classType ?? [],
