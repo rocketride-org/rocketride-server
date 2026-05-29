@@ -44,7 +44,6 @@ import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { WorkspaceProvider } from '../../workspace/WorkspaceContext';
 import type { ShellConfig } from '../../workspace/types';
-import { registerAndMapApps } from '../../lib/appLoader';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
@@ -161,12 +160,23 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Connection state ──────────────────────────────────────────────────
 	const { client, isConnected, statusMessage } = useShellConnection();
 
-	// ── Desktop apps — derived from identity, falls back to static config ──
+	// ── Apps — probe catalog + post-auth desktop metadata ─────────────────
+	// MF remotes are registered once at bootstrap from the probe — they
+	// never change after auth. Post-auth, ConnectResult.apps only adds
+	// desktop metadata (appStatus, onDesktop) onto existing probe entries.
 	const apps = useMemo(() => {
-		if (identity?.apps?.length) {
-			return registerAndMapApps(identity.apps as Parameters<typeof registerAndMapApps>[0]);
-		}
-		return config.apps;
+		if (!identity?.apps?.length) return config.apps;
+
+		// Index desktop metadata by app id for fast lookup
+		const desktopById = new Map(
+			(identity.apps as Array<{ id: string; appStatus?: string; onDesktop?: boolean }>)
+				.map((a) => [a.id, a]),
+		);
+		// Overlay desktop metadata onto probe entries
+		return config.apps.map((a) => {
+			const da = desktopById.get(a.id);
+			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
+		});
 	}, [identity?.apps, config.apps]);
 
 	// =====================================================================
