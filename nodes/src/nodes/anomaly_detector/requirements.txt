@@ -1,0 +1,5 @@
+# Anomaly Detector node Requirements
+#
+# This node uses only Python standard library modules (math, threading,
+# collections) for statistical anomaly detection. No external dependencies
+# are required.
