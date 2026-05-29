@@ -136,3 +136,41 @@ describe('runInit (offline)', () => {
 		expect(await exists(path.join(cwd, '.rocketride/docs', DOC))).toBe(false);
 	});
 });
+
+describe('runInit (catalog)', () => {
+	const services = {
+		chat: { classType: ['source'], description: 'Chat source. Second sentence.', lanes: {} },
+		llm_openai: { classType: ['provider'], description: 'OpenAI provider.', lanes: {} },
+	};
+
+	it('writes schema files and services-catalog.json when fetchCatalog returns services', async () => {
+		const cwd = await mkTempCwd();
+		const deps: InitDeps = {
+			cwd,
+			log: () => undefined,
+			fetchCatalog: async () => services,
+		};
+		await runInit({ catalog: true, apikey: 'k' }, deps);
+
+		expect(await exists(path.join(cwd, '.rocketride/schema/chat.json'))).toBe(true);
+		expect(await exists(path.join(cwd, '.rocketride/schema/llm_openai.json'))).toBe(true);
+
+		const catalog = JSON.parse(await fs.readFile(path.join(cwd, '.rocketride/services-catalog.json'), 'utf8'));
+		expect(catalog).toHaveLength(2);
+		// catalog descriptions are first-sentence only (agents-core behavior)
+		const chat = catalog.find((e: { name: string }) => e.name === 'chat');
+		expect(chat.description).toBe('Chat source.');
+	});
+
+	it('skips catalog gracefully (no throw, no files) when fetchCatalog returns null', async () => {
+		const cwd = await mkTempCwd();
+		const deps: InitDeps = {
+			cwd,
+			log: () => undefined,
+			fetchCatalog: async () => null,
+		};
+		const code = await runInit({ catalog: true }, deps);
+		expect(code).toBe(0);
+		expect(await exists(path.join(cwd, '.rocketride/services-catalog.json'))).toBe(false);
+	});
+});
