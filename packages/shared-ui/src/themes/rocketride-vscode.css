@@ -201,10 +201,12 @@
 
 body[data-vscode-theme-kind='vscode-dark'],
 body[data-vscode-theme-kind='vscode-high-contrast'] {
+	--rr-icon-color: #ffffff;
 	--icon-color: #ffffff;
 }
 
 body[data-vscode-theme-kind='vscode-light'],
 body[data-vscode-theme-kind='vscode-high-contrast-light'] {
+	--rr-icon-color: #1f1f1f;
 	--icon-color: #1f1f1f;
 }
