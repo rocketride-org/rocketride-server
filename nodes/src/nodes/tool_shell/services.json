@@ -1,0 +1,141 @@
+{
+	"title": "Shell",
+	"protocol": "tool_shell://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_shell",
+	"prefix": "shell",
+	"icon": "shell.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Executes shell commands in the host environment. Use to run scripts, manage processes, install packages, and interact with the operating system via the command line.", "Common use cases: build scripts (npm run build, make), package management (npm/pip install), process management, file operations (cp, mv, mkdir, find), environment inspection (env, which), and host-installed git operations.", "Note: For portable git operations that do not depend on the host environment having git installed, use the Git node instead."],
+	"tile": ["Tool: ${parameters.tool_shell.serverName}.execute"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "shell"
+			}
+		}
+	},
+	"fields": {
+		"tool_shell.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tool: <serverName>.execute",
+			"default": "shell"
+		},
+		"tool_shell.workingDir": {
+			"type": "string",
+			"title": "Default working directory",
+			"description": "Default working directory for command execution. The agent may override per-call. If empty, the host process CWD is used.",
+			"default": "",
+			"optional": true
+		},
+		"tool_shell.timeout": {
+			"type": "integer",
+			"title": "Execution timeout (seconds)",
+			"description": "Maximum seconds a command may run before it is killed. Default 30s, max 1800s.",
+			"default": 30,
+			"minimum": 1,
+			"maximum": 1800,
+			"optional": true
+		},
+		"tool_shell.maxOutputBytes": {
+			"type": "integer",
+			"title": "Max output size (bytes)",
+			"description": "Maximum size applied to each of stdout and stderr individually; each stream is truncated beyond this limit. Default 1 MiB.",
+			"default": 1048576,
+			"minimum": 1024,
+			"optional": true
+		},
+		"tool_shell.allowExternalEnv": {
+			"type": "boolean",
+			"title": "Allow agent-supplied env vars",
+			"description": "If enabled, the agent may inject additional environment variables per call. Variables defined in this node's config always take precedence. Defaults off because env vars like LD_PRELOAD, PATH, or NODE_OPTIONS can redirect command execution.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_shell.allowShell": {
+			"type": "boolean",
+			"title": "Allow shell mode",
+			"description": "When off (default), commands are parsed into argv and executed without invoking a shell — pipes, redirects, globs, and '&&' are not interpreted, eliminating the shell-injection class. Enable only if commands genuinely need shell features; once enabled, agents can request shell mode per call via use_shell=true.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_shell.allowAnyCommand": {
+			"type": "boolean",
+			"title": "Allow any command",
+			"description": "When off (default), an empty Command Allowlist denies all commands and the node refuses to run anything until at least one regex is configured. Enable only to opt into unrestricted execution — every command the agent passes will run on the host.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_shell.redactSecrets": {
+			"type": "boolean",
+			"title": "Redact secrets in output",
+			"description": "When on (default), captured stdout and stderr are scrubbed for common secret shapes (AWS keys, bearer tokens, JWTs, PEM private keys, KEY=value lines for password/secret/token/api_key/...) before being returned to the agent.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_shell.envName": {
+			"type": "string",
+			"title": "Variable name",
+			"default": ""
+		},
+		"tool_shell.envValue": {
+			"type": "string",
+			"title": "Value",
+			"default": ""
+		},
+		"tool_shell.envVars": {
+			"title": "Environment variables",
+			"description": "Environment variables injected into every command. These override any same-named variables supplied by the agent.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["tool_shell.envName", "tool_shell.envValue"]
+			}
+		},
+		"tool_shell.commandPattern": {
+			"type": "string",
+			"title": "Command pattern (regex)",
+			"default": ""
+		},
+		"tool_shell.commandAllowlist": {
+			"title": "Command allowlist",
+			"description": "Regex patterns for allowed commands. The full command string must match at least one pattern (re.fullmatch) to run; use .* for substring matching (e.g. 'npm .*'). If empty, any command is allowed.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["tool_shell.commandPattern"]
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Shell",
+			"properties": ["type", "tool_shell.workingDir", "tool_shell.timeout", "tool_shell.maxOutputBytes", "tool_shell.allowShell", "tool_shell.allowExternalEnv", "tool_shell.redactSecrets", "tool_shell.envVars", "tool_shell.commandAllowlist", "tool_shell.allowAnyCommand"]
+		}
+	]
+}
