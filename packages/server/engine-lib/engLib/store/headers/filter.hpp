@@ -318,6 +318,8 @@ public:
     virtual std::vector<std::string> cb_getListeners() noexcept(false);
     virtual std::vector<std::string> cb_getControllerNodeIds(
         std::string &classType) noexcept(false);
+    virtual IServiceFilterInstance *cb_getInstance(
+        const std::string &nodeId) noexcept(false);
     virtual void cb_control(std::string &filter, py::object &control,
                             std::string nodeId = "") noexcept(false);
     virtual void cb_open(py::object entry) noexcept(false);
@@ -328,27 +330,43 @@ public:
     virtual void cb_writeText(const std::u16string &text) noexcept(false);
     virtual void cb_writeTable(const std::u16string &text) noexcept(false);
     virtual void cb_writeWords(const WordVector &textWords) noexcept(false);
-    virtual void cb_writeAudio(
-        const AVI_ACTION action, Text &mimeType,
-        const pybind11::bytes &streamData) noexcept(false);
-    virtual void cb_writeVideo(
-        const AVI_ACTION action, Text &mimeType,
-        const pybind11::bytes &streamData) noexcept(false);
-    virtual void cb_writeImage(
-        const AVI_ACTION action, Text &mimeType,
-        const pybind11::bytes &streamData) noexcept(false);
-    virtual void cb_writeQuestions(const pybind11::object &question) noexcept(
-        false);
-    virtual void cb_writeAnswers(const pybind11::object &answers) noexcept(
-        false);
+    virtual void cb_writeAudio(const AVI_ACTION action, Text &mimeType,
+                               const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_writeVideo(const AVI_ACTION action, Text &mimeType,
+                               const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_writeImage(const AVI_ACTION action, Text &mimeType,
+                               const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_writeQuestions(const pybind11::object &question) noexcept(false);
+    virtual void cb_writeAnswers(const pybind11::object &answers) noexcept(false);
     virtual void cb_writeClassifications(
         const json::Value &classifications,
         const json::Value &classificationPolicy,
         const json::Value &classificationRules) noexcept(false);
     virtual void cb_writeClassificationContext(
         const json::Value &classifications) noexcept(false);
-    virtual void cb_writeDocuments(const pybind11::object &documents) noexcept(
-        false);
+    virtual void cb_writeDocuments(const pybind11::object &documents) noexcept(false);
+
+    // cb_acceptXxx: peer-direct delivery. Invokes this->writeXxx()
+    // virtual (fires the Python trampoline) instead of broadcasting
+    // through this->binder like cb_writeXxx does.
+    virtual void cb_acceptText(const std::u16string &text) noexcept(false);
+    virtual void cb_acceptTable(const std::u16string &text) noexcept(false);
+    virtual void cb_acceptWords(const WordVector &textWords) noexcept(false);
+    virtual void cb_acceptAudio(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptVideo(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptImage(const AVI_ACTION action, Text &mimeType,
+                                const pybind11::bytes &streamData) noexcept(false);
+    virtual void cb_acceptQuestions(const pybind11::object &question) noexcept(false);
+    virtual void cb_acceptAnswers(const pybind11::object &answers) noexcept(false);
+    virtual void cb_acceptDocuments(const pybind11::object &documents) noexcept(false);
+    virtual void cb_acceptClassifications(
+        const json::Value &classifications,
+        const json::Value &classificationPolicy,
+        const json::Value &classificationRules) noexcept(false);
+    virtual void cb_acceptClassificationContext(
+        const json::Value &classifications) noexcept(false);
     virtual void cb_writeTagEndStream() noexcept(false);
     virtual void cb_writeTagEndObject() noexcept(false);
     virtual void cb_close() noexcept(false);

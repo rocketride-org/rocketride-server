@@ -31,6 +31,14 @@ export interface PipelineInputConnection {
 
 	/** Source component ID providing the data */
 	from: string;
+
+	/**
+	 * Branch name on the source component, when the source declares a
+	 * `branches` metadata field in its services.json (e.g., flow_if_else
+	 * uses `"then"` / `"else"`). Omitted on components with a single
+	 * output per lane.
+	 */
+	branch?: string;
 }
 
 /**
