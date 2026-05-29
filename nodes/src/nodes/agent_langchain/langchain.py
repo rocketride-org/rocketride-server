@@ -26,17 +26,14 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent._internal.utils import pick_for_tool_call
 from ai.common.agent.types import AgentRunResult
-from ai.common.attachment_picker import pick_for_tool_call
 from ai.common.schema import Question
-
-logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -201,11 +198,7 @@ def _build_langchain_tools(
                         if getattr(_c, 'path', None) == _v:
                             _mime = getattr(_c, 'mime', 'unknown')
                             break
-                    logger.info(
-                        'METRIC tool.call_with_attachment tool_name=%s mime=%s',
-                        tool_name,
-                        _mime,
-                    )
+                    debug(f'METRIC tool.call_with_attachment tool_name={tool_name} mime={_mime}')
             except Exception:
                 # Picker is best-effort; never block a tool call on it.
                 pass

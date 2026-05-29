@@ -142,12 +142,14 @@ export const useChatMessages = () => {
 		async (text: string, client: any, authToken: string, chat?: Chat | null, attachments?: Attachment[]): Promise<void> => {
 			if (!text.trim() && !(attachments && attachments.length > 0)) return;
 
-			// Add user message to chat
+			// Add user message to chat. Carry attachments so the user bubble
+			// renders pills for the message just sent (Message.tsx reads them).
 			const userMessage: Message = {
 				id: Date.now(),
 				text,
 				sender: 'user',
 				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				...(attachments && attachments.length > 0 ? { attachments } : {}),
 			};
 
 			setMessages((prev) => [...prev, userMessage]);

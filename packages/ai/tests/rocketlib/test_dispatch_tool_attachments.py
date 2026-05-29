@@ -38,8 +38,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from rocketlib import IInstanceBase, tool_function
-from rocketlib.error import APERR, Ec
+from rocketlib import APERR, Ec, IInstanceBase, tool_function
 
 
 class _StubFileStore:

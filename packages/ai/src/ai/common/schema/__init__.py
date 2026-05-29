@@ -2,6 +2,7 @@ from .autopipe import Autopipe
 
 from rocketride import (
     Answer,
+    Attachment,
     Question,
     QuestionExample,
     QuestionHistory,
@@ -12,7 +13,6 @@ from rocketride import (
     Doc,
     DocGroup,
 )
-from rocketride.schema import Attachment
 
 __all__ = [
     'Answer',

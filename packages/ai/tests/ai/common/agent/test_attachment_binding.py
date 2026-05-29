@@ -1,9 +1,9 @@
 # Copyright (c) 2026 Aparavi Software AG
 # SPDX-License-Identifier: MIT
-"""Attachment picker contract."""
+"""Attachment binding contract."""
 
 from ai.common.schema import Attachment
-from ai.common.attachment_picker import pick_for_property, pick_for_tool_call
+from ai.common.agent._internal.utils import pick_for_property, pick_for_tool_call
 
 
 def _att(mime: str, name: str = 'x') -> Attachment:

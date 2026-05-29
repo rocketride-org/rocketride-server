@@ -11,17 +11,6 @@ class LLMBase(IInstanceBase):
     Provider-specific request/retry behavior remains in ai.common.chat.ChatBase.
     """
 
-    # Provider block-shape selector for Question.attachments dispatch.
-    # Subclasses override; default 'openai' because most providers in the catalog
-    # are OpenAI-compatible. Recognized values: 'openai' | 'anthropic' | 'gemini'
-    # | 'bedrock'. The non-OpenAI shapes each supply their own translator, and
-    # per-provider IInstance subclasses override this value.
-    provider_shape: str = 'openai'
-
-    # Concrete node name surfaced in drop-and-warn telemetry. Defaults to a
-    # sentinel; per-node subclasses override it.
-    provider_name: str = 'unknown'
-
     def _question(self, question: Question) -> Answer:
         return self.IGlobal._chat.chat(question)
 

@@ -17,10 +17,9 @@ import importlib
 from typing import Dict, Any
 from rocketlib import debug
 
-# Telemetry logger — METRIC-prefixed structured lines emitted from this
-# module are picked up by a follow-up adapter that fans them out to the
-# MetricsManager surface. Privacy: MIME + counts only, never
-# filenames or paths.
+# Telemetry logger — emits METRIC-prefixed structured lines (MIME + counts
+# only, never filenames or paths) to the standard logger so attachment volume
+# is recoverable from production logs. No metrics adapter consumes these yet.
 _telemetry_logger = logging.getLogger(__name__)
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -429,11 +428,10 @@ class ChatBase:
     def _get_file_store(self):
         """Return the per-account FileStore used to read attachment bytes.
 
-        ChatBase doesn't construct one itself; the LLM node injects
-        ``self._file_store``. Until then, fall back to the shared builder
-        that resolves via :mod:`ai.account.store` using the ambient
-        ``ROCKETRIDE_CLIENT_ID`` env var (the same fallback tool nodes use
-        for attachment resolution). Returns an object exposing
+        Honours an injected ``self._file_store`` if one is ever set; otherwise
+        (the current production path) it builds one via the shared builder,
+        which resolves through :mod:`ai.account.store` using the ambient
+        ``ROCKETRIDE_CLIENT_ID`` env var. Returns an object exposing
         ``read_bytes(path) -> bytes`` (sync).
         """
         injected = getattr(self, '_file_store', None)
@@ -464,8 +462,7 @@ class ChatBase:
 
         def _log_drops(dropped):
             for d in dropped:
-                # Structured METRIC log line — picked up by the follow-up
-                # logging-to-metrics adapter. MIME only, no path/filename
+                # Structured METRIC log line; MIME only, never path/filename
                 # (privacy invariant).
                 _telemetry_logger.info(
                     'METRIC attachment.dropped_unsupported provider=%s mime=%s',
@@ -473,14 +470,13 @@ class ChatBase:
                     d.mime,
                 )
 
-        def _log_forwarded(provider_name, kept_count, sample_mimes):
-            # One emission per surviving attachment per send. Tagged with
-            # provider and the per-attachment MIME so the counter can
-            # be aggregated by both axes downstream.
-            for mime in sample_mimes:
+        def _log_forwarded(kept_mimes):
+            # One emission per surviving attachment per send, tagged with
+            # provider + per-attachment MIME so it can be aggregated by both.
+            for mime in kept_mimes:
                 _telemetry_logger.info(
                     'METRIC llm.attachment_forwarded provider=%s mime=%s',
-                    provider_name,
+                    self._provider,
                     mime,
                 )
 
@@ -493,35 +489,28 @@ class ChatBase:
                 if getattr(a, 'attachment_id', None) not in dropped_ids
             ]
 
-        if shape == 'openai':
-            file_store = self._get_file_store()
-            blocks, dropped = translate_openai_shape(prompt_text, attachments, file_store, self._provider)
-            _log_drops(dropped)
-            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
-            return self._chat_blocks(blocks)
-        elif shape == 'anthropic':
-            file_store = self._get_file_store()
-            blocks, dropped = translate_anthropic_shape(prompt_text, attachments, file_store, self._provider)
-            _log_drops(dropped)
-            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
-            return self._chat_blocks(blocks)
-        elif shape == 'gemini':
-            file_store = self._get_file_store()
-            parts, dropped = translate_gemini_shape(prompt_text, attachments, file_store, self._provider)
-            _log_drops(dropped)
-            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
-            return self._chat_blocks(parts)
-        elif shape == 'bedrock':
-            file_store = self._get_file_store()
-            blocks, dropped = translate_bedrock_shape(prompt_text, attachments, file_store, self._provider)
-            _log_drops(dropped)
-            _log_forwarded(self._provider, len(attachments) - len(dropped), _kept_mimes(attachments, dropped))
-            return self._chat_blocks(blocks)
+        # Each shape supplies its own translator returning (blocks, dropped);
+        # the blocks go straight to _chat_blocks. Adding a provider shape is a
+        # one-line entry here, not another near-identical branch.
+        translators = {
+            'openai': translate_openai_shape,
+            'anthropic': translate_anthropic_shape,
+            'gemini': translate_gemini_shape,
+            'bedrock': translate_bedrock_shape,
+        }
+        translate = translators.get(shape)
 
-        # Unknown shape: log warning and fall back to text-only so the
-        # existing pipeline keeps working until per-node shapes land.
-        debug(f'provider_shape={shape!r} not recognized; falling back to text-only for provider {self._provider}')
-        return self.chat_string(prompt_text)
+        if translate is None:
+            # Unknown shape: warn and fall back to text-only so the existing
+            # pipeline keeps working until per-node shapes land.
+            debug(f'provider_shape={shape!r} not recognized; falling back to text-only for provider {self._provider}')
+            return self.chat_string(prompt_text)
+
+        file_store = self._get_file_store()
+        blocks, dropped = translate(prompt_text, attachments, file_store, self._provider)
+        _log_drops(dropped)
+        _log_forwarded(_kept_mimes(attachments, dropped))
+        return self._chat_blocks(blocks)
 
     def chat(self, question: Question) -> Answer:
         """

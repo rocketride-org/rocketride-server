@@ -32,15 +32,12 @@ Usage::
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Dict, List, Set
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 from ai.common.agent import AgentBase, AgentContext, safe_str
 from ai.common.schema import Question
-
-logger = logging.getLogger(__name__)
 
 # Per-process set of run_ids for which we have already emitted the
 # "Wave does not support multimodal forwarding" warning.  Wave's
@@ -225,18 +222,16 @@ def _build_wave_question(
         # attachment so downstream aggregation can split by MIME. Privacy:
         # MIME only, never filename or path.
         for _att in attachments:
-            logger.info(
-                'METRIC attachment.dropped_agent_unsupported framework=rocketride_wave mime=%s',
-                getattr(_att, 'mime', 'application/octet-stream'),
+            debug(
+                'METRIC attachment.dropped_agent_unsupported framework=rocketride_wave '
+                f'mime={getattr(_att, "mime", "application/octet-stream")}'
             )
         run_id = getattr(context, 'run_id', '')
         if run_id and run_id not in _attachment_drop_warned_runs:
             _attachment_drop_warned_runs.add(run_id)
-            logger.warning(
-                'RocketRide Wave does not support multimodal forwarding; '
-                '%d attachment(s) dropped from LLM call (run_id=%s)',
-                len(attachments),
-                run_id,
+            warning(
+                f'RocketRide Wave does not support multimodal forwarding; '
+                f'{len(attachments)} attachment(s) dropped from LLM call (run_id={run_id})'
             )
 
     # ------------------------------------------------------------------

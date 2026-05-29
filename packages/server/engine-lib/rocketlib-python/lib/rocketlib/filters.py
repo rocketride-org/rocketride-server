@@ -24,39 +24,13 @@
 
 from __future__ import annotations  # Enables forward references
 import json
-import logging
+import mimetypes
 from typing import TYPE_CHECKING, Dict, Any, Iterable, List, Optional, TypedDict, Callable, Protocol
 from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke
 from .error import APERR, Ec
 
-# Telemetry surface — METRIC-prefixed log lines are picked up by a
-# follow-up metrics adapter.  Privacy: tool_name + MIME only,
-# never filename or path.
-_telemetry_logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
-
-
-# Optional host-provided factory for resolving a per-account FileStore on
-# tool nodes.  rocketlib stays dependency-free: the ``ai`` layer registers a
-# builder here at import time (see ai.common.__init__) so attachment-accepting
-# tools can read bytes the same way the chat node does, without rocketlib ever
-# importing the account layer.  Unregistered -> tool attachment resolution
-# no-ops, which is the pre-existing behavior.
-_attachment_file_store_factory: Optional[Callable[[Any], Any]] = None
-
-
-def set_attachment_file_store_factory(factory: Optional[Callable[[Any], Any]]) -> None:
-    """Register (or clear) the per-account FileStore factory for tool nodes.
-
-    ``factory(node) -> file_store_or_None`` is consulted by
-    ``IInstanceBase._get_attachment_file_store`` as a last resort, after any
-    explicitly injected store. Keeps the dependency direction one-way
-    (``ai`` -> ``rocketlib``).
-    """
-    global _attachment_file_store_factory
-    _attachment_file_store_factory = factory
 
 
 # =========================================================================
@@ -1303,17 +1277,17 @@ class IInstanceBase:
                     return
 
             data = file_store.read_bytes(path)
-            mimes = prop_schema.get('x-rocketride-mimes') or []
-            mime = mimes[0] if mimes else None
+            # Derive the concrete MIME from the path, NOT from the schema's
+            # ``x-rocketride-mimes`` accept-list (which may be a wildcard
+            # like ``image/*`` or list several patterns).
+            mime, _ = mimetypes.guess_type(path)
             input_obj[prop_name] = {'path': path, 'mime': mime, 'bytes': data}
-            # METRIC tool.attachment_resolved — fired per successfully
-            # resolved attachment-typed slot.  Privacy: tool
-            # name + property name only, never the path itself.
-            _telemetry_logger.info(
-                'METRIC tool.attachment_resolved tool_name=%s prop=%s',
-                tool_name,
-                prop_name,
-            )
+            # METRIC tool.attachment_resolved — one line per resolved
+            # attachment-typed slot, for log-based observability.
+            # Privacy: tool + property name only, never the path itself.
+            from .engine import debug
+
+            debug(f'METRIC tool.attachment_resolved tool_name={tool_name} prop={prop_name}')
 
     def _get_attachment_file_store(self) -> Any:
         """Return a sync FileStore-like object exposing ``read_bytes(path)``.
@@ -1327,9 +1301,11 @@ class IInstanceBase:
            ``_resolve_attachment_inputs`` for the contract.
 
         We deliberately do NOT auto-construct a per-account FileStore here
-        (no env-var sniffing). Tool nodes that need attachments must be
-        wired by their host; this keeps the rocketlib base dependency-free
-        and lets the IInstance harness control the lifecycle.
+        (no env-var sniffing), which keeps the rocketlib base dependency-free.
+        A tool node that accepts attachments builds its own store in
+        ``beginGlobal()`` and exposes it as ``self._file_store`` — see
+        ``tool_filesystem`` for the canonical pattern (it imports
+        ``ai.account.store`` directly, which node code is free to do).
         """
         injected = getattr(self, '_file_store', None)
         if injected is not None:
@@ -1339,10 +1315,6 @@ class IInstanceBase:
             fs = getattr(instance, 'fileStore', None) or getattr(instance, '_file_store', None)
             if fs is not None:
                 return fs
-        # Last resort: a host-registered factory (the ai layer's per-account
-        # FileStore builder).  None when no host has registered one.
-        if _attachment_file_store_factory is not None:
-            return _attachment_file_store_factory(self)
         return None
 
     # ------------------------------------------------------------------

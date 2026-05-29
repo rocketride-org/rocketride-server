@@ -34,14 +34,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import Any, Dict, List, Optional, Set, Union
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug, warning
 
 from ai.common.agent import AgentBase, AgentContext
-
-logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -284,18 +281,16 @@ class CrewBase(AgentBase):
                 attachments = getattr(outer_context, 'attachments', ()) or ()
                 if attachments:
                     for _att in attachments:
-                        logger.info(
-                            'METRIC attachment.dropped_agent_unsupported framework=crewai mime=%s',
-                            getattr(_att, 'mime', 'application/octet-stream'),
+                        debug(
+                            'METRIC attachment.dropped_agent_unsupported framework=crewai '
+                            f'mime={getattr(_att, "mime", "application/octet-stream")}'
                         )
                     run_id = getattr(outer_context, 'run_id', '')
                     if run_id and run_id not in CrewBase._attachment_drop_warned_runs:
                         CrewBase._attachment_drop_warned_runs.add(run_id)
-                        logger.warning(
-                            'CrewAI does not support multimodal forwarding; '
-                            '%d attachment(s) dropped from LLM call (run_id=%s)',
-                            len(attachments),
-                            run_id,
+                        warning(
+                            f'CrewAI does not support multimodal forwarding; '
+                            f'{len(attachments)} attachment(s) dropped from LLM call (run_id={run_id})'
                         )
                 stop_words = getattr(self, 'stop', None)
                 # forward_attachments=False makes the drop above real: CrewAI

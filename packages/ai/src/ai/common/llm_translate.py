@@ -39,9 +39,11 @@ class AttachmentDropReport:
 
 # --- OpenAI shape -------------------------------------------------------
 #
-# Covers OpenAI-compat providers: openai, groq, mistral, fireworks,
-# together, cerebras, deepseek (and any other ``messages[0].content`` block
-# API). See ROCKETRIDE_COMPONENT_REFERENCE for provider list.
+# Covers our OpenAI-compatible LLM nodes — those that inherit the default
+# provider_shape='openai': llm_openai, llm_openai_api, llm_deepseek,
+# llm_gmi_cloud, llm_ibm_watson, llm_mistral, llm_ollama, llm_perplexity,
+# llm_qwen, llm_xai. (The anthropic, gemini, and bedrock nodes declare their
+# own shapes and use the dedicated translators further down.)
 
 _OPENAI_IMAGE_MIMES = {'image/png', 'image/jpeg', 'image/webp', 'image/gif'}
 _OPENAI_AUDIO_FORMATS = {

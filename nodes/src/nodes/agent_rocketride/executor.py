@@ -27,7 +27,6 @@ The path component is a JMESPath expression and may itself contain colons
 from __future__ import annotations
 
 import json
-import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List
@@ -40,8 +39,6 @@ from ai.common.agent import AgentBase, AgentContext
 from ai.common.schema import Question
 
 from .formatters import format_data
-
-logger = logging.getLogger(__name__)
 
 # Maximum number of concurrent tool executions per wave.  Keeping this at 8
 # prevents runaway thread counts when the LLM issues many parallel calls.

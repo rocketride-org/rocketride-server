@@ -23,6 +23,7 @@ Run with:
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from typing import Any, List
 from unittest.mock import MagicMock
 
@@ -36,6 +37,14 @@ if 'rocketlib.types' not in sys.modules:
     types_stub = MagicMock()
     sys.modules['rocketlib.types'] = types_stub
     _rocketlib_stub.types = types_stub
+
+# `call_llm` wraps the synthesized/caller Question as `IInvokeLLM.Ask(question=q)`
+# before handing it to the LLM channel. With `rocketlib.types` stubbed, a bare
+# MagicMock `Ask` would discard `.question` (and a MagicMock's default `__iter__`
+# yields nothing), so the spies below would never observe the threaded
+# attachments. Make `Ask` a structural passthrough that preserves the question —
+# behaviourally identical to the real data envelope for the `.question` contract.
+sys.modules['rocketlib.types'].IInvokeLLM.Ask = lambda question: SimpleNamespace(question=question)
 for _mod in ('depends', 'engLib'):
     if _mod not in sys.modules:
         _stub = MagicMock()

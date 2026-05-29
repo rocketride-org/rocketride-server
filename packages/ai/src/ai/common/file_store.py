@@ -21,14 +21,16 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Shared per-account FileStore builder for attachment byte reads.
+"""Per-account FileStore builder for chat attachment byte reads.
 
-Both the chat/LLM path (``ChatBase`` attachment translation) and tool-node
-attachment resolution need to turn a FileStore path into bytes, and neither is
-handed a FileStore by the engine today. This module centralizes the fallback
-that constructs one from the ambient ``ROCKETRIDE_CLIENT_ID`` so the two paths
-cannot drift. The returned object exposes a synchronous
-``read_bytes(path) -> bytes``.
+The chat/LLM path (``ChatBase`` attachment translation) needs to turn a
+FileStore path into bytes but isn't handed a FileStore by the engine, so this
+builds one from the ambient ``ROCKETRIDE_CLIENT_ID``. Chat dispatch is
+synchronous while the account FileStore is async, so the result is wrapped in a
+shim exposing a synchronous ``read_bytes(path) -> bytes``.
+
+(Tool nodes that accept attachments do NOT use this — they build their own
+store in ``beginGlobal()``; see ``tool_filesystem`` for that pattern.)
 """
 
 from __future__ import annotations

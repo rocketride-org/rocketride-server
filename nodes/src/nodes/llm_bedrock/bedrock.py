@@ -41,8 +41,6 @@ class Chat(ChatBase):
     # dispatch. Declared on the chat driver because that is the instance the
     # dispatcher reads (a default of 'openai' here silently misroutes
     # attachments).
-    # TODO Bedrock-on-Claude path: if the model id starts with 'anthropic.',
-    # use the anthropic shape instead of Converse — defer to follow-up.
     provider_shape = 'bedrock'
 
     _llm: ChatBedrock
