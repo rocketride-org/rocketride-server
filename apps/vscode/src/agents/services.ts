@@ -22,135 +22,19 @@
 // =============================================================================
 
 /**
- * services.ts - Service Catalog Sync
+ * services.ts - VS Code adapter for service-catalog sync.
  *
- * Syncs the server's service catalog to .rocketride/ in the workspace:
- *   1. Individual schema files:  .rocketride/schema/<component>.json
- *   2. Obsolete schema cleanup:  removes files not in the current catalog
- *   3. Master catalog:           .rocketride/services-catalog.json
+ * Thin wrapper over @rocketride/agents-core's syncServiceCatalog. Converts the
+ * vscode.Uri workspace root to a filesystem path and injects an output-channel
+ * logger. The catalog-writing logic itself lives in core (shared with the CLI).
  */
 
 import * as vscode from 'vscode';
+import { syncServiceCatalog as coreSyncServiceCatalog } from '@rocketride/agents-core';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
-/**
- * Write a file only if content has actually changed (line-ending normalized).
- */
-async function writeIfChanged(uri: vscode.Uri, content: string): Promise<boolean> {
-	try {
-		const existing = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
-		if (existing.replace(/\r\n/g, '\n') === content.replace(/\r\n/g, '\n')) {
-			return false;
-		}
-	} catch {
-		// File doesn't exist — will create
-	}
-	await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-	return true;
-}
-
-/**
- * Extract the first sentence from an HTML description string.
- */
-function firstSentence(description: string | undefined): string {
-	if (!description) return '';
-	// Strip HTML tags. Loop until idempotent so nested or malformed tags like
-	// `<scri<x>pt>` collapse fully — a single regex pass would leave `<script>`
-	// behind after consuming only the inner `<x>`. Defense-in-depth: the
-	// output here lands in a JSON catalog file, not rendered as HTML, but
-	// the consumer surface may grow.
-	let stripped = description;
-	let prev: string;
-	do {
-		prev = stripped;
-		stripped = stripped.replace(/<[^>]*>/g, '');
-	} while (stripped !== prev);
-	const text = stripped.trim();
-	// Take first sentence (ends with . ! or ?)
-	const match = text.match(/^[^.!?]*[.!?]/);
-	return match ? match[0].trim() : text;
-}
-
-/**
- * Sanitize a service name so it is safe to use as a filename.
- * Only `[a-zA-Z0-9._-]` characters are kept; everything else is replaced with `_`.
- * Each leading dot is replaced individually to preserve name uniqueness.
- */
-function sanitizeServiceName(name: string): string {
-	return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, (match) => '_'.repeat(match.length));
-}
-
-/**
- * Return true only when `child` is strictly inside `parent` (same scheme + authority,
- * and child path starts with parent path followed by a `/`).
- * Used as a defense-in-depth guard after name sanitization.
- */
-function isUnderDirectory(parent: vscode.Uri, child: vscode.Uri): boolean {
-	if (child.scheme !== parent.scheme || child.authority !== parent.authority) {
-		return false;
-	}
-	const parentPath = parent.path.endsWith('/') ? parent.path : parent.path + '/';
-	return child.path.startsWith(parentPath);
-}
-
-/**
- * Sync service catalog data to .rocketride/ when the server sends services.
- *
- * 1. Write individual schema files: .rocketride/schema/<component>.json
- * 2. Remove obsolete schema files not in the current catalog
- * 3. Write master catalog: .rocketride/services-catalog.json
- */
 export async function syncServiceCatalog(workspaceRoot: vscode.Uri, services: Record<string, unknown>): Promise<void> {
-	const schemaDir = vscode.Uri.joinPath(workspaceRoot, '.rocketride', 'schema');
-	await vscode.workspace.fs.createDirectory(schemaDir);
-
-	const logger = getLogger();
-	const serviceNames = Object.keys(services);
-
-	// Step 1: Write individual schema files; track written filenames for cleanup.
-	const expectedFiles = new Set<string>();
-	for (const name of serviceNames) {
-		const safeName = sanitizeServiceName(name);
-		const schemaUri = vscode.Uri.joinPath(schemaDir, `${safeName}.json`);
-		// Defense-in-depth: verify the resolved path is still within schemaDir.
-		if (!isUnderDirectory(schemaDir, schemaUri)) {
-			logger.output(`${icons.info} Skipped schema write for unsafe service name: ${name}`);
-			continue;
-		}
-		expectedFiles.add(`${safeName}.json`);
-		const json = JSON.stringify(services[name], null, 2);
-		await writeIfChanged(schemaUri, json);
-	}
-
-	// Step 2: Remove obsolete schema files
-	try {
-		const entries = await vscode.workspace.fs.readDirectory(schemaDir);
-		for (const [fileName, fileType] of entries) {
-			if (fileType === vscode.FileType.File && !expectedFiles.has(fileName)) {
-				await vscode.workspace.fs.delete(vscode.Uri.joinPath(schemaDir, fileName));
-				logger.output(`${icons.info} Removed obsolete schema: ${fileName}`);
-			}
-		}
-	} catch {
-		// Directory listing failed — first run, nothing to clean
-	}
-
-	// Step 3: Build and write master catalog
-	const catalog = serviceNames.map((name) => {
-		const svc = services[name] as Record<string, unknown>;
-		const entry: Record<string, unknown> = {
-			name,
-			classType: svc.classType ?? [],
-			description: firstSentence(svc.description as string | undefined),
-			lanes: svc.lanes ?? {},
-		};
-		if (svc.invoke !== undefined) {
-			entry.invoke = svc.invoke;
-		}
-		return entry;
-	});
-
-	const catalogUri = vscode.Uri.joinPath(workspaceRoot, '.rocketride', 'services-catalog.json');
-	await writeIfChanged(catalogUri, JSON.stringify(catalog, null, 2));
+	const out = getLogger();
+	await coreSyncServiceCatalog(workspaceRoot.fsPath, services, (message) => out.output(`${icons.info} ${message}`));
 }
