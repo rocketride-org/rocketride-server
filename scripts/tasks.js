@@ -31,6 +31,20 @@
  *   ui:build — build all UI apps (shell + remotes)
  */
 const { parallel } = require('./lib');
+const registry = require('./lib/registry');
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Returns all registered *-ui module names except shell-ui.
+ * Called at action execution time (after discovery), so both OSS and
+ * overlay apps are visible in the registry.
+ */
+function getRemoteUiModules() {
+	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shell-ui');
+}
 
 // =============================================================================
 // MODULE DEFINITION
@@ -49,13 +63,22 @@ module.exports = {
 				steps: [
 					parallel([
 						'shell-ui:clean',
-						'hello-ui:clean',
-						'world-ui:clean',
-						'chat-ui:clean',
-						'dropper-ui:clean',
-						'monitor-ui:clean',
-						'profiler-ui:clean',
+						...getRemoteUiModules().map(n => `${n}:clean`),
 					], 'Clean UI apps'),
+				],
+			}),
+		},
+		{
+			// Register all UI apps into apps.json without bundling.
+			// Lightweight alternative to ui:build — only writes manifest metadata.
+			name: 'ui:register',
+			action: () => ({
+				description: 'Register all UI apps into apps.json',
+				steps: [
+					parallel(
+						getRemoteUiModules().map(n => `${n}:register`),
+						'Register UI apps',
+					),
 				],
 			}),
 		},
@@ -66,14 +89,10 @@ module.exports = {
 				description: 'Build ui (all)',
 				steps: [
 					'shell-ui:build',
-					parallel([
-						'hello-ui:build',
-						'world-ui:build',
-						'chat-ui:build',
-						'dropper-ui:build',
-						'monitor-ui:build',
-						'profiler-ui:build',
-					], 'Build remote apps'),
+					parallel(
+						getRemoteUiModules().map(n => `${n}:build`),
+						'Build remote apps',
+					),
 				],
 			}),
 		},
