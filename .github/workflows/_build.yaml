@@ -169,7 +169,7 @@ jobs:
         # documented "MYAPIKEY" placeholder used elsewhere in the codebase
         # (.env.template, the engine's built-in dev key).
         env:
-          ROCKETRIDE_APIKEY: MYAPIKEY
+          ROCKETRIDE_APIKEY: ${{ secrets.ROCKETRIDE_APIKEY || 'MYAPIKEY' }}
         run: ${{ matrix.builder_cmd }} test --verbose -s
 
       - name: Perform CodeQL Analysis

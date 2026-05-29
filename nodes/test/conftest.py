@@ -155,6 +155,10 @@ def pytest_configure(config):
         'markers',
         'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)',
     )
+    config.addinivalue_line(
+        'markers',
+        'cobalt: mark tests as exercising Cobalt-backed evaluation paths',
+    )
 
 
 # =============================================================================

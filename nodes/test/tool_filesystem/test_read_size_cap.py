@@ -33,6 +33,23 @@ import pytest
 
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
+_MISSING = object()
+_STUBBED_MODULE_NAMES = (
+    'rocketlib',
+    'tool_filesystem',
+    'tool_filesystem.IGlobal',
+    'tool_filesystem.IInstance',
+)
+_ORIGINAL_MODULES = {name: sys.modules.get(name, _MISSING) for name in _STUBBED_MODULE_NAMES}
+
+
+def _restore_import_stubs() -> None:
+    """Restore import scaffolding immediately after module-under-test import."""
+    for name, original in _ORIGINAL_MODULES.items():
+        if original is _MISSING:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
 
 
 def _install_rocketlib_stub() -> None:
@@ -43,9 +60,6 @@ def _install_rocketlib_stub() -> None:
     decorator that stamps ``__tool_meta__`` on the wrapped method) — both
     are surface used by ``IInstance.py`` at import time.
     """
-    if 'rocketlib' in sys.modules:
-        return
-
     stub = types.ModuleType('rocketlib')
 
     class _IInstanceBase:
@@ -67,8 +81,26 @@ def _install_rocketlib_stub() -> None:
 
         return wrap
 
+    def _require_str(args, key, *, tool_name=''):
+        value = args.get(key)
+        if not isinstance(value, str) or value == '':
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}{key} is required and must be a non-empty string')
+        return value
+
+    def _optional_str(args, key, *, default=None, tool_name=''):
+        value = args.get(key, default)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}{key} must be a string')
+        return value
+
     stub.IInstanceBase = _IInstanceBase
     stub.tool_function = _tool_function
+    stub.require_str = _require_str
+    stub.optional_str = _optional_str
     sys.modules['rocketlib'] = stub
 
 
@@ -120,6 +152,8 @@ from tool_filesystem.IInstance import (  # noqa: E402  — must follow sys.modul
     IInstance,
 )
 from tool_filesystem.IGlobal import IGlobal  # noqa: E402
+
+_restore_import_stubs()
 
 
 # ---------------------------------------------------------------------------
