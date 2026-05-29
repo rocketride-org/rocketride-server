@@ -85,6 +85,18 @@ class Answer(BaseModel):
 
     answer: Optional[Union[str, dict, list]] = None
     expectJson: bool = False
+    usage_metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            'Per-invocation token usage reported by the underlying LLM. '
+            'Populated by drivers that surface usage (e.g. Anthropic); '
+            'rides the writeAnswers trace at FULL pipeline trace level so '
+            'apaevt_flow op:leave events carry input/output/cache token '
+            'counts alongside duration. Anthropic surfaces input_tokens, '
+            'output_tokens, cache_creation_input_tokens, '
+            'cache_read_input_tokens (flat ints).'
+        ),
+    )
 
     @field_validator('answer', mode='before')
     @classmethod
