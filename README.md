@@ -5,8 +5,13 @@
 </a>
 
 <p>
-  Open-source, developer-native AI pipeline tool.<br/>
-  Build, debug, and deploy production AI workflows - without leaving your IDE.
+  AIDE by RocketRide: the AI Integrated Development Environment.<br/>
+  Your IDE handles code. Agents do that now. AIDE handles everything after it: models, pipelines, memory, and guardrails.<br/>
+  Open source. Any model. Built for production.
+</p>
+
+<p>
+  Your IDE is evolving. AIDE starts where you already work, in VS Code and Cursor, and extends to the AI stack that runs in production.
 </p>
 
 <p>
@@ -16,7 +21,15 @@
 </p>
 
 <p>
- RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+  App builders and vibe coding tools help you create AI. AIDE helps you run it.
+</p>
+
+<p>
+  AIDE is an open-source environment for everything around your model: pipelines, embeddings, memory, vector stores, and guardrails, spanning 50+ nodes across 13 LLM providers and 8 vector databases. A multithreaded C++ runtime executes it on your own infrastructure, originally built for petabyte-scale processing, so concurrency and backpressure are not afterthoughts. Any model, any tool. Swap a component when something better ships, no rewrites. Model-independence is not a feature. It is a right.
+</p>
+
+<p>
+  <em>Build, run, update, maintain, and control AI in production, not just the first step. The kind of answer you need at 3am when something breaks.</em>
 </p>
 
 <p>
@@ -36,7 +49,7 @@
 
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-ide.png" alt="Build and run AI pipelines inside your IDE" width="100%">
 
-_Design, test, and ship complex AI workflows from a visual canvas, right where you write code._
+_Design, run, and observe complex AI workflows from a visual canvas._
 
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-sdk.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
 
@@ -48,14 +61,14 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 | Feature                           | Description                                                                                                                                                                                                                          |
 | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code — no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON — version-controllable, shareable, and runnable anywhere. |
+| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code. No boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
 | **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
-| **50+ Pipeline Nodes**            | 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible — build and publish your own.                                                    |
+| **50+ Pipeline Nodes**            | 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible. Build and publish your own.                                                       |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
-| **Coding Agent Ready**            | RocketRide auto-detects your coding agent — Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
+| **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                   |
 | **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
-| **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run — no manual setup.                                                                                                |
-| **One-Click Deploy**              | Run on Docker, on-prem, or RocketRide Cloud (coming soon). Production-ready architecture from day one — not retrofitted from a demo.                                                                                                 |
+| **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run. No manual setup.                                                                                                 |
+| **One-Click Deploy**              | Run on Docker, on-prem, or RocketRide Cloud (coming soon). Production-ready architecture from day one, not retrofitted from a demo.                                                                                                  |
 
 ## Quick Start
 
@@ -111,12 +124,14 @@ Selecting running pipelines allows for in-depth analytics. Trace call trees, tok
 
 ## Contributors
 
-RocketRide is built by a growing community of contributors. Whether you've fixed a bug, added a node, improved docs, or helped someone on Discord, thank you. New contributions are always welcome - check out our [contributing guide](CONTRIBUTING.md) to get started.
+RocketRide is built by a growing community of contributors. Whether you've fixed a bug, added a node, improved docs, or helped someone on Discord, thank you. New contributions are always welcome. Check out our [contributing guide](CONTRIBUTING.md) to get started.
 
 <a href="https://github.com/rocketride-org/rocketride-server/graphs/contributors">
   <img alt="contributors" src="https://contrib.rocks/image?repo=rocketride-org/rocketride-server&columns=16" width="100%" />
 </a>
 
 ---
+
+<p align="center"><strong>Anyone can build AI. AIDE is how businesses run it.</strong></p>
 
 <p align="center">Made with ♥ in SF &amp; EU</p>
