@@ -105,23 +105,25 @@ export interface InitDeps {
  * real key), then ensure `.env` is listed in .gitignore so a later-filled-in
  * key is not committed. Idempotent.
  */
-function scaffoldEnv(cwd: string, log: (msg: string) => void): void {
+async function scaffoldEnv(cwd: string, log: (msg: string) => void): Promise<void> {
 	const envPath = path.join(cwd, '.env');
-	if (!fs.existsSync(envPath)) {
-		fs.writeFileSync(envPath, ENV_TEMPLATE, 'utf8');
+	try {
+		await fs.promises.access(envPath);
+	} catch {
+		await fs.promises.writeFile(envPath, ENV_TEMPLATE, 'utf8');
 		log('Created .env');
 	}
 
 	const gitignorePath = path.join(cwd, '.gitignore');
 	let gitignore = '';
 	try {
-		gitignore = fs.readFileSync(gitignorePath, 'utf8');
+		gitignore = await fs.promises.readFile(gitignorePath, 'utf8');
 	} catch {
 		// Will create.
 	}
 	if (!gitignore.split('\n').some((line) => line.trim() === '.env')) {
 		const next = gitignore.trimEnd() + (gitignore ? '\n' : '') + '.env\n';
-		fs.writeFileSync(gitignorePath, next, 'utf8');
+		await fs.promises.writeFile(gitignorePath, next, 'utf8');
 	}
 }
 
@@ -141,7 +143,7 @@ export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number
 		await manager.installFromList(agents, bundle, cwd, deps.log);
 	}
 
-	scaffoldEnv(cwd, deps.log);
+	await scaffoldEnv(cwd, deps.log);
 
 	if (opts.catalog !== false) {
 		const uri = opts.uri || process.env.ROCKETRIDE_URI || CONST_DEFAULT_WEB_LOCAL;

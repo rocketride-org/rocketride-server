@@ -210,15 +210,20 @@ jobs:
             MARKER_COMMENT_ID=$(echo "$MARKER" | jq -r '.id')
           fi
 
-          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
-          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+          # Normalize webhook URL so POST and PATCH share one base. The previous
+          # awk-split approach desynced if DISCORD_DISCUSSIONS_WEBHOOK_URL had a
+          # trailing slash or query string (e.g. ?thread_id=...): PATCH 404'd,
+          # the 404 branch deleted the marker as "message gone", then fell through
+          # to POST → fresh repost on every discussion update.
+          BASE="${DISCORD_WEBHOOK_URL%%\?*}"
+          BASE="${BASE%/}"
 
           # ── Post or patch ────────────────────────────────────────────────
           if [ -n "$DISCORD_MSG_ID" ]; then
             PATCH_BODY=$(discord_curl -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID") || true
+              "$BASE/messages/$DISCORD_MSG_ID") || true
             PATCH_STATUS=$(cat "$DISCORD_STATUS_FILE")
             echo "PATCH status: $PATCH_STATUS"
 
@@ -234,10 +239,13 @@ jobs:
           fi
 
           if [ -z "$DISCORD_MSG_ID" ]; then
-            if ! RESPONSE=$(discord_curl \
+            # --no-retry-5xx makes POST at-most-once per the discord-helper
+            # contract: only 429 is safe to retry (request guaranteed rejected);
+            # transient 5xx or no-response could each create a duplicate message.
+            if ! RESPONSE=$(discord_curl --no-retry-5xx -X POST \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "${DISCORD_WEBHOOK_URL}?wait=true"); then
+              "$BASE?wait=true"); then
               echo "::error::Discord POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
               exit 1
             fi
@@ -248,10 +256,10 @@ jobs:
 
             if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
               # Another run won the race — delete our duplicate message, use theirs
-              discord_curl -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" > /dev/null || true
+              discord_curl -X DELETE "$BASE/messages/$NEW_MSG_ID" > /dev/null || true
               DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
               discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
-                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null || true
+                "$BASE/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
               gh api graphql \
