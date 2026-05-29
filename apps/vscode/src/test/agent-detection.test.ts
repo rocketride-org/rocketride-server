@@ -56,6 +56,14 @@ test('Claude Code is not added twice when both extension and CLI present', () =>
 	assert.deepEqual(names, ['Cursor', 'Claude Code']);
 });
 
+test('"code" appName (VSCodium / code-oss) detects Copilot', () => {
+	assert.deepEqual(detectAgentNames(input({ appName: 'Code' })), ['Copilot']);
+});
+
+test('unrecognized appName returns empty when no Claude signals', () => {
+	assert.deepEqual(detectAgentNames(input({ appName: 'Theia' })), []);
+});
+
 test('mergeSelectedAgents unions detected and settings-checked, de-duplicated, order-stable', () => {
 	const merged = mergeSelectedAgents(['Copilot', 'Claude Code'], ['Cursor', 'Copilot']);
 	assert.deepEqual(merged, ['Copilot', 'Claude Code', 'Cursor']);
