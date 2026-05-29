@@ -24,6 +24,7 @@
 /* global process */
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -36,7 +37,7 @@ const env = getenv();
 requireKeys(env, ['RR_STRIPE_PUBLISHABLE_KEY'], 'vscode:build-webview');
 
 export default defineConfig({
-	plugins: [pluginReact()],
+	plugins: [pluginReact(), pluginRocketrideIcons()],
 
 	source: {
 		// Inject public build-time config values into webview bundles.

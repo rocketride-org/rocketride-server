@@ -57,7 +57,7 @@ class IGlobal(IGlobalBase):
                 from mistralai import Mistral  # 1.x layout
 
             try:
-                from mistralai.exceptions import MistralException  # type: ignore
+                from mistralai.exceptions import MistralException  # type: ignore  # contract-check: ignore  optional, falls back to built-in Exception
             except Exception:
                 MistralException = Exception  # type: ignore
 

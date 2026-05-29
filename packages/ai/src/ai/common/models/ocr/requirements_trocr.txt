@@ -1,3 +1,4 @@
+# contract-check: disable  reason: craft-text-detector transitively pins opencv-python<4.5.4.62; the engine's opencv-contrib-python==4.13.0.92 wins via the ai.common.opencv runtime shim. uv resolver can't replay that override, so the install will always fail. NEVER attempted by the framework, even under --install-all. Paired with `# contract-check: ignore` on the craft_text_detector import in trocr.py.
 # Requirements for TrOCR loader (detection + recognition)
 # Direct imports only
 # opencv is handled by ai.common.opencv module

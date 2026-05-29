@@ -1,3 +1,4 @@
+# contract-check: skip-install  reason: opt-in OCR engine; ~150 MB (CRAFT detector + scipy) on top of the project's torch baseline. PR lane skips; nightly --install-all installs and verifies.
 # Requirements for EasyOCR loader
 # Direct imports only
 # opencv is handled by ai.common.opencv module

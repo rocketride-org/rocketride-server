@@ -55,7 +55,6 @@ import { useFlow } from '../../../hooks';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
-import { getIconPath } from '../../../util/get-icon-path';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
 
@@ -130,8 +129,9 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** The service definition for this node's provider. */
 	const service: IService | undefined = catalog[data.provider];
 
-	// Service-derived fields
-	const icon = getIconPath(service?.icon);
+	// Service-derived fields. `icon` is the raw identifier (e.g. "openai.svg")
+	// from the service JSON; the <Icon> component resolves it at render time.
+	const icon = service?.icon;
 	const classType = service?.classType;
 	const lanes = service?.lanes as Record<string, IServiceLane> | undefined;
 	const capabilities = service?.capabilities ?? 0;

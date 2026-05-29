@@ -64,9 +64,10 @@ class SuryaLoader(BaseLoader):
         # Import opencv first to ensure correct version (may be used by surya)
         from ai.common.opencv import cv2  # noqa: F401
 
-        from surya.foundation import FoundationPredictor
-        from surya.recognition import RecognitionPredictor
-        from surya.detection import DetectionPredictor
+        # disable contract check for surya due to opencv conflict (see README)
+        from surya.foundation import FoundationPredictor  # contract-check: ignore  see comment above
+        from surya.recognition import RecognitionPredictor  # contract-check: ignore  see comment above
+        from surya.detection import DetectionPredictor  # contract-check: ignore  see comment above
         from ai.common.torch import torch
 
         languages = languages or ['en']

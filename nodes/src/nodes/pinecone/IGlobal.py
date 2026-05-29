@@ -152,7 +152,8 @@ class IGlobal(IGlobalTransform):
         except Exception as e:
             # Prefer SDK/HTTP structured attributes if available
             try:
-                from pinecone.core.client.exceptions import ApiException as _ApiException  # type: ignore
+                # exception is optional, ignore it by contract-check if not present
+                from pinecone.core.client.exceptions import ApiException as _ApiException  # type: ignore  # contract-check: ignore
 
                 if isinstance(e, _ApiException):
                     status = getattr(e, 'status', None)

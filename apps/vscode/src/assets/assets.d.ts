@@ -4,6 +4,12 @@
 // =============================================================================
 
 declare module '*.svg' {
-	const content: string;
-	export default content;
+	import type * as React from 'react';
+	const Component: React.FC<React.SVGProps<SVGSVGElement>>;
+	export default Component;
+}
+
+declare module '*.svg?url' {
+	const url: string;
+	export default url;
 }

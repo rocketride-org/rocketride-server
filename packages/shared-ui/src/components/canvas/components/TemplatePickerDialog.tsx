@@ -34,7 +34,7 @@ import { ReactElement, useMemo, useState } from 'react';
 import { useFlowProject } from '../context/FlowProjectContext';
 import type { ITemplate } from '../templates/types';
 import { IService, IServiceCapabilities } from '../types';
-import { getIconPath } from '../util/get-icon-path';
+import { Icon } from '../util/Icon';
 import { commonStyles } from '../../../themes/styles';
 
 // =============================================================================
@@ -230,19 +230,8 @@ export default function TemplatePickerDialog({ template, onClose, instantiateTem
 										}}
 										onClick={() => onSelect(slotKey, key)}
 									>
-										{(() => {
-											const icon = getIconPath(service.icon);
-											return (
-												<img
-													src={icon}
-													alt=""
-													style={{
-														...styles.itemIcon,
-														filter: icon.includes('#td') ? 'var(--icon-filter)' : undefined,
-													}}
-												/>
-											);
-										})()}
+										<Icon name={service.icon} style={styles.itemIcon} />
+
 										<span style={styles.itemTitle}>{service.title ?? key}</span>
 									</button>
 								);

@@ -33,7 +33,6 @@ import DOMPurify from 'dompurify';
 import parse, { DOMNode, Element as DOMElement, domToReact, HTMLReactParserOptions } from 'html-react-parser';
 import { ILaneObject, IService, IServiceCapabilities, IServiceLane } from '../types';
 import { getDefaultFormState } from './rjsf';
-import { getIconPath } from './get-icon-path';
 
 // =============================================================================
 // Lane Utilities
@@ -197,12 +196,12 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 		for (const classType of classTypes) {
 			const services = classType in _inventory ? _inventory[classType] : {};
 
-			// Resolve the icon path from the CDN/asset URL pattern
-			const icon = getIconPath(value?.icon || '');
+			// `value.icon` is the raw icon identifier from the service JSON
+			// (e.g. "openai.svg"). It is passed straight to the <Icon> component
+			// at render time, which resolves it via the build-time icon map.
 			const _value = {
 				...value,
 				focus: isFocus,
-				icon,
 			};
 
 			services[key] = _value;
