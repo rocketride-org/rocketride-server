@@ -34,6 +34,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AgentManager, defaultBundle, syncServiceCatalog } from '@rocketride/agents-core';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
+import { Command } from 'commander';
+import { RocketRideClient } from '../client/client';
 
 /** Ergonomic CLI slugs mapped to agents-core canonical installer names. */
 const AGENT_SLUGS: Record<string, string> = {
@@ -153,4 +155,63 @@ export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number
 
 	deps.log('RocketRide project initialized.');
 	return 0;
+}
+
+/**
+ * Default catalog fetch: connect to the server and call getServices(). Returns
+ * null (rather than throwing) when no apikey is available or the connection
+ * fails, so init degrades to offline scaffolding.
+ */
+async function defaultFetchCatalog(opts: { apikey?: string; uri: string }): Promise<Record<string, unknown> | null> {
+	const apikey = opts.apikey || process.env.ROCKETRIDE_APIKEY;
+	if (!apikey) {
+		return null;
+	}
+	const client = new RocketRideClient({ uri: opts.uri, auth: apikey });
+	try {
+		await client.connect();
+		const response = await client.getServices();
+		return response.services as Record<string, unknown>;
+	} catch {
+		return null;
+	} finally {
+		try {
+			await client.disconnect();
+		} catch {
+			// best-effort
+		}
+	}
+}
+
+/**
+ * Register the `init` subcommand on the given commander program and return the
+ * created Command so the caller can attach shared --uri/--apikey options.
+ */
+export function registerInitCommand(program: Command): Command {
+	return program
+		.command('init')
+		.description('Scaffold RocketRide docs, agent stubs, .env, and service catalog into the current directory')
+		.option('--agent <slug...>', 'Agent stubs to install (default: all). Slugs: claude-code, cursor, windsurf, copilot, claude-md, agents-md')
+		.option('--no-catalog', 'Skip fetching and syncing the service catalog')
+		.action(async (options) => {
+			const deps: InitDeps = {
+				log: (msg: string) => console.log(msg),
+				fetchCatalog: defaultFetchCatalog,
+			};
+			try {
+				const exitCode = await runInit(
+					{
+						agent: options.agent,
+						catalog: options.catalog,
+						apikey: options.apikey,
+						uri: options.uri,
+					},
+					deps,
+				);
+				process.exit(exitCode);
+			} catch (error) {
+				console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+				process.exit(1);
+			}
+		});
 }
