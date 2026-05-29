@@ -661,13 +661,28 @@ class WebServer:
         """
         Get the port number on which the server is running.
 
+        Resolved lazily from the bound socket on first use: with port=0 the OS
+        assigns the real port at bind time, which uvicorn does *after* the
+        lifespan startup hook, so self._port is still 0 until a request arrives.
+
         Returns:
-            int: The port number.
+            int: The port number actually bound by uvicorn.
 
         Example:
             >>> port = get_port()
             5565
         """
+        if not self._port and self.server is not None:
+            for srv in getattr(self.server, 'servers', None) or []:
+                for sock in getattr(srv, 'sockets', None) or []:
+                    try:
+                        bound = sock.getsockname()
+                    except OSError:
+                        continue  # closed/bad socket; try the next one
+                    bound_port = bound[1] if isinstance(bound, tuple) and len(bound) >= 2 else None
+                    if bound_port:
+                        self._port = bound_port
+                        return self._port
         return self._port
 
     def registerStatusCallback(self, callback: Callable[[Dict[str, any]], None]) -> None:

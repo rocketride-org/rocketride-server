@@ -1,0 +1,261 @@
+name: check-externals
+run-name: check-externals ${{ github.event_name == 'schedule' && '(nightly)' || '(pr)' }}
+
+# Third-party interface contract checks. Verifies that the Python packages the
+# engine depends on still expose the symbols + call chains our code uses, before
+# a breaking upstream release reaches a customer. See tools/contract_checks/README.md.
+#
+# Two lanes:
+#   * PR lane     — fast, markers respected, NON-BLOCKING during stabilization
+#                   (continue-on-error). Heavy `skip-install` bundles are skipped.
+#   * Nightly lane — full install (--install-all), fresh constraints
+#                   (--rebuild-cache). Catches upstream releases the day they ship.
+#
+# PHASE 1 (this file): failures surface as GitHub Actions warning annotations
+# only. The auto-issue-creation step is included but COMMENTED OUT — enable it
+# in a later phase once the lane has proven stable.
+#
+# ENGINE BUILD: server:download (packages/server/scripts/tasks.js) compares
+# contentHash(packages/server/) to the release manifest. The hash covers EVERY
+# file under that tree — including Python under engine-lib/ — so a pure-Python
+# edit there forces a full vcpkg compile. The vcpkg + nuget steps below READ
+# the binary cache that _build.yaml populates; this lane does not write to it.
+#
+# The prebuilt still links libc++/libgomp at runtime; _build.yaml gets those
+# from its compile toolchain, so this lane installs them explicitly (see the
+# runtime-libraries step) and pins ubuntu-22.04 to match the prebuilt's jammy
+# build target.
+
+on:
+  pull_request:
+    branches: [develop, stage, main, 'release/**']
+    paths:
+      - 'packages/**'
+      - 'nodes/**'
+      - 'tools/contract_checks/**'
+      - '.github/workflows/check-externals.yml'
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      install_all:
+        description: 'Pass --install-all (override skip-install markers)'
+        type: boolean
+        default: false
+
+# PR runs cancel on push; the nightly run does not cancel itself (a partial
+# nightly is more useful than none).
+concurrency:
+  group: check-externals-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+permissions:
+  contents: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  VCPKG_NUGET_USER: ${{ github.repository_owner }}
+  NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,read
+
+jobs:
+  # ===========================================================================
+  # PR lane — non-blocking, markers respected, fast
+  # ===========================================================================
+  pr:
+    name: check-externals (PR)
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    runs-on: ubuntu-22.04
+    # NON-BLOCKING during stabilization. Flip to false in PR3 to make it a
+    # required check (and add it to the CI OK aggregator's needs:).
+    continue-on-error: true
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10.33.0
+
+      - name: Install engine runtime libraries
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
+
+      - name: Set up vcpkg
+        # Bootstrap vcpkg up-front so the next step can fetch its bundled
+        # nuget.exe before the builder starts compiling ports.
+        shell: bash
+        run: ./builder vcpkg:submodule-build
+
+      - name: Set up vcpkg nuget
+        # Without auth, binary-cache reads return nothing and every port
+        # recompiles from source — does not fit in the timeout.
+        shell: bash
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono "$NUGET_EXE" sources add \
+            -Source "$NUGET_FEED_URL" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$GH_TOKEN"
+
+      - name: Run check-externals (markers respected)
+        # The builder task's own steps build the engine + the four trees, then
+        # invoke the CLI. No --install-all: the 7 skip-install bundles and the
+        # 2 disable files stay uninstalled (fast). Tee the output so the
+        # annotate step can scan it.
+        #
+        # --autoinstall: let the builder install its own Node deps + missing
+        #                tooling on a fresh runner (mirrors _build.yaml's Build).
+        shell: bash
+        run: |
+          set -o pipefail
+          ./builder check-externals:run --autoinstall 2>&1 | tee check-externals.log
+
+      - name: Annotate failures
+        # Always run so warnings surface even when the run "succeeded"
+        # (failures don't set a non-zero exit when continue-on-error masks it,
+        # and [install-failed] lines never set non-zero by design).
+        if: always()
+        shell: bash
+        run: |
+          # FAIL rows = real interface drift; install-failed = install-layer drift.
+          grep -E '^\[FAIL\]' check-externals.log | while IFS= read -r line; do
+            echo "::warning title=check-externals drift::${line}"
+          done || true
+          grep -E '^\[install-failed\]' check-externals.log | while IFS= read -r line; do
+            echo "::warning title=check-externals install-failed::${line}"
+          done || true
+
+  # ===========================================================================
+  # Nightly lane — full install, fresh constraints, drift detection
+  # ===========================================================================
+  nightly:
+    name: check-externals (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+      # PHASE 2: uncomment when enabling the auto-issue step below.
+      # issues: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10.33.0
+
+      - name: Install engine runtime libraries
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libgomp1 libportaudio2 libgl1 libglib2.0-0
+
+      - name: Set up vcpkg
+        # Bootstrap vcpkg up-front so the next step can fetch its bundled
+        # nuget.exe before the builder starts compiling ports.
+        shell: bash
+        run: ./builder vcpkg:submodule-build
+
+      - name: Set up vcpkg nuget
+        # Without auth, binary-cache reads return nothing and every port
+        # recompiles from source — does not fit in the timeout. Let this step
+        # fail loudly rather than fall back to that silent slow path.
+        shell: bash
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono "$NUGET_EXE" sources add \
+            -Source "$NUGET_FEED_URL" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$GH_TOKEN"
+
+      - name: Run check-externals
+        # --rebuild-cache: full uv pip compile from scratch (catches upstream
+        #                  releases since the last constraint resolution).
+        # --install-all:   install the 7 skip-install bundles and verify them.
+        #                  The 2 disable files (surya/trocr) stay skipped —
+        #                  disable beats install-all.
+        # workflow_dispatch can opt out of --install-all via the input.
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INSTALL_ALL_INPUT: ${{ github.event.inputs.install_all }}
+        run: |
+          set -o pipefail
+          INSTALL_ALL='--install-all'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INSTALL_ALL_INPUT" = "false" ]; then
+            INSTALL_ALL=''
+          fi
+          ./builder check-externals:run --rebuild-cache $INSTALL_ALL --autoinstall 2>&1 | tee check-externals.log
+
+      - name: Annotate failures
+        if: always()
+        shell: bash
+        run: |
+          grep -E '^\[FAIL\]' check-externals.log | while IFS= read -r line; do
+            echo "::warning title=check-externals drift::${line}"
+          done || true
+          grep -E '^\[install-failed\]' check-externals.log | while IFS= read -r line; do
+            echo "::warning title=check-externals install-failed::${line}"
+          done || true
+
+      # -----------------------------------------------------------------------
+      # PHASE 2 (NOT YET ENABLED): auto-file a GitHub issue on nightly failure.
+      #
+      # Phase 1 keeps failures as warning annotations only (above). When the
+      # lane has proven stable, uncomment this step AND the `issues: write`
+      # permission on this job. The existing .github/workflows/discord-issues.yml
+      # bridge will mirror the new issue to the team channel automatically.
+      #
+      # NOTE: this auto-FILES AN ISSUE (drift detected → someone go fix). It does
+      # NOT open a pull request — there's no auto-generated change to propose.
+      # If a fix-PR workflow is wanted later, that's a separate design.
+      # -----------------------------------------------------------------------
+      # - name: Auto-file issue on failure
+      #   if: failure() && github.event_name == 'schedule'
+      #   uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+      #   with:
+      #     script: |
+      #       const fs = require('fs');
+      #       let log = '';
+      #       try { log = fs.readFileSync('check-externals.log', 'utf8'); } catch (e) {}
+      #       const fails = log.split('\n').filter(l => l.startsWith('[FAIL]') || l.startsWith('[install-failed]'));
+      #       const date = new Date().toISOString().split('T')[0];
+      #       const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+      #       const body = [
+      #         `Nightly \`check-externals\` run detected interface drift.`,
+      #         ``,
+      #         `Run: ${runUrl}`,
+      #         ``,
+      #         '```',
+      #         ...(fails.length ? fails : ['(no [FAIL]/[install-failed] lines captured — see run log)']),
+      #         '```',
+      #         ``,
+      #         `Triage:`,
+      #         `- \`[FAIL]\` = upstream interface drift (update consuming code, add an applies_when/any_of manifest, or pin the version).`,
+      #         `- \`[install-failed]\` = install-layer change (a previously installable bundle regressed, or a disable'd file's conflict resolved).`,
+      #       ].join('\n');
+      #       await github.rest.issues.create({
+      #         ...context.repo,
+      #         title: `check-externals nightly drift (${date})`,
+      #         body,
+      #         labels: ['check-externals', 'bug'],
+      #       });

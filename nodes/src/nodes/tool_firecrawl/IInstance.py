@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import json
 
-from rocketlib import IInstanceBase, normalize_tool_input, tool_function, warning
+from rocketlib import IInstanceBase, tool_function, warning
+
+from ai.common.utils import normalize_tool_input
 
 from .utils import firecrawl_wrapper
 from .IGlobal import IGlobal

@@ -47,6 +47,7 @@ from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
+from .deploy import DeployApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -323,6 +324,11 @@ class RocketRideClient(
     def database(self) -> DatabaseApi:
         """Direct database query operations (raw SQL/Cypher execution)."""
         return DatabaseApi(self)
+
+    @cached_property
+    def deploy(self) -> DeployApi:
+        """Deployment management operations (add, remove, list, status, update)."""
+        return DeployApi(self)
 
     # =========================================================================
     # TASK METHODS

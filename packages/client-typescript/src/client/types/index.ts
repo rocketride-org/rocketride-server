@@ -30,6 +30,7 @@
 
 export * from './account.js';
 export * from './billing.js';
+export * from './deploy.js';
 export * from './client.js';
 export * from './cprofile.js';
 export * from './dashboard.js';

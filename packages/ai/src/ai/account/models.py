@@ -26,8 +26,10 @@
 # Placed here to avoid circular imports between account/auth and modules/task.
 # =============================================================================
 
-from pydantic import BaseModel
-from typing import TypedDict
+import time
+from typing import Literal, TypedDict
+
+from pydantic import BaseModel, Field
 
 from rocketride.types.client import AppManifestEntry
 
@@ -114,6 +116,26 @@ class AccountInfo(BaseModel):
         # Use pydantic's model_dump with an explicit exclusion set so that the
         # raw authentication credential is never returned to the client.
         return self.model_dump(exclude={'auth'})
+
+
+# =============================================================================
+# DEPLOYMENT RECORD
+# =============================================================================
+
+
+class DeploymentRecord(BaseModel):
+    """Persistent deployment control record — single source of truth on disk."""
+
+    pipeline: dict
+    # Cron expression (e.g. "*/15 * * * *") or "manual" for on-demand only.
+    schedule: str = 'manual'
+
+    # 'active' | 'paused' | 'errored'
+    state: Literal['active', 'paused', 'errored'] = 'active'
+
+    created_by: str  # client_id of the user who deployed
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
 
 
 # =============================================================================

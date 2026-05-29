@@ -82,6 +82,12 @@ function parseArgs(args) {
 			options.pytest.push(arg.substring('--pytest='.length));
 		} else if (arg.startsWith('--pytest-pattern=')) {
 			options.pytestPattern = arg.substring('--pytest-pattern='.length);
+		} else if (arg.startsWith('--pattern=')) {
+			// Generic substring filter. check-externals:run accumulates
+			// these into a list (multiple --pattern values = OR semantics);
+			// pytest-based tasks join them into a single -k expression.
+			options.pattern = options.pattern || [];
+			options.pattern.push(arg.substring('--pattern='.length));
 		} else if (arg.startsWith('--pytest-preinstall=')) {
 			options.pytestPreinstall = arg.substring('--pytest-preinstall='.length);
 		} else if (arg.startsWith('--pytest-parallel=')) {
@@ -121,6 +127,15 @@ function parseArgs(args) {
 				console.error(`Invalid --arch value: ${archValue}. Use 'arm' or 'intel'.`);
 				process.exit(1);
 			}
+		} else if (arg === '--rebuild-cache') {
+			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
+			// so depends.ensure_constraints() does a full uv pip compile.
+			options.rebuildCache = true;
+		} else if (arg === '--install-all') {
+			// check-externals:run: ignore `# contract-check: skip-install`
+			// markers in requirements files and install everything.
+			// PR lanes respect markers (fast); nightly uses this flag.
+			options.installAll = true;
 		} else if (arg === '--saas') {
 			options.saas = true;
 		} else if (arg === '--modelserver') {
@@ -225,8 +240,11 @@ Options:
   --overlay-root=DIR  Set overlay root directory
   --pytest="args"     Pass arguments to pytest (can be repeated)
   --pytest-parallel=N|auto|off  Run pytest with N xdist workers; default: min(cpus, 8). Use 'off' or '0' to disable.
+  --pattern="SUBSTR"  Generic substring filter (check-externals:run)
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
+  --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
+  --rebuild-cache     check-externals:run: force ensure_constraints() to recompile (deletes constraints.txt + requirements.hash)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)

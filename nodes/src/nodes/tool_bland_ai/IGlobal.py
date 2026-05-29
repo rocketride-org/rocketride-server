@@ -34,16 +34,9 @@ from __future__ import annotations
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
+from ai.common.utils import parse_bool
+
 from .bland_driver import BlandDriver
-
-
-def _parse_bool(raw: object, default: bool = True) -> bool:
-    """Safely parse a boolean from config values (bool, str, or other)."""
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
-    return bool(raw) if raw is not None else default
 
 
 class IGlobal(IGlobalBase):
@@ -73,7 +66,7 @@ class IGlobal(IGlobalBase):
             raise ValueError('maxDuration must be a positive integer') from None
         if max_duration <= 0:
             raise ValueError('maxDuration must be a positive integer')
-        record = _parse_bool(cfg.get('record', True))
+        record = parse_bool(cfg.get('record', True))
         language = str(cfg.get('language') or 'en').strip()
 
         try:

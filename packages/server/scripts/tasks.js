@@ -29,7 +29,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -1003,20 +1003,20 @@ function makeRocketlibPythonTestAction(options = {}) {
 			const exeExt = isWindows() ? '.exe' : '';
 			const engine = path.join(DIST_DIR, 'engine' + exeExt);
 
-			if (!(await exists(rocketrideTests))) {
-				task.output = 'rocketlib tests not found, skipping';
-				return;
-			}
-
-			const pytestArgs = ['-m', 'pytest', rocketrideTests, '-v'];
+			const extraArgs = ['-v'];
 			if (options.pytest) {
 				const tokens = typeof options.pytest === 'string'
 					? options.pytest.split(/\s+/).filter(Boolean)
 					: options.pytest.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
-				pytestArgs.push(...tokens);
+				extraArgs.push(...tokens);
 			}
 
-			await execCommand(engine, pytestArgs, { task, cwd: DIST_DIR });
+			await runPytest({
+				engine,
+				testsDir: rocketrideTests,
+				extraArgs,
+				execOpts: { task, cwd: DIST_DIR },
+			});
 		},
 	};
 }

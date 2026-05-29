@@ -163,8 +163,14 @@ class Store(DocumentStoreBase):
             filters.append({'permissionId': {'$in': docFilter.permissions}})
         if docFilter.objectIds is not None:
             filters.append({'objectId': {'$in': docFilter.objectIds}})
-        if docFilter.isDeleted is not None:
-            filters.append({'isDeleted': {'$eq': docFilter.isDeleted}})
+        if docFilter.isDeleted is None or not docFilter.isDeleted:
+            # Exclude only docs explicitly marked deleted. A null/absent isDeleted
+            # (the client strips None via exclude_none) must still count as not
+            # deleted, so use $ne True (which matches absent-key records) instead of
+            # $eq False (which would drop them).
+            filters.append({'isDeleted': {'$ne': True}})
+        else:
+            filters.append({'isDeleted': {'$eq': True}})
         if docFilter.chunkIds is not None:
             filters.append({'chunkId': {'$in': docFilter.chunkIds}})
         # If we are min chunk id, add a condition

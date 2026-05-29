@@ -40,6 +40,8 @@ from rocketlib import ToolDescriptor
 
 from ai.common.agent import AgentBase, AgentContext
 
+from ai.common.utils import safe_str
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # CREWAI ASYNC COMPATIBILITY PATCHES (applied once at import time)
@@ -165,9 +167,11 @@ class CrewBase(AgentBase):
           * `_build_crew_llm(context, role)`
           * `_build_crew_tools(context, tool_descriptors)`
 
-      - Shared CrewAI utility helpers (`_safe_str`, `_escape_braces`,
-        `_merge_instructions`) as `@staticmethod` so subclasses can call
-        them via `self._safe_str(...)` etc. without import noise.
+      - Shared CrewAI utility helpers (`_escape_braces`, `_merge_instructions`)
+        as `@staticmethod` so subclasses can call them via `self._escape_braces(...)`
+        without import noise. Note: `safe_str` is imported from
+        `ai.common.utils` (the shared helper used by every agent
+        driver including agent_rocketride).
 
       - Default field values (`_DEFAULT_GOAL`, `_DEFAULT_BACKSTORY`,
         `_DEFAULT_EXPECTED_OUTPUT`) as class attributes used as fallbacks
@@ -196,13 +200,6 @@ class CrewBase(AgentBase):
     # ─────────────────────────────────────────────────────────────────────
     # SHARED UTILITIES
     # ─────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _safe_str(v: Any) -> str:
-        try:
-            return '' if v is None else str(v)
-        except Exception:
-            return ''
 
     @staticmethod
     def _escape_braces(text: str) -> str:
@@ -369,9 +366,9 @@ class CrewBase(AgentBase):
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    return json.dumps(out, default=str) if isinstance(out, (dict, list)) else CrewBase._safe_str(out)
+                    return json.dumps(out, default=str) if isinstance(out, (dict, list)) else safe_str(out)
                 except Exception:
-                    return CrewBase._safe_str(out)
+                    return safe_str(out)
 
             async def _arun(self, **framework_args: Any) -> str:
                 # The ReAct tool path goes tool.ainvoke -> _arun, so this is what

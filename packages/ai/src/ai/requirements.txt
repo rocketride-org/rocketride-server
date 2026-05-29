@@ -8,3 +8,4 @@ httpx
 psutil
 tenacity
 nvidia-ml-py
+croniter
