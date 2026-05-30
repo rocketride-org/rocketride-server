@@ -178,7 +178,7 @@ Reference the node from your `.pipe` by its protocol just like any built-in. Aft
 When the node is ready to ship:
 
 1. Move the folder from `<workspace>/nodes/<your_node>/` to this repo's `nodes/src/nodes/<your_node>/`.
-2. Commit it. The folder ships as a unit.
+2. Open a pull request following [CONTRIBUTING.md](../CONTRIBUTING.md) (fork, branch, PR against `develop`). The folder ships as a unit.
 
 ---
 
