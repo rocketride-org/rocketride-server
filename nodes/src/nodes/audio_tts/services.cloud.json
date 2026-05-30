@@ -106,7 +106,6 @@
 			"default": "gpt-4o-mini-tts",
 			"enum": [
 				["gpt-4o-mini-tts", "GPT-4o mini TTS"],
-				["gpt-4o-tts", "GPT-4o TTS"],
 				["tts-1", "TTS-1"],
 				["tts-1-hd", "TTS-1 HD"]
 			]
