@@ -48,6 +48,17 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+# Server-side sliding window: retain only the most recent N waves in the
+# planning context.  Prevents unbounded prompt growth in long-running sessions
+# where the LLM omits ``remove`` signals.  Configurable via ``context_window_waves``.
+_DEFAULT_CONTEXT_WINDOW_WAVES = 5
+
+# Hard character budget for the aggregate structural summaries injected into
+# every planning prompt.  When exceeded, the oldest wave entries are evicted
+# until the total is under budget.  Configurable via ``wave_context_budget_chars``.
+# 12 000 chars ~= ~3 000 tokens, a safe budget for most provider context windows.
+_DEFAULT_WAVE_CONTEXT_BUDGET_CHARS = 12_000
+
 
 class RocketRideDriver(AgentBase):
     """
@@ -72,6 +83,73 @@ class RocketRideDriver(AgentBase):
         super().__init__(iGlobal)
         config = Config.getNodeConfig(iGlobal.glb.logicalType, iGlobal.glb.connConfig)
         self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
+        self._context_window_waves = int(
+            config.get('context_window_waves', _DEFAULT_CONTEXT_WINDOW_WAVES)
+        )
+        self._wave_context_budget_chars = int(
+            config.get('wave_context_budget_chars', _DEFAULT_WAVE_CONTEXT_BUDGET_CHARS)
+        )
+
+    # ------------------------------------------------------------------
+    # Context pruning
+    # ------------------------------------------------------------------
+
+    def _prune_wave_context(self, waves: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Return a token-budget-capped *copy* of the wave history for planning.
+
+        This method never mutates the master ``waves`` list (which feeds the
+        observability ``trace``).  It returns a shallow copy with two
+        complementary eviction strategies applied:
+
+        1. **Sliding window** — retains only the most recent
+           ``context_window_waves`` entries.  This is the primary mechanism:
+           it unconditionally bounds worst-case prompt growth.
+
+        2. **Character budget** — if the aggregate length of all structural
+           summaries in the window still exceeds ``wave_context_budget_chars``,
+           evicts the oldest entries one-by-one until within budget.  This
+           handles edge cases where a single wave produces unusually large
+           summaries (e.g. a DB query returning hundreds of rows).
+
+        The LLM's ``remove`` signal operates independently on the master
+        ``waves`` list and is intentionally preserved; this method adds an
+        additional server-side safety net on the planning copy only.
+
+        Returns:
+            A new list (shallow copy of wave dicts) safe to pass to
+            ``plan_wave()`` without affecting the trace.
+        """
+        # Work on a copy — the master waves list must never be mutated here.
+        # (Wave dicts themselves are not deep-copied because the planner only
+        # reads them; it never writes back into the wave history.)
+        context: List[Dict[str, Any]] = list(waves)
+
+        # --- Strategy 1: sliding window ---
+        window = max(1, self._context_window_waves)
+        if len(context) > window:
+            context = context[len(context) - window :]
+
+        # --- Strategy 2: character budget ---
+        budget = self._wave_context_budget_chars
+        if budget <= 0:
+            return context  # Budget disabled (0 means unlimited).
+
+        def _total_summary_chars(w_list: List[Dict[str, Any]]) -> int:
+            total = 0
+            for w in w_list:
+                for r in w.get('results', []):
+                    total += len(r.get('summary', ''))
+            return total
+
+        # Evict oldest entries until within budget or only one wave remains.
+        while len(context) > 1 and _total_summary_chars(context) > budget:
+            evicted = context.pop(0)
+            debug(
+                f'rocketride wave context budget: evicted wave {evicted.get("wave_num")} '
+                f'(budget={budget} chars) from planning context'
+            )
+
+        return context
 
     # ------------------------------------------------------------------
     # Main driver
@@ -120,6 +198,12 @@ class RocketRideDriver(AgentBase):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
             self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
 
+            # waves is the canonical trace (never mutated by the pruner).
+            # context_waves is a pruned shallow copy passed to the planner so
+            # that the planning prompt stays within the token budget without
+            # destroying the historical record in trace['waves'].
+            context_waves = self._prune_wave_context(waves)
+
             # Run the planner — one LLM call with all tool descriptions.
             # Returns either {"done": true, "answer": "..."} or {"tool_calls": [...]}
             # or {} if the LLM response was malformed.
@@ -128,7 +212,7 @@ class RocketRideDriver(AgentBase):
                     agent_base=self,
                     context=context,
                     question=question,
-                    waves=waves,
+                    waves=context_waves,
                     instructions=self._instructions,
                     current_scratch=current_scratch,
                 )
@@ -212,6 +296,10 @@ class RocketRideDriver(AgentBase):
             # as context; the full result stays in memory for later peek access.
             results = execute_wave(tool_calls, agent_base=self, context=context, wave_name=f'wave-{wave_num}')
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
+            # NOTE: do NOT call _prune_wave_context(waves) here.
+            # Pruning now returns a copy computed at the top of each planning
+            # iteration; the master waves list is the immutable trace record.
+
             self.sendSSE(context, 'thinking', message=f'Step {wave_num + 1} complete', results=len(results))
 
         # ------------------------------------------------------------------

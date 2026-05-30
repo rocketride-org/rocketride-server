@@ -1,6 +1,7 @@
 import importlib
 import threading
 from abc import abstractmethod, ABC
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Callable, Dict, Any, Tuple
 from rocketlib import IInstanceBase
 from .schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
@@ -269,12 +270,35 @@ class DocumentStoreBase(ABC):
         # Return the update document list
         return newDocs
 
+    # Maximum number of concurrent sub-query executions inside _queryDocuments.
+    # Caps thread count when a pipeline issues a large fan-out of sub-queries.
+    _MAX_PARALLEL_QUERIES: int = 8
+
     def _queryDocuments(self, question: Question) -> Dict[Tuple[str, int], Doc]:
+        """
+        Execute sub-queries in parallel and merge their results.
+
+        For SEMANTIC / PROMPT / QUESTION and KEYWORD question types, each
+        sub-query in ``question.questions`` is dispatched concurrently via a
+        ``ThreadPoolExecutor``.  This eliminates the sequential blocking I/O
+        penalty when the caller has decomposed a complex question into multiple
+        independent sub-queries (e.g. HyDE, multi-hop).
+
+        A ``threading.Lock`` guards all writes to the shared ``documents`` dict
+        so concurrent result merges are thread-safe.  GET queries are not
+        parallelised because there is only ever a single call.
+        """
         # Get the type of question being asked
         type = question.type
 
         # Keep track of the documents by objectId/chunkId
         documents: Dict[Tuple[str, int], Doc] = {}
+
+        # Serialise concurrent writes from parallel sub-query threads.
+        # The lock is only held for the merge step, not for the I/O call
+        # itself, so threads spend the vast majority of their time running
+        # network requests in parallel outside the critical section.
+        _documents_lock = threading.Lock()
 
         # Add the pending documents to our list
         for doc in question.documents:
@@ -282,7 +306,11 @@ class DocumentStoreBase(ABC):
             key = self._getDocKey(doc)
             documents[key] = doc
 
-        def _addDoc(doc: Doc):
+        def _addDoc(doc: Doc) -> None:
+            """Merge a single document into the shared result dict.
+
+            Must be called while holding ``_documents_lock``.
+            """
             # If it doesn't meet our score threshold, skip it
             if doc.score < self.threshold_search:
                 return
@@ -290,9 +318,8 @@ class DocumentStoreBase(ABC):
             # Get the key for this document
             key = self._getDocKey(doc)
 
-            # If this is already there, skip
+            # If this is already there, keep the highest score
             if key in documents:
-                # Use the highest score
                 if doc.score > documents[key].score:
                     documents[key].score = doc.score
                 return
@@ -300,40 +327,73 @@ class DocumentStoreBase(ABC):
             # Add it
             documents[key] = doc
 
-        def _addDocs(docs: List[Doc]):
-            # For each document, add it
-            for doc in docs:
-                _addDoc(doc)
+        def _merge_docs(docs: List[Doc]) -> None:
+            """Merge a batch of documents under the lock."""
+            with _documents_lock:
+                for doc in docs:
+                    _addDoc(doc)
 
-        # What type is this?
+        # ----------------------------------------------------------------
+        # SEMANTIC / PROMPT / QUESTION — parallel fan-out
+        # ----------------------------------------------------------------
         if type == QuestionType.PROMPT or type == QuestionType.SEMANTIC or type == QuestionType.QUESTION:
-            # For each question
-            for query in question.questions:
-                # Make sure we have the embeddings
+            queries = question.questions
+
+            # Validate embeddings before dispatching any I/O so we fail fast
+            # without wasting network round-trips on incomplete requests.
+            for query in queries:
                 if not query.embedding_model:
                     raise Exception('You must run your question through an embedding filter')
 
-                # Do a find operation
-                docs = self.searchSemantic(query, question.filter)
+            if not queries:
+                # No sub-queries to execute; pre-loaded documents (if any) are
+                # already in the dict from the loop above.
+                pass
+            elif len(queries) == 1:
+                # Single-query path: skip executor overhead entirely.
+                _merge_docs(self.searchSemantic(queries[0], question.filter))
+            else:
+                def _fetch_semantic(query: QuestionText) -> List[Doc]:
+                    return self.searchSemantic(query, question.filter)
 
-                # Add the documents we got back
-                _addDocs(docs)
+                n_workers = min(self._MAX_PARALLEL_QUERIES, len(queries))
+                with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                    future_to_query = {pool.submit(_fetch_semantic, q): q for q in queries}
+                    for future in as_completed(future_to_query):
+                        # Propagate exceptions from sub-queries to the caller.
+                        # The 'with' block guarantees pool.shutdown(wait=True)
+                        # so in-flight threads complete before the exception
+                        # unwinds the stack — no thread orphaning.
+                        _merge_docs(future.result())
 
+        # ----------------------------------------------------------------
+        # KEYWORD — parallel fan-out
+        # NOTE: this is an independent 'if', not an 'elif'. KEYWORD and GET
+        # are peer branches, not subordinate to the SEMANTIC block above.
+        # Using 'elif' here would make GET silently unreachable whenever
+        # KEYWORD matches with zero queries (the elif chain would fall through
+        # to the else: pass arm instead of the GET arm).
+        # ----------------------------------------------------------------
         if type == QuestionType.KEYWORD:
-            # For each question
-            for query in question.questions:
-                # Do a find operation
-                docs = self.searchKeyword(query, question.filter)
+            queries = question.questions
 
-                # Add the documents we got back
-                _addDocs(docs)
+            if not queries:
+                pass  # nothing to search; return pre-loaded documents as-is
+            elif len(queries) == 1:
+                _merge_docs(self.searchKeyword(queries[0], question.filter))
+            else:
+                def _fetch_keyword(query: QuestionText) -> List[Doc]:
+                    return self.searchKeyword(query, question.filter)
+
+                n_workers = min(self._MAX_PARALLEL_QUERIES, len(queries))
+                with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                    future_to_query = {pool.submit(_fetch_keyword, q): q for q in queries}
+                    for future in as_completed(future_to_query):
+                        _merge_docs(future.result())
 
         elif type == QuestionType.GET:
-            # This is a get request
-            docs = self.get(question.filter)
-
-            # Add the documents we got back
-            _addDocs(docs)
+            # This is a get request — single call, no parallelism needed.
+            _merge_docs(self.get(question.filter))
 
         else:
             # Nothing that we handle, pass it on
