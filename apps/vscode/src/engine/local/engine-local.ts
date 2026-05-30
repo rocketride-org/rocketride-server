@@ -52,6 +52,9 @@ export class EngineLocal extends EngineBackend {
 	/** True while stopProcess() is in progress — suppresses spurious error events from the exit handler. */
 	private stopping = false;
 
+	/** Local-node symlinks created under <engineDir>/nodes/src/nodes/ for this run; removed on stop. */
+	private linkedNodes: string[] = [];
+
 	/**
 	 * @param parentDir - Parent directory for the engine/ subdirectory.
 	 *   Engine binaries live at <parentDir>/engine/engine(.exe).
@@ -158,7 +161,20 @@ export class EngineLocal extends EngineBackend {
 			...effectiveArgs,
 		];
 
-		await this.spawnProcess(executablePath, args);
+		// Wipe links from any prior start() attempt on this same backend so
+		// nodes removed from the workspace don't linger and so a retry can't
+		// accumulate duplicates in linkedNodes.
+		this.cleanupLocalNodes();
+		this.setupLocalNodes(path.dirname(executablePath));
+
+		try {
+			await this.spawnProcess(executablePath, args);
+		} catch (err) {
+			// Spawn failed — roll back the symlinks we just created so a
+			// failed start doesn't leak workspace-local links into the install.
+			this.cleanupLocalNodes();
+			throw err;
+		}
 		this.logger.output(`${icons.success} Local server started on port ${this.actualPort}`);
 
 		const installed = this.installer.getInstalledVersion();
@@ -176,6 +192,7 @@ export class EngineLocal extends EngineBackend {
 	async stop(): Promise<void> {
 		this.emitStatus({ phase: 'working', message: 'Stopping server...' });
 		await this.stopProcess();
+		this.cleanupLocalNodes();
 		this.emitStatus({ phase: 'idle', message: 'Server stopped' });
 	}
 
@@ -249,6 +266,7 @@ export class EngineLocal extends EngineBackend {
 	 */
 	async dispose(): Promise<void> {
 		if (this.child) await this.stopProcess();
+		this.cleanupLocalNodes();
 	}
 
 	// =========================================================================
@@ -456,5 +474,97 @@ export class EngineLocal extends EngineBackend {
 				}
 			},
 		};
+	}
+
+	// =========================================================================
+	// LOCAL NODES — workspace-adjacent nodes/ folder symlinked into the
+	// engine catalog so devs can prototype without touching the installed
+	// engine. The installed engine scans <engineDir>/nodes/<node>/; we
+	// mirror each <workspace>/nodes/<node>/ in there.
+	// =========================================================================
+
+	/**
+	 * Mirrors each <workspaceRoot>/nodes/<node>/ (with services.json) into
+	 * <engineDir>/nodes/<node>/ via symlink. Skips name collisions with
+	 * built-ins and links already claimed by another window. Stale links
+	 * from crashed runs are refreshed.
+	 */
+	private setupLocalNodes(engineDir: string): void {
+		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		if (!workspaceRoot) return;
+
+		const localNodesDir = path.join(workspaceRoot, 'nodes');
+		if (!fs.existsSync(localNodesDir)) return;
+
+		if (!vscode.workspace.isTrusted) {
+			this.logger.output(`${icons.info} Local nodes folder detected at ${localNodesDir} but workspace is not trusted; ignored`);
+			return;
+		}
+
+		const targetRoot = path.join(engineDir, 'nodes');
+		try {
+			fs.mkdirSync(targetRoot, { recursive: true });
+		} catch (err) {
+			this.logger.output(`${icons.warning} Could not prepare local node target dir ${targetRoot}: ${err instanceof Error ? err.message : String(err)}`);
+			return;
+		}
+
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(localNodesDir, { withFileTypes: true });
+		} catch (err) {
+			this.logger.output(`${icons.warning} Could not read ${localNodesDir}: ${err instanceof Error ? err.message : String(err)}`);
+			return;
+		}
+
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const sourceDir = path.join(localNodesDir, entry.name);
+			if (!fs.existsSync(path.join(sourceDir, 'services.json'))) continue;
+			const targetDir = path.join(targetRoot, entry.name);
+
+			try {
+				const existing = fs.lstatSync(targetDir);
+				if (!existing.isSymbolicLink()) {
+					this.logger.output(`${icons.warning} Local node "${entry.name}" collides with an existing engine node; skipped`);
+					continue;
+				}
+				let currentTarget = '';
+				try { currentTarget = path.resolve(targetRoot, fs.readlinkSync(targetDir)); } catch { /* unreadable link */ }
+				if (currentTarget === sourceDir) {
+					// already linked to our source — reuse
+					this.linkedNodes.push(targetDir);
+					continue;
+				}
+				if (currentTarget && fs.existsSync(currentTarget)) {
+					this.logger.output(`${icons.warning} Local node "${entry.name}" target already linked to ${currentTarget}; skipped to avoid clobbering another window`);
+					continue;
+				}
+				// stale: target gone — refresh
+				fs.unlinkSync(targetDir);
+			} catch {
+				// target does not exist — proceed to create
+			}
+
+			try {
+				fs.symlinkSync(sourceDir, targetDir, 'dir');
+				this.linkedNodes.push(targetDir);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				this.logger.output(`${icons.warning} Could not link local node "${entry.name}" (${msg}); skipped. On Windows, enable Developer Mode or run VS Code as administrator.`);
+			}
+		}
+
+		if (this.linkedNodes.length) {
+			this.logger.output(`${icons.success} Local nodes registered (${this.linkedNodes.length}): ${this.linkedNodes.map((p) => path.basename(p)).join(', ')}`);
+		}
+	}
+
+	/** Removes symlinks created by setupLocalNodes. Safe to call multiple times. */
+	private cleanupLocalNodes(): void {
+		for (const p of this.linkedNodes) {
+			try { if (fs.lstatSync(p).isSymbolicLink()) fs.unlinkSync(p); } catch { /* already gone */ }
+		}
+		this.linkedNodes = [];
 	}
 }

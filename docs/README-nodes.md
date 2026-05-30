@@ -152,6 +152,36 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 
 ---
 
+## Local Nodes for Prototyping
+
+To try out a new node without adding it to this repo, create a folder called `nodes/` at the root of your VS Code / Cursor workspace and drop the node in there. The extension picks it up automatically and exposes it to the engine.
+
+### Quick start
+
+Use the same node structure as built-in nodes (see [Adding a New Node](#adding-a-new-node)) — `services.json`, Python interfaces, SVG icon, optional `requirements.txt` — but place the folder in `<workspace>/nodes/<node_name>/` instead of `nodes/src/nodes/`. Each node stays **self-contained** in its own directory.
+
+Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Workspace Trust prompt), and start the engine. You should see in the engine output channel:
+
+```text
+✅ Local nodes registered (1): hello_world
+```
+
+Reference the node from your `.pipe` by its protocol just like any built-in. After any change to the node files, run `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window** to pick them up.
+
+### Safety
+
+- **Workspace Trust** is required. In an untrusted workspace the local `nodes/` folder is logged and ignored.
+- **Built-ins are never overwritten.** If a local node's directory name collides with an installed engine node, the local one is skipped and a warning is logged.
+
+### Promoting a local node to a built-in
+
+When the node is ready to ship:
+
+1. Move the folder from `<workspace>/nodes/<your_node>/` to this repo's `nodes/src/nodes/<your_node>/`.
+2. Open a pull request following [CONTRIBUTING.md](../CONTRIBUTING.md) (fork, branch, PR against `develop`). The folder ships as a unit.
+
+---
+
 ## License
 
 MIT License -- see [LICENSE](../LICENSE).
