@@ -62,7 +62,7 @@ class IGlobal(IGlobalBase):
                 )
             from depends import depends  # type: ignore
 
-            depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
+            depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.cloud.txt'))
             self._cloud_engine = CloudTTSEngine(engine, cfg)
             return
 
