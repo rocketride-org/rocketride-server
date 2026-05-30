@@ -78,6 +78,7 @@ python tools/src/sync_models.py --provider llm_openai --model-source openrouter 
 | `llm_xai`          | `llm_xai`          | `ROCKETRIDE_XAI_KEY`        |
 | `llm_perplexity`   | `llm_perplexity`   | `ROCKETRIDE_PERPLEXITY_KEY` |
 | `llm_qwen`         | `llm_qwen`         | `ROCKETRIDE_QWEN_KEY`       |
+| `llm_minimax`      | `llm_minimax`      | `ROCKETRIDE_MINIMAX_KEY`    |
 
 If an API key env var is not set the provider is skipped with a warning (not an error).
 Set keys in a `.env` file in the repo root or export them in the shell.

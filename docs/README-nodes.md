@@ -18,6 +18,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `llm_mistral`        | Mistral AI                                 |                                                           |
 | `llm_perplexity`     | Perplexity AI (Sonar, web search)          | [README](../nodes/src/nodes/llm_perplexity/README.md)     |
 | `llm_deepseek`       | DeepSeek models                            |                                                           |
+| `llm_minimax`        | MiniMax models                             |                                                           |
 | `llm_xai`            | xAI (Grok)                                 |                                                           |
 | `llm_vertex`         | Google Vertex AI                           |                                                           |
 | `llm_ibm_watson`     | IBM Watson                                 |                                                           |
