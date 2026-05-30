@@ -36,7 +36,7 @@ import { pluginRocketrideIcons } from './scripts/rsbuild-plugin-icons.mjs';
 export default defineConfig({
 	source: {
 		entry: {
-			index: './index.tsx',
+			index: './index.ts',
 		},
 	},
 	output: {

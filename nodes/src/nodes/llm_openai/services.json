@@ -90,7 +90,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 1050000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-4-pro": {
 				"title": "GPT-5.4 Pro",
@@ -98,7 +101,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 1050000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-4-mini": {
 				"title": "GPT-5.4-mini",
@@ -106,7 +112,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-4-nano": {
 				"title": "GPT-5.4-nano",
@@ -114,7 +123,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-4o": {
 				"title": "GPT-4o",
@@ -138,7 +150,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-1": {
 				"title": "GPT-5.1",
@@ -146,7 +161,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-2": {
 				"title": "GPT-5.2",
@@ -154,7 +172,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-mini": {
 				"title": "GPT-5-mini",
@@ -162,15 +183,21 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"openai-5-nano": {
 				"title": "GPT-5-nano",
 				"model": "gpt-5-nano",
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
-				"modelOutputTokens": 128000, // litellm
-				"apikey": ""
+				"modelOutputTokens": 4096, // default
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gpt-3-5-turbo": {
 				"title": "OpenAI: GPT-3.5 Turbo",
@@ -201,7 +228,7 @@
 				"model": "gpt-4.1",
 				"modelSource": "provider",
 				"modelTotalTokens": 1047576, // openrouter
-				"modelOutputTokens": 32768, // litellm
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
 			"gpt-4-1-mini": {
@@ -232,32 +259,32 @@
 				"title": "GPT-5.1 Chat Latest",
 				"model": "gpt-5.1-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // litellm
-				"modelOutputTokens": 16384, // litellm
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"gpt-5-2-chat-latest": {
 				"title": "GPT-5.2 Chat Latest",
 				"model": "gpt-5.2-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // litellm
-				"modelOutputTokens": 16384, // litellm
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"gpt-5-3-chat-latest": {
 				"title": "GPT-5.3 Chat Latest",
 				"model": "gpt-5.3-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // litellm
-				"modelOutputTokens": 16384, // litellm
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"gpt-5-chat-latest": {
 				"title": "GPT-5 Chat Latest",
 				"model": "gpt-5-chat-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // litellm
-				"modelOutputTokens": 16384, // litellm
+				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 16384, // manual
 				"apikey": ""
 			},
 			"o1": {
@@ -266,7 +293,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"o3": {
 				"title": "OpenAI: o3",
@@ -274,7 +304,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"o3-mini": {
 				"title": "OpenAI: o3 Mini",
@@ -282,7 +315,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"o4-mini": {
 				"title": "OpenAI: o4 Mini",
@@ -290,7 +326,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 200000, // openrouter
 				"modelOutputTokens": 100000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gpt-5-5": {
 				"title": "OpenAI: GPT-5.5",
@@ -298,7 +337,10 @@
 				"modelSource": "provider",
 				"modelTotalTokens": 1050000, // openrouter
 				"modelOutputTokens": 128000, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			}
 		}
 	},

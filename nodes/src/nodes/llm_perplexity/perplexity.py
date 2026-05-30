@@ -29,6 +29,7 @@ including sonar models with real-time web search capabilities.
 """
 
 import os
+import re
 import time
 from depends import depends  # type: ignore
 
@@ -40,6 +41,9 @@ from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+
+# sonar-reasoning* wraps CoT in <think>...</think> inside the answer.
+_THINK_RE = re.compile(r'<think>(.*?)</think>\s*', re.DOTALL)
 from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
 
@@ -79,6 +83,8 @@ class Chat(ChatBase):
             max_retries=0,  # We handle retries ourselves
             max_tokens=self._modelOutputTokens,
         )
+
+        self._is_reasoning = bool((config.get('capabilities') or {}).get('reasoning'))
 
         # Store in bag for pipeline access
         bag['chat'] = self
@@ -199,8 +205,13 @@ class Chat(ChatBase):
         else:
             return (2, 1.0)  # Standard retry config
 
-    def chat(self, question: Question) -> Answer:
-        """Process a question and return an answer with retry logic."""
+    def chat(self, question: Question, on_chunk=None, on_finish=None, on_reasoning_chunk=None) -> Answer:
+        """Process a question and return an answer with retry logic.
+
+        Non-streaming under the hood; reasoning (sonar-reasoning*, sonar-deep-research)
+        is extracted post-hoc from inline ``<think>...</think>`` tags and routed to
+        ``on_reasoning_chunk`` so the UI panel renders it.
+        """
         prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
@@ -209,10 +220,22 @@ class Chat(ChatBase):
             try:
                 # Ask the model
                 results = self._llm.invoke(prompt)
+                content = results.content or ''
+
+                # Reasoning Sonar models embed CoT in <think>...</think>; only
+                # parse when the profile is flagged reasoning-capable.
+                if self._is_reasoning:
+                    reasoning_parts: list = []
+                    content = _THINK_RE.sub(lambda m: reasoning_parts.append(m.group(1)) or '', content)
+                    if reasoning_parts and on_reasoning_chunk is not None:
+                        on_reasoning_chunk('\n'.join(p.strip() for p in reasoning_parts if p.strip()))
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)
-                answer.setAnswer(results.content)
+                answer.setAnswer(content)
+                if on_finish is not None:
+                    meta = getattr(results, 'response_metadata', None) or {}
+                    on_finish(meta.get('finish_reason') or 'stop')
                 return answer
 
             except Exception as e:

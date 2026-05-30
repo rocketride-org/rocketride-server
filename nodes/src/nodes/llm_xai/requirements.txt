@@ -1,5 +1,6 @@
-# Plugin xAI core
-langchain-xai
+# Plugin xAI core — uses OpenAI-compatible Chat Completions on api.x.ai/v1
+openai
+langchain-openai
 
 # LangChain deps
 langchain-core

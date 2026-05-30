@@ -24,7 +24,7 @@
 """GMI Cloud binding for the ChatLLM."""
 
 from typing import Any, Dict
-from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError
+from openai import OpenAI, AuthenticationError, APIError, RateLimitError, APIConnectionError
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
@@ -62,6 +62,10 @@ class Chat(ChatBase):
             temperature=0,
             max_tokens=self._modelOutputTokens,
         )
+
+        if (config.get('capabilities') or {}).get('reasoning'):
+            self._raw_openai_client = OpenAI(api_key=apikey, base_url=serverbase)
+            self._native_stream_provider = 'openai_compat_reasoning'
 
         bag['chat'] = self
 

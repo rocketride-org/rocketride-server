@@ -87,14 +87,17 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"region": "us",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen-flash": {
 				"title": "Qwen Flash",
 				"model": "qwen-flash",
 				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 4096, // manual
 				"region": "us",
 				"apikey": ""
 			},
@@ -102,7 +105,7 @@
 				"title": "Qwen2.5 72B Instruct",
 				"model": "qwen-2.5-72b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -110,7 +113,7 @@
 				"title": "Qwen: Qwen2.5 7B Instruct",
 				"model": "qwen-2.5-7b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
@@ -118,7 +121,7 @@
 				"title": "Qwen2.5 Coder 32B Instruct",
 				"model": "qwen-2.5-coder-32b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
+				"modelTotalTokens": 128000, // openrouter
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -126,8 +129,10 @@
 				"title": "Qwen: Qwen-Max ",
 				"model": "qwen-max",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 8192, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 8192, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"qwen-plus-2025-07-28": {
@@ -136,7 +141,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen-plus-2025-07-28-thinking": {
 				"title": "Qwen: Qwen Plus 0728 (thinking)",
@@ -144,14 +152,19 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"qwen-turbo": {
 				"title": "Qwen: Qwen-Turbo",
 				"model": "qwen-turbo",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 8192, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 8192, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			}
 		}

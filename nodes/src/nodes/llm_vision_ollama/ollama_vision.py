@@ -76,7 +76,7 @@ class Chat(ChatBase):
             )
         return f'Ollama Vision error: {error_msg}'
 
-    def chat(self, question: Question) -> Answer:
+    def chat(self, question: Question, on_chunk=None, on_finish=None, on_reasoning_chunk=None) -> Answer:
         """Send a vision request to Ollama and get the response."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -151,6 +151,9 @@ class Chat(ChatBase):
                 response = result[0]
                 answer = Answer(expectJson=question.expectJson)
                 answer.setAnswer(response.content)
+                if on_finish is not None:
+                    meta = getattr(response, 'response_metadata', None) or {}
+                    on_finish(meta.get('finish_reason') or 'stop')
                 return answer
             except Exception as e:
                 last_error = e

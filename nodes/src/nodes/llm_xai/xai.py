@@ -23,24 +23,32 @@
 
 """
 XAI binding for the ChatLLM.
+
+Uses xAI's OpenAI-compatible Chat Completions endpoint (`https://api.x.ai/v1`)
+via langchain-openai. This makes reasoning-capable Grok models (grok-4,
+grok-4-fast-reasoning, etc.) surface `reasoning_content` on stream deltas,
+which the generic ChatBase loop already routes to the UI "Thinking" panel.
 """
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from langchain_xai import ChatXAI
+from langchain_openai import ChatOpenAI
+from openai import OpenAI
+
+XAI_BASE_URL = 'https://api.x.ai/v1'
 
 
 class Chat(ChatBase):
     """
-    Create an XAI chat bot.
+    Create an xAI Grok chat bot via the OpenAI-compatible API.
     """
 
-    _llm: ChatXAI
+    _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the XAI chat bot.
+        Initialize the xAI chat bot.
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -53,13 +61,26 @@ class Chat(ChatBase):
 
         # API key validation logic
         if not apikey or not apikey.startswith('xai-'):
-            raise ValueError('Invalid XAI API key format, please check your API key.')
-
-        # Init the chat base
-        super().__init__(provider, connConfig, bag)
+            raise ValueError('Invalid xAI API key format, please check your API key.')
 
         # Get the llm
-        self._llm = ChatXAI(model=self._model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
+        kwargs: Dict[str, Any] = {
+            'model': self._model,
+            'api_key': apikey,
+            'base_url': XAI_BASE_URL,
+            'temperature': 0,
+            'max_tokens': self._modelOutputTokens,
+        }
+        is_reasoning = bool((config.get('capabilities') or {}).get('reasoning'))
+        if is_reasoning:
+            kwargs['model_kwargs'] = {'reasoning_effort': 'low'}
+
+        self._llm = ChatOpenAI(**kwargs)
+
+        if is_reasoning:
+            self._raw_openai_client = OpenAI(api_key=apikey, base_url=XAI_BASE_URL)
+            self._reasoning_kwargs = {'reasoning_effort': 'low'}
+            self._native_stream_provider = 'openai_compat_reasoning'
 
         # Save our chat class into the bag
         bag['chat'] = self

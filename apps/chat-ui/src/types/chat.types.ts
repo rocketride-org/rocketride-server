@@ -36,6 +36,11 @@ export interface Message {
 	timestamp: string;
 	resultKey?: string | undefined;
 	sseType?: string;
+	// Reasoning summary streamed from reasoning-capable models (OpenAI o-series
+	// via Responses API). Renders as a collapsible "Thinking" panel above the
+	// bot bubble's answer. Empty/undefined → no panel shown.
+	reasoning?: string;
+	reasoningStreaming?: boolean;
 }
 
 /**
