@@ -3,3 +3,4 @@ numpy
 kokoro>=0.9.4
 soundfile>=0.13.1
 # en_core_web_sm is installed dynamically via spacy_en_model.ensure_spacy_en_model()
+# Cloud engines (OpenAI, ElevenLabs) install requirements.cloud.txt instead.

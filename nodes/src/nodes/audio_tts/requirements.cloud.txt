@@ -1,0 +1,4 @@
+# Cloud TTS (OpenAI, ElevenLabs): HTTPS calls in-process.
+# Kept separate from requirements.txt so cloud-only deployments never
+# install the heavy local Kokoro stack (kokoro, soundfile, spaCy).
+requests>=2.31.0
