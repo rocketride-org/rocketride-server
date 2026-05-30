@@ -137,7 +137,15 @@ def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
 
     debug(f'Running: {" ".join(args)}')
 
-    proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(
+        args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+    )
 
     # Read stdout/stderr in background threads to avoid blocking
     stdout_data = []
@@ -325,7 +333,7 @@ def pip(*args) -> bool:
         True if command succeeded, False otherwise
     """
     cmd = [sys.executable, '-m', 'pip'] + list(args)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', check=False)
     return result.returncode == 0
 
 
@@ -706,7 +714,16 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         args.extend(['-c', './cache/constraints.txt'])
 
     debug(f'Dry-run: {args}')
-    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
+        stdin=subprocess.PIPE,
+        cwd=exe_dir,
+    )
 
     # Check if dry-run failed (e.g., dependency resolution error)
     if result.returncode != 0:
@@ -779,6 +796,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         '--index-strategy',
         'unsafe-best-match',
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
+        '--no-cache',
     ]
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         uv_args.extend(['-c', './cache/constraints.txt'])
@@ -791,6 +809,8 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding='utf-8',
+        errors='replace',
         bufsize=1,
     )
     output_lines = []
