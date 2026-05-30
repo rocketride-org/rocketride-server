@@ -182,12 +182,6 @@ Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Wor
 
 Reference the node from your `.pipe` by its protocol just like any built-in. After any change to the node files, run `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window** to pick them up.
 
-### How it works
-
-Before spawning the engine subprocess, the extension symlinks every `<workspaceRoot>/nodes/<node>/` directory into the installed engine's `nodes/` catalog, where the engine's startup scan picks them up natively. Symlinks are removed when the engine stops, so the install directory stays clean. Stale symlinks from a crashed run are detected and refreshed automatically on the next start.
-
-There is no hot reload — adding or editing a node requires restarting the engine. Use `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window**; the extension reactivates, the engine respawns, and the updated node folder is symlinked fresh.
-
 ### Path convention
 
 Because the symlink lives alongside the built-in nodes in the engine's `nodes/` directory, your `services.json` uses the **same** `"path": "nodes.<your_node>"` convention as built-in nodes. No special prefix, no different import resolution.
