@@ -85,14 +85,17 @@ class WhisperLoader(BaseLoader):
             import subprocess
             import sys
 
+            # StorageView has no (shape, dtype, device) Python constructor — must use
+            # from_array() on a CUDA-resident tensor to exercise the CUDA path.
             probe_script = (
-                'import ctranslate2, numpy as np; '
+                'import ctranslate2, torch; '
                 'v = ctranslate2.get_supported_compute_types("cuda"); '
                 'assert v, "no cuda types"; '
-                # Allocate a tiny CUDA tensor via ctranslate2 to exercise the CUDA path
-                'sv = ctranslate2.StorageView([1], ctranslate2.DataType.FLOAT32, ctranslate2.Device.CUDA); '
+                't = torch.zeros(1, dtype=torch.float32, device="cuda"); '
+                'sv = ctranslate2.StorageView.from_array(t); '
                 'print("ok")'
             )
+            result = None
             try:
                 result = subprocess.run(
                     [sys.executable, '-c', probe_script],
@@ -177,10 +180,13 @@ class WhisperLoader(BaseLoader):
             else:
                 gpu_index = -1
                 torch_device = 'cpu'
-                logger.warning(
-                    'ctranslate2 CUDA probe failed — Whisper will use CPU in server mode. '
-                    'This is a known issue on some CUDA/cuBLAS version combinations.'
-                )
+                if not torch.cuda.is_available():
+                    logger.warning('CUDA is not available — Whisper will use CPU in server mode.')
+                else:
+                    logger.warning(
+                        'ctranslate2 CUDA probe failed — Whisper will use CPU in server mode. '
+                        'This is a known issue on some CUDA/cuBLAS version combinations.'
+                    )
             # CTranslate2 does not support float16 on CPU (Intel or ARM). Use int8 for speed;
             # use float32 in loader_options if you prefer max precision on CPU (slower, more RAM).
             # Refs: https://opennmt.net/CTranslate2/quantization.html (fallback table),
