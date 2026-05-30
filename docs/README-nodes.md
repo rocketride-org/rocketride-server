@@ -152,6 +152,60 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 
 ---
 
+## Local Nodes for Prototyping
+
+To try out a new node without adding it to this repo, create a folder called `nodes/` at the root of your VS Code / Cursor workspace and drop the node in there. The extension picks it up automatically and exposes it to the engine.
+
+### Quick start
+
+Lay out your workspace like this:
+
+```text
+my-workspace/
+├── my-pipeline.pipe
+└── nodes/
+    └── hello_world/
+        ├── services.json
+        ├── __init__.py
+        ├── hello_world.py
+        ├── hello_world.svg     # icon — lives with the node, not elsewhere
+        └── requirements.txt    # optional
+```
+
+Each node is **self-contained**: sources, `services.json`, and the SVG icon all live in the node's own directory. Nothing in `packages/` or anywhere else in the engine install needs to be touched — that's the same rule built-in nodes follow.
+
+Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Workspace Trust prompt), and start the engine. You should see in the engine output channel:
+
+```text
+✅ Local nodes registered (1): hello_world
+```
+
+Reference the node from your `.pipe` by its protocol just like any built-in. After any change to the node files, run `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window** to pick them up.
+
+### How it works
+
+Before spawning the engine subprocess, the extension symlinks every `<workspaceRoot>/nodes/<node>/` directory into the installed engine's `nodes/` catalog, where the engine's startup scan picks them up natively. Symlinks are removed when the engine stops, so the install directory stays clean. Stale symlinks from a crashed run are detected and refreshed automatically on the next start.
+
+There is no hot reload — adding or editing a node requires restarting the engine. Use `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window**; the extension reactivates, the engine respawns, and the updated node folder is symlinked fresh.
+
+### Path convention
+
+Because the symlink lives alongside the built-in nodes in the engine's `nodes/` directory, your `services.json` uses the **same** `"path": "nodes.<your_node>"` convention as built-in nodes. No special prefix, no different import resolution.
+
+### Safety
+
+- **Workspace Trust** is required. In an untrusted workspace the local `nodes/` folder is logged and ignored.
+- **Built-ins are never overwritten.** If a local node's directory name collides with an installed engine node, the local one is skipped and a warning is logged.
+
+### Promoting a local node to a built-in
+
+When the node is ready to ship:
+
+1. Move the folder from `<workspace>/nodes/<your_node>/` to this repo's `nodes/src/nodes/<your_node>/`.
+2. Commit it. The folder ships as a unit — no changes to `services.json`, no edits anywhere in `packages/`. Self-contained on the way in, self-contained on the way out.
+
+---
+
 ## License
 
 MIT License -- see [LICENSE](../LICENSE).
