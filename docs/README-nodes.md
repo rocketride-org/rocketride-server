@@ -158,21 +158,7 @@ To try out a new node without adding it to this repo, create a folder called `no
 
 ### Quick start
 
-Lay out your workspace like this:
-
-```text
-my-workspace/
-├── my-pipeline.pipe
-└── nodes/
-    └── hello_world/
-        ├── services.json
-        ├── __init__.py
-        ├── hello_world.py
-        ├── hello_world.svg     # icon — lives with the node, not elsewhere
-        └── requirements.txt    # optional
-```
-
-Each node is **self-contained**: sources, `services.json`, and the SVG icon all live in the node's own directory.
+Use the same node structure as built-in nodes (see [Adding a New Node](#adding-a-new-node)) — `services.json`, Python interfaces, SVG icon, optional `requirements.txt` — but place the folder in `<workspace>/nodes/<node_name>/` instead of `nodes/src/nodes/`. Each node stays **self-contained** in its own directory.
 
 Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Workspace Trust prompt), and start the engine. You should see in the engine output channel:
 
@@ -181,10 +167,6 @@ Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Wor
 ```
 
 Reference the node from your `.pipe` by its protocol just like any built-in. After any change to the node files, run `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) → **Developer: Reload Window** to pick them up.
-
-### Path convention
-
-Because the symlink lives alongside the built-in nodes in the engine's `nodes/` directory, your `services.json` uses the **same** `"path": "nodes.<your_node>"` convention as built-in nodes. No special prefix, no different import resolution.
 
 ### Safety
 
@@ -196,7 +178,7 @@ Because the symlink lives alongside the built-in nodes in the engine's `nodes/` 
 When the node is ready to ship:
 
 1. Move the folder from `<workspace>/nodes/<your_node>/` to this repo's `nodes/src/nodes/<your_node>/`.
-2. Commit it. The folder ships as a unit — no changes to `services.json`, no edits anywhere in `packages/`. Self-contained on the way in, self-contained on the way out.
+2. Commit it. The folder ships as a unit.
 
 ---
 
