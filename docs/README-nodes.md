@@ -172,7 +172,7 @@ my-workspace/
         └── requirements.txt    # optional
 ```
 
-Each node is **self-contained**: sources, `services.json`, and the SVG icon all live in the node's own directory. Nothing in `packages/` or anywhere else in the engine install needs to be touched — that's the same rule built-in nodes follow.
+Each node is **self-contained**: sources, `services.json`, and the SVG icon all live in the node's own directory.
 
 Open the workspace in VS Code / Cursor, mark it as **trusted** (the standard Workspace Trust prompt), and start the engine. You should see in the engine output channel:
 
