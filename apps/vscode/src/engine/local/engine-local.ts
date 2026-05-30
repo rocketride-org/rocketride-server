@@ -161,9 +161,20 @@ export class EngineLocal extends EngineBackend {
 			...effectiveArgs,
 		];
 
+		// Wipe links from any prior start() attempt on this same backend so
+		// nodes removed from the workspace don't linger and so a retry can't
+		// accumulate duplicates in linkedNodes.
+		this.cleanupLocalNodes();
 		this.setupLocalNodes(path.dirname(executablePath));
 
-		await this.spawnProcess(executablePath, args);
+		try {
+			await this.spawnProcess(executablePath, args);
+		} catch (err) {
+			// Spawn failed — roll back the symlinks we just created so a
+			// failed start doesn't leak workspace-local links into the install.
+			this.cleanupLocalNodes();
+			throw err;
+		}
 		this.logger.output(`${icons.success} Local server started on port ${this.actualPort}`);
 
 		const installed = this.installer.getInstalledVersion();
