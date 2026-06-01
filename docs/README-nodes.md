@@ -22,6 +22,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `llm_xai`            | xAI (Grok)                                 |                                                           |
 | `llm_vertex`         | Google Vertex AI                           |                                                           |
 | `llm_ibm_watson`     | IBM Watson                                 |                                                           |
+| `llm_nebius`         | Nebius Token Factory (OpenAI-compatible)   | [README](../nodes/src/nodes/llm_nebius/README.md)         |
 | `llm_vision_mistral` | Mistral Vision (multimodal, image-to-text) | [README](../nodes/src/nodes/llm_vision_mistral/README.md) |
 
 ## Vector Databases
@@ -98,6 +99,16 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 | `dictionary`        | Dictionary lookups                                                                          |
 | `text_output`       | Text output                                                                                 |
 | `local_text_output` | Local text file output                                                                      |
+
+## Agent Tools
+
+Tool nodes (`classType: ["tool"]`) expose capabilities to agents via the control-plane invoke channel rather than data lanes.
+
+| Node                 | Description                          | Documentation                                                |
+| -------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `tool_tavily_search` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily_search/README.md)  |
+
+The `tool_tavily_search` node pairs with `llm_nebius` and `agent_deepagent` to build Nebius Agentic Search — see `examples/nebius-agentic-search.pipe`.
 
 ## Internal
 
