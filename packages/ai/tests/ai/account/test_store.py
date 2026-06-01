@@ -381,7 +381,7 @@ class TestMemoryStore(BaseStoreTest):
 
 
 class TestS3Store(BaseStoreTest):
-    """Test S3 storage with mocked boto3."""
+    """Test S3 storage with real boto3."""
 
     @pytest.fixture
     def test_config(self):
@@ -431,6 +431,61 @@ class TestS3Store(BaseStoreTest):
         url = f's3://{test_config["bucket"]}/{temp_dir}'
         secret_key = json.dumps(test_config['secret_key'])
         return S3Store(url, secret_key)
+
+
+# ===========================================================================
+# Azure Blob Tests
+# ============================================================================
+
+
+class TestAzureBlobStore(BaseStoreTest):
+    """Test Azure Blob storage with real Azure SDK."""
+
+    @pytest.fixture
+    def test_config(self):
+        return {
+            'account_name': os.getenv('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME'),
+            'connection_string': (
+                f'DefaultEndpointsProtocol={os.getenv("ROCKETRIDE_TEST_AZURE_DEFAULT_PROTOCOL")};'
+                f'AccountName={os.getenv("ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME")};'
+                f'AccountKey={os.getenv("ROCKETRIDE_TEST_AZURE_ACCOUNT_KEY")};'
+                f'BlobEndpoint={os.getenv("ROCKETRIDE_TEST_AZURE_BLOB_ENDPOINT")};'
+            ),
+            'container': os.getenv('ROCKETRIDE_TEST_AZURE_CONTAINER'),
+        }
+
+    @pytest.fixture
+    def temp_dir(self, test_config):
+        """Create a temporary blob prefix in the Azure container, clean up after test."""
+        import uuid
+
+        BlobServiceClient = pytest.importorskip(
+            'azure.storage.blob', reason='azure-storage-blob not installed'
+        ).BlobServiceClient
+        from azure.core.exceptions import ResourceExistsError
+
+        if not test_config.get('account_name'):
+            pytest.skip('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME not configured')
+
+        container_client = BlobServiceClient.from_connection_string(
+            test_config['connection_string']
+        ).get_container_client(test_config['container'])
+        try:
+            container_client.create_container()
+        except ResourceExistsError as e:
+            if e.error_code != 'ContainerAlreadyExists':
+                raise e
+
+        yield f'tmp_{uuid.uuid4().hex[:8]}'
+
+        for blob in container_client.list_blobs(name_starts_with='tmp_'):  # cleanup all tmp_-s to be safe
+            container_client.delete_blob(blob.name)
+
+    @pytest.fixture
+    def store(self, test_config, temp_dir):
+        """Create Azure Blob storage instance connected to local Azurite."""
+        secret_key = json.dumps({'connection_string': test_config['connection_string']})
+        return AzureBlobStore(f'azure://{test_config["container"]}/{temp_dir}', secret_key)
 
 
 # ============================================================================
@@ -1008,7 +1063,7 @@ class TestS3StoreMocked:
 # ============================================================================
 
 
-class TestAzureBlobStore:
+class TestAzureBlobStoreMocked:
     """Test Azure Blob storage with mocked SDK."""
 
     @pytest.fixture
