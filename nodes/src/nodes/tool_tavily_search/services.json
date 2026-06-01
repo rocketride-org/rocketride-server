@@ -117,8 +117,10 @@
 	},
 	//
 	//	Test configuration for automated node testing.
-	//	No apikey is supplied — validateConfig emits a warning (not an error),
-	//	so this case exercises config validation without live API calls.
+	//	Gated on TAVILY_API_KEY: the dynamic test builds a pipeline and runs the
+	//	node, which calls beginGlobal() and therefore needs a key, so the case is
+	//	skipped when the key is absent (e.g. CI without the secret). Node
+	//	structure is still validated by the keyless contract tests.
 	//
 	"test": {
 		"requires": ["TAVILY_API_KEY"],
@@ -126,7 +128,7 @@
 		"outputs": [],
 		"cases": [
 			{
-				"name": "Config validation with placeholder key",
+				"name": "Tavily search smoke test (requires key)",
 				"text": "test query"
 			}
 		]
