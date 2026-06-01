@@ -91,103 +91,98 @@
 			"minimax-m2": {
 				"title": "MiniMax M2",
 				"model": "MiniMax-M2",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-1": {
 				"title": "MiniMax M2.1",
 				"model": "MiniMax-M2.1",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-1-highspeed": {
 				"title": "MiniMax M2.1 Highspeed",
 				"model": "MiniMax-M2.1-highspeed",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-5": {
 				"title": "MiniMax M2.5",
 				"model": "MiniMax-M2.5",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-5-highspeed": {
 				"title": "MiniMax M2.5 Highspeed",
 				"model": "MiniMax-M2.5-highspeed",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-7": {
 				"title": "MiniMax M2.7",
 				"model": "MiniMax-M2.7",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
 			"minimax-m2-7-highspeed": {
 				"title": "MiniMax M2.7 Highspeed",
 				"model": "MiniMax-M2.7-highspeed",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
-			// Local-deploy profiles. Defaults target vLLM / SGLang on port 8000 with the
-			// HuggingFace model path (MiniMaxAI/MiniMax-M2.X) — that's the path MiniMax
-			// itself documents at platform.minimax.io/docs/guides/local-deploy.
-			//
-			// MiniMax open-weight models are MIT-licensed but very large (M2 = 230B MoE /
-			// 10B active; M2.5 / M2.7 likewise) and need ≥96 GB unified memory or a
-			// multi-GPU server. M2.7 is the only variant whose local-deploy steps are
-			// formally documented today; M2 / M2.5 entries here are scaffolded against
-			// the same HF naming so they work as soon as their guides land.
-			//
-			// To use Ollama instead: edit serverbase to http://localhost:11434/v1 and set
-			// `model` to the Ollama tag you pulled. To use MLX on Apple Silicon: set
-			// serverbase to http://localhost:8080/v1 and model to e.g.
-			// mlx-community/MiniMax-M2.7-4bit.
 			"minimax-m2-local": {
 				"title": "MiniMax M2 (Local)",
 				"model": "MiniMaxAI/MiniMax-M2",
 				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
 				"serverbase": "http://localhost:8000/v1"
 			},
 			"minimax-m2-5-local": {
 				"title": "MiniMax M2.5 (Local)",
 				"model": "MiniMaxAI/MiniMax-M2.5",
 				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
 				"serverbase": "http://localhost:8000/v1"
 			},
 			"minimax-m2-7-local": {
 				"title": "MiniMax M2.7 (Local)",
 				"model": "MiniMaxAI/MiniMax-M2.7",
 				"modelSource": "manual",
-				"modelTotalTokens": 204800,
-				"modelOutputTokens": 8192,
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
 				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m3": {
+				"title": "MiniMax M3",
+				"model": "MiniMax-M3",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // sync_models.config.json
+				"modelOutputTokens": 131072, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
 			}
 		}
 	},
@@ -216,99 +211,169 @@
 		},
 		"minimax.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "minimax.serverbase", "llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"minimax.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2": {
 			"object": "minimax-m2",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-1": {
 			"object": "minimax-m2-1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-1-highspeed": {
 			"object": "minimax-m2-1-highspeed",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-5": {
 			"object": "minimax-m2-5",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-5-highspeed": {
 			"object": "minimax-m2-5-highspeed",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-7": {
 			"object": "minimax-m2-7",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-7-highspeed": {
 			"object": "minimax-m2-7-highspeed",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"minimax.minimax-m2-local": {
 			"object": "minimax-m2-local",
-			"properties": ["llm.local.serverbase"]
+			"properties": [
+				"llm.local.serverbase"
+			]
 		},
 		"minimax.minimax-m2-5-local": {
 			"object": "minimax-m2-5-local",
-			"properties": ["llm.local.serverbase"]
+			"properties": [
+				"llm.local.serverbase"
+			]
 		},
 		"minimax.minimax-m2-7-local": {
 			"object": "minimax-m2-7-local",
-			"properties": ["llm.local.serverbase"]
+			"properties": [
+				"llm.local.serverbase"
+			]
 		},
 		"minimax.profile": {
 			"title": "Model",
 			"description": "MiniMax LLM model",
 			"type": "string",
 			"default": "minimax-m2",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": ["minimax.custom"]
+					"properties": [
+						"minimax.custom"
+					]
 				},
 				{
 					"value": "minimax-m2",
-					"properties": ["minimax.minimax-m2"]
+					"properties": [
+						"minimax.minimax-m2"
+					]
 				},
 				{
 					"value": "minimax-m2-1",
-					"properties": ["minimax.minimax-m2-1"]
+					"properties": [
+						"minimax.minimax-m2-1"
+					]
 				},
 				{
 					"value": "minimax-m2-1-highspeed",
-					"properties": ["minimax.minimax-m2-1-highspeed"]
+					"properties": [
+						"minimax.minimax-m2-1-highspeed"
+					]
 				},
 				{
 					"value": "minimax-m2-5",
-					"properties": ["minimax.minimax-m2-5"]
+					"properties": [
+						"minimax.minimax-m2-5"
+					]
 				},
 				{
 					"value": "minimax-m2-5-highspeed",
-					"properties": ["minimax.minimax-m2-5-highspeed"]
+					"properties": [
+						"minimax.minimax-m2-5-highspeed"
+					]
 				},
 				{
 					"value": "minimax-m2-7",
-					"properties": ["minimax.minimax-m2-7"]
+					"properties": [
+						"minimax.minimax-m2-7"
+					]
 				},
 				{
 					"value": "minimax-m2-7-highspeed",
-					"properties": ["minimax.minimax-m2-7-highspeed"]
+					"properties": [
+						"minimax.minimax-m2-7-highspeed"
+					]
 				},
 				{
 					"value": "minimax-m2-local",
-					"properties": ["minimax.minimax-m2-local"]
+					"properties": [
+						"minimax.minimax-m2-local"
+					]
 				},
 				{
 					"value": "minimax-m2-5-local",
-					"properties": ["minimax.minimax-m2-5-local"]
+					"properties": [
+						"minimax.minimax-m2-5-local"
+					]
 				},
 				{
 					"value": "minimax-m2-7-local",
-					"properties": ["minimax.minimax-m2-7-local"]
+					"properties": [
+						"minimax.minimax-m2-7-local"
+					]
+				},
+				{
+					"value": "minimax-m3",
+					"properties": [
+						"minimax.minimax-m3"
+					]
 				}
+			]
+		},
+		"minimax.minimax-m3": {
+			"object": "minimax-m3",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
 			]
 		}
 	},

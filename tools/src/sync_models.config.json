@@ -422,13 +422,23 @@
 				["minimax-m2-5", "2026-10-09"],
 				["minimax-m2-5-highspeed", "2026-10-09"],
 				["minimax-m2-7", "2026-10-09"],
-				["minimax-m2-7-highspeed", "2026-10-09"]
+				["minimax-m2-7-highspeed", "2026-10-09"],
+				["minimax-m3", "2026-10-09"]
 			],
 			"token_limit_overrides": {
-				// "MiniMax-M2": 204800,
-				// "MiniMax-M2.1": 204800,
-				// "MiniMax-M2.5": 204800,
-				// "MiniMax-M2.7": 204800
+				// MiniMax's /v1/models endpoint doesn't return context_window. Lock every
+				// MiniMax model at its docs-stated context window so discovery (which can
+				// otherwise pull stale or wrong numbers from OpenRouter/LiteLLM) never
+				// silently shifts these values.
+				// https://platform.minimax.io/docs/api-reference/text-chat-openai.md
+				"MiniMax-M3": 1000000,
+				"MiniMax-M2": 204800,
+				"MiniMax-M2.1": 204800,
+				"MiniMax-M2.1-highspeed": 204800,
+				"MiniMax-M2.5": 204800,
+				"MiniMax-M2.5-highspeed": 204800,
+				"MiniMax-M2.7": 204800,
+				"MiniMax-M2.7-highspeed": 204800
 			}
 		}
 	},
@@ -497,6 +507,17 @@
 			"embed": 0 // embedding models have no output tokens
 		},
 		"overrides": {
+			// MiniMax — see https://platform.minimax.io/docs/api-reference/text-chat-openai.md
+			// "For MiniMax-M3 the recommended value is 131072 (128K); for other models the
+			// recommended value is 65536 (64K)."
+			"MiniMax-M3": 131072,
+			"MiniMax-M2": 65536,
+			"MiniMax-M2.1": 65536,
+			"MiniMax-M2.1-highspeed": 65536,
+			"MiniMax-M2.5": 65536,
+			"MiniMax-M2.5-highspeed": 65536,
+			"MiniMax-M2.7": 65536,
+			"MiniMax-M2.7-highspeed": 65536,
 			// // Anthropic — see comment block above for source
 			// "claude-opus-4-6": 131072,
 			// "claude-sonnet-4-6": 65536,

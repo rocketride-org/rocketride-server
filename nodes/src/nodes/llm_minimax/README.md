@@ -34,6 +34,7 @@ The MiniMax API is OpenAI-compatible, so this node uses the OpenAI SDK / `langch
 
 | Profile                | Model                     | Context     |
 | ---------------------- | ------------------------- | ----------- |
+| MiniMax M3             | `MiniMax-M3`              | 1M tokens   |
 | MiniMax M2 _(default)_ | `MiniMax-M2`              | 200K tokens |
 | MiniMax M2.1           | `MiniMax-M2.1`            | 200K tokens |
 | MiniMax M2.1 Highspeed | `MiniMax-M2.1-highspeed`  | 200K tokens |
@@ -43,7 +44,7 @@ The MiniMax API is OpenAI-compatible, so this node uses the OpenAI SDK / `langch
 | MiniMax M2.7 Highspeed | `MiniMax-M2.7-highspeed`  | 200K tokens |
 | Custom Model           | User-defined              | User-defined |
 
-The cloud catalogue above is what `models.list()` returns as of 2026-05-21. The `-highspeed` variants are MiniMax's faster/cheaper tier of the same generation.
+The cloud catalogue above is what `models.list()` returns as of 2026-05-29. The `-highspeed` variants are MiniMax's faster/cheaper tier of the same generation. **MiniMax M3** is MiniMax's frontier multimodal coding model — 5× the M2-family context (1M tokens) and a 128K-token recommended output limit (max 512K). M3 is multimodal at the API level (text + image + video), though the `llm_minimax` node only exposes the text path.
 
 **Local deploy**
 
