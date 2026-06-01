@@ -1,0 +1,89 @@
+{
+	"title": "Supabase",
+	"protocol": "supabase://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_supabase",
+	"prefix": "supabase",
+	"icon": "supabase.svg",
+	"documentation": "https://supabase.com/docs/guides/ai-tools/mcp",
+	"description": ["Connects to the official Supabase MCP server and exposes its tools for agent tool-calling.", "Uses Streamable HTTP transport to https://mcp.supabase.com/mcp. Auth: OAuth 2.1 (primary) or Authorization: Bearer ${SUPABASE_ACCESS_TOKEN} for CI/headless use."],
+	"tile": ["Project: ${parameters.supabase.projectRef}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "supabase_remote",
+		"profiles": {
+			"supabase_remote": {
+				"title": "Supabase (remote MCP server)",
+				"serverName": "supabase",
+				"endpoint": "https://mcp.supabase.com/mcp",
+				"projectRef": "",
+				"readOnly": false,
+				"features": "",
+				"bearer": "${SUPABASE_ACCESS_TOKEN}"
+			},
+			"supabase_local": {
+				"title": "Supabase CLI (local MCP server)",
+				"serverName": "supabase",
+				"endpoint": "http://localhost:54321/mcp",
+				"projectRef": "",
+				"readOnly": false,
+				"features": "",
+				"bearer": "${SUPABASE_ACCESS_TOKEN}"
+			}
+		}
+	},
+	"fields": {
+		"supabase.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for tools: <serverName>.<toolName> (example: supabase.list_tables)",
+			"default": "supabase"
+		},
+		"supabase.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "Supabase MCP server URL. Default: https://mcp.supabase.com/mcp (Supabase-hosted). Use http://localhost:54321/mcp for the local Supabase CLI.",
+			"default": "https://mcp.supabase.com/mcp"
+		},
+		"supabase.projectRef": {
+			"type": "string",
+			"title": "Project ref",
+			"description": "Supabase project reference ID (found in project settings URL). Scopes the MCP server to a single project and disables account-level tools. Strongly recommended.",
+			"default": ""
+		},
+		"supabase.bearer": {
+			"type": "string",
+			"title": "Access token (CI / headless)",
+			"description": "Personal access token for CI or headless environments. Set to ${SUPABASE_ACCESS_TOKEN} to read from the environment. Leave blank to use OAuth 2.1 browser-based auth.",
+			"optional": true,
+			"secure": true,
+			"default": "${SUPABASE_ACCESS_TOKEN}",
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"supabase.readOnly": {
+			"type": "boolean",
+			"title": "Read-only",
+			"description": "Restrict the MCP server to a read-only Postgres user. Recommended for agent pipelines that should not write to the database.",
+			"default": false
+		},
+		"supabase.features": {
+			"type": "string",
+			"title": "Feature groups",
+			"description": "Comma-separated list of tool groups to enable (e.g. database,docs,storage). Leave blank to enable all groups.",
+			"default": "",
+			"optional": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase",
+			"properties": ["type", "supabase.serverName", "supabase.endpoint", "supabase.projectRef", "supabase.bearer", "supabase.readOnly", "supabase.features"]
+		}
+	]
+}

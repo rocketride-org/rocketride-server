@@ -1,0 +1,6 @@
+# No external dependencies required.
+# The Supabase MCP server is accessed over HTTP using Python's standard
+# urllib — no MCP SDK or Supabase client library is needed.
+#
+# The MCP server itself is Supabase-hosted at https://mcp.supabase.com/mcp
+# (or locally via the Supabase CLI at http://localhost:54321/mcp).
