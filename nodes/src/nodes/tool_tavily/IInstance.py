@@ -24,9 +24,9 @@
 # =============================================================================
 
 """
-Tavily Search tool node instance.
+Tavily tool node instance.
 
-Exposes ``tavily_search`` as a @tool_function for real-time web search via the Tavily API.
+Exposes ``tavily`` as a @tool_function for real-time web search via the Tavily API.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from ai.common.utils import normalize_tool_input
 
 from .IGlobal import IGlobal
 
-TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
+TAVILY_API_URL = 'https://api.tavily.com/search'
 VALID_SEARCH_DEPTHS = {'basic', 'advanced'}
 VALID_TOPICS = {'general', 'news', 'finance'}
 VALID_TIME_RANGES = {'day', 'week', 'month', 'year'}
@@ -108,9 +108,9 @@ class IInstance(IInstanceBase):
         },
         description='Search the web in real time using Tavily. Provide a natural language query to find relevant, current web pages. Returns structured results with title, URL, content snippet, and relevance score.',
     )
-    def tavily_search(self, args):
+    def tavily(self, args):
         """Search the web using the Tavily API."""
-        args = normalize_tool_input(args, tool_name='tavily_search')
+        args = normalize_tool_input(args, tool_name='tavily')
 
         query = (args.get('query') or '').strip()
         if not query:
@@ -157,7 +157,7 @@ class IInstance(IInstanceBase):
         }
 
         try:
-            body = _request_with_retry(url=TAVILY_SEARCH_URL, headers=headers, payload=payload)
+            body = _request_with_retry(url=TAVILY_API_URL, headers=headers, payload=payload)
         except RuntimeError as exc:
             return {'success': False, 'query': query, 'num_results': 0, 'results': [], 'error': str(exc)}
 
@@ -250,9 +250,9 @@ def _request_with_retry(
                 debug(f'Tavily request timeout, retrying in {delay}s ({attempt + 1}/{max_retries})')
                 time.sleep(delay)
                 continue
-            raise RuntimeError('Tavily search: request timed out after all retries') from None
+            raise RuntimeError('Tavily: request timed out after all retries') from None
         except requests.RequestException as exc:
             status = getattr(getattr(exc, 'response', None), 'status_code', None)
             detail = f' (HTTP {status})' if status else ''
-            raise RuntimeError(f'Tavily search request failed{detail}: {type(exc).__name__}') from None
-    raise RuntimeError('Tavily search: max retries exceeded')
+            raise RuntimeError(f'Tavily request failed{detail}: {type(exc).__name__}') from None
+    raise RuntimeError('Tavily: max retries exceeded')

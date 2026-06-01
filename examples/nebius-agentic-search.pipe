@@ -32,7 +32,7 @@
       "config": {
         "instructions": [
           "You are an agentic web-research assistant.",
-          "Use the tavily_search tool to find current information; refine your query and search again when results are weak.",
+          "Use the tavily tool to find current information; refine your query and search again when results are weak.",
           "Cite the source URLs you used and answer concisely."
         ],
         "parameters": {}
@@ -87,9 +87,9 @@
       ]
     },
     {
-      "id": "tool_tavily_search_1",
-      "provider": "tool_tavily_search",
-      "name": "Tavily Search",
+      "id": "tool_tavily_1",
+      "provider": "tool_tavily",
+      "name": "Tavily",
       "config": {
         "apikey": "${TAVILY_API_KEY}",
         "maxResults": 5,
@@ -142,7 +142,7 @@
     }
   ],
   "source": "chat_1",
-  "project_id": "b7d3e1a2-9f4c-4b8e-a5d6-2c8f1e0b3a7d",
+  "project_id": "c5ba857f-30ff-4f3d-b5bf-9ee90d3ee33b",
   "viewport": {
     "x": 15.5,
     "y": -120.9,

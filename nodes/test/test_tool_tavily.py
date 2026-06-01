@@ -23,7 +23,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Unit tests for tool_tavily_search pure helpers (no network)."""
+"""Unit tests for tool_tavily pure helpers (no network)."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from unittest.mock import MagicMock
 
 import importlib
 
-# Add nodes/src to sys.path so `nodes.tool_tavily_search.IInstance` is resolvable.
+# Add nodes/src to sys.path so `nodes.tool_tavily.IInstance` is resolvable.
 _NODES_SRC = Path(__file__).resolve().parents[1] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
@@ -90,7 +90,7 @@ for _name, _stub in _build_import_stubs().items():
         sys.modules[_name] = _stub
         _added_stubs.append(_name)
 
-mod = importlib.import_module('nodes.tool_tavily_search.IInstance')
+mod = importlib.import_module('nodes.tool_tavily.IInstance')
 
 # Drop the stubs we injected so they never leak into the shared pytest session.
 for _name in _added_stubs:

@@ -1,4 +1,4 @@
-# tool_tavily_search
+# tool_tavily
 
 Exposes [Tavily](https://tavily.com) real-time web search as an agent tool node.
 

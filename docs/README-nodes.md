@@ -106,9 +106,9 @@ Tool nodes (`classType: ["tool"]`) expose capabilities to agents via the control
 
 | Node                 | Description                          | Documentation                                                |
 | -------------------- | ------------------------------------ | ------------------------------------------------------------ |
-| `tool_tavily_search` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily_search/README.md)  |
+| `tool_tavily` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily/README.md)  |
 
-The `tool_tavily_search` node pairs with `llm_nebius` and `agent_deepagent` to build Nebius Agentic Search — see `examples/nebius-agentic-search.pipe`.
+The `tool_tavily` node pairs with `llm_nebius` and `agent_deepagent` to build Nebius Agentic Search — see `examples/nebius-agentic-search.pipe`.
 
 ## Internal
 

@@ -24,7 +24,7 @@
 # =============================================================================
 
 """
-Tavily Search tool node - global (shared) state.
+Tavily tool node - global (shared) state.
 
 Reads the Tavily API key and search configuration from the node config.
 Tool logic lives on IInstance via @tool_function.
@@ -39,7 +39,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, error, warning
 
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_tavily_search."""
+    """Global state for tool_tavily."""
 
     apikey: str = ''
     max_results: int = 5
@@ -55,8 +55,8 @@ class IGlobal(IGlobalBase):
         apikey = str(cfg.get('apikey') or os.environ.get('TAVILY_API_KEY', '')).strip()
 
         if not apikey:
-            error('tool_tavily_search: apikey is required — set it in node config or TAVILY_API_KEY env var')
-            raise ValueError('tool_tavily_search: apikey is required')
+            error('tool_tavily: apikey is required — set it in node config or TAVILY_API_KEY env var')
+            raise ValueError('tool_tavily: apikey is required')
 
         self.apikey = apikey
         raw_max = cfg.get('maxResults', 5)
