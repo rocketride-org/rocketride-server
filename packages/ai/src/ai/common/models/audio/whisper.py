@@ -89,7 +89,8 @@ class WhisperLoader(BaseLoader):
             # 1. Version guard: ctranslate2 4.7.x + CUDA 12.8 causes a
             #    tcache_thread_shutdown() SIGABRT during GPU transcription on H200
             #    (heap corruption in cuBLAS 12.8.4). Exit non-zero to force CPU.
-            #    Remove this guard once ctranslate2 ships a fix.
+            #    Upper bound at 4.8 so the guard lifts automatically once
+            #    ctranslate2 ships a fix (expected in 4.8+).
             # 2. StorageView sanity: verify a CUDA StorageView can be created via
             #    the documented from_array() API (no direct (shape,dtype,device)
             #    constructor exists in the Python bindings).
@@ -102,7 +103,7 @@ class WhisperLoader(BaseLoader):
                 'except (ValueError, AttributeError):\n'
                 '    ct2 = (999, 999)\n'
                 'cuda = torch.version.cuda or ""\n'
-                'if ct2 >= (4, 7) and cuda.startswith("12.8"):\n'
+                'if (4, 7) <= ct2 < (4, 8) and cuda.startswith("12.8"):\n'
                 '    sys.exit(1)\n'
                 't = torch.zeros(1, dtype=torch.float32, device="cuda")\n'
                 'sv = ctranslate2.StorageView.from_array(t)\n'
@@ -213,6 +214,15 @@ class WhisperLoader(BaseLoader):
                     device = 'cuda'
                 else:
                     device = 'cpu'
+            elif device != 'cpu' and not WhisperLoader._check_gpu_compatible():
+                # Explicit cuda / cuda:N requested but probe failed — fall back to CPU
+                # so the same SIGABRT protection applies regardless of how the caller
+                # specified the device.
+                logger.warning(
+                    'ctranslate2 CUDA probe failed for explicit device=%r — Whisper will use CPU instead.',
+                    device,
+                )
+                device = 'cpu'
 
             if device == 'cpu':
                 gpu_index = -1
