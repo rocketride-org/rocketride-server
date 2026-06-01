@@ -32,57 +32,69 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Bootstrap: inject lightweight stubs so the module can be imported without
-# the full engine runtime (pydantic, engLib, etc.).
+# Bootstrap: when run under a bare interpreter that lacks the engine runtime
+# (rocketlib, ai.common, requests), inject lightweight stubs ONLY for modules
+# that are not already present, import the module under test, then REMOVE the
+# stubs we added. Restoring is essential: under the full `builder nodes:test-full`
+# run these modules are real and shared across the whole pytest session, so a
+# leaked MagicMock stub would break unrelated nodes' tests (e.g. tool_git,
+# tool_filesystem, which rely on the real rocketlib schema helpers). The pure
+# helpers under test (_shape_results, _validate_public_url) hold no runtime
+# dependency on the stubbed modules, so dropping the stubs after import is safe.
 # ---------------------------------------------------------------------------
 
-# Stub out rocketlib — the unit-tests only exercise pure helper functions
-# (_shape_results, _validate_public_url) that live at module level and have no
-# dependency on the engine runtime.
-_rocketlib_stub = MagicMock()
-_rocketlib_stub.IInstanceBase = object  # must be a real class for inheritance
-_rocketlib_stub.IGlobalBase = object
-_rocketlib_stub.tool_function = lambda **kwargs: lambda f: f  # pass-through decorator
-_rocketlib_stub.debug = lambda *a, **kw: None
-_rocketlib_stub.error = lambda *a, **kw: None
-_rocketlib_stub.warning = lambda *a, **kw: None
-_rocketlib_stub.OPEN_MODE = MagicMock()
-sys.modules.setdefault('rocketlib', _rocketlib_stub)
-
-# Stub depends (used by nodes/__init__.py and ai/__init__.py)
-_depends_stub = MagicMock()
-_depends_stub.depends = lambda *a, **kw: None
-sys.modules.setdefault('depends', _depends_stub)
-
-# Stub ai.common.utils — normalize_tool_input is called inside the tool method,
-# not in the helper functions under test, so a trivial pass-through is enough.
-_ai_common_utils_stub = MagicMock()
-_ai_common_utils_stub.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
-sys.modules.setdefault('ai', MagicMock())
-sys.modules.setdefault('ai.common', MagicMock())
-sys.modules.setdefault('ai.common.utils', _ai_common_utils_stub)
-sys.modules.setdefault('ai.common.config', MagicMock())
-
-# Stub out requests — the unit tests exercise pure helpers that do no I/O.
-_requests_stub = MagicMock()
-_requests_exceptions_stub = MagicMock()
-_requests_exceptions_stub.Timeout = TimeoutError
-_requests_exceptions_stub.RequestException = Exception
-_requests_stub.exceptions = _requests_exceptions_stub
-sys.modules.setdefault('requests', _requests_stub)
+import importlib
 
 # Add nodes/src to sys.path so `nodes.tool_tavily_search.IInstance` is resolvable.
 _NODES_SRC = Path(__file__).resolve().parents[1] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
-# ---------------------------------------------------------------------------
-# Load the module under test
-# ---------------------------------------------------------------------------
 
-import importlib
+def _build_import_stubs():
+    """Return {module_name: stub} for the deps needed only to import the module."""
+    rocketlib = MagicMock()
+    rocketlib.IInstanceBase = object  # must be a real class for inheritance
+    rocketlib.IGlobalBase = object
+    rocketlib.tool_function = lambda **kwargs: lambda f: f  # pass-through decorator
+    rocketlib.debug = lambda *a, **kw: None
+    rocketlib.error = lambda *a, **kw: None
+    rocketlib.warning = lambda *a, **kw: None
+    rocketlib.OPEN_MODE = MagicMock()
+
+    depends = MagicMock()
+    depends.depends = lambda *a, **kw: None
+
+    ai_common_utils = MagicMock()
+    ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
+
+    requests = MagicMock()
+    requests.exceptions = MagicMock()
+    requests.exceptions.Timeout = TimeoutError
+    requests.exceptions.RequestException = Exception
+
+    return {
+        'rocketlib': rocketlib,
+        'depends': depends,
+        'ai': MagicMock(),
+        'ai.common': MagicMock(),
+        'ai.common.utils': ai_common_utils,
+        'ai.common.config': MagicMock(),
+        'requests': requests,
+    }
+
+
+_added_stubs = []
+for _name, _stub in _build_import_stubs().items():
+    if _name not in sys.modules:
+        sys.modules[_name] = _stub
+        _added_stubs.append(_name)
 
 mod = importlib.import_module('nodes.tool_tavily_search.IInstance')
+
+# Drop the stubs we injected so they never leak into the shared pytest session.
+for _name in _added_stubs:
+    sys.modules.pop(_name, None)
 
 
 def test_shape_results_maps_tavily_fields():
