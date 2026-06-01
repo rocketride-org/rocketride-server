@@ -94,15 +94,16 @@ class WhisperLoader(BaseLoader):
             #    the documented from_array() API (no direct (shape,dtype,device)
             #    constructor exists in the Python bindings).
             probe_script = (
-                'import sys, ctranslate2, torch; '
-                'v = ctranslate2.get_supported_compute_types("cuda"); '
-                'assert v, "no cuda types"; '
-                'ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2]); '
-                'cuda = torch.version.cuda or ""; '
-                'if ct2 >= (4, 7) and cuda.startswith("12.8"): sys.exit(1); '
-                't = torch.zeros(1, dtype=torch.float32, device="cuda"); '
-                'sv = ctranslate2.StorageView.from_array(t); '
-                'print("ok")'
+                'import sys, ctranslate2, torch\n'
+                'v = ctranslate2.get_supported_compute_types("cuda")\n'
+                'assert v, "no cuda types"\n'
+                'ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2])\n'
+                'cuda = torch.version.cuda or ""\n'
+                'if ct2 >= (4, 7) and cuda.startswith("12.8"):\n'
+                '    sys.exit(1)\n'
+                't = torch.zeros(1, dtype=torch.float32, device="cuda")\n'
+                'sv = ctranslate2.StorageView.from_array(t)\n'
+                'print("ok")\n'
             )
             result = None
             try:
