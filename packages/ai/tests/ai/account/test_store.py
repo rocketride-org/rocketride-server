@@ -398,10 +398,10 @@ class TestS3Store(BaseStoreTest):
     @pytest.fixture
     def temp_dir(self, test_config):
         """Create a temporary key prefix in the MinIO bucket, clean up after test."""
-        boto3 = pytest.importorskip('boto3', reason='boto3 is not available for S3 tests')
         if not os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'):
             pytest.skip('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID not configured for S3 tests')
 
+        import boto3
         import uuid
 
         client = boto3.client(
@@ -457,15 +457,12 @@ class TestAzureBlobStore(BaseStoreTest):
     @pytest.fixture
     def temp_dir(self, test_config):
         """Create a temporary blob prefix in the Azure container, clean up after test."""
-        import uuid
-
-        BlobServiceClient = pytest.importorskip(
-            'azure.storage.blob', reason='azure-storage-blob not installed'
-        ).BlobServiceClient
-        from azure.core.exceptions import ResourceExistsError
-
-        if not test_config.get('account_name'):
+        if not os.getenv('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME'):
             pytest.skip('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME not configured')
+
+        import uuid
+        from azure.storage.blob import BlobServiceClient
+        from azure.core.exceptions import ResourceExistsError
 
         container_client = BlobServiceClient.from_connection_string(
             test_config['connection_string']

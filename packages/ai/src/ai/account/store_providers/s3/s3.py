@@ -5,7 +5,7 @@ from fnmatch import fnmatch
 import json
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from ..store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
+from ...store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
 
 
 class S3Store(IStore):
