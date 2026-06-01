@@ -1,0 +1,154 @@
+{
+  "name": "Nebius Agentic Search",
+  "description": "A web-research agent powered by Nebius (Llama 3.3 70B) and Tavily real-time search. Ask any question and the agent will search the web, refine its queries, and return a cited answer.",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Trigger",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_deepagent_1",
+      "provider": "agent_deepagent",
+      "name": "Nebius Agentic Search",
+      "config": {
+        "instructions": [
+          "You are an agentic web-research assistant.",
+          "Use the tavily_search tool to find current information; refine your query and search again when results are weak.",
+          "Cite the source URLs you used and answer concisely."
+        ],
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 86
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_nebius_1",
+      "provider": "llm_nebius",
+      "name": "Nebius LLM",
+      "config": {
+        "profile": "llama-3-3-70b",
+        "llama-3-3-70b": {
+          "apikey": "${NEBIUS_API_KEY}"
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 380
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_deepagent_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_tavily_search_1",
+      "provider": "tool_tavily_search",
+      "name": "Tavily Search",
+      "config": {
+        "type": "tool_tavily_search",
+        "apikey": "${TAVILY_API_KEY}",
+        "maxResults": 5,
+        "searchDepth": "advanced",
+        "topic": "general"
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 380
+        },
+        "measured": {
+          "width": 150,
+          "height": 37
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_deepagent_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 447,
+          "y": 222
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_deepagent_1"
+        }
+      ]
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "b7d3e1a2-9f4c-4b8e-a5d6-2c8f1e0b3a7d",
+  "viewport": {
+    "x": 15.5,
+    "y": -120.9,
+    "zoom": 1.04
+  },
+  "version": 1,
+  "docRevision": 1
+}
