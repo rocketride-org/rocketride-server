@@ -93,8 +93,8 @@
 				"title": "Qwen Flash",
 				"model": "qwen-flash",
 				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 4096, // manual
 				"region": "us",
 				"apikey": ""
 			},
@@ -102,7 +102,7 @@
 				"title": "Qwen2.5 72B Instruct",
 				"model": "qwen-2.5-72b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -110,7 +110,7 @@
 				"title": "Qwen: Qwen2.5 7B Instruct",
 				"model": "qwen-2.5-7b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
@@ -118,16 +118,18 @@
 				"title": "Qwen2.5 Coder 32B Instruct",
 				"model": "qwen-2.5-coder-32b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
 			"qwen-max": {
 				"title": "Qwen: Qwen-Max ",
 				"model": "qwen-max",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 8192, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 8192, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"qwen-plus-2025-07-28": {
@@ -150,8 +152,10 @@
 				"title": "Qwen: Qwen-Turbo",
 				"model": "qwen-turbo",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 8192, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 8192, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			}
 		}
@@ -179,97 +183,170 @@
 			"description": "DashScope regional endpoint. API keys are not interchangeable between regions.",
 			"default": "us",
 			"enum": [
-				["us", "US (Virginia)"],
-				["intl", "Singapore"],
-				["cn", "China (Beijing)"]
+				[
+					"us",
+					"US (Virginia)"
+				],
+				[
+					"intl",
+					"Singapore"
+				],
+				[
+					"cn",
+					"China (Beijing)"
+				]
 			]
 		},
 		"qwen.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-plus": {
 			"object": "qwen-plus",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-flash": {
 			"object": "qwen-flash",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-2-5-72b-instruct": {
 			"object": "qwen-2-5-72b-instruct",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-2-5-7b-instruct": {
 			"object": "qwen-2-5-7b-instruct",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-2-5-coder-32b-instruct": {
 			"object": "qwen-2-5-coder-32b-instruct",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-max": {
 			"object": "qwen-max",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-plus-2025-07-28": {
 			"object": "qwen-plus-2025-07-28",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-plus-2025-07-28-thinking": {
 			"object": "qwen-plus-2025-07-28-thinking",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.qwen-turbo": {
 			"object": "qwen-turbo",
-			"properties": ["llm.cloud.apikey", "qwen.region", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"qwen.region",
+				"llm.cloud.modelSource"
+			]
 		},
 		"qwen.profile": {
 			"title": "Model",
 			"description": "Qwen AI model selection",
 			"type": "string",
 			"default": "qwen-flash",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": ["qwen.custom"]
+					"properties": [
+						"qwen.custom"
+					]
 				},
 				{
 					"value": "qwen-plus",
-					"properties": ["qwen.qwen-plus"]
+					"properties": [
+						"qwen.qwen-plus"
+					]
 				},
 				{
 					"value": "qwen-flash",
-					"properties": ["qwen.qwen-flash"]
+					"properties": [
+						"qwen.qwen-flash"
+					]
 				},
 				{
 					"value": "qwen-2-5-72b-instruct",
-					"properties": ["qwen.qwen-2-5-72b-instruct"]
+					"properties": [
+						"qwen.qwen-2-5-72b-instruct"
+					]
 				},
 				{
 					"value": "qwen-2-5-7b-instruct",
-					"properties": ["qwen.qwen-2-5-7b-instruct"]
+					"properties": [
+						"qwen.qwen-2-5-7b-instruct"
+					]
 				},
 				{
 					"value": "qwen-2-5-coder-32b-instruct",
-					"properties": ["qwen.qwen-2-5-coder-32b-instruct"]
+					"properties": [
+						"qwen.qwen-2-5-coder-32b-instruct"
+					]
 				},
 				{
 					"value": "qwen-max",
-					"properties": ["qwen.qwen-max"]
+					"properties": [
+						"qwen.qwen-max"
+					]
 				},
 				{
 					"value": "qwen-plus-2025-07-28",
-					"properties": ["qwen.qwen-plus-2025-07-28"]
+					"properties": [
+						"qwen.qwen-plus-2025-07-28"
+					]
 				},
 				{
 					"value": "qwen-plus-2025-07-28-thinking",
-					"properties": ["qwen.qwen-plus-2025-07-28-thinking"]
+					"properties": [
+						"qwen.qwen-plus-2025-07-28-thinking"
+					]
 				},
 				{
 					"value": "qwen-turbo",
-					"properties": ["qwen.qwen-turbo"]
+					"properties": [
+						"qwen.qwen-turbo"
+					]
 				}
 			]
 		}

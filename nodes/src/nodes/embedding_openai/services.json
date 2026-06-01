@@ -78,19 +78,76 @@
 			"text-embedding-3-small": {
 				"title": "Text Small   - A highly efficient model",
 				"model": "text-embedding-3-small",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 0, // default
 				"tokens": 8191,
 				"apikey": ""
 			},
 			"text-embedding-3-large": {
 				"title": "Text Large   - A larger and more powerful model",
 				"model": "text-embedding-3-large",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 0, // default
 				"tokens": 8191,
 				"apikey": ""
 			},
 			"text-embedding-ada-002": {
 				"title": "Text Ada     - First OpenAI embeddings model",
 				"model": "text-embedding-ada-002",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 0, // default
 				"tokens": 8191
+			},
+			"text-embedding-004": {
+				"title": "Text Embedding 004",
+				"model": "text-embedding-004",
+				"modelSource": "litellm",
+				"modelTotalTokens": 2048, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
+			},
+			"text-embedding-005": {
+				"title": "Text Embedding 005",
+				"model": "text-embedding-005",
+				"modelSource": "litellm",
+				"modelTotalTokens": 2048, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
+			},
+			"text-embedding-3-small-inference": {
+				"title": "Text Embedding 3 Small Inference",
+				"model": "text-embedding-3-small-inference",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
+			},
+			"text-embedding-ada-002-v2": {
+				"title": "Text Embedding Ada 002 V2",
+				"model": "text-embedding-ada-002-v2",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8191, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
+			},
+			"text-embedding-large-exp-03-07": {
+				"title": "Text Embedding Large Exp 03.07",
+				"model": "text-embedding-large-exp-03-07",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8192, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
+			},
+			"text-embedding-preview-0409": {
+				"title": "Text Embedding Preview 0409",
+				"model": "text-embedding-preview-0409",
+				"modelSource": "litellm",
+				"modelTotalTokens": 3072, // litellm
+				"modelOutputTokens": 0, // default
+				"apikey": ""
 			}
 		}
 	},
@@ -108,35 +165,130 @@
 		},
 		"openai_embed.text-embedding-3-small": {
 			"object": "text-embedding-3-small",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"openai_embed.text-embedding-3-large": {
 			"object": "text-embedding-3-large",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"openai_embed.text-embedding-ada-002": {
 			"object": "text-embedding-ada-002",
-			"properties": ["llm.cloud.apikey"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"openai_embed.profile": {
 			"title": "Model",
 			"description": "OpenAI embedding model",
 			"type": "string",
 			"default": "text-embedding-3-small",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "text-embedding-3-small",
-					"properties": ["openai_embed.text-embedding-3-small"]
+					"properties": [
+						"openai_embed.text-embedding-3-small"
+					]
 				},
 				{
 					"value": "text-embedding-3-large",
-					"properties": ["openai_embed.text-embedding-3-large"]
+					"properties": [
+						"openai_embed.text-embedding-3-large"
+					]
 				},
 				{
 					"value": "text-embedding-ada-002",
-					"properties": ["openai_embed.text-embedding-ada-002"]
+					"properties": [
+						"openai_embed.text-embedding-ada-002"
+					]
+				},
+				{
+					"value": "text-embedding-004",
+					"properties": [
+						"openai_embed.text-embedding-004"
+					]
+				},
+				{
+					"value": "text-embedding-005",
+					"properties": [
+						"openai_embed.text-embedding-005"
+					]
+				},
+				{
+					"value": "text-embedding-3-small-inference",
+					"properties": [
+						"openai_embed.text-embedding-3-small-inference"
+					]
+				},
+				{
+					"value": "text-embedding-ada-002-v2",
+					"properties": [
+						"openai_embed.text-embedding-ada-002-v2"
+					]
+				},
+				{
+					"value": "text-embedding-large-exp-03-07",
+					"properties": [
+						"openai_embed.text-embedding-large-exp-03-07"
+					]
+				},
+				{
+					"value": "text-embedding-preview-0409",
+					"properties": [
+						"openai_embed.text-embedding-preview-0409"
+					]
 				}
+			]
+		},
+		"openai_embed.text-embedding-004": {
+			"object": "text-embedding-004",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai_embed.text-embedding-005": {
+			"object": "text-embedding-005",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai_embed.text-embedding-3-small-inference": {
+			"object": "text-embedding-3-small-inference",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai_embed.text-embedding-ada-002-v2": {
+			"object": "text-embedding-ada-002-v2",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai_embed.text-embedding-large-exp-03-07": {
+			"object": "text-embedding-large-exp-03-07",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai_embed.text-embedding-preview-0409": {
+			"object": "text-embedding-preview-0409",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
 			]
 		}
 	},

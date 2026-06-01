@@ -36,7 +36,7 @@
 				"model": "mistral-medium-2508",
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-small": {
@@ -44,7 +44,7 @@
 				"model": "mistral-small-2506",
 				"modelSource": "provider",
 				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"codestral": {
@@ -59,8 +59,8 @@
 				"title": "Magistral Medium 1.2",
 				"model": "magistral-medium-2509",
 				"modelSource": "provider",
-				"modelTotalTokens": 40000, // litellm
-				"modelOutputTokens": 40000, // litellm
+				"modelTotalTokens": 40000, // manual
+				"modelOutputTokens": 40000, // manual
 				"apikey": ""
 			},
 			"magistral-small": {
@@ -68,23 +68,23 @@
 				"model": "magistral-small-2509",
 				"modelSource": "provider",
 				"modelTotalTokens": 40960, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"devstral-medium": {
 				"title": "Devstral Medium 1.0",
 				"model": "devstral-medium-2507",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // litellm
-				"modelOutputTokens": 128000, // litellm
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 128000, // manual
 				"apikey": ""
 			},
 			"devstral-small": {
 				"title": "Devstral Small 1.1",
 				"model": "devstral-small-2507",
 				"modelSource": "provider",
-				"modelTotalTokens": 128000, // litellm
-				"modelOutputTokens": 128000, // litellm
+				"modelTotalTokens": 128000, // manual
+				"modelOutputTokens": 128000, // manual
 				"apikey": ""
 			},
 			"ministral-14b": {
@@ -100,7 +100,7 @@
 				"model": "ministral-8b-2512",
 				"modelSource": "provider",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 262144, // litellm
 				"apikey": ""
 			},
 			"ministral-3b": {
@@ -115,8 +115,8 @@
 				"title": "Codestral-latest",
 				"model": "codestral-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 8191, // litellm
+				"modelTotalTokens": 8191, // manual
+				"modelOutputTokens": 8191, // manual
 				"apikey": ""
 			},
 			"devstral-2512": {
@@ -131,32 +131,32 @@
 				"title": "Devstral-latest",
 				"model": "devstral-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 256000, // litellm
-				"modelOutputTokens": 256000, // litellm
+				"modelTotalTokens": 256000, // manual
+				"modelOutputTokens": 256000, // manual
 				"apikey": ""
 			},
 			"devstral-medium-latest": {
 				"title": "Devstral-medium-latest",
 				"model": "devstral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 256000, // litellm
-				"modelOutputTokens": 256000, // litellm
+				"modelTotalTokens": 256000, // manual
+				"modelOutputTokens": 256000, // manual
 				"apikey": ""
 			},
 			"magistral-medium-latest": {
 				"title": "Magistral-medium-latest",
 				"model": "magistral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 40000, // litellm
-				"modelOutputTokens": 40000, // litellm
+				"modelTotalTokens": 40000, // manual
+				"modelOutputTokens": 40000, // manual
 				"apikey": ""
 			},
 			"magistral-small-latest": {
 				"title": "Magistral-small-latest",
 				"model": "magistral-small-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 40000, // litellm
-				"modelOutputTokens": 40000, // litellm
+				"modelTotalTokens": 40000, // manual
+				"modelOutputTokens": 40000, // manual
 				"apikey": ""
 			},
 			"ministral-14b-latest": {
@@ -164,7 +164,7 @@
 				"model": "ministral-14b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"ministral-3b-latest": {
@@ -172,7 +172,7 @@
 				"model": "ministral-3b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"ministral-8b-latest": {
@@ -180,31 +180,31 @@
 				"model": "ministral-8b-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-large-2411": {
 				"title": "Mistral Large 2411",
 				"model": "mistral-large-2411",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 128000, // litellm
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 128000, // manual
 				"apikey": ""
 			},
 			"mistral-large-latest": {
 				"title": "Mistral Large Latest",
 				"model": "mistral-large-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 32000, // litellm
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 32000, // manual
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-medium-2505": {
 				"title": "Mistral Medium 2505",
 				"model": "mistral-medium-2505",
 				"modelSource": "provider",
-				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 8191, // litellm
+				"modelTotalTokens": 8191, // manual
+				"modelOutputTokens": 8191, // manual
 				"apikey": ""
 			},
 			"mistral-medium-2604": {
@@ -219,16 +219,16 @@
 				"title": "Mistral: Mistral Medium 3",
 				"model": "mistral-medium-3",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 8191, // litellm
 				"apikey": ""
 			},
 			"mistral-medium-3-5": {
 				"title": "Mistral Medium 3.5",
 				"model": "mistral-medium-3-5",
 				"modelSource": "provider",
-				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // manual
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
 			"mistral-medium-c21211-r0-75": {
@@ -243,8 +243,8 @@
 				"title": "Mistral Medium Latest",
 				"model": "mistral-medium-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // litellm
-				"modelOutputTokens": 131072, // litellm
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 131072, // manual
 				"apikey": ""
 			},
 			"mistral-small-2603": {
@@ -259,8 +259,8 @@
 				"title": "Mistral Small Latest",
 				"model": "mistral-small-latest",
 				"modelSource": "provider",
-				"modelTotalTokens": 131072, // litellm
-				"modelOutputTokens": 131072, // litellm
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 131072, // manual
 				"apikey": ""
 			},
 			"mistral-tiny-2407": {
@@ -268,7 +268,7 @@
 				"model": "mistral-tiny-2407",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-tiny-latest": {
@@ -276,7 +276,7 @@
 				"model": "mistral-tiny-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-vibe-cli-fast": {
@@ -284,7 +284,7 @@
 				"model": "mistral-vibe-cli-fast",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-vibe-cli-latest": {
@@ -292,7 +292,7 @@
 				"model": "mistral-vibe-cli-latest",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096, // manual
 				"apikey": ""
 			},
 			"mistral-vibe-cli-with-tools": {
@@ -300,7 +300,63 @@
 				"model": "mistral-vibe-cli-with-tools",
 				"modelSource": "provider",
 				"modelTotalTokens": 16384, // manual
+				"modelOutputTokens": 4096, // manual
+				"apikey": ""
+			},
+			"mistral-large-2407": {
+				"title": "Mistral Large 2407",
+				"model": "mistral-large-2407",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 4096, // litellm
+				"apikey": ""
+			},
+			"mistral-medium-3-1": {
+				"title": "Mistral: Mistral Medium 3.1",
+				"model": "mistral-medium-3.1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"mistral-nemo": {
+				"title": "Mistral: Mistral Nemo",
+				"model": "mistral-nemo",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 4096, // litellm
+				"apikey": ""
+			},
+			"mistral-saba": {
+				"title": "Mistral: Saba",
+				"model": "mistral-saba",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"mistral-small-24b-instruct-2501": {
+				"title": "Mistral: Mistral Small 3",
+				"model": "mistral-small-24b-instruct-2501",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768, // openrouter
+				"modelOutputTokens": 16384, // openrouter
+				"apikey": ""
+			},
+			"mistral-small-3-1-24b-instruct": {
+				"title": "Mistral: Mistral Small 3.1 24B",
+				"model": "mistral-small-3.1-24b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 128000, // openrouter
+				"apikey": ""
+			},
+			"mistral-small-3-2-24b-instruct": {
+				"title": "Mistral: Mistral Small 3.2 24B",
+				"model": "mistral-small-3.2-24b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			}
 		}
@@ -318,300 +374,575 @@
 		},
 		"mistral.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-large": {
 			"object": "mistral-large",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium": {
 			"object": "mistral-medium",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-small": {
 			"object": "mistral-small",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.codestral": {
 			"object": "codestral",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.magistral-medium": {
 			"object": "magistral-medium",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.magistral-small": {
 			"object": "magistral-small",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.devstral-medium": {
 			"object": "devstral-medium",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.devstral-small": {
 			"object": "devstral-small",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-14b": {
 			"object": "ministral-14b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-8b": {
 			"object": "ministral-8b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-3b": {
 			"object": "ministral-3b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.profile": {
 			"title": "Model",
 			"description": "Mistral AI model selection",
 			"type": "string",
 			"default": "mistral-large",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": ["mistral.custom"]
+					"properties": [
+						"mistral.custom"
+					]
 				},
 				{
 					"value": "mistral-large",
-					"properties": ["mistral.mistral-large"]
+					"properties": [
+						"mistral.mistral-large"
+					]
 				},
 				{
 					"value": "mistral-medium",
-					"properties": ["mistral.mistral-medium"]
+					"properties": [
+						"mistral.mistral-medium"
+					]
 				},
 				{
 					"value": "mistral-small",
-					"properties": ["mistral.mistral-small"]
+					"properties": [
+						"mistral.mistral-small"
+					]
 				},
 				{
 					"value": "codestral",
-					"properties": ["mistral.codestral"]
+					"properties": [
+						"mistral.codestral"
+					]
 				},
 				{
 					"value": "magistral-medium",
-					"properties": ["mistral.magistral-medium"]
+					"properties": [
+						"mistral.magistral-medium"
+					]
 				},
 				{
 					"value": "magistral-small",
-					"properties": ["mistral.magistral-small"]
+					"properties": [
+						"mistral.magistral-small"
+					]
 				},
 				{
 					"value": "devstral-medium",
-					"properties": ["mistral.devstral-medium"]
+					"properties": [
+						"mistral.devstral-medium"
+					]
 				},
 				{
 					"value": "devstral-small",
-					"properties": ["mistral.devstral-small"]
+					"properties": [
+						"mistral.devstral-small"
+					]
 				},
 				{
 					"value": "ministral-14b",
-					"properties": ["mistral.ministral-14b"]
+					"properties": [
+						"mistral.ministral-14b"
+					]
 				},
 				{
 					"value": "ministral-8b",
-					"properties": ["mistral.ministral-8b"]
+					"properties": [
+						"mistral.ministral-8b"
+					]
 				},
 				{
 					"value": "ministral-3b",
-					"properties": ["mistral.ministral-3b"]
+					"properties": [
+						"mistral.ministral-3b"
+					]
 				},
 				{
 					"value": "codestral-latest",
-					"properties": ["mistral.codestral-latest"]
+					"properties": [
+						"mistral.codestral-latest"
+					]
 				},
 				{
 					"value": "devstral-2512",
-					"properties": ["mistral.devstral-2512"]
+					"properties": [
+						"mistral.devstral-2512"
+					]
 				},
 				{
 					"value": "devstral-latest",
-					"properties": ["mistral.devstral-latest"]
+					"properties": [
+						"mistral.devstral-latest"
+					]
 				},
 				{
 					"value": "devstral-medium-latest",
-					"properties": ["mistral.devstral-medium-latest"]
+					"properties": [
+						"mistral.devstral-medium-latest"
+					]
 				},
 				{
 					"value": "magistral-medium-latest",
-					"properties": ["mistral.magistral-medium-latest"]
+					"properties": [
+						"mistral.magistral-medium-latest"
+					]
 				},
 				{
 					"value": "magistral-small-latest",
-					"properties": ["mistral.magistral-small-latest"]
+					"properties": [
+						"mistral.magistral-small-latest"
+					]
 				},
 				{
 					"value": "ministral-14b-latest",
-					"properties": ["mistral.ministral-14b-latest"]
+					"properties": [
+						"mistral.ministral-14b-latest"
+					]
 				},
 				{
 					"value": "ministral-3b-latest",
-					"properties": ["mistral.ministral-3b-latest"]
+					"properties": [
+						"mistral.ministral-3b-latest"
+					]
 				},
 				{
 					"value": "ministral-8b-latest",
-					"properties": ["mistral.ministral-8b-latest"]
+					"properties": [
+						"mistral.ministral-8b-latest"
+					]
 				},
 				{
 					"value": "mistral-large-2411",
-					"properties": ["mistral.mistral-large-2411"]
+					"properties": [
+						"mistral.mistral-large-2411"
+					]
 				},
 				{
 					"value": "mistral-large-latest",
-					"properties": ["mistral.mistral-large-latest"]
+					"properties": [
+						"mistral.mistral-large-latest"
+					]
 				},
 				{
 					"value": "mistral-medium-2505",
-					"properties": ["mistral.mistral-medium-2505"]
+					"properties": [
+						"mistral.mistral-medium-2505"
+					]
 				},
 				{
 					"value": "mistral-medium-2604",
-					"properties": ["mistral.mistral-medium-2604"]
+					"properties": [
+						"mistral.mistral-medium-2604"
+					]
 				},
 				{
 					"value": "mistral-medium-3",
-					"properties": ["mistral.mistral-medium-3"]
+					"properties": [
+						"mistral.mistral-medium-3"
+					]
 				},
 				{
 					"value": "mistral-medium-3-5",
-					"properties": ["mistral.mistral-medium-3-5"]
+					"properties": [
+						"mistral.mistral-medium-3-5"
+					]
 				},
 				{
 					"value": "mistral-medium-c21211-r0-75",
-					"properties": ["mistral.mistral-medium-c21211-r0-75"]
+					"properties": [
+						"mistral.mistral-medium-c21211-r0-75"
+					]
 				},
 				{
 					"value": "mistral-medium-latest",
-					"properties": ["mistral.mistral-medium-latest"]
+					"properties": [
+						"mistral.mistral-medium-latest"
+					]
 				},
 				{
 					"value": "mistral-small-2603",
-					"properties": ["mistral.mistral-small-2603"]
+					"properties": [
+						"mistral.mistral-small-2603"
+					]
 				},
 				{
 					"value": "mistral-small-latest",
-					"properties": ["mistral.mistral-small-latest"]
+					"properties": [
+						"mistral.mistral-small-latest"
+					]
 				},
 				{
 					"value": "mistral-tiny-2407",
-					"properties": ["mistral.mistral-tiny-2407"]
+					"properties": [
+						"mistral.mistral-tiny-2407"
+					]
 				},
 				{
 					"value": "mistral-tiny-latest",
-					"properties": ["mistral.mistral-tiny-latest"]
+					"properties": [
+						"mistral.mistral-tiny-latest"
+					]
 				},
 				{
 					"value": "mistral-vibe-cli-fast",
-					"properties": ["mistral.mistral-vibe-cli-fast"]
+					"properties": [
+						"mistral.mistral-vibe-cli-fast"
+					]
 				},
 				{
 					"value": "mistral-vibe-cli-latest",
-					"properties": ["mistral.mistral-vibe-cli-latest"]
+					"properties": [
+						"mistral.mistral-vibe-cli-latest"
+					]
 				},
 				{
 					"value": "mistral-vibe-cli-with-tools",
-					"properties": ["mistral.mistral-vibe-cli-with-tools"]
+					"properties": [
+						"mistral.mistral-vibe-cli-with-tools"
+					]
+				},
+				{
+					"value": "mistral-large-2407",
+					"properties": [
+						"mistral.mistral-large-2407"
+					]
+				},
+				{
+					"value": "mistral-medium-3-1",
+					"properties": [
+						"mistral.mistral-medium-3-1"
+					]
+				},
+				{
+					"value": "mistral-nemo",
+					"properties": [
+						"mistral.mistral-nemo"
+					]
+				},
+				{
+					"value": "mistral-saba",
+					"properties": [
+						"mistral.mistral-saba"
+					]
+				},
+				{
+					"value": "mistral-small-24b-instruct-2501",
+					"properties": [
+						"mistral.mistral-small-24b-instruct-2501"
+					]
+				},
+				{
+					"value": "mistral-small-3-1-24b-instruct",
+					"properties": [
+						"mistral.mistral-small-3-1-24b-instruct"
+					]
+				},
+				{
+					"value": "mistral-small-3-2-24b-instruct",
+					"properties": [
+						"mistral.mistral-small-3-2-24b-instruct"
+					]
 				}
 			]
 		},
 		"mistral.codestral-latest": {
 			"object": "codestral-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.devstral-2512": {
 			"object": "devstral-2512",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.devstral-latest": {
 			"object": "devstral-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.devstral-medium-latest": {
 			"object": "devstral-medium-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.magistral-medium-latest": {
 			"object": "magistral-medium-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.magistral-small-latest": {
 			"object": "magistral-small-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-14b-latest": {
 			"object": "ministral-14b-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-3b-latest": {
 			"object": "ministral-3b-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.ministral-8b-latest": {
 			"object": "ministral-8b-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-large-2411": {
 			"object": "mistral-large-2411",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-large-latest": {
 			"object": "mistral-large-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-2505": {
 			"object": "mistral-medium-2505",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-2604": {
 			"object": "mistral-medium-2604",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-3": {
 			"object": "mistral-medium-3",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-3-5": {
 			"object": "mistral-medium-3-5",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-c21211-r0-75": {
 			"object": "mistral-medium-c21211-r0-75",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-medium-latest": {
 			"object": "mistral-medium-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-small-2603": {
 			"object": "mistral-small-2603",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-small-latest": {
 			"object": "mistral-small-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-tiny-2407": {
 			"object": "mistral-tiny-2407",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-tiny-latest": {
 			"object": "mistral-tiny-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-vibe-cli-fast": {
 			"object": "mistral-vibe-cli-fast",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-vibe-cli-latest": {
 			"object": "mistral-vibe-cli-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"mistral.mistral-vibe-cli-with-tools": {
 			"object": "mistral-vibe-cli-with-tools",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-large-2407": {
+			"object": "mistral-large-2407",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-medium-3-1": {
+			"object": "mistral-medium-3-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-nemo": {
+			"object": "mistral-nemo",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-saba": {
+			"object": "mistral-saba",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-small-24b-instruct-2501": {
+			"object": "mistral-small-24b-instruct-2501",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-small-3-1-24b-instruct": {
+			"object": "mistral-small-3-1-24b-instruct",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-small-3-2-24b-instruct": {
+			"object": "mistral-small-3-2-24b-instruct",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		}
 	},
 	"shape": [
