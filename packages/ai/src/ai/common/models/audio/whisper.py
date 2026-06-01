@@ -100,7 +100,7 @@ class WhisperLoader(BaseLoader):
                 'try:\n'
                 '    ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2])\n'
                 'except (ValueError, AttributeError):\n'
-                '    ct2 = (0, 0)\n'
+                '    ct2 = (999, 999)\n'
                 'cuda = torch.version.cuda or ""\n'
                 'if ct2 >= (4, 7) and cuda.startswith("12.8"):\n'
                 '    sys.exit(1)\n'
