@@ -1,0 +1,174 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_rocketride_1",
+      "provider": "agent_rocketride",
+      "config": {
+        "instructions": [
+          "You are a personal assistant with long-term, shared memory via the xtrace tools.",
+          "At the start of each turn, call xtrace.recall with a query describing what you need to know about the user, and use the returned context.",
+          "After answering, call xtrace.remember with the relevant turns so you (or other agents sharing this memory) can use them later.",
+          "Use your internal memory only for short-term working notes within this run."
+        ],
+        "max_waves": 15,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 86
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-4o",
+        "openai-4o": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 110,
+          "y": 360
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "memory_internal_1",
+      "provider": "memory_internal",
+      "config": {
+        "type": "memory_internal"
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_rocketride_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 360
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "tool_xtrace_memory_1",
+      "provider": "tool_xtrace_memory",
+      "config": {
+        "type": "tool_xtrace_memory",
+        "api_key": "${XTRACE_API_KEY}",
+        "org_id": "${XTRACE_ORG_ID}",
+        "user_id": "demo-user",
+        "agent_id": "assistant",
+        "search_mode": "compose"
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_rocketride_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 500,
+          "y": 360
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_rocketride_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "27c2922f-53cd-4666-92a9-7f706a344c18",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

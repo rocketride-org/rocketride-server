@@ -1,0 +1,146 @@
+{
+	"title": "xTrace Memory",
+	"protocol": "tool_xtrace_memory://",
+	"classType": ["tool"],
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_xtrace_memory",
+	"prefix": "xtrace",
+	"icon": "xtrace.svg",
+	"documentation": "https://docs.mem.xtrace.ai",
+	"description": ["Long-term, shared agent memory exposed as tools, backed by xTrace Memory Manager.", "Exposes two agent tools: 'remember' ingests conversation turns (xTrace extracts facts/episodes server-side) and 'recall' returns the relevant, ready-to-inject context. Memory is shared across agents/runs that point at the same org and groups. Complements the agent's required short-term memory subsystem; it does not replace it."],
+	"tile": ["Org: ${parameters.xtrace_memory.org_id}", "Mode: ${parameters.xtrace_memory.search_mode}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "xTrace Memory",
+				"api_key": "",
+				"org_id": "",
+				"base_url": "https://api.production.xtrace.ai",
+				"user_id": "",
+				"agent_id": "",
+				"app_id": "",
+				"group_ids": "",
+				"wait": true,
+				"ingest_timeout": 30,
+				"extract_artifacts": false,
+				"search_mode": "compose",
+				"search_limit": 10
+			}
+		}
+	},
+	"fields": {
+		"xtrace_memory.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "xTrace API key (xtk_...). Create one at app.xtrace.ai → Settings → API Keys.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"xtrace_memory.org_id": {
+			"type": "string",
+			"title": "Org id",
+			"description": "xTrace organization id (org_...). Required on every request alongside the API key.",
+			"default": ""
+		},
+		"xtrace_memory.base_url": {
+			"type": "string",
+			"title": "Base URL",
+			"description": "xTrace Memory API base URL. Production by default; use https://api.staging.xtrace.ai for staging.",
+			"default": "https://api.production.xtrace.ai"
+		},
+		"xtrace_memory.user_id": {
+			"type": "string",
+			"title": "Default user id",
+			"description": "Default scope key for ingest/recall (the user whose memory this agent reads & writes). Required for ingest unless the agent passes one per call.",
+			"default": ""
+		},
+		"xtrace_memory.agent_id": {
+			"type": "string",
+			"title": "Agent id",
+			"description": "Optional agent scope stamped on ingested memories and AND-narrowed on recall.",
+			"default": ""
+		},
+		"xtrace_memory.app_id": {
+			"type": "string",
+			"title": "App id",
+			"description": "Optional app scope stamped on ingested memories and AND-narrowed on recall.",
+			"default": ""
+		},
+		"xtrace_memory.group_ids": {
+			"type": "string",
+			"title": "Group ids",
+			"description": "Comma-separated group ids (grp_...) for SHARED memory across users/agents. Tagged on ingest; read across the group on recall.",
+			"default": ""
+		},
+		"xtrace_memory.wait": {
+			"type": "boolean",
+			"title": "Synchronous ingest",
+			"description": "When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"xtrace_memory.ingest_timeout": {
+			"type": "integer",
+			"title": "Ingest timeout (s)",
+			"description": "Max seconds to wait/poll for an ingest job to reach a terminal state.",
+			"default": 30,
+			"minimum": 1,
+			"maximum": 120
+		},
+		"xtrace_memory.extract_artifacts": {
+			"type": "boolean",
+			"title": "Extract artifacts",
+			"description": "Opt into artifact extraction (the most expensive stage). Facts and episodes are always extracted.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"xtrace_memory.search_mode": {
+			"type": "string",
+			"title": "Recall mode",
+			"description": "'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only.",
+			"default": "compose",
+			"enum": [
+				["compose", "Compose (ready-to-inject context)"],
+				["retrieve", "Retrieve (ranked rows only)"]
+			]
+		},
+		"xtrace_memory.search_limit": {
+			"type": "integer",
+			"title": "Recall limit",
+			"description": "Maximum number of memory rows to retrieve per recall.",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 100
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "xTrace Memory",
+			"properties": ["type", "xtrace_memory.api_key", "xtrace_memory.org_id", "xtrace_memory.base_url", "xtrace_memory.user_id", "xtrace_memory.agent_id", "xtrace_memory.app_id", "xtrace_memory.group_ids", "xtrace_memory.wait", "xtrace_memory.ingest_timeout", "xtrace_memory.extract_artifacts", "xtrace_memory.search_mode", "xtrace_memory.search_limit"]
+		}
+	]
+}
