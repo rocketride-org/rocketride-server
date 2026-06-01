@@ -85,12 +85,21 @@ class WhisperLoader(BaseLoader):
             import subprocess
             import sys
 
-            # StorageView has no (shape, dtype, device) Python constructor — must use
-            # from_array() on a CUDA-resident tensor to exercise the CUDA path.
+            # Probe script checks two things:
+            # 1. Version guard: ctranslate2 4.7.x + CUDA 12.8 causes a
+            #    tcache_thread_shutdown() SIGABRT during GPU transcription on H200
+            #    (heap corruption in cuBLAS 12.8.4). Exit non-zero to force CPU.
+            #    Remove this guard once ctranslate2 ships a fix.
+            # 2. StorageView sanity: verify a CUDA StorageView can be created via
+            #    the documented from_array() API (no direct (shape,dtype,device)
+            #    constructor exists in the Python bindings).
             probe_script = (
-                'import ctranslate2, torch; '
+                'import sys, ctranslate2, torch; '
                 'v = ctranslate2.get_supported_compute_types("cuda"); '
                 'assert v, "no cuda types"; '
+                'ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2]); '
+                'cuda = torch.version.cuda or ""; '
+                'if ct2 >= (4, 7) and cuda.startswith("12.8"): sys.exit(1); '
                 't = torch.zeros(1, dtype=torch.float32, device="cuda"); '
                 'sv = ctranslate2.StorageView.from_array(t); '
                 'print("ok")'
