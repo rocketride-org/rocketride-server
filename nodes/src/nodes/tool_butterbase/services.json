@@ -1,0 +1,67 @@
+{
+	"title": "Butterbase",
+	"protocol": "tool_butterbase://",
+	"classType": ["tool"],
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_butterbase",
+	"prefix": "butterbase",
+	"icon": "butterbase.svg",
+	"documentation": "https://docs.butterbase.ai",
+	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>."],
+	"tile": ["Server: ${parameters.butterbase.serverName}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Butterbase",
+				"serverName": "butterbase",
+				"endpoint": "https://api.butterbase.ai/mcp",
+				"api_key": ""
+			}
+		}
+	},
+	"fields": {
+		"butterbase.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Butterbase API key (bb_sk_...). Create one in the Butterbase dashboard. Sent as an Authorization Bearer token.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"butterbase.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "Butterbase MCP Streamable HTTP endpoint. Defaults to the production server.",
+			"default": "https://api.butterbase.ai/mcp"
+		},
+		"butterbase.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the discovered tools: <serverName>.<toolName> (example: butterbase.init_app).",
+			"default": "butterbase"
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Butterbase",
+			"properties": ["type", "butterbase.api_key", "butterbase.endpoint", "butterbase.serverName"]
+		}
+	]
+}
