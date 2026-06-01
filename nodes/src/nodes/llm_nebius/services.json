@@ -177,6 +177,7 @@
 		}
 	],
 	"test": {
+		"requires": ["NEBIUS_API_KEY"],
 		"profiles": ["llama-3-3-70b"],
 		"outputs": ["answers"],
 		"cases": [

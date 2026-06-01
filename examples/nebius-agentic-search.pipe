@@ -91,7 +91,6 @@
       "provider": "tool_tavily_search",
       "name": "Tavily Search",
       "config": {
-        "type": "tool_tavily_search",
         "apikey": "${TAVILY_API_KEY}",
         "maxResults": 5,
         "searchDepth": "advanced",

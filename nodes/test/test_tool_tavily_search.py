@@ -97,7 +97,16 @@ for _name in _added_stubs:
     sys.modules.pop(_name, None)
 
 
-def test_shape_results_maps_tavily_fields():
+def test_shape_results_maps_tavily_fields(monkeypatch):
+    import socket
+
+    # _shape_results validates each URL via _validate_public_url -> socket.getaddrinfo;
+    # stub DNS so the test stays network-independent (offline CI safe).
+    monkeypatch.setattr(
+        socket,
+        'getaddrinfo',
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 0, '', ('93.184.216.34', 0))],
+    )
     body = {'results': [{'title': 'T', 'url': 'https://example.com', 'content': 'snippet', 'score': 0.9}]}
     shaped = mod._shape_results('q', body)
     assert shaped['success'] is True

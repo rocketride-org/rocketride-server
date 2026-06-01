@@ -121,6 +121,7 @@
 	//	so this case exercises config validation without live API calls.
 	//
 	"test": {
+		"requires": ["TAVILY_API_KEY"],
 		"profiles": ["default"],
 		"outputs": [],
 		"cases": [
