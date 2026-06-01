@@ -1,0 +1,26 @@
+# tool_tavily_search
+
+Exposes [Tavily](https://tavily.com) real-time web search as an agent tool node.
+
+## What it does
+
+Agents invoke this node via the tool invoke channel. The node performs a live web search using the Tavily API and returns structured results containing titles, URLs, content snippets, and relevance scores.
+
+Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes — it is consumed exclusively by agent runtimes through the `invoke` capability.
+
+## Setup
+
+Set your Tavily API key via the node config field **API Key** or the environment variable:
+
+```
+TAVILY_API_KEY=tvly-...
+```
+
+## Config fields
+
+| Field        | Default    | Description                                      |
+| ------------ | ---------- | ------------------------------------------------ |
+| API Key      | *(empty)*  | Tavily API key (from https://tavily.com). Encrypted at rest. |
+| Max Results  | `5`        | Maximum number of results returned (1–20).       |
+| Search Depth | `advanced` | `basic` or `advanced` — controls result quality. |
+| Topic        | `general`  | `general`, `news`, or `finance`.                 |

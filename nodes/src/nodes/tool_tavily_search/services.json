@@ -1,0 +1,144 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Tavily Search",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_tavily_search://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_tavily_search",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "tavily",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "tavily.svg",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Tavily real-time web search as an agent tool.", "Performs live web searches via the Tavily API and returns structured results with titles, URLs, content snippets, and relevance scores."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Tavily Search",
+				"apikey": "",
+				"maxResults": 5,
+				"searchDepth": "advanced",
+				"topic": "general"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_tavily_search.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Tavily API key (from https://tavily.com)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_tavily_search.maxResults": {
+			"type": "integer",
+			"title": "Max Results",
+			"description": "Maximum number of search results to return (1-20)",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20
+		},
+		"tool_tavily_search.searchDepth": {
+			"type": "string",
+			"title": "Search Depth",
+			"description": "Tavily search depth",
+			"default": "advanced",
+			"enum": [
+				["basic", "Basic"],
+				["advanced", "Advanced"]
+			]
+		},
+		"tool_tavily_search.topic": {
+			"type": "string",
+			"title": "Topic",
+			"description": "Search topic category",
+			"default": "general",
+			"enum": [
+				["general", "General"],
+				["news", "News"],
+				["finance", "Finance"]
+			]
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	No apikey is supplied — validateConfig emits a warning (not an error),
+	//	so this case exercises config validation without live API calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Tavily Search",
+			"properties": ["type", "tool_tavily_search.apikey", "tool_tavily_search.maxResults", "tool_tavily_search.searchDepth", "tool_tavily_search.topic"]
+		}
+	]
+}
