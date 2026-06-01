@@ -402,6 +402,7 @@ class TestS3Store(BaseStoreTest):
             pytest.skip('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID not configured for S3 tests')
 
         import boto3
+        from botocore.exceptions import ClientError
         import uuid
 
         client = boto3.client(
@@ -414,7 +415,9 @@ class TestS3Store(BaseStoreTest):
 
         try:
             client.head_bucket(Bucket=test_config['bucket'])
-        except Exception:
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code') != '404':
+                raise e
             client.create_bucket(Bucket=test_config['bucket'])
 
         yield f'tmp_{uuid.uuid4().hex[:8]}'

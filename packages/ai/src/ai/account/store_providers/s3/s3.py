@@ -369,7 +369,6 @@ class S3Store(IStore):
                         parts = rel.split('/')
 
                         if include_dirs:
-                            len(str(prefix_part_len) + prefix)
                             for i in range(prefix_part_len + 1, len(parts)):
                                 if _match(parts[i - 1]):
                                     dir = '/'.join(parts[:i]) + '/'
