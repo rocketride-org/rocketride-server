@@ -46,7 +46,7 @@ class Chat(ChatBase):
         # Resolve the key from config first, then the NEBIUS_API_KEY env var.
         # The 'sk-dummy' placeholder lets the client initialise before a key is
         # saved (e.g. during config-only open mode).
-        apikey = config.get('apikey') or os.environ.get('NEBIUS_API_KEY') or 'sk-dummy'
+        apikey = (config.get('apikey') or '').strip() or os.environ.get('NEBIUS_API_KEY', '').strip() or 'sk-dummy'
 
         self._llm = ChatOpenAI(
             model=self._model,
