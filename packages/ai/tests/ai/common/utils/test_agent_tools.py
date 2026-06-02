@@ -185,9 +185,10 @@ def lc_messages(monkeypatch):
                 self.tool_calls = tool_calls
 
     class ToolMessage:
-        def __init__(self, content='', name=''):
+        def __init__(self, content='', name='', tool_call_id=''):
             self.content = content
             self.name = name
+            self.tool_call_id = tool_call_id
 
     mod = types.ModuleType('langchain_core.messages')
     mod.SystemMessage = SystemMessage
@@ -281,3 +282,64 @@ class TestLangchainMessagesToTranscript:
         msg = lc_messages.HumanMessage(content='x')
         out = langchain_messages_to_transcript([msg])
         assert not out.endswith('\n')
+
+    # -- parallel tool-call identity (regression) ---------------------------
+    #
+    # On every turn the transcript is replayed to the LLM as context. When an
+    # assistant turn issued *parallel* tool calls, the prior implementation
+    # flattened them into separate single-call lines and dropped both the
+    # per-call ``id`` and the ``ToolMessage.tool_call_id``, so the replayed
+    # turn lost the call->result pairing — the model could mis-attribute
+    # results, especially when several parallel calls hit the *same* tool
+    # (e.g. ``task`` for subagent fan-out). These tests pin the identity.
+
+    def test_single_tool_call_round_trips_with_id(self, lc_messages):
+        """A lone tool call renders as the singular envelope and carries its id."""
+        messages = [
+            lc_messages.AIMessage(
+                content='',
+                tool_calls=[{'id': 'call_solo', 'name': 'search', 'args': {'q': 'x'}}],
+            ),
+            lc_messages.ToolMessage(content='hit', name='search', tool_call_id='call_solo'),
+        ]
+        out = langchain_messages_to_transcript(messages)
+
+        assert '"type": "tool_call"' in out
+        assert '"id": "call_solo"' in out
+        # The result line is pinned to the same id.
+        assert 'tool[search#call_solo]: hit' in out
+
+    def test_parallel_calls_preserve_grouping_and_per_call_identity(self, lc_messages):
+        """Two parallel calls to the SAME tool keep distinct ids on call and result."""
+        messages = [
+            lc_messages.HumanMessage(content='do both'),
+            lc_messages.AIMessage(
+                content='',
+                tool_calls=[
+                    {'id': 'call_a', 'name': 'task', 'args': {'description': 'A'}},
+                    {'id': 'call_b', 'name': 'task', 'args': {'description': 'B'}},
+                ],
+            ),
+            lc_messages.ToolMessage(content='result A', name='task', tool_call_id='call_a'),
+            lc_messages.ToolMessage(content='result B', name='task', tool_call_id='call_b'),
+        ]
+        out = langchain_messages_to_transcript(messages)
+
+        # Grouping preserved: ONE plural envelope, not two flattened single-call lines.
+        assert '"type": "tool_calls"' in out
+        assert out.count('"type": "tool_call"') == 0
+
+        # Both call ids survive on the assistant side.
+        assert '"id": "call_a"' in out
+        assert '"id": "call_b"' in out
+
+        # Each result is explicitly pinned to the call that produced it — this is
+        # the pairing that was lost before the fix.
+        assert 'tool[task#call_a]: result A' in out
+        assert 'tool[task#call_b]: result B' in out
+
+    def test_missing_tool_call_id_degrades_gracefully(self, lc_messages):
+        """A ToolMessage with no tool_call_id still renders by name (no crash, no '#')."""
+        msg = lc_messages.ToolMessage(content='ok', name='search', tool_call_id='')
+        out = langchain_messages_to_transcript([msg])
+        assert out == 'tool[search]: ok'
