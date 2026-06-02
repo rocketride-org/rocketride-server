@@ -1,0 +1,22 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+from ai.common.database import DatabaseInstanceBase
+from .IGlobal import IGlobal
+
+
+class IInstance(DatabaseInstanceBase):
+    """ClickHouse-specific instance.
+
+    All tool methods and lane handlers are inherited from DatabaseInstanceBase.
+    """
+
+    IGlobal: IGlobal
+
+    def _db_display_name(self) -> str:
+        return 'ClickHouse'
+
+    def _db_dialect(self) -> str:
+        return 'clickhouse'

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="800px" height="800px" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+  <title>ClickHouse</title>
+  <g fill="#FFCC00">
+    <rect x="0"  y="0"  width="6" height="36"/>
+    <rect x="10" y="0"  width="6" height="36"/>
+    <rect x="20" y="0"  width="6" height="36"/>
+    <rect x="30" y="0"  width="6" height="22"/>
+    <rect x="30" y="26" width="6" height="10"/>
+  </g>
+</svg>
