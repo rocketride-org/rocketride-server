@@ -242,7 +242,16 @@ def _request_with_retry(
                 resp.raise_for_status()
 
             resp.raise_for_status()
-            return resp.json()
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                # A 200 with a non-JSON body would otherwise raise ValueError,
+                # which tavily() does not catch; convert it to the RuntimeError
+                # contract so the caller returns {'success': False, ...}.
+                raise RuntimeError('Tavily returned a non-JSON response body') from exc
+            if not isinstance(data, dict):
+                raise RuntimeError(f'Tavily returned an unexpected payload type: {type(data).__name__}')
+            return data
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
             # Transient transport failures (timeouts, dropped/refused connections)

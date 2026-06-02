@@ -165,3 +165,22 @@ def test_request_with_retry_retries_connection_error(monkeypatch):
     body = mod._request_with_retry(url='https://api.tavily.com/search', headers={}, payload={}, base_delay=0.0)
     assert body == {'results': []}
     assert calls['n'] == 2  # first attempt raised, retry succeeded
+
+
+def test_request_with_retry_rejects_non_dict_payload(monkeypatch):
+    """A 200 whose JSON is not an object is converted to RuntimeError (clean error contract)."""
+    import pytest
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return ['not', 'an', 'object']  # valid JSON, wrong shape
+
+    monkeypatch.setattr(mod.requests, 'post', lambda *a, **k: _Resp())
+
+    with pytest.raises(RuntimeError):
+        mod._request_with_retry(url='https://api.tavily.com/search', headers={}, payload={}, base_delay=0.0)
