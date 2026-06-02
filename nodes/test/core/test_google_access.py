@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+# core/ is a flat dir of engine-loaded modules (no __init__.py) and nodes/src is
+# not on pytest's pythonpath, so import the module by adding its dir to sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'core'))
 from google_access import (  # noqa: E402
     CALENDAR,
@@ -146,8 +148,9 @@ def test_gmail_modify_is_writeable():
     assert resolve_google_access({'access': 'modify'}, GMAIL).can_write is True
 
 
-def test_gmail_declares_allow_hard_delete_flag():
-    assert 'allowHardDelete' in GMAIL.flags
+def test_gmail_declares_no_capability_flags():
+    # Permanent delete needs the full mail scope (no tier grants it), so Gmail has no gates.
+    assert GMAIL.flags == ()
 
 
 def test_drive_declares_public_sharing_and_hard_delete_flags():
@@ -184,3 +187,106 @@ def test_default_tier_is_a_valid_tier(spec):
 
 def test_resolver_returns_googleaccess_instance():
     assert isinstance(resolve_google_access({}, GMAIL), GoogleAccess)
+
+
+# ---------------------------------------------------------------------------
+# Strict-boolean flags
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('bad', ['false', 'true', 'no', 1, 0, [], {}])
+def test_flag_non_bool_value_raises(bad):
+    with pytest.raises(GoogleAccessError):
+        resolve_google_access({'access': 'write', 'allowDelete': bad}, _FIXTURE)
+
+
+def test_flag_explicit_true_enables():
+    access = resolve_google_access({'access': 'write', 'allowDelete': True}, _FIXTURE)
+    assert access.flags['allowDelete'] is True
+
+
+def test_flag_explicit_false_disables():
+    access = resolve_google_access({'access': 'write', 'allowDelete': False}, _FIXTURE)
+    assert access.flags['allowDelete'] is False
+
+
+# ---------------------------------------------------------------------------
+# Non-string access guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('bad_access', [['write'], {'tier': 'write'}, 123])
+def test_non_string_access_raises_googleaccesserror(bad_access):
+    with pytest.raises(GoogleAccessError):
+        resolve_google_access({'access': bad_access}, _FIXTURE)
+
+
+# ---------------------------------------------------------------------------
+# AccessSpec construction validation
+# ---------------------------------------------------------------------------
+
+
+def test_accessspec_default_absent_from_scopes_raises():
+    with pytest.raises(GoogleAccessError):
+        AccessSpec(scopes={'readonly': [f'{_G}/thing.readonly']}, default='write')
+
+
+def test_accessspec_empty_scopes_raises():
+    with pytest.raises(GoogleAccessError):
+        AccessSpec(scopes={}, default='write')
+
+
+# ---------------------------------------------------------------------------
+# Scope-derived can_write across every shipped spec/tier
+# ---------------------------------------------------------------------------
+
+_CAN_WRITE_CASES = [
+    (GMAIL, 'readonly', False),
+    (GMAIL, 'modify', True),
+    (GMAIL, 'send', True),
+    (DRIVE, 'readonly', False),
+    (DRIVE, 'write', True),
+    (SHEETS, 'readonly', False),
+    (SHEETS, 'write', True),
+    (DOCS, 'readonly', False),
+    (DOCS, 'write', True),
+    (CALENDAR, 'readonly', False),
+    (CALENDAR, 'write', True),
+    (SLIDES, 'readonly', False),
+    (SLIDES, 'write', True),
+    (PEOPLE, 'readonly', False),
+    (PEOPLE, 'write', True),
+]
+
+
+@pytest.mark.parametrize('spec,tier,expected', _CAN_WRITE_CASES)
+def test_can_write_derived_from_scopes(spec, tier, expected):
+    assert resolve_google_access({'access': tier}, spec).can_write is expected
+
+
+def test_people_write_is_writable_despite_directory_readonly():
+    access = resolve_google_access({'access': 'write'}, PEOPLE)
+    assert f'{_G}/directory.readonly' in access.scopes  # retained
+    assert f'{_G}/contacts' in access.scopes  # writable scope present
+    assert access.can_write is True
+
+
+# ---------------------------------------------------------------------------
+# Exact scope strings for the flag-less editor/calendar specs
+# ---------------------------------------------------------------------------
+
+_EXACT_SCOPES = [
+    (SHEETS, 'readonly', [f'{_G}/spreadsheets.readonly']),
+    (SHEETS, 'write', [f'{_G}/spreadsheets']),
+    (DOCS, 'readonly', [f'{_G}/documents.readonly']),
+    (DOCS, 'write', [f'{_G}/documents']),
+    (SLIDES, 'readonly', [f'{_G}/presentations.readonly']),
+    (SLIDES, 'write', [f'{_G}/presentations']),
+    (CALENDAR, 'readonly', [f'{_G}/calendar.readonly']),
+    (CALENDAR, 'write', [f'{_G}/calendar']),
+]
+
+
+@pytest.mark.parametrize('spec,tier,scopes', _EXACT_SCOPES)
+def test_exact_scope_strings(spec, tier, scopes):
+    assert resolve_google_access({'access': tier}, spec).scopes == scopes

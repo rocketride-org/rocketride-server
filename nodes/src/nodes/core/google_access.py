@@ -43,7 +43,14 @@ class AccessSpec:
     scopes: dict[str, list[str]]  # access tier -> OAuth scopes
     default: str  # tier used when config omits access
     flags: tuple[str, ...] = ()  # config boolean field names honored
-    readonly_tiers: frozenset[str] = frozenset({'readonly'})
+
+    def __post_init__(self) -> None:
+        if not self.scopes:
+            raise GoogleAccessError('AccessSpec.scopes must declare at least one tier')
+        if self.default not in self.scopes:
+            raise GoogleAccessError(
+                f'AccessSpec default tier {self.default!r} is not a defined tier; expected one of {sorted(self.scopes)}'
+            )
 
 
 @dataclass(frozen=True)
@@ -67,16 +74,35 @@ class GoogleAccess:
             )
 
 
+def _resolve_flags(config: dict, spec: AccessSpec) -> dict[str, bool]:
+    # Strict: a destructive gate must fail loud on misconfig, not coerce. Only an
+    # explicit bool True enables; a present non-bool ('false', 1, 'no') is an error.
+    flags: dict[str, bool] = {}
+    for name in spec.flags:
+        if name not in config:
+            flags[name] = False
+            continue
+        value = config[name]
+        if type(value) is not bool:
+            raise GoogleAccessError(f'flag {name!r} must be a boolean, got {value!r} ({type(value).__name__})')
+        flags[name] = value
+    return flags
+
+
 def resolve_google_access(config: dict, spec: AccessSpec) -> GoogleAccess:
     tier = config.get('access') or spec.default
+    if not isinstance(tier, str):
+        raise GoogleAccessError(f'access must be a string tier name, got {type(tier).__name__}')
     if tier not in spec.scopes:
         raise GoogleAccessError(f'unknown access tier {tier!r}; expected one of {sorted(spec.scopes)}')
-    flags = {name: bool(config.get(name, False)) for name in spec.flags}
+    tier_scopes = spec.scopes[tier]
+    # Writable iff at least one granted scope is not a Google read-only scope
+    # (those end in '.readonly'). Derived from scopes so it can't drift from grant.
     return GoogleAccess(
         tier=tier,
-        scopes=list(spec.scopes[tier]),
-        can_write=tier not in spec.readonly_tiers,
-        flags=flags,
+        scopes=list(tier_scopes),
+        can_write=any(not s.endswith('.readonly') for s in tier_scopes),
+        flags=_resolve_flags(config, spec),
     )
 
 
@@ -89,7 +115,8 @@ GMAIL = AccessSpec(
         'send': [f'{_G}/gmail.modify', f'{_G}/gmail.send'],
     },
     default='modify',
-    flags=('allowHardDelete',),
+    # No allowHardDelete: permanent delete (messages.delete) needs the full
+    # https://mail.google.com/ scope, which no tier here grants. gmail.modify only trashes.
 )
 DRIVE = AccessSpec(
     scopes={'readonly': [f'{_G}/drive.readonly'], 'write': [f'{_G}/drive']},
