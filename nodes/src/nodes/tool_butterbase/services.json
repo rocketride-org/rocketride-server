@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.tool_butterbase",
 	"prefix": "butterbase",
-	"icon": "butterbase.svg",
+	"icon": "https://api.smithery.ai/servers/butterbase/butterbase/icon",
 	"documentation": "https://docs.butterbase.ai",
 	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>."],
 	"tile": ["Server: ${parameters.butterbase.serverName}"],
