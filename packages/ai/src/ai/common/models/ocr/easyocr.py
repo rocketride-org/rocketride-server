@@ -153,6 +153,8 @@ class EasyOCRLoader(BaseLoader):
                     setattr(reader, attr, module.module.to(target))
                     logger.debug(f'EasyOCR {attr}: unwrapped DataParallel → cuda:{gpu_index}')
                 else:
+                    if isinstance(module, torch.nn.Module):
+                        setattr(reader, attr, module.to(target))
                     first_param = (
                         next(module.parameters(), None) if callable(getattr(module, 'parameters', None)) else None
                     )
