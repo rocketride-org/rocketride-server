@@ -29,18 +29,24 @@ def _split_group_ids(raw: object) -> List[str]:
     return []
 
 
+# Defaults / bounds (avoid magic constants scattered in the code).
+_DEFAULT_BASE_URL = 'https://api.production.xtrace.ai'
+_DEFAULT_INGEST_TIMEOUT = 30
+_MAX_INGEST_TIMEOUT = 120
+
+
 class IGlobal(IGlobalBase):
     """Global state for xtrace_memory."""
 
     api_key: str = ''
     org_id: str = ''
-    base_url: str = 'https://api.production.xtrace.ai'
+    base_url: str = _DEFAULT_BASE_URL
     user_id: str = ''
     agent_id: str = ''
     app_id: str = ''
     group_ids: List[str] = []
     wait: bool = True
-    ingest_timeout: int = 30
+    ingest_timeout: int = _DEFAULT_INGEST_TIMEOUT
     extract_artifacts: bool = False
     search_mode: str = 'compose'
     search_limit: int = 10
@@ -63,15 +69,17 @@ class IGlobal(IGlobalBase):
 
         self.api_key = api_key
         self.org_id = org_id
-        self.base_url = str(cfg.get('base_url') or 'https://api.production.xtrace.ai').strip().rstrip('/')
+        self.base_url = str(cfg.get('base_url') or _DEFAULT_BASE_URL).strip().rstrip('/')
         self.user_id = str(cfg.get('user_id') or '').strip()
         self.agent_id = str(cfg.get('agent_id') or '').strip()
         self.app_id = str(cfg.get('app_id') or '').strip()
         self.group_ids = _split_group_ids(cfg.get('group_ids'))
         self.wait = bool(cfg.get('wait', True))
 
-        raw_timeout = cfg.get('ingest_timeout', 30)
-        self.ingest_timeout = max(1, min(120, int(raw_timeout if raw_timeout is not None else 30)))
+        raw_timeout = cfg.get('ingest_timeout', _DEFAULT_INGEST_TIMEOUT)
+        self.ingest_timeout = max(
+            1, min(_MAX_INGEST_TIMEOUT, int(raw_timeout if raw_timeout is not None else _DEFAULT_INGEST_TIMEOUT))
+        )
 
         self.extract_artifacts = bool(cfg.get('extract_artifacts', False))
 

@@ -97,6 +97,19 @@ def _ensure_requests() -> None:
     sys.modules['requests.exceptions'] = exc
 
 
+def _ensure_tenacity() -> None:
+    """Stub ``tenacity`` if unavailable — the retry layer is patched out in tests."""
+    if 'tenacity' in sys.modules:
+        return
+    mod = types.ModuleType('tenacity')
+    # Retrying(...)(fn) just calls fn once; tests patch _request_with_retry anyway.
+    mod.Retrying = lambda **_kw: lambda fn, *a, **k: fn(*a, **k)
+    mod.stop_after_attempt = lambda *a, **k: None
+    mod.wait_exponential = lambda *a, **k: None
+    mod.retry_if_exception = lambda *a, **k: None
+    sys.modules['tenacity'] = mod
+
+
 def _ensure_pkg() -> None:
     if 'tool_xtrace_memory' not in sys.modules:
         pkg = types.ModuleType('tool_xtrace_memory')
@@ -107,6 +120,7 @@ def _ensure_pkg() -> None:
 _ensure_rocketlib()
 _ensure_ai_common()
 _ensure_requests()
+_ensure_tenacity()
 _ensure_pkg()
 
 from tool_xtrace_memory import IInstance as IInstanceMod  # noqa: E402

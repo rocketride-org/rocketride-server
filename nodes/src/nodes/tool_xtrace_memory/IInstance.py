@@ -27,12 +27,16 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import requests
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from rocketlib import IInstanceBase, tool_function, debug
 
 from ai.common.utils import normalize_tool_input
 
 from .IGlobal import IGlobal
+
+# Per-request socket timeout, in seconds.
+_REQUEST_TIMEOUT = 35
 
 
 class IInstance(IInstanceBase):
@@ -336,42 +340,52 @@ def _request_with_retry(
     payload: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
     max_retries: int = 3,
-    base_delay: float = 2.0,
     idempotent: bool = True,
 ) -> Dict[str, Any]:
-    """HTTP request with bounded retries. 429 always retries (not yet processed);
-    5xx/timeout retry only when ``idempotent`` — ingest passes False to avoid
-    duplicate writes.
+    """Execute an HTTP request to the xTrace API with bounded retries (via tenacity).
+
+    Args:
+        method: HTTP verb, e.g. ``'GET'`` or ``'POST'``.
+        url: Fully-qualified request URL.
+        headers: Request headers (auth + content type).
+        payload: JSON body to send, or ``None``.
+        params: Query-string parameters, or ``None``.
+        max_retries: Retries after the first try (total attempts = ``max_retries + 1``).
+        idempotent: When ``True``, retry on 5xx and timeouts. When ``False`` (writes such
+            as ingest), retry only on 429 — which means the request was not processed —
+            and never on 5xx/timeout, to avoid duplicate side effects.
+
+    Returns:
+        The parsed JSON response body as a dict (``{}`` when the body is empty).
+
+    Raises:
+        RuntimeError: If the request ultimately fails (retries exhausted or a
+            non-retryable error).
     """
-    for attempt in range(max_retries + 1):
-        try:
-            resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=35)
 
-            retryable = resp.status_code == 429 or (idempotent and 500 <= resp.status_code < 600)
-            if retryable:
-                if attempt < max_retries:
-                    delay = base_delay * (2**attempt)
-                    debug(
-                        f'xtrace_memory: HTTP {resp.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})'
-                    )
-                    time.sleep(delay)
-                    continue
-                resp.raise_for_status()
+    def _is_retryable(exc: BaseException) -> bool:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return idempotent
+        if isinstance(exc, requests.exceptions.HTTPError):
+            status = getattr(getattr(exc, 'response', None), 'status_code', 0)
+            return status == 429 or (idempotent and 500 <= status < 600)
+        return False
 
-            resp.raise_for_status()
-            return resp.json() if resp.content else {}
+    def _attempt() -> Dict[str, Any]:
+        resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=_REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
 
-        except requests.exceptions.Timeout:
-            if idempotent and attempt < max_retries:
-                delay = base_delay * (2**attempt)
-                debug(f'xtrace_memory: request timeout, retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
-                time.sleep(delay)
-                continue
-            raise RuntimeError('xtrace_memory: request timed out') from None
-
-        except requests.RequestException as exc:
-            status = getattr(getattr(exc, 'response', None), 'status_code', None)
-            detail = f' (HTTP {status})' if status else ''
-            raise RuntimeError(f'xtrace_memory: request failed{detail}: {type(exc).__name__}') from None
+    try:
+        return Retrying(
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_exponential(multiplier=2, min=2, max=16),
+            retry=retry_if_exception(_is_retryable),
+            reraise=True,
+        )(_attempt)
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        detail = f' (HTTP {status})' if status else ''
+        raise RuntimeError(f'xtrace_memory: request failed{detail}: {type(exc).__name__}') from None
 
     raise RuntimeError('xtrace_memory: max retries exceeded')
