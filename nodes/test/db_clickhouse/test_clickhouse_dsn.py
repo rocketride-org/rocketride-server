@@ -108,6 +108,14 @@ def test_connection_params_coerces_none_to_defaults(g):
     }
 
 
+def test_connection_params_normalizes_whitespace_and_nonstring(g):
+    """Whitespace-only values fall back to defaults; non-string values are coerced to str."""
+    p = g._connection_params({'host': '   ', 'database': '  analytics ', 'table': 42})
+    assert p['host'] == 'localhost'  # whitespace-only -> default
+    assert p['database'] == 'analytics'  # stripped
+    assert p['table'] == '42'  # non-string coerced, no AttributeError
+
+
 @pytest.mark.parametrize(
     'value, expected',
     [
