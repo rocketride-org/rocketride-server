@@ -85,15 +85,29 @@ class WhisperLoader(BaseLoader):
             import subprocess
             import sys
 
-            # StorageView has no (shape, dtype, device) Python constructor — must use
-            # from_array() on a CUDA-resident tensor to exercise the CUDA path.
+            # Probe script checks two things:
+            # 1. Version guard: ctranslate2 4.7.x + CUDA 12.8 causes a
+            #    tcache_thread_shutdown() SIGABRT during GPU transcription on H200
+            #    (heap corruption in cuBLAS 12.8.4). Exit non-zero to force CPU.
+            #    Upper bound at 4.8 so the guard lifts automatically once
+            #    ctranslate2 ships a fix (expected in 4.8+).
+            # 2. StorageView sanity: verify a CUDA StorageView can be created via
+            #    the documented from_array() API (no direct (shape,dtype,device)
+            #    constructor exists in the Python bindings).
             probe_script = (
-                'import ctranslate2, torch; '
-                'v = ctranslate2.get_supported_compute_types("cuda"); '
-                'assert v, "no cuda types"; '
-                't = torch.zeros(1, dtype=torch.float32, device="cuda"); '
-                'sv = ctranslate2.StorageView.from_array(t); '
-                'print("ok")'
+                'import sys, ctranslate2, torch\n'
+                'v = ctranslate2.get_supported_compute_types("cuda")\n'
+                'assert v, "no cuda types"\n'
+                'try:\n'
+                '    ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2])\n'
+                'except (ValueError, AttributeError):\n'
+                '    ct2 = (999, 999)\n'
+                'cuda = torch.version.cuda or ""\n'
+                'if (4, 7) <= ct2 < (4, 8) and cuda.startswith("12.8"):\n'
+                '    sys.exit(1)\n'
+                't = torch.zeros(1, dtype=torch.float32, device="cuda")\n'
+                'sv = ctranslate2.StorageView.from_array(t)\n'
+                'print("ok")\n'
             )
             result = None
             try:
@@ -200,6 +214,15 @@ class WhisperLoader(BaseLoader):
                     device = 'cuda'
                 else:
                     device = 'cpu'
+            elif device != 'cpu' and not WhisperLoader._check_gpu_compatible():
+                # Explicit cuda / cuda:N requested but probe failed — fall back to CPU
+                # so the same SIGABRT protection applies regardless of how the caller
+                # specified the device.
+                logger.warning(
+                    'ctranslate2 CUDA probe failed for explicit device=%r — Whisper will use CPU instead.',
+                    device,
+                )
+                device = 'cpu'
 
             if device == 'cpu':
                 gpu_index = -1
