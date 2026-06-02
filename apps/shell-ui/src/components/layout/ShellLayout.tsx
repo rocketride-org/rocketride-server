@@ -231,6 +231,25 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		}
 	}, [identity, activeAppId, activeManifest, defaultAppId]);
 
+	// --- Subscription gate: auto-trigger checkout for subscription apps ------
+	const subGateTriggeredRef = useRef<string | null>(null);
+	const subGateActive = identity
+		&& activeManifest
+		&& activeAppId !== defaultAppId
+		&& activeManifest.appStatus === 'unsubscribed';
+
+	useEffect(() => {
+		// When a logged-in user navigates to an app they haven't subscribed to,
+		// open the checkout flow automatically. Skip the default app (always accessible).
+		if (subGateActive) {
+			if (subGateTriggeredRef.current === activeAppId) return;
+			subGateTriggeredRef.current = activeAppId;
+			ConnectionManager.getInstance().emit('shell:subscribe', { app: activeManifest });
+		} else {
+			subGateTriggeredRef.current = null;
+		}
+	}, [subGateActive, activeAppId, activeManifest]);
+
 	// --- Loading guard -------------------------------------------------------
 	if (!loaded && !seeded) return null;
 
@@ -258,7 +277,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
 					<div style={styles.clientArea}>
-						{activeApp?.components?.App ? (
+						{subGateActive ? (
+							<div style={styles.appLoading}>Subscription required</div>
+						) : activeApp?.components?.App ? (
 							<AppErrorBoundary key={activeAppId} appName={appName}>
 								<activeApp.components.App
 									isConnected={isConnected}
