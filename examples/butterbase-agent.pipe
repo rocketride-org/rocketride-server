@@ -3,6 +3,7 @@
     {
       "id": "chat_1",
       "provider": "chat",
+      "name": "Chat",
       "config": {
         "hideForm": true,
         "mode": "Source",
@@ -21,9 +22,11 @@
     {
       "id": "agent_rocketride_1",
       "provider": "agent_rocketride",
+      "name": "RocketRide Wave",
       "config": {
         "instructions": [
-          "You are a backend engineer agent. Use the butterbase tools to provision and manage the backend: create apps, define and apply schemas, configure auth and row-level rules, manage storage, and deploy functions.",
+          "You are a backend engineer agent. I'm using Butterbase as my backend. Call the butterbase_docs tool with topic \"overview\" to learn about the platform before doing anything else.",
+          "Use the butterbase tools to provision and manage the backend: create apps, define and apply schemas, configure auth and row-level rules, manage storage, and deploy functions.",
           "Inspect available butterbase tools before acting, prefer dry-run/preview where offered, and confirm destructive changes."
         ],
         "max_waves": 20,
@@ -45,33 +48,9 @@
       ]
     },
     {
-      "id": "llm_anthropic_1",
-      "provider": "llm_anthropic",
-      "config": {
-        "profile": "claude-sonnet-4-6",
-        "claude-sonnet-4-6": {
-          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
-        },
-        "parameters": {}
-      },
-      "ui": {
-        "position": {
-          "x": 110,
-          "y": 360
-        },
-        "nodeType": "default",
-        "formDataValid": true
-      },
-      "control": [
-        {
-          "classType": "llm",
-          "from": "agent_rocketride_1"
-        }
-      ]
-    },
-    {
       "id": "memory_internal_1",
       "provider": "memory_internal",
+      "name": "Memory (Internal)",
       "config": {
         "type": "memory_internal"
       },
@@ -93,6 +72,7 @@
     {
       "id": "tool_butterbase_1",
       "provider": "tool_butterbase",
+      "name": "Butterbase MCP Client",
       "config": {
         "type": "tool_butterbase",
         "api_key": "${ROCKETRIDE_BUTTERBASE_API_KEY}",
@@ -117,6 +97,7 @@
     {
       "id": "response_answers_1",
       "provider": "response_answers",
+      "name": "Return Answers",
       "config": {
         "laneName": "answers"
       },
@@ -134,9 +115,38 @@
           "from": "agent_rocketride_1"
         }
       ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "OpenAI",
+      "config": {
+        "profile": "openai-5-2",
+        "openai-5-2": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "name": "OpenAI",
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 80,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ]
     }
   ],
-  "project_id": "6ba2f198-2277-40ef-ac46-f00778cb043d",
+  "project_id": "217c9e93-9a48-403a-8349-7bfe9812702b",
   "version": 1,
   "isLocked": false,
   "snapToGrid": true,
@@ -144,5 +154,5 @@
     10,
     10
   ],
-  "docRevision": 1
+  "docRevision": 13
 }
