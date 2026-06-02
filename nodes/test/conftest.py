@@ -242,6 +242,8 @@ def pytest_generate_tests(metafunc):
             'audio_tts',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
+            # Require live third-party API credentials (no live calls in default CI):
+            'tool_butterbase',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 
