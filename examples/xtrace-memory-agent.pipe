@@ -3,6 +3,7 @@
     {
       "id": "chat_1",
       "provider": "chat",
+      "name": "Chat",
       "config": {
         "hideForm": true,
         "mode": "Source",
@@ -14,10 +15,6 @@
           "x": 20,
           "y": 200
         },
-        "measured": {
-          "width": 150,
-          "height": 66
-        },
         "nodeType": "default",
         "formDataValid": true
       }
@@ -25,6 +22,7 @@
     {
       "id": "agent_rocketride_1",
       "provider": "agent_rocketride",
+      "name": "RocketRide Wave",
       "config": {
         "instructions": [
           "You are a personal assistant with long-term, shared memory via the xtrace tools.",
@@ -35,28 +33,25 @@
         "max_waves": 15,
         "parameters": {}
       },
-      "input": [
-        {
-          "lane": "questions",
-          "from": "chat_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 240,
           "y": 200
         },
-        "measured": {
-          "width": 150,
-          "height": 86
-        },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
     },
     {
       "id": "llm_openai_1",
       "provider": "llm_openai",
+      "name": "OpenAI",
       "config": {
         "profile": "openai-4o",
         "openai-4o": {
@@ -64,111 +59,100 @@
         },
         "parameters": {}
       },
-      "control": [
-        {
-          "classType": "llm",
-          "from": "agent_rocketride_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 110,
           "y": 360
         },
-        "measured": {
-          "width": 150,
-          "height": 66
-        },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ]
     },
     {
       "id": "memory_internal_1",
       "provider": "memory_internal",
+      "name": "Memory (Internal)",
       "config": {
         "type": "memory_internal"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
       },
       "control": [
         {
           "classType": "memory",
           "from": "agent_rocketride_1"
         }
-      ],
-      "ui": {
-        "position": {
-          "x": 300,
-          "y": 360
-        },
-        "measured": {
-          "width": 150,
-          "height": 66
-        },
-        "nodeType": "default",
-        "formDataValid": true
-      }
+      ]
     },
     {
       "id": "tool_xtrace_memory_1",
       "provider": "tool_xtrace_memory",
+      "name": "xTrace Memory",
       "config": {
         "type": "tool_xtrace_memory",
-        "api_key": "${XTRACE_API_KEY}",
-        "org_id": "${XTRACE_ORG_ID}",
+        "api_key": "${ROCKETRIDE_XTRACE_API_KEY}",
+        "org_id": "${ROCKETRIDE_XTRACE_ORG_ID}",
         "user_id": "demo-user",
         "agent_id": "assistant",
         "search_mode": "compose"
+      },
+      "ui": {
+        "position": {
+          "x": 500,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
       },
       "control": [
         {
           "classType": "tool",
           "from": "agent_rocketride_1"
         }
-      ],
-      "ui": {
-        "position": {
-          "x": 500,
-          "y": 360
-        },
-        "measured": {
-          "width": 150,
-          "height": 66
-        },
-        "nodeType": "default",
-        "formDataValid": true
-      }
+      ]
     },
     {
       "id": "response_answers_1",
       "provider": "response_answers",
+      "name": "Return Answers",
       "config": {
         "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
       },
       "input": [
         {
           "lane": "answers",
           "from": "agent_rocketride_1"
         }
-      ],
-      "ui": {
-        "position": {
-          "x": 460,
-          "y": 200
-        },
-        "measured": {
-          "width": 150,
-          "height": 66
-        },
-        "nodeType": "default",
-        "formDataValid": true
-      }
+      ]
     }
   ],
-  "project_id": "27c2922f-53cd-4666-92a9-7f706a344c18",
-  "viewport": {
-    "x": 0,
-    "y": 0,
-    "zoom": 1
-  },
-  "version": 1
+  "project_id": "5ee7af1b-5b4b-479f-b10a-18ccc83d3136",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 2
 }
