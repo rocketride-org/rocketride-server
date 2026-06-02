@@ -108,7 +108,7 @@ Tool nodes (`classType: ["tool"]`) expose capabilities to agents via the control
 | ------------- | ------------------------------------- | -------------------------------------------------- |
 | `tool_tavily` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily/README.md) |
 
-The `tool_tavily` node pairs with `llm_nebius` and `agent_deepagent` to build agentic web-search pipelines.
+Like any tool node, `tool_tavily` is agent-agnostic: it attaches to any agent node's tool channel (e.g. `agent_deepagent`, `agent_langchain`, `agent_crewai`). Paired with an LLM provider such as `llm_nebius`, it builds agentic web-search pipelines.
 
 ## Internal
 

@@ -52,7 +52,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        apikey = str(cfg.get('apikey') or os.environ.get('TAVILY_API_KEY', '')).strip()
+        apikey = str(cfg.get('apikey') or '').strip() or os.environ.get('TAVILY_API_KEY', '').strip()
 
         if not apikey:
             error('tool_tavily: apikey is required — set it in node config or TAVILY_API_KEY env var')
@@ -71,7 +71,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or os.environ.get('TAVILY_API_KEY', '')).strip()
+            apikey = str(cfg.get('apikey') or '').strip() or os.environ.get('TAVILY_API_KEY', '').strip()
             if not apikey:
                 warning('apikey is required')
         except Exception as e:
