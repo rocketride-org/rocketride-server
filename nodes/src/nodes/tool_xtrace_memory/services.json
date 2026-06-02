@@ -2,7 +2,7 @@
 	"title": "xTrace Memory",
 	"protocol": "tool_xtrace_memory://",
 	"classType": ["tool"],
-	"capabilities": ["invoke", "experimental"],
+	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_xtrace_memory",
@@ -51,36 +51,42 @@
 		},
 		"xtrace_memory.base_url": {
 			"type": "string",
+			"optional": true,
 			"title": "Base URL",
 			"description": "xTrace Memory API base URL. Production by default; use https://api.staging.xtrace.ai for staging.",
 			"default": "https://api.production.xtrace.ai"
 		},
 		"xtrace_memory.user_id": {
 			"type": "string",
+			"optional": true,
 			"title": "Default user id",
 			"description": "Default scope key for ingest/recall (the user whose memory this agent reads & writes). Required for ingest unless the agent passes one per call.",
 			"default": ""
 		},
 		"xtrace_memory.agent_id": {
 			"type": "string",
+			"optional": true,
 			"title": "Agent id",
 			"description": "Optional agent scope stamped on ingested memories and AND-narrowed on recall.",
 			"default": ""
 		},
 		"xtrace_memory.app_id": {
 			"type": "string",
+			"optional": true,
 			"title": "App id",
 			"description": "Optional app scope stamped on ingested memories and AND-narrowed on recall.",
 			"default": ""
 		},
 		"xtrace_memory.group_ids": {
 			"type": "string",
+			"optional": true,
 			"title": "Group ids",
 			"description": "Comma-separated group ids (grp_...) for SHARED memory across users/agents. Tagged on ingest; read across the group on recall.",
 			"default": ""
 		},
 		"xtrace_memory.wait": {
 			"type": "boolean",
+			"optional": true,
 			"title": "Synchronous ingest",
 			"description": "When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background.",
 			"default": true,
@@ -91,6 +97,7 @@
 		},
 		"xtrace_memory.ingest_timeout": {
 			"type": "integer",
+			"optional": true,
 			"title": "Ingest timeout (s)",
 			"description": "Max seconds to wait/poll for an ingest job to reach a terminal state.",
 			"default": 30,
@@ -99,6 +106,7 @@
 		},
 		"xtrace_memory.extract_artifacts": {
 			"type": "boolean",
+			"optional": true,
 			"title": "Extract artifacts",
 			"description": "Opt into artifact extraction (the most expensive stage). Facts and episodes are always extracted.",
 			"default": false,
@@ -109,6 +117,7 @@
 		},
 		"xtrace_memory.search_mode": {
 			"type": "string",
+			"optional": true,
 			"title": "Recall mode",
 			"description": "'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only.",
 			"default": "compose",
@@ -119,6 +128,7 @@
 		},
 		"xtrace_memory.search_limit": {
 			"type": "integer",
+			"optional": true,
 			"title": "Recall limit",
 			"description": "Maximum number of memory rows to retrieve per recall.",
 			"default": 10,
