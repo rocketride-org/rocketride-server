@@ -68,7 +68,7 @@ To connect to a ClickHouse Cloud service:
 
 ## Ingestion
 
-Unlike the MySQL/PostgreSQL nodes, this node intentionally does **not** expose a pipeline ingestion (`answers`) lane. The shared auto-create-table helper builds tables with an auto-increment integer primary key and no table engine — neither of which exists in ClickHouse (tables require an explicit engine such as `MergeTree`) — so the inherited insert/auto-create path cannot work here. Create your tables in ClickHouse directly, and use this node for querying. (A ClickHouse-correct ingestion path can be added later as a separate feature.)
+Unlike the MySQL/PostgreSQL nodes, this node intentionally does **not** expose the ingestion/input `answers` lane (used for pipeline inserts). This removes only that input lane — **not** the `questions → answers` output lane used for querying, which still works. The shared auto-create-table helper builds tables with an auto-increment integer primary key and no table engine — neither of which exists in ClickHouse (tables require an explicit engine such as `MergeTree`) — so the inherited insert/auto-create path cannot work here. Create your tables in ClickHouse directly, and use this node for querying. (A ClickHouse-correct ingestion path can be added later as a separate feature.)
 
 ## Notes
 

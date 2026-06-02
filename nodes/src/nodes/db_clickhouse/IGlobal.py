@@ -106,4 +106,6 @@ class IGlobal(DatabaseGlobalBase):
         return max(1, min(20, value))
 
     def _db_description(self, config: Dict[str, Any]) -> str:
-        return config.get('db_description', '')
+        # A stored null (or non-string) must not violate the -> str contract.
+        value = config.get('db_description')
+        return value if isinstance(value, str) else ''

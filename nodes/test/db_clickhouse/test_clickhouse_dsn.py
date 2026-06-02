@@ -208,3 +208,24 @@ def test_build_url_tls_ipv6_keeps_explicit_port(g):
 def test_max_validation_attempts(g, cfg, expected):
     """max_attempts is parsed as int, clamped to 1..20, with a safe fallback of 5."""
     assert g._max_validation_attempts(cfg) == expected
+
+
+# ---------------------------------------------------------------------------
+# _db_description
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'cfg, expected',
+    [
+        ({}, ''),
+        ({'db_description': 'sales events'}, 'sales events'),
+        ({'db_description': None}, ''),
+        ({'db_description': 123}, ''),
+    ],
+)
+def test_db_description_always_returns_str(g, cfg, expected):
+    """_db_description honors its -> str contract, coercing null/non-string to ''."""
+    result = g._db_description(cfg)
+    assert isinstance(result, str)
+    assert result == expected
