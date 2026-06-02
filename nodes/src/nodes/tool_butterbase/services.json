@@ -1,17 +1,71 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Butterbase MCP Client",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "tool_butterbase://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
 	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
 	"path": "nodes.tool_butterbase",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
 	"prefix": "butterbase",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node (a URL renders via <img>)
+	//
 	"icon": "https://api.smithery.ai/servers/butterbase/butterbase/icon",
 	"documentation": "https://docs.butterbase.ai",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
 	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>."],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
 	"tile": ["Server: ${parameters.butterbase.serverName}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
 	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
 	"preconfig": {
 		"default": "default",
 		"profiles": {
@@ -23,6 +77,11 @@
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
 	"fields": {
 		"butterbase.api_key": {
 			"type": "string",
@@ -47,6 +106,11 @@
 			"default": "butterbase"
 		}
 	},
+	//
+	// Optional:
+	//		Test configuration for automated node testing. The API key is a
+	//		placeholder — config validation is tested here, not live API calls.
+	//
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -57,6 +121,10 @@
 			}
 		]
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
 	"shape": [
 		{
 			"section": "Pipe",
