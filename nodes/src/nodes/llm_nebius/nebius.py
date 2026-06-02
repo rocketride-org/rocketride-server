@@ -59,7 +59,11 @@ class Chat(ChatBase):
         bag['chat'] = self
 
     def is_retryable_error(self, error):
-        return isinstance(error, (RateLimitError, APIConnectionError))
+        # Always retry rate limits and connection errors; for anything else
+        # delegate to ChatBase, which also flags transient 5xx server errors.
+        if isinstance(error, (RateLimitError, APIConnectionError)):
+            return True
+        return super().is_retryable_error(error)
 
     def map_exception(self, error):
         if isinstance(error, AuthenticationError):
