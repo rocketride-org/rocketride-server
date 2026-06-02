@@ -138,6 +138,19 @@ class EasyOCRLoader(BaseLoader):
             logger.error(f'Failed to load EasyOCR: {e}')
             raise Exception(f'Failed to load EasyOCR: {e}')
 
+        # EasyOCR wraps its detector and recognizer in DataParallel, which
+        # scatters every batch across ALL visible GPUs via parallel_apply().
+        # Under concurrent server load this causes CUDA heap corruption and
+        # a FATAL crash (SIGABRT from parallel_apply worker threads). Pin both
+        # sub-models to the single allocated GPU by unwrapping DataParallel.
+        if use_gpu and gpu_index >= 0:
+            target = torch.device(f'cuda:{gpu_index}')
+            for attr in ('detector', 'recognizer'):
+                module = getattr(reader, attr, None)
+                if isinstance(module, torch.nn.DataParallel):
+                    setattr(reader, attr, module.module.to(target))
+                    logger.debug(f'EasyOCR {attr}: unwrapped DataParallel → cuda:{gpu_index}')
+
         model_bundle = {
             'reader': reader,
             'languages': languages,
