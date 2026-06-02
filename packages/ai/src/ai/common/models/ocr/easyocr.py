@@ -147,9 +147,16 @@ class EasyOCRLoader(BaseLoader):
             target = torch.device(f'cuda:{gpu_index}')
             for attr in ('detector', 'recognizer'):
                 module = getattr(reader, attr, None)
-                if isinstance(module, torch.nn.DataParallel):
+                if module is None:
+                    logger.info(f'EasyOCR reader has no {attr} attribute — skipping device pinning')
+                elif isinstance(module, torch.nn.DataParallel):
                     setattr(reader, attr, module.module.to(target))
                     logger.debug(f'EasyOCR {attr}: unwrapped DataParallel → cuda:{gpu_index}')
+                else:
+                    device = next(module.parameters()).device if hasattr(module, 'parameters') else 'unknown'
+                    logger.info(
+                        f'EasyOCR {attr}: not wrapped in DataParallel (type={type(module).__name__}, device={device})'
+                    )
 
         model_bundle = {
             'reader': reader,
