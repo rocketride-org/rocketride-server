@@ -95,6 +95,19 @@ def test_connection_params_strips_but_keeps_password_whitespace(g):
     assert p['password'] == '  pw  '
 
 
+def test_connection_params_coerces_none_to_defaults(g):
+    """Explicit null values fall back to defaults instead of raising AttributeError."""
+    p = g._connection_params({'host': None, 'user': None, 'password': None, 'database': None, 'table': None})
+    assert p == {
+        'host': 'localhost',
+        'user': 'default',
+        'password': '',
+        'database': 'default',
+        'table': 'table',
+        'tls': '',
+    }
+
+
 @pytest.mark.parametrize(
     'value, expected',
     [
@@ -150,6 +163,26 @@ def test_build_url_url_encodes_password(g):
     assert url == 'clickhouse+native://u:p%40s%2Fs%231@h/default'
 
 
+def test_build_url_url_encodes_user_and_database(g):
+    """User and database with reserved characters are URL-encoded, not just the password."""
+    url = g._build_connection_url(
+        g._connection_params({'host': 'h', 'user': 'a@b', 'password': 'p', 'database': 'db/1'})
+    )
+    assert url == 'clickhouse+native://a%40b:p@h/db%2F1'
+
+
+def test_build_url_tls_ipv6_bare_defaults_to_9440(g):
+    """A bracketed IPv6 literal with no port gets :9440 appended (brackets preserved)."""
+    url = g._build_connection_url(g._connection_params({'host': '[::1]', 'password': 'pw', 'tls': True}))
+    assert url == 'clickhouse+native://default:pw@[::1]:9440/default?secure=true'
+
+
+def test_build_url_tls_ipv6_keeps_explicit_port(g):
+    """A bracketed IPv6 literal that already has a port is left unchanged."""
+    url = g._build_connection_url(g._connection_params({'host': '[::1]:9000', 'password': 'pw', 'tls': True}))
+    assert url == 'clickhouse+native://default:pw@[::1]:9000/default?secure=true'
+
+
 # ---------------------------------------------------------------------------
 # _max_validation_attempts
 # ---------------------------------------------------------------------------
@@ -163,8 +196,15 @@ def test_build_url_url_encodes_password(g):
         ({'max_attempts': '7'}, 7),
         ({'max_attempts': 'nope'}, 5),
         ({'max_attempts': None}, 5),
+        # Out-of-range values are clamped to the documented 1..20 bounds.
+        ({'max_attempts': 0}, 1),
+        ({'max_attempts': -3}, 1),
+        ({'max_attempts': 1}, 1),
+        ({'max_attempts': 20}, 20),
+        ({'max_attempts': 100}, 20),
+        ({'max_attempts': '25'}, 20),
     ],
 )
 def test_max_validation_attempts(g, cfg, expected):
-    """max_attempts is read as int with a safe fallback of 5."""
+    """max_attempts is parsed as int, clamped to 1..20, with a safe fallback of 5."""
     assert g._max_validation_attempts(cfg) == expected

@@ -48,12 +48,14 @@ class IGlobal(DatabaseGlobalBase):
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
-        # URL-encode the password so special characters (e.g. @, /, #) don't
-        # break the SQLAlchemy connection string.
+        # URL-encode user / password / database so reserved characters
+        # (e.g. @, /, #, :) don't break the SQLAlchemy connection string.
         # Host may include an explicit port (e.g. localhost:5433); SQLAlchemy
         # handles host:port in the authority section correctly.
+        user = urllib.parse.quote_plus(params['user'])
         password = urllib.parse.quote_plus(params['password'])
-        return f'postgresql+psycopg2://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
+        database = urllib.parse.quote_plus(params['database'])
+        return f'postgresql+psycopg2://{user}:{password}@{params["host"]}/{database}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         try:

@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-ClickHouse node with two roles: pipeline node (natural-language queries via lanes) and tool node (agents call it directly). Connects over the native TCP protocol (default port 9000) via `clickhouse-driver`.
+ClickHouse node with two roles: pipeline node (natural-language queries via lanes) and tool node (agents call it directly). Connects over the native TCP protocol (default port 9000) via `clickhouse-driver`. This is a **query / read** node — it does not expose a pipeline ingestion (insert) lane (see [Ingestion](#ingestion)).
 
 ## Connections
 
@@ -27,9 +27,6 @@ ClickHouse node with two roles: pipeline node (natural-language queries via lane
 | `questions` | `table`   | Translate question → SQL → execute, return as table   |
 | `questions` | `text`    | Translate question → SQL → execute, return as text    |
 | `questions` | `answers` | Translate question → SQL → execute, return as answers |
-| `answers`   | —         | Parse structured data and insert into table           |
-
-Auto-creates the target table on first insert if it doesn't exist.
 
 ## As a tool
 
@@ -41,7 +38,7 @@ When connected to an agent, exposes three functions under the configured server 
 | `clickhouse.get_schema` | Returns tables, columns, types, and primary keys                         |
 | `clickhouse.get_sql`    | Natural language → SQL only — no execution                               |
 
-Only `SELECT` is permitted for queries. Insert operations use the `answers` lane.
+Only `SELECT` is permitted for queries.
 
 ## Configuration
 
@@ -69,7 +66,11 @@ To connect to a ClickHouse Cloud service:
 2. Configure the node with: **Host** = that hostname (no port needed — TLS port 9440 is assumed), **User** = `default`, **Password** = your service password, **Use TLS** = ON.
 3. Make sure your machine's IP is allowed under the service's **IP Access List** (or set it to "Anywhere" for testing).
 
+## Ingestion
+
+Unlike the MySQL/PostgreSQL nodes, this node intentionally does **not** expose a pipeline ingestion (`answers`) lane. The shared auto-create-table helper builds tables with an auto-increment integer primary key and no table engine — neither of which exists in ClickHouse (tables require an explicit engine such as `MergeTree`) — so the inherited insert/auto-create path cannot work here. Create your tables in ClickHouse directly, and use this node for querying. (A ClickHouse-correct ingestion path can be added later as a separate feature.)
+
 ## Notes
 
 - ClickHouse is column-oriented and has no foreign keys; the reflected schema therefore exposes columns and (best-effort) primary keys but no FK relationships.
-- The node is **read-only by default**: the natural-language path only ever runs `SELECT`. Direct write/DDL statements require the **Allow direct execution** toggle.
+- The node is **read-only by default**: the natural-language path only ever runs `SELECT`. Raw SQL (`QuestionType.EXECUTE`) is gated behind the **Allow direct execution** toggle and is intended only for trusted callers.

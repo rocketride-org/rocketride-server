@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["A processing component that takes structured table data and inserts it ", "into a ClickHouse database. Designed for analytical data ingestion, it ", "supports field mapping and basic configuration of connection credentials ", "and target tables. Ideal for storing processed results or structured outputs, ", "this component ensures reliable insertion of records into columnar storage."],
+	"description": ["A ClickHouse component that answers natural-language questions by translating ", "them into SQL and executing them against the database, returning rows as a table, ", "text, or structured answers. It also exposes an agent tool surface (get_data, ", "get_schema, get_sql) for question-to-SQL querying. Read-only by default; raw SQL ", "execution is available to trusted callers via the allow_execute option."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -71,7 +71,6 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"answers": [],
 		"questions": ["table", "text", "answers"]
 	},
 	//

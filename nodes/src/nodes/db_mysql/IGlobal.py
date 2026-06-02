@@ -48,10 +48,12 @@ class IGlobal(DatabaseGlobalBase):
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
-        # URL-encode the password so special characters (e.g. @, /, #) don't
-        # break the SQLAlchemy connection string.
+        # URL-encode user / password / database so reserved characters
+        # (e.g. @, /, #, :) don't break the SQLAlchemy connection string.
+        user = urllib.parse.quote_plus(params['user'])
         password = urllib.parse.quote_plus(params['password'])
-        return f'mysql+pymysql://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
+        database = urllib.parse.quote_plus(params['database'])
+        return f'mysql+pymysql://{user}:{password}@{params["host"]}/{database}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         try:

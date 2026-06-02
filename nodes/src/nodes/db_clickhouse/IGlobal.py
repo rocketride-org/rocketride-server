@@ -53,42 +53,57 @@ class IGlobal(DatabaseGlobalBase):
             # Config values may arrive as strings ('true'/'false'); 'false' must
             # not be truthy, so don't use bool() directly.
             tls = tls.strip().lower() in {'1', 'true', 'yes', 'on'}
+        # `(config.get(k) or default)` coerces an explicit JSON null (or empty
+        # string) to the intended default before .strip(), so a stored null
+        # can't raise AttributeError.
         return {
-            'host': config.get('host', 'localhost').strip(),
-            'user': config.get('user', 'default').strip(),
-            'password': config.get('password', ''),  # Do not strip — whitespace is valid in passwords
-            'database': config.get('database', 'default').strip(),
-            'table': config.get('table', 'table').strip(),
+            'host': (config.get('host') or 'localhost').strip(),
+            'user': (config.get('user') or 'default').strip(),
+            'password': config.get('password') or '',  # Do not strip — whitespace is valid in passwords
+            'database': (config.get('database') or 'default').strip(),
+            'table': (config.get('table') or 'table').strip(),
             # Normalised to a flag string so the params dict stays Dict[str, str];
             # consumed by _build_connection_url below.
             'tls': 'true' if tls else '',
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
-        # URL-encode the password so special characters (e.g. @, /, #) don't
-        # break the SQLAlchemy connection string.
+        # URL-encode user / password / database so reserved characters
+        # (e.g. @, /, #, :) can't break the SQLAlchemy connection string.
+        user = urllib.parse.quote_plus(params['user'])
         password = urllib.parse.quote_plus(params['password'])
+        database = urllib.parse.quote_plus(params['database'])
 
         host = params['host']
         if params.get('tls'):
             # TLS is required by managed services such as ClickHouse Cloud, whose
             # native-protocol TLS port is 9440. Default to it when the user did
             # not pin an explicit port, so a bare cloud hostname just works.
-            if ':' not in host:
+            # Port detection is bracket-aware: a bracketed IPv6 literal (e.g.
+            # [::1]) only carries a port when a ':' follows the closing ']'.
+            if host.startswith('['):
+                has_port = ']' in host and ':' in host.split(']', 1)[1]
+            else:
+                has_port = ':' in host
+            if not has_port:
                 host = f'{host}:9440'
             # ?secure=true is clickhouse-driver's own wire-level parameter name for
             # enabling TLS; it is unrelated to the node's "tls" config field.
-            return f'clickhouse+native://{params["user"]}:{password}@{host}/{params["database"]}?secure=true'
+            return f'clickhouse+native://{user}:{password}@{host}/{database}?secure=true'
 
         # Plaintext native (e.g. a local server); defaults to port 9000 when the
         # host carries no explicit port. SQLAlchemy handles host:port correctly.
-        return f'clickhouse+native://{params["user"]}:{password}@{host}/{params["database"]}'
+        return f'clickhouse+native://{user}:{password}@{host}/{database}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         try:
-            return int(config.get('max_attempts', 5))
+            value = int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             return 5
+        # Clamp to the documented 1..20 range (services.json minimum/maximum) so
+        # a value supplied directly (bypassing UI validation) can't request 0,
+        # negative, or excessive EXPLAIN-validation retries.
+        return max(1, min(20, value))
 
     def _db_description(self, config: Dict[str, Any]) -> str:
         return config.get('db_description', '')
