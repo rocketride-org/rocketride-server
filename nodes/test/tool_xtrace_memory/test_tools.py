@@ -147,8 +147,17 @@ def captured(monkeypatch):
     """Patch the HTTP layer; record the last call and return a canned body."""
     state = {'calls': [], 'response': {}}
 
-    def fake_request(method, url, headers, *, payload=None, params=None, **_kw):
-        state['calls'].append({'method': method, 'url': url, 'headers': headers, 'payload': payload, 'params': params})
+    def fake_request(method, url, headers, *, payload=None, params=None, **kw):
+        state['calls'].append(
+            {
+                'method': method,
+                'url': url,
+                'headers': headers,
+                'payload': payload,
+                'params': params,
+                'idempotent': kw.get('idempotent', True),
+            }
+        )
         return state['response']
 
     monkeypatch.setattr(IInstanceMod, '_request_with_retry', fake_request)
@@ -217,6 +226,8 @@ def test_remember_builds_payload_and_returns_terminal(captured):
     assert p['conv_id'] == 'conv_fixed'
     assert p['extract_artifacts'] is True
     assert p['group_ids'] == ['grp_x']
+    # ingest is a non-idempotent write — must not auto-retry on 5xx/timeout
+    assert call['idempotent'] is False
 
 
 def test_remember_requires_user_id(captured):

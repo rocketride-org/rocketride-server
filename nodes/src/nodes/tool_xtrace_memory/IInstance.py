@@ -141,7 +141,9 @@ class IInstance(IInstanceBase):
         params = {'wait': 'true'} if cfg.wait else None
 
         try:
-            job = _request_with_retry('POST', url, _headers(cfg), payload=payload, params=params)
+            # Ingest is a non-idempotent write (no idempotency key in the API),
+            # so don't retry on ambiguous 5xx/timeout — only on 429.
+            job = _request_with_retry('POST', url, _headers(cfg), payload=payload, params=params, idempotent=False)
         except RuntimeError as exc:
             return {'success': False, 'status': 'failed', 'error': str(exc)}
 
@@ -335,13 +337,18 @@ def _request_with_retry(
     params: Optional[Dict[str, Any]] = None,
     max_retries: int = 3,
     base_delay: float = 2.0,
+    idempotent: bool = True,
 ) -> Dict[str, Any]:
-    """Execute an HTTP request to the xTrace API with retry on 429/5xx/timeout."""
+    """HTTP request with bounded retries. 429 always retries (not yet processed);
+    5xx/timeout retry only when ``idempotent`` — ingest passes False to avoid
+    duplicate writes.
+    """
     for attempt in range(max_retries + 1):
         try:
             resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=35)
 
-            if resp.status_code == 429 or 500 <= resp.status_code < 600:
+            retryable = resp.status_code == 429 or (idempotent and 500 <= resp.status_code < 600)
+            if retryable:
                 if attempt < max_retries:
                     delay = base_delay * (2**attempt)
                     debug(
@@ -355,12 +362,12 @@ def _request_with_retry(
             return resp.json() if resp.content else {}
 
         except requests.exceptions.Timeout:
-            if attempt < max_retries:
+            if idempotent and attempt < max_retries:
                 delay = base_delay * (2**attempt)
                 debug(f'xtrace_memory: request timeout, retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
                 time.sleep(delay)
                 continue
-            raise RuntimeError('xtrace_memory: request timed out after all retries') from None
+            raise RuntimeError('xtrace_memory: request timed out') from None
 
         except requests.RequestException as exc:
             status = getattr(getattr(exc, 'response', None), 'status_code', None)
