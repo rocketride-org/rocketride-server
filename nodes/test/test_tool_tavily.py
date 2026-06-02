@@ -70,8 +70,12 @@ def _build_import_stubs():
 
     requests = MagicMock()
     requests.exceptions = MagicMock()
+    # Use real exception classes so IInstance's except clauses (which reference
+    # these) can actually catch them under the stub.
     requests.exceptions.Timeout = TimeoutError
+    requests.exceptions.ConnectionError = ConnectionError
     requests.exceptions.RequestException = Exception
+    requests.RequestException = Exception
 
     return {
         'rocketlib': rocketlib,
