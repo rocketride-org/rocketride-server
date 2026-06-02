@@ -25,8 +25,10 @@
       "name": "RocketRide Wave",
       "config": {
         "instructions": [
-          "You are a backend engineer agent. I'm using Butterbase as my backend. Call the butterbase_docs tool with topic \"overview\" to learn about the platform before doing anything else.",
-          "Use the butterbase tools to provision and manage the backend: create apps, define and apply schemas, configure auth and row-level rules, manage storage, and deploy functions.",
+          "You are a backend engineer agent. I'm using Butterbase as my backend. Call the butterbase_docs tool with topic \"overview\" first to learn the platform.",
+          "Provision and manage the backend with the butterbase tools: create the app, define and apply the schema, configure auth and row-level rules, seed data, and deploy functions/frontend. Developer Mode must be enabled on the app for create/modify operations to succeed.",
+          "Keep field names identical between the database schema and any frontend or code you generate — if the column is \"body\", read and write \"body\", not \"content\".",
+          "When you build a frontend for the app: use the ABSOLUTE data API base https://api.butterbase.ai/v1/<app_id>, and the auth base https://api.butterbase.ai/auth/<app_id> for signup/login/me (auth is NOT under /v1). Set is_published=true so anonymous visitors can read public rows, auto-login right after signup (email verification is not required to log in), and confirm the frontend deployment reaches status READY so the domain serves the real app.",
           "Inspect available butterbase tools before acting, prefer dry-run/preview where offered, and confirm destructive changes."
         ],
         "max_waves": 20,
@@ -147,7 +149,7 @@
       ]
     }
   ],
-  "project_id": "711db6c9-2a46-45e0-80b5-f9dbe0d6ce4a",
+  "project_id": "5bd9113f-6fba-485d-b01f-be37e8493598",
   "version": 1,
   "isLocked": false,
   "snapToGrid": true,
