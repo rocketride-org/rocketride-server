@@ -250,12 +250,26 @@ class EasyOCRLoader(BaseLoader):
         reader = models['reader']
         images = preprocessed['images']
         dimensions = preprocessed.get('dimensions', [])
+        device = models.get('device', 'cpu')
+
+        # Set the active CUDA device so tensors created inside readtext
+        # (e.g. input preprocessing, workspace buffers) land on the same GPU
+        # as the model weights that were pinned during load.
+        import contextlib
+        from ai.common.torch import torch
+
+        if device.startswith('cuda'):
+            gpu_id = int(device.split(':')[1]) if ':' in device else 0
+            cuda_ctx = torch.cuda.device(gpu_id)
+        else:
+            cuda_ctx = contextlib.nullcontext()
 
         results = []
 
         for idx, img_np in enumerate(images):
             try:
-                raw_results = reader.readtext(img_np)
+                with cuda_ctx:
+                    raw_results = reader.readtext(img_np)
 
                 # Convert EasyOCR format to standard box format
                 boxes = []
