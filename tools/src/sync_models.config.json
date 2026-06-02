@@ -430,6 +430,56 @@
 				// "MiniMax-M2.5": 204800,
 				// "MiniMax-M2.7": 204800
 			}
+		},
+		// ----------------------------------------------------------------------
+		// Nebius Token Factory — OpenAI-compatible hosting of open models
+		// (Llama, Qwen, DeepSeek, Mistral, ...). Uses openai.OpenAI with a
+		// custom base_url, same shape as DeepSeek.
+		// ----------------------------------------------------------------------
+		"llm_nebius": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_NEBIUS_KEY",
+			"module": "nebius",
+			"models_endpoint": "https://api.tokenfactory.nebius.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			// Nebius hosts a broad multi-vendor catalogue with namespaced IDs
+			// (meta-llama/..., Qwen/..., deepseek-ai/..., etc.). Discovery
+			// considers all of them; exclude non-chat families (embeddings,
+			// rerankers, vision/audio, safety guards). The chat smoke test is
+			// the final gate before any profile is added.
+			"model_filter": {
+				"include_prefixes": [],
+				"exclude_prefixes": [],
+				"exclude_patterns": [
+					"embed",
+					"Embedding",
+					"bge",
+					"e5-",
+					"rerank",
+					"Rerank",
+					"guard",
+					"Guard",
+					"vision",
+					"-VL",
+					"whisper",
+					"tts",
+					"audio",
+					"moderation"
+				]
+			},
+			// Protect our curated presets + custom so a no-key fallback run
+			// never deprecates them.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["llama-3-3-70b", "2026-10-09"],
+				["qwen3-235b", "2026-10-09"],
+				["deepseek-v3", "2026-10-09"]
+			],
+			"default_context_window": 131072,
+			"token_limit_overrides": {
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
