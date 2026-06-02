@@ -423,7 +423,10 @@
 				["minimax-m2-5-highspeed", "2026-10-09"],
 				["minimax-m2-7", "2026-10-09"],
 				["minimax-m2-7-highspeed", "2026-10-09"],
-				["minimax-m3", "2026-10-09"]
+				["minimax-m3", "2026-10-09"],
+				["minimax-m2-local", "2026-10-09"],
+				["minimax-m2-5-local", "2026-10-09"],
+				["minimax-m2-7-local", "2026-10-09"]
 			],
 			"token_limit_overrides": {
 				// MiniMax's /v1/models endpoint doesn't return context_window. Lock every
