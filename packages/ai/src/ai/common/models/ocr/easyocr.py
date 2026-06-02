@@ -160,6 +160,12 @@ class EasyOCRLoader(BaseLoader):
                     logger.info(
                         f'EasyOCR {attr}: not wrapped in DataParallel (type={type(module).__name__}, device={device})'
                     )
+            # Align reader.device so EasyOCR's internal img.to(self.device) calls
+            # send inputs to the same GPU as the pinned model weights. Without this,
+            # reader.device stays 'cuda' (→ cuda:0) regardless of which GPU was
+            # allocated, causing a device mismatch on any non-0 allocation.
+            reader.device = str(target)
+            logger.debug(f'EasyOCR reader.device aligned to {target}')
 
         model_bundle = {
             'reader': reader,
