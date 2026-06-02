@@ -12,6 +12,13 @@ This is a purpose-built clone of the generic `tool_mcp_client`, hardcoded to But
 Streamable HTTP endpoint so setup is a single API key. For other MCP servers, use
 `tool_mcp_client`.
 
+## Prerequisite: enable Developer Mode
+
+The Butterbase app must have **Developer Mode enabled** for the agent to create or modify
+resources (apps, schema, auth, etc.). Without it, write operations are rejected and the agent
+can only read. Turn it on in the Butterbase dashboard before running a pipeline that
+provisions a backend.
+
 ## Connection
 
 | | |

@@ -49,7 +49,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder
 	//
-	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>."],
+	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>.", "Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources (without it, write operations are rejected)."],
 	//
 	// Optional:
 	//		Rendering hints for the UI: which config fields to surface on the node tile
