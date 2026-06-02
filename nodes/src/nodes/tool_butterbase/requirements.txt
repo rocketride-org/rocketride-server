@@ -1,2 +1,0 @@
-# No external dependencies — the Streamable HTTP MCP client uses only the
-# Python standard library (urllib, json). Mirrors tool_mcp_client.

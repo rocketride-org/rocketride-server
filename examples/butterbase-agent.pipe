@@ -75,9 +75,10 @@
       "name": "Butterbase MCP Client",
       "config": {
         "type": "tool_butterbase",
-        "api_key": "${ROCKETRIDE_BUTTERBASE_API_KEY}",
+        "transport": "streamable-http",
         "endpoint": "https://api.butterbase.ai/mcp",
-        "serverName": "butterbase"
+        "serverName": "butterbase",
+        "bearer": "${ROCKETRIDE_BUTTERBASE_API_KEY}"
       },
       "ui": {
         "position": {
@@ -146,7 +147,7 @@
       ]
     }
   ],
-  "project_id": "217c9e93-9a48-403a-8349-7bfe9812702b",
+  "project_id": "711db6c9-2a46-45e0-80b5-f9dbe0d6ce4a",
   "version": 1,
   "isLocked": false,
   "snapToGrid": true,

@@ -1,0 +1,57 @@
+{
+	"title": "Butterbase MCP Client",
+	"protocol": "tool_butterbase://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_mcp_client",
+	"prefix": "butterbase",
+	"icon": "https://api.smithery.ai/servers/butterbase/butterbase/icon",
+	"documentation": "https://docs.butterbase.ai",
+	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>.", "This is a branded preset of the generic MCP Client (Streamable HTTP), so it shares the same implementation. Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources."],
+	"tile": ["Server: ${parameters.mcp_client.serverName}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "butterbase",
+		"profiles": {
+			"butterbase": {
+				"title": "Butterbase MCP server",
+				"serverName": "butterbase",
+				"transport": "streamable-http",
+				"endpoint": "https://api.butterbase.ai/mcp"
+			}
+		}
+	},
+	"fields": {
+		"mcp_client.bearer": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Butterbase API key (bb_sk_...). Create one in the <b>Butterbase dashboard</b>: <a href='https://dashboard.butterbase.ai' target='_blank'>dashboard.butterbase.ai</a> → API Keys. Sent as an Authorization Bearer token.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"mcp_client.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "Butterbase MCP Streamable HTTP endpoint. Defaults to the production server.",
+			"default": "https://api.butterbase.ai/mcp"
+		},
+		"mcp_client.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the discovered tools: <serverName>.<toolName> (example: butterbase.init_app).",
+			"default": "butterbase"
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Butterbase MCP Client",
+			"properties": ["type", "mcp_client.bearer", "mcp_client.endpoint", "mcp_client.serverName"]
+		}
+	]
+}
