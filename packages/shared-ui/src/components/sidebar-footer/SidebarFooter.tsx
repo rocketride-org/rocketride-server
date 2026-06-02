@@ -26,13 +26,31 @@
  *   - Cloud-UI (always cloud):  avatar trigger, Theme/Account/Billing/etc.
  */
 
-import React, { CSSProperties, useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
+import { useAnnouncements } from '../../hooks/useAnnouncements';
 import { PopupRow } from '../PopupRow';
 import { BxBookOpen, BxCog, BxChevronRight, BxCheck, BxLock } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
+
+// =============================================================================
+// ANNOUNCEMENT MARKDOWN
+// =============================================================================
+
+/** Custom component overrides for announcement markdown — compact sizing. */
+const annMarkdownComponents = {
+	img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+		<img {...props} style={{ maxWidth: 12, maxHeight: 12, display: 'inline-block', verticalAlign: 'middle' }} />
+	),
+	p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
+		<span {...props} style={{ display: 'block', margin: 0, fontSize: 10 }} />
+	),
+};
 
 // =============================================================================
 // TYPES
@@ -317,13 +335,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const flatMode = !!connectionStatus;
 
 	// ── Announcements ticker (flat mode) ────────────────────────────────────
-	const announcements: { title: string; body: string; linkText: string; linkUrl: string }[] = useMemo(
-		() => [
-			{ title: 'Agentic AI Hackathon - SF', body: 'Hack-with-the-Bay, Fri June 5.', linkText: 'Details & RSVP', linkUrl: 'https://luma.com/zemh10km' },
-			{ title: 'Connect with us', body: 'See what others are building.', linkText: 'Join Discord', linkUrl: 'https://discord.gg/9hr3tdZmEG' },
-		],
-		[]
-	);
+	const announcements = useAnnouncements();
 	const [tickerIndex, setTickerIndex] = useState(0);
 	const [tickerFade, setTickerFade] = useState(true);
 
@@ -343,24 +355,41 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	// ── Flat mode: no popup, render items directly in the footer ────────
 	if (flatMode) {
-		const current = announcements[tickerIndex];
+		const current = announcements[tickerIndex % Math.max(announcements.length, 1)];
 		return (
 			<div style={S.wrapper}>
-				{/* Separator above announcements */}
-				<div style={S.fullDivider} />
 				{/* Announcements ticker */}
-				<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
-					<div
-						style={{
-							opacity: tickerFade ? 1 : 0,
-							transition: 'opacity 300ms ease',
-						}}
-					>
-						<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{current.title}</div>
-						<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>{current.body}</div>
-						<a href={current.linkUrl} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>{current.linkText} &rarr;</a>
-					</div>
-				</div>
+				{current && (
+					<>
+						<div style={S.fullDivider} />
+						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+							<div
+								style={{
+									opacity: tickerFade ? 1 : 0,
+									transition: 'opacity 300ms ease',
+								}}
+							>
+								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
+								</div>
+								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
+								</div>
+								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+									{current.link ? (
+										<a href={current.link} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
+									) : <span />}
+									{announcements.length > 1 && (
+										<div style={{ display: 'flex', gap: 2 }}>
+											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
+											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
+										</div>
+									)}
+								</div>
+							</div>
+						</div>
+					</>
+				)}
 				{onOpenDocs && (
 					<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
 						<BxBookOpen size={16} />
@@ -407,18 +436,35 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	return (
 		<div style={S.wrapper}>
 			{/* ── Announcements ticker (popup mode) ────────────────────── */}
-			{!collapsed && announcements.length > 0 && (
-				<>
-					<div style={S.fullDivider} />
-					<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
-						<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
-							<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{announcements[tickerIndex].title}</div>
-							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>{announcements[tickerIndex].body}</div>
-							<a href={announcements[tickerIndex].linkUrl} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>{announcements[tickerIndex].linkText} &rarr;</a>
+			{!collapsed && announcements.length > 0 && (() => {
+				const current = announcements[tickerIndex % announcements.length];
+				return (
+					<>
+						<div style={S.fullDivider} />
+						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+							<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
+								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
+								</div>
+								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
+								</div>
+								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+									{current.link ? (
+										<a href={current.link} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
+									) : <span />}
+									{announcements.length > 1 && (
+										<div style={{ display: 'flex', gap: 2 }}>
+											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
+											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
+										</div>
+									)}
+								</div>
+							</div>
 						</div>
-					</div>
-				</>
-			)}
+					</>
+				);
+			})()}
 
 			{/* ── Documentation button ──────────────────────────────────── */}
 			{onOpenDocs && (

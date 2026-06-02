@@ -40,6 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { WorkspaceProvider } from '../../workspace/WorkspaceContext';
@@ -177,10 +178,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		mountedRef.current = true;
 
 		(async () => {
+			// Initialize and configure the auth provider (SaaS mode)
+			const authProvider = CloudAuthProvider.getInstance();
+			if (RR_ZITADEL_URL && RR_ZITADEL_CLIENT_ID) {
+				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID });
+			}
+
 			// Initialise the client singleton (idempotent)
 			cm.init({
 				uri: RR_APIKEY ? undefined : ROCKETRIDE_URI,
 				clientName: config.apps[0]?.id ?? 'shell-ui',
+				authProvider,
 				zitadelUrl: RR_ZITADEL_URL,
 				zitadelClientId: RR_ZITADEL_CLIENT_ID,
 			});

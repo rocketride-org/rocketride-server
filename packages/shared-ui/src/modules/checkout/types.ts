@@ -11,12 +11,40 @@
  */
 
 // =============================================================================
+// PLAN ACTION
+// =============================================================================
+
+/**
+ * Defines an alternative click action for a plan card.
+ *
+ * Plans without an action proceed to Stripe checkout as normal.
+ * Plans with an action navigate the user elsewhere instead (e.g. a
+ * GitHub repo for a free/OSS tier, or a mailto for enterprise sales).
+ */
+export interface PlanAction {
+	/** Action type: ``link`` opens a URL, ``mailto`` opens an email compose. */
+	type: 'link' | 'mailto';
+
+	/** Target URL (for ``link``) or email address (for ``mailto``). */
+	url: string;
+
+	/** Optional email subject line (only used when type is ``mailto``). */
+	subject?: string;
+
+	/** Button label shown on the card (e.g. "Get started", "Contact us"). */
+	label: string;
+}
+
+// =============================================================================
 // CHECKOUT PLAN
 // =============================================================================
 
 /**
- * A single subscription plan shown in the CheckoutModal plan picker.
- * Returned by the server's `prices` subcommand with pre-formatted display strings.
+ * A single plan card shown in the CheckoutModal plan picker.
+ *
+ * Plans come from Stripe via the server's ``prices`` subcommand.
+ * The ``action`` field (from Stripe price metadata) determines what
+ * happens when the user clicks the card — checkout or navigate away.
  */
 export interface CheckoutPlan {
 	/** Stripe price_* identifier. Passed to the checkout session creation. */
@@ -25,11 +53,28 @@ export interface CheckoutPlan {
 	/** Human-readable label shown in the plan selector (e.g. "Monthly", "Annual"). */
 	label: string;
 
-	/** Billing interval — used to sort and badge the options. */
-	interval: 'month' | 'year';
+	/** Billing interval — used for the toggle and to group plans. */
+	interval: 'month' | 'year' | '';
 
-	/** Display price string (e.g. "$29 / mo", "$276 / yr"). */
+	/** Display price string (e.g. "$29 / mo", "$276 / yr", "Free", "Custom"). */
 	amount: string;
+
+	/** Feature description lines from Stripe price metadata, displayed on the plan card. */
+	description?: string[] | null;
+
+	/**
+	 * Alternative click action. When present, clicking the card opens
+	 * a link or mailto instead of proceeding to Stripe checkout.
+	 * Plans without an action go through the normal checkout flow.
+	 */
+	action?: PlanAction | null;
+
+	/**
+	 * Sort order for card positioning.  Lower values appear first.
+	 * Spaced 100 apart by convention (Free=100, Starter=200, …, Enterprise=900).
+	 * Defaults to 500 when not set in Stripe metadata.
+	 */
+	order?: number;
 
 	/** Credit grants config from Stripe price metadata, or null. */
 	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
@@ -52,7 +97,7 @@ export interface CheckoutModalProps {
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 
-	/** Short description shown below the app name in the left column. */
+	/** Short description shown below the app name. */
 	appDescription?: string;
 
 	/** Stripe publishable key (pk_test_* or pk_live_*). */

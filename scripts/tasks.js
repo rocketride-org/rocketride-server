@@ -43,7 +43,7 @@ const registry = require('./lib/registry');
  * overlay apps are visible in the registry.
  */
 function getRemoteUiModules() {
-	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shell-ui');
+	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shell-ui' && n !== 'shared-ui');
 }
 
 // =============================================================================

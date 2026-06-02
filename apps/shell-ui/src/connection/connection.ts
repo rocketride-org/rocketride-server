@@ -41,12 +41,12 @@
 // =============================================================================
 
 import { RocketRideClient, ConnectResult } from 'rocketride';
-import type { ShellConnectionEventMap, IConnectionManager } from 'shared';
+import type { ShellConnectionEventMap, IConnectionManager, IAuthProvider } from 'shared';
 import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
-import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
 	SS_APP_ID,
@@ -73,9 +73,15 @@ export interface InitOptions {
 	env?: Record<string, unknown>;
 	/** Server connection mode (determines auth strategy). */
 	connectionMode?: ConnectionMode;
-	/** Zitadel OAuth2 authority URL (e.g. https://auth.example.com). */
+	/**
+	 * Auth provider for OAuth sign-in and callback handling.
+	 * When set, ConnectionManager delegates all OAuth operations to it
+	 * instead of managing PKCE flows internally.
+	 */
+	authProvider?: IAuthProvider;
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 authority URL. */
 	zitadelUrl?: string;
-	/** Zitadel OAuth2 client ID for the PKCE flow. */
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 client ID. */
 	zitadelClientId?: string;
 }
 
@@ -259,7 +265,10 @@ export class ConnectionManager implements IConnectionManager {
 			},
 		});
 
-		// Store OAuth config for startOAuth()
+		// Store auth provider (preferred) or legacy OAuth config
+		if (options?.authProvider) {
+			this.authProvider = options.authProvider;
+		}
 		this.zitadelUrl = options?.zitadelUrl ?? '';
 		this.zitadelClientId = options?.zitadelClientId ?? '';
 
@@ -281,29 +290,38 @@ export class ConnectionManager implements IConnectionManager {
 	// OAUTH — PKCE redirect flow (SaaS mode)
 	// =========================================================================
 
-	/** Zitadel config stored from init(). */
+	/** Auth provider for OAuth sign-in (set via init options). */
+	private authProvider: IAuthProvider | null = null;
+
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelUrl = '';
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelClientId = '';
 
 	/** Module-level flag to prevent double bootstrap under React StrictMode. */
 	private bootStarted = false;
 
 	/**
-	 * Redirect the browser to Zitadel for PKCE OAuth2 authorization.
+	 * Redirect the browser to the OAuth provider for authorization.
 	 *
-	 * Sets the session phase to 'authenticating' so the callback page
-	 * knows to exchange the authorization code.
+	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
+	 * the legacy PKCE flow if no auth provider is configured.
 	 */
 	public async startOAuth(): Promise<void> {
+		if (this.authProvider) {
+			await this.authProvider.signIn();
+			return;
+		}
+		// Legacy fallback — remove once all callers pass authProvider
 		if (!this.zitadelUrl || !this.zitadelClientId) {
 			console.error('[ConnectionManager] Zitadel not configured');
 			this.emit('shell:error', { error: new Error('Zitadel not configured') });
 			return;
 		}
+		const { generatePkce, buildAuthUrl } = await import('../util/pkce');
 		const { challenge } = await generatePkce();
 		const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
-		// Full-page redirect to the Zitadel OAuth2 authorize endpoint
-		window.location.href = url;
+		window.location.replace(url);
 	}
 
 	/**
