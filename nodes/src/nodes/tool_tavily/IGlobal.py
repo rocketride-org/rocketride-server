@@ -62,7 +62,11 @@ class IGlobal(IGlobalBase):
         raw_max = cfg.get('maxResults', 5)
         if raw_max is None:
             raw_max = 5
-        self.max_results = max(1, min(20, int(raw_max)))
+        try:
+            self.max_results = max(1, min(20, int(raw_max)))
+        except (ValueError, TypeError):
+            error(f'tool_tavily: maxResults must be a number, got {raw_max!r}; using default 5')
+            self.max_results = 5
         search_depth = str(cfg.get('searchDepth') or 'advanced').strip()
         self.search_depth = search_depth if search_depth in ('basic', 'advanced') else 'advanced'
         topic = str(cfg.get('topic') or 'general').strip()
