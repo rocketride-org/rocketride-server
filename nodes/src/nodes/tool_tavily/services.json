@@ -117,13 +117,13 @@
 	},
 	//
 	//	Test configuration for automated node testing.
-	//	Gated on TAVILY_API_KEY: the dynamic test builds a pipeline and runs the
+	//	Gated on ROCKETRIDE_TAVILY_KEY: the dynamic test builds a pipeline and runs the
 	//	node, which calls beginGlobal() and therefore needs a key, so the case is
 	//	skipped when the key is absent (e.g. CI without the secret). Node
 	//	structure is still validated by the keyless contract tests.
 	//
 	"test": {
-		"requires": ["TAVILY_API_KEY"],
+		"requires": ["ROCKETRIDE_TAVILY_KEY"],
 		"profiles": ["default"],
 		"outputs": [],
 		"cases": [

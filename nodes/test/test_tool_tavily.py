@@ -67,6 +67,9 @@ def _build_import_stubs():
 
     ai_common_utils = MagicMock()
     ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
+    # validate_public_url (SSRF guard) now lives in ai.common.utils; stub it as a
+    # pass-through here — its behaviour is covered by the ai package's own tests.
+    ai_common_utils.validate_public_url = lambda url: url
 
     requests = MagicMock()
     requests.exceptions = MagicMock()
@@ -101,16 +104,9 @@ for _name in _added_stubs:
     sys.modules.pop(_name, None)
 
 
-def test_shape_results_maps_tavily_fields(monkeypatch):
-    import socket
-
-    # _shape_results validates each URL via _validate_public_url -> socket.getaddrinfo;
-    # stub DNS so the test stays network-independent (offline CI safe).
-    monkeypatch.setattr(
-        socket,
-        'getaddrinfo',
-        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 0, '', ('93.184.216.34', 0))],
-    )
+def test_shape_results_maps_tavily_fields():
+    # validate_public_url is stubbed as a pass-through (see _build_import_stubs),
+    # so _shape_results stays network-independent here.
     body = {'results': [{'title': 'T', 'url': 'https://example.com', 'content': 'snippet', 'score': 0.9}]}
     shaped = mod._shape_results('q', body)
     assert shaped['success'] is True
@@ -120,24 +116,6 @@ def test_shape_results_maps_tavily_fields(monkeypatch):
     assert shaped['results'][0]['score'] == 0.9
     assert shaped['results'][0]['content'] == 'snippet'
     assert shaped['results'][0]['published_date'] is None
-
-
-def test_validate_public_url_rejects_loopback():
-    import pytest
-
-    with pytest.raises(ValueError):
-        mod._validate_public_url('http://127.0.0.1/secret')
-
-
-def test_validate_public_url_allows_public_https(monkeypatch):
-    import socket
-
-    monkeypatch.setattr(
-        socket,
-        'getaddrinfo',
-        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 0, '', ('93.184.216.34', 0))],
-    )
-    assert mod._validate_public_url('https://example.com/page') == 'https://example.com/page'
 
 
 def test_request_with_retry_retries_connection_error(monkeypatch):

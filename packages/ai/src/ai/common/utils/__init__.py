@@ -30,6 +30,7 @@ from .tool_args import (
     require_str,
     validate_tool_input_schema,
 )
+from .url_utils import validate_public_url
 
 __all__ = [
     'config_int',
@@ -45,5 +46,6 @@ __all__ = [
     'require_int',
     'require_str',
     'safe_str',
+    'validate_public_url',
     'validate_tool_input_schema',
 ]
