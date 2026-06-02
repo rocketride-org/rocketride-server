@@ -44,7 +44,7 @@
 	// Optional:
 	//		The icon to display in the UI for this node (a URL renders via <img>)
 	//
-	"icon": "https://api.smithery.ai/servers/butterbase/butterbase/icon",
+	"icon": "butterbase.svg",
 	"documentation": "https://docs.butterbase.ai",
 	//
 	// Optional:
