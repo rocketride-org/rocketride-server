@@ -153,7 +153,10 @@ class EasyOCRLoader(BaseLoader):
                     setattr(reader, attr, module.module.to(target))
                     logger.debug(f'EasyOCR {attr}: unwrapped DataParallel → cuda:{gpu_index}')
                 else:
-                    device = next(module.parameters()).device if hasattr(module, 'parameters') else 'unknown'
+                    first_param = (
+                        next(module.parameters(), None) if callable(getattr(module, 'parameters', None)) else None
+                    )
+                    device = first_param.device if first_param is not None else 'unknown'
                     logger.info(
                         f'EasyOCR {attr}: not wrapped in DataParallel (type={type(module).__name__}, device={device})'
                     )
