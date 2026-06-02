@@ -331,6 +331,9 @@ class AzureBlobStore(IStore):
             if name_pattern == '..':
                 raise StorageError(f'Path traversal detected: {name_pattern}')
 
+            def _part_len(path):
+                return path.count('/') + 1 if path else 0
+
             client = self._get_client()
             container_client = client.get_container_client(self._container)
 
@@ -338,7 +341,7 @@ class AzureBlobStore(IStore):
             seen_dirs = set() if recursive and include_dirs else None
 
             blob_prefix = self._get_blob_name(prefix) if prefix else self._prefix
-            prefix_part_len = blob_prefix.count('/') - self._prefix.count('/')
+            prefix_part_len = _part_len(blob_prefix) - _part_len(self._prefix)
 
             blob_list = (
                 await asyncio.to_thread(container_client.list_blobs, name_starts_with=blob_prefix)
@@ -552,5 +555,10 @@ class AzureBlobStore(IStore):
             # Ensure the resolved name stays within the prefix
             if not full_name.startswith(self._prefix + '/') and full_name != self._prefix:
                 raise StorageError(f'Path traversal detected: {path}')
-            return full_name
-        return posixpath.normpath(path)
+        else:
+            full_name = posixpath.normpath(path)
+            # This isn't a path traversal case, but let's still raise
+            # an error to ensure consistency across all providers
+            if full_name.startswith('../') or full_name == '..':
+                raise StorageError(f'Path traversal detected: {path}')
+        return full_name

@@ -328,9 +328,12 @@ class S3Store(IStore):
             if name_pattern == '..':
                 raise StorageError(f'Path traversal detected: {name_pattern}')
 
+            def _part_len(path):
+                return path.count('/') + 1 if path else 0
+
             client = self._get_client()
             key_prefix = self._get_key(prefix) if prefix else self._prefix
-            prefix_part_len = key_prefix.count('/') - self._prefix.count('/')
+            prefix_part_len = _part_len(key_prefix) - _part_len(self._prefix)
 
             def _match(name):
                 return not name_pattern or fnmatch(name, name_pattern)
@@ -591,5 +594,10 @@ class S3Store(IStore):
             # Ensure the resolved key stays within the prefix
             if not full_key.startswith(self._prefix + '/') and full_key != self._prefix:
                 raise StorageError(f'Path traversal detected: {path}')
-            return full_key
-        return posixpath.normpath(path)
+        else:
+            full_key = posixpath.normpath(path)
+            # This isn't a path traversal case, but let's still raise
+            # an error to ensure consistency across all providers
+            if full_key.startswith('../') or full_key == '..':
+                raise StorageError(f'Path traversal detected: {path}')
+        return full_key
