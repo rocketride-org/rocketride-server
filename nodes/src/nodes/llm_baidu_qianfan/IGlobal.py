@@ -79,6 +79,12 @@ class IGlobal(IGlobalBase):
                     messages=[{'role': 'user', 'content': VALIDATION_PROMPT}],
                     max_tokens=1,
                 )
+            except AuthenticationError:
+                warning('Baidu Qianfan API key is invalid or unauthorized.')
+                return
+            except RateLimitError:
+                warning('Baidu Qianfan rate limit exceeded while validating the configuration.')
+                return
             except APIStatusError as e:
                 status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
                 try:
@@ -98,12 +104,6 @@ class IGlobal(IGlobalBase):
                 except Exception:
                     message = self._format_error(status, None, None, str(e))
                 warning(message)
-                return
-            except AuthenticationError:
-                warning('Baidu Qianfan API key is invalid or unauthorized.')
-                return
-            except RateLimitError:
-                warning('Baidu Qianfan rate limit exceeded while validating the configuration.')
                 return
             except APIConnectionError:
                 warning('Could not connect to Baidu Qianfan. Check the configured base URL and network access.')

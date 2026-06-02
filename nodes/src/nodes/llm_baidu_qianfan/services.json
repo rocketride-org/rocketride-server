@@ -140,7 +140,12 @@
 		"baidu_qianfan.serverbase": {
 			"type": "string",
 			"title": "Base URL",
-			"description": "Qianfan OpenAI-compatible API base URL"
+			"description": "Qianfan OpenAI-compatible API endpoint.",
+			"default": "https://qianfan.baidubce.com/v2",
+			"enum": [
+				["https://qianfan.baidubce.com/v2", "China (default)"],
+				["https://api.baiduqianfan.ai/v1", "International"]
+			]
 		},
 		"baidu_qianfan.ernie-4-5-turbo-128k": {
 			"object": "ernie-4-5-turbo-128k",
