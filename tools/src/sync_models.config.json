@@ -430,68 +430,6 @@
 				// "MiniMax-M2.5": 204800,
 				// "MiniMax-M2.7": 204800
 			}
-		},
-		// ----------------------------------------------------------------------
-		// Nebius Token Factory — OpenAI-compatible hosting of open models
-		// (Llama, Qwen, DeepSeek, Mistral, ...). Uses openai.OpenAI with a
-		// custom base_url, same shape as DeepSeek.
-		// ----------------------------------------------------------------------
-		"llm_nebius": {
-			"handler": "cloud",
-			"env_var": "ROCKETRIDE_NEBIUS_KEY",
-			"module": "nebius",
-			"models_endpoint": "https://api.tokenfactory.nebius.com/v1/models",
-			"auth_header": "Authorization",
-			"auth_prefix": "Bearer",
-			"smoke_test": "chat",
-			// Discover only from the Nebius API (never the OpenRouter fallback):
-			// OpenRouter lists models Nebius does not host and its IDs do not map
-			// to Nebius' namespaced IDs, and fallback-discovered models bypass the
-			// smoke test. Same stance as embedding_openai.
-			"use_openrouter": false,
-			// Nebius hosts a broad multi-vendor catalogue with namespaced IDs
-			// (meta-llama/..., Qwen/..., deepseek-ai/..., etc.). Discovery
-			// considers all of them; exclude non-chat families (embeddings,
-			// rerankers, vision/audio, safety guards). exclude_patterns is a
-			// case-sensitive substring match (base.py), so list both cases for
-			// families that vary. The chat smoke test is the final gate.
-			"model_filter": {
-				"include_prefixes": [],
-				"exclude_prefixes": [],
-				"exclude_patterns": [
-					"embed",
-					"Embed",
-					"Embedding",
-					"bge",
-					"e5-",
-					"rerank",
-					"Rerank",
-					"guard",
-					"Guard",
-					"vision",
-					"Vision",
-					"-VL",
-					"whisper",
-					"Whisper",
-					"tts",
-					"TTS",
-					"audio",
-					"Audio",
-					"moderation",
-					"Moderation"
-				]
-			},
-			// Protect our curated presets + custom so a no-key fallback run
-			// never deprecates them.
-			"protected_profiles": [
-				["custom", "2126-04-09"],
-				["llama-3-3-70b", "2026-10-09"],
-				["qwen3-235b", "2026-10-09"],
-				["deepseek-v3", "2026-10-09"]
-			],
-			"default_context_window": 131072,
-			"token_limit_overrides": {
-			}
 		}
 	},
 	// --------------------------------------------------------------------------
