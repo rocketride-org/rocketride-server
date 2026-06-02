@@ -49,32 +49,6 @@
       ]
     },
     {
-      "id": "llm_openai_1",
-      "provider": "llm_openai",
-      "name": "OpenAI",
-      "config": {
-        "profile": "openai-4o",
-        "openai-4o": {
-          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
-        },
-        "parameters": {}
-      },
-      "ui": {
-        "position": {
-          "x": 110,
-          "y": 360
-        },
-        "nodeType": "default",
-        "formDataValid": true
-      },
-      "control": [
-        {
-          "classType": "llm",
-          "from": "agent_rocketride_1"
-        }
-      ]
-    },
-    {
       "id": "memory_internal_1",
       "provider": "memory_internal",
       "name": "Memory (Internal)",
@@ -101,12 +75,17 @@
       "provider": "tool_xtrace_memory",
       "name": "xTrace Memory",
       "config": {
-        "type": "tool_xtrace_memory",
         "api_key": "${ROCKETRIDE_XTRACE_API_KEY}",
+        "group_ids": "",
         "org_id": "${ROCKETRIDE_XTRACE_ORG_ID}",
+        "show_advanced": false,
+        "type": "tool_xtrace_memory",
         "user_id": "demo-user",
         "agent_id": "assistant",
-        "search_mode": "compose"
+        "search_mode": "compose",
+        "parameters": {
+          "google": {}
+        }
       },
       "ui": {
         "position": {
@@ -144,6 +123,35 @@
           "from": "agent_rocketride_1"
         }
       ]
+    },
+    {
+      "id": "llm_anthropic_1",
+      "provider": "llm_anthropic",
+      "name": "Anthropic",
+      "config": {
+        "profile": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "name": "Anthropic",
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 100,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ]
     }
   ],
   "project_id": "5ee7af1b-5b4b-479f-b10a-18ccc83d3136",
@@ -154,5 +162,5 @@
     10,
     10
   ],
-  "docRevision": 2
+  "docRevision": 13
 }
