@@ -37,6 +37,10 @@ import os
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, error, warning
 
+# Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
+# and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
+TAVILY_API_KEY_ENV = 'ROCKETRIDE_TAVILY_KEY'
+
 
 class IGlobal(IGlobalBase):
     """Global state for tool_tavily."""
@@ -52,10 +56,10 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        apikey = str(cfg.get('apikey') or '').strip() or os.environ.get('TAVILY_API_KEY', '').strip()
+        apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(TAVILY_API_KEY_ENV, '').strip()
 
         if not apikey:
-            error('tool_tavily: apikey is required — set it in node config or TAVILY_API_KEY env var')
+            error(f'tool_tavily: apikey is required — set it in node config or the {TAVILY_API_KEY_ENV} env var')
             raise ValueError('tool_tavily: apikey is required')
 
         self.apikey = apikey
@@ -75,7 +79,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or '').strip() or os.environ.get('TAVILY_API_KEY', '').strip()
+            apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(TAVILY_API_KEY_ENV, '').strip()
             if not apikey:
                 warning('apikey is required')
         except Exception as e:

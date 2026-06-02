@@ -31,17 +31,14 @@ Exposes ``tavily`` as a @tool_function for real-time web search via the Tavily A
 
 from __future__ import annotations
 
-import ipaddress
-import socket
 import time
 from typing import Any, Dict
-from urllib.parse import urlparse
 
 import requests
 
 from rocketlib import IInstanceBase, tool_function, debug
 
-from ai.common.utils import normalize_tool_input
+from ai.common.utils import normalize_tool_input, validate_public_url
 
 from .IGlobal import IGlobal
 
@@ -81,7 +78,7 @@ class IInstance(IInstanceBase):
                 },
                 'time_range': {
                     'type': 'string',
-                    'enum': ['day', 'week', 'month', 'year'],
+                    'enum': sorted(VALID_TIME_RANGES),
                     'description': 'Restrict results to a recent time window.',
                 },
                 'include_domains': {
@@ -177,7 +174,7 @@ def _shape_results(query: str, body: Dict[str, Any]) -> Dict[str, Any]:
         if not url:
             continue
         try:
-            url = _validate_public_url(url)
+            url = validate_public_url(url)
         except ValueError:
             continue
         results.append(
@@ -190,29 +187,6 @@ def _shape_results(query: str, body: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
     return {'success': True, 'query': query, 'num_results': len(results), 'results': results}
-
-
-def _validate_public_url(raw_url: str) -> str:
-    """Reject private/loopback/reserved hosts to prevent SSRF (clone of search_exa)."""
-    parsed = urlparse(raw_url)
-    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
-        raise ValueError(f'Tavily returned an invalid URL: {raw_url}')
-    try:
-        addrinfo = socket.getaddrinfo(parsed.hostname, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as e:
-        raise ValueError(f'Tavily returned an unresolved URL host: {parsed.hostname}') from e
-    for _, _, _, _, sockaddr in addrinfo:
-        ip = ipaddress.ip_address(sockaddr[0])
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise ValueError(f'Tavily returned a blocked URL host: {parsed.hostname}')
-    return raw_url
 
 
 def _request_with_retry(

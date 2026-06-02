@@ -13,7 +13,7 @@ Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes â€
 Set your Tavily API key via the node config field **API Key** or the environment variable:
 
 ```bash
-TAVILY_API_KEY=tvly-...
+ROCKETRIDE_TAVILY_KEY=tvly-...
 ```
 
 ## Config fields
