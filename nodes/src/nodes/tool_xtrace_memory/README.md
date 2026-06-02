@@ -61,8 +61,17 @@ instructions. Point several agents (in one pipe or across runs) at the same `org
 | `search_mode` | no | `compose` (ready-to-inject context) or `retrieve` (rows only). |
 | `search_limit` | no | Max rows per recall. |
 
-Credentials come from **app.xtrace.ai → Settings → API Keys**. Every request sends
-`x-api-key` + `X-Org-Id`. Never commit keys — use node config (encrypted) or env vars.
+## Where to get your credentials
+
+⚠️ Get the API key from the **Developer Portal: [app.xtrace.ai](https://app.xtrace.ai) →
+Settings → API Keys** — copy your **Org id** and create an **API key (`xtk_…`)** there.
+
+Do **not** look in **mem.xtrace.ai** ("memhub"): that's the consumer app for connecting MCP
+clients (Claude, Cursor, ChatGPT) to xTrace over **OAuth**, and it has **no API key**. This
+node uses the REST API with a key, not the OAuth MCP server, so you need the Developer Portal.
+
+Every request sends `x-api-key` + `X-Org-Id`. Never commit keys — use node config (encrypted)
+or env vars.
 
 > Note: the xTrace Python SDK is on their roadmap; this node talks to the documented HTTP
 > API directly.
