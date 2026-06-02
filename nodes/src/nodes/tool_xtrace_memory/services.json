@@ -37,7 +37,7 @@
 		"xtrace_memory.api_key": {
 			"type": "string",
 			"title": "API Key",
-			"description": "xTrace API key (xtk_...). Get it from the <b>Developer Portal</b>: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys. Note: it is NOT in mem.xtrace.ai (that's the memhub/MCP app, which uses OAuth and has no API key).",
+			"description": "xTrace API key (xtk_...). Get it from the <b>Developer Portal</b>: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys (not in mem.xtrace.ai).",
 			"default": "",
 			"secure": true,
 			"ui": {
