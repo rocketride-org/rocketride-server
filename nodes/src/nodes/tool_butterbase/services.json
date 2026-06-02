@@ -1,8 +1,8 @@
 {
-	"title": "Butterbase",
+	"title": "Butterbase MCP Client",
 	"protocol": "tool_butterbase://",
 	"classType": ["tool"],
-	"capabilities": ["invoke", "experimental"],
+	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_butterbase",
@@ -16,7 +16,7 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"title": "Butterbase",
+				"title": "Butterbase MCP Client",
 				"serverName": "butterbase",
 				"endpoint": "https://api.butterbase.ai/mcp",
 				"api_key": ""
@@ -60,7 +60,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Butterbase",
+			"title": "Butterbase MCP Client",
 			"properties": ["type", "butterbase.api_key", "butterbase.endpoint", "butterbase.serverName"]
 		}
 	]
