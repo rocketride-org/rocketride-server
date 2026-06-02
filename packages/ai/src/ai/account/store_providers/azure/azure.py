@@ -325,11 +325,12 @@ class AzureBlobStore(IStore):
         def _match(name):
             return not name_pattern or fnmatch(name, name_pattern)
 
+        if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
+            raise StorageError(f'Invalid name pattern: {name_pattern}')
+        if name_pattern == '..':
+            raise StorageError(f'Path traversal detected: {name_pattern}')
+
         try:
-            if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
-                raise StorageError(f'Invalid name pattern: {name_pattern}')
-            if name_pattern == '..':
-                raise StorageError(f'Path traversal detected: {name_pattern}')
 
             def _part_len(path):
                 return path.count('/') + 1 if path else 0
@@ -342,13 +343,14 @@ class AzureBlobStore(IStore):
 
             blob_prefix = self._get_blob_name(prefix) if prefix else self._prefix
             prefix_part_len = _part_len(blob_prefix) - _part_len(self._prefix)
+            list_prefix = f'{blob_prefix.rstrip("/")}/' if blob_prefix else ''
 
             blob_list = (
-                await asyncio.to_thread(container_client.list_blobs, name_starts_with=blob_prefix)
+                await asyncio.to_thread(container_client.list_blobs, name_starts_with=list_prefix)
                 if recursive
                 else await asyncio.to_thread(
                     container_client.walk_blobs,
-                    name_starts_with=f'{blob_prefix}/' if blob_prefix else '',
+                    name_starts_with=list_prefix,
                     delimiter='/',
                 )
             )

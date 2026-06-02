@@ -313,6 +313,12 @@ class S3Store(IStore):
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from S3: {e}') from e
 
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     async def list_entries(
         self,
         prefix: str = '',
