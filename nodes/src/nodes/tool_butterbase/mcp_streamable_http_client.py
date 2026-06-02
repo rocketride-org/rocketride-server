@@ -78,16 +78,23 @@ class McpToolDef:
     inputSchema: Dict[str, Any]
 
 
+# Defaults (avoid magic constants in the client signature).
+_MCP_PROTOCOL_VERSION = '2025-11-25'
+_CLIENT_NAME = 'RocketRideButterbaseMcpClient'
+_CLIENT_VERSION = '0.1.0'
+_DEFAULT_TIMEOUT_S = 20.0
+
+
 class McpStreamableHttpClient:
     def __init__(
         self,
         *,
         endpoint: str,
         headers: Optional[Dict[str, str]] = None,
-        protocol_version: str = '2025-11-25',
-        client_name: str = 'RocketRideButterbaseMcpClient',
-        client_version: str = '0.1.0',
-        timeout_s: float = 20.0,
+        protocol_version: str = _MCP_PROTOCOL_VERSION,
+        client_name: str = _CLIENT_NAME,
+        client_version: str = _CLIENT_VERSION,
+        timeout_s: float = _DEFAULT_TIMEOUT_S,
     ) -> None:
         """Create an MCP streamable HTTP client."""
         self._endpoint = str(endpoint).strip()

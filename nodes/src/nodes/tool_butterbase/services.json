@@ -86,7 +86,7 @@
 		"butterbase.api_key": {
 			"type": "string",
 			"title": "API Key",
-			"description": "Butterbase API key (bb_sk_...). Create one in the Butterbase dashboard. Sent as an Authorization Bearer token.",
+			"description": "Butterbase API key (bb_sk_...). Create one in the <b>Butterbase dashboard</b>: <a href='https://dashboard.butterbase.ai' target='_blank'>dashboard.butterbase.ai</a> → API Keys (or via the generate_service_key tool). Sent as an Authorization Bearer token.",
 			"default": "",
 			"secure": true,
 			"ui": {
