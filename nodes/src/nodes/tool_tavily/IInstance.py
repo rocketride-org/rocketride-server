@@ -244,13 +244,17 @@ def _request_with_retry(
             resp.raise_for_status()
             return resp.json()
 
-        except requests.exceptions.Timeout:
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            # Transient transport failures (timeouts, dropped/refused connections)
+            # are retried with the same backoff as 429/5xx responses.
             if attempt < max_retries:
                 delay = base_delay * (2**attempt)
-                debug(f'Tavily request timeout, retrying in {delay}s ({attempt + 1}/{max_retries})')
+                debug(
+                    f'Tavily transport error ({type(exc).__name__}), retrying in {delay}s ({attempt + 1}/{max_retries})'
+                )
                 time.sleep(delay)
                 continue
-            raise RuntimeError('Tavily: request timed out after all retries') from None
+            raise RuntimeError(f'Tavily: {type(exc).__name__} after all retries') from None
         except requests.RequestException as exc:
             status = getattr(getattr(exc, 'response', None), 'status_code', None)
             detail = f' (HTTP {status})' if status else ''

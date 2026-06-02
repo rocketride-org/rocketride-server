@@ -134,3 +134,30 @@ def test_validate_public_url_allows_public_https(monkeypatch):
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 0, '', ('93.184.216.34', 0))],
     )
     assert mod._validate_public_url('https://example.com/page') == 'https://example.com/page'
+
+
+def test_request_with_retry_retries_connection_error(monkeypatch):
+    """A transient ConnectionError is retried (not treated as fatal) and then succeeds."""
+    calls = {'n': 0}
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'results': []}
+
+    def _fake_post(*a, **k):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise mod.requests.exceptions.ConnectionError('connection refused')
+        return _Resp()
+
+    monkeypatch.setattr(mod.requests, 'post', _fake_post)
+    monkeypatch.setattr(mod.time, 'sleep', lambda *_a, **_k: None)
+
+    body = mod._request_with_retry(url='https://api.tavily.com/search', headers={}, payload={}, base_delay=0.0)
+    assert body == {'results': []}
+    assert calls['n'] == 2  # first attempt raised, retry succeeded
