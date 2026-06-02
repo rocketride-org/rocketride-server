@@ -18,6 +18,7 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -375,14 +376,12 @@ class TestMemoryStore(BaseStoreTest):
         return MemoryStore()
 
 
-# ===========================================================================
+# ============================================================================
 # S3 Tests
 # ============================================================================
 
 
-class TestS3Store(BaseStoreTest):
-    """Test S3 storage with real boto3."""
-
+class BaseS3StoreTest:
     @pytest.fixture
     def test_config(self):
         return {
@@ -396,22 +395,37 @@ class TestS3Store(BaseStoreTest):
         }
 
     @pytest.fixture
-    def temp_dir(self, test_config):
-        """Create a temporary key prefix in the MinIO bucket, clean up after test."""
+    def client(self, test_config):
+        """Create S3 client for direct bucket operations (setup/teardown)."""
         if not os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'):
             pytest.skip('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID not configured for S3 tests')
 
         import boto3
-        from botocore.exceptions import ClientError
-        import uuid
 
-        client = boto3.client(
+        return boto3.client(
             's3',
             endpoint_url=test_config['secret_key']['endpoint'],
             aws_access_key_id=test_config['secret_key']['access_key_id'],
             aws_secret_access_key=test_config['secret_key']['secret_access_key'],
             region_name=test_config['secret_key']['region'],
         )
+
+    def _clean_bucket(self, client, bucket, prefix=''):
+        """Delete all objects in the bucket."""
+        paginator = client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            objects = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
+            if objects:
+                client.delete_objects(Bucket=bucket, Delete={'Objects': objects})
+
+
+class TestS3Store(BaseS3StoreTest, BaseStoreTest):
+    """Test S3 storage with real boto3."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create S3 store instance."""
+        from botocore.exceptions import ClientError
 
         try:
             client.head_bucket(Bucket=test_config['bucket'])
@@ -420,20 +434,38 @@ class TestS3Store(BaseStoreTest):
                 raise e
             client.create_bucket(Bucket=test_config['bucket'])
 
-        yield f'tmp_{uuid.uuid4().hex[:8]}'
+        prefix = f'tmp_{uuid4().hex[:8]}'
+        url = f's3://{test_config["bucket"]}/{prefix}'
+        secret_key = json.dumps(test_config['secret_key'])
 
-        paginator = client.get_paginator('list_objects_v2')
-        for page in paginator.paginate(Bucket=test_config['bucket'], Prefix='tmp_'):  # cleanup all tmp_-s to be safe
-            objects = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
-            if objects:
-                client.delete_objects(Bucket=test_config['bucket'], Delete={'Objects': objects})
+        yield S3Store(url, secret_key)
+
+        self._clean_bucket(client, test_config['bucket'], prefix='tmp_')  # Clean up all tmp_-s to be safe
+
+
+class TestS3StoreNoPrefix(BaseS3StoreTest, BaseStoreTest):
+    """Test S3 storage with no prefix (root of bucket)."""
 
     @pytest.fixture
-    def store(self, test_config, temp_dir):
+    def store(self, test_config, client):
         """Create S3 store instance."""
-        url = f's3://{test_config["bucket"]}/{temp_dir}'
+        bucket_prefix = f'{test_config["bucket"]}-tmp-'
+        bucket = f'{bucket_prefix}{uuid4().hex[:8]}'
+
+        client.create_bucket(Bucket=bucket)
+
+        url = f's3://{bucket}'
         secret_key = json.dumps(test_config['secret_key'])
-        return S3Store(url, secret_key)
+
+        yield S3Store(url, secret_key)
+
+        # Delete all temp buckets to be safe
+        for b in client.list_buckets().get('Buckets', []):
+            name = b.get('Name')
+            if not name or not name.startswith(bucket_prefix):
+                continue
+            self._clean_bucket(client, name)
+            client.delete_bucket(Bucket=name)
 
 
 # ===========================================================================
@@ -441,9 +473,7 @@ class TestS3Store(BaseStoreTest):
 # ============================================================================
 
 
-class TestAzureBlobStore(BaseStoreTest):
-    """Test Azure Blob storage with real Azure SDK."""
-
+class BaseAzureStoreTest:
     @pytest.fixture
     def test_config(self):
         return {
@@ -458,34 +488,58 @@ class TestAzureBlobStore(BaseStoreTest):
         }
 
     @pytest.fixture
-    def temp_dir(self, test_config):
-        """Create a temporary blob prefix in the Azure container, clean up after test."""
+    def client(self, test_config):
+        """Create Azure BlobServiceClient for direct container/blob operations (setup/teardown)."""
         if not os.getenv('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME'):
             pytest.skip('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME not configured')
 
-        import uuid
         from azure.storage.blob import BlobServiceClient
+
+        return BlobServiceClient.from_connection_string(test_config['connection_string'])
+
+
+class TestAzureBlobStore(BaseAzureStoreTest, BaseStoreTest):
+    """Test Azure Blob storage with a prefix inside a shared container."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create Azure Blob storage instance."""
         from azure.core.exceptions import ResourceExistsError
 
-        container_client = BlobServiceClient.from_connection_string(
-            test_config['connection_string']
-        ).get_container_client(test_config['container'])
+        container_client = client.get_container_client(test_config['container'])
         try:
             container_client.create_container()
         except ResourceExistsError as e:
             if e.error_code != 'ContainerAlreadyExists':
                 raise e
 
-        yield f'tmp_{uuid.uuid4().hex[:8]}'
+        prefix = f'tmp_{uuid4().hex[:8]}'
+        secret_key = json.dumps({'connection_string': test_config['connection_string']})
+
+        yield AzureBlobStore(f'azure://{test_config["container"]}/{prefix}', secret_key)
 
         for blob in container_client.list_blobs(name_starts_with='tmp_'):  # cleanup all tmp_-s to be safe
             container_client.delete_blob(blob.name)
 
+
+class TestAzureBlobStoreNoPrefix(BaseAzureStoreTest, BaseStoreTest):
+    """Test Azure Blob storage with no prefix (root of container)."""
+
     @pytest.fixture
-    def store(self, test_config, temp_dir):
-        """Create Azure Blob storage instance connected to local Azurite."""
+    def store(self, test_config, client):
+        """Create Azure Blob storage instance."""
+        container_prefix = f'{test_config["container"]}-tmp-'
+        container_name = f'{container_prefix}{uuid4().hex[:8]}'
+
+        client.create_container(container_name)
+
         secret_key = json.dumps({'connection_string': test_config['connection_string']})
-        return AzureBlobStore(f'azure://{test_config["container"]}/{temp_dir}', secret_key)
+
+        yield AzureBlobStore(f'azure://{container_name}', secret_key)
+
+        # Delete all temp containers to be safe
+        for c in client.list_containers(name_starts_with=container_prefix):
+            client.delete_container(c['name'])
 
 
 # ============================================================================
