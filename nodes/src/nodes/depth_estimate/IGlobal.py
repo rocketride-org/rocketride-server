@@ -25,9 +25,17 @@ class IGlobal(IGlobalBase):
 
         bag = self.IEndpoint.endpoint.bag
 
+        # Pull node config once; reuse for all derived knobs.
+        node_cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+
+        # Stash max_edge on self for diagnostics; the estimator reads it from
+        # config too (single source of truth).
+        try:
+            self.max_edge = int(node_cfg.get('maxEdge', 1024))
+        except (TypeError, ValueError):
+            self.max_edge = 1024
+
         self.estimator = DepthEstimator(self.glb.logicalType, self.glb.connConfig, bag)
-        self.interval = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig).get('interval', 1)
-        self.max_video_size_bytes = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig).get('maxVideoSizeMB', 500) * 1024 * 1024
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

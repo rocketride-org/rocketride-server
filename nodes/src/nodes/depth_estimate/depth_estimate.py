@@ -11,28 +11,46 @@ depends(requirements)
 
 from typing import Any, Dict, Tuple
 from ai.common.config import Config
+from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
+
+
+DEFAULT_MODEL = 'depth-anything/Depth-Anything-V2-Small-hf'
 
 
 class DepthEstimator:
     """
-    Wraps Depth Anything (V2 or DA3) for monocular depth estimation.
+    Wraps Depth-Anything V2 Small for monocular depth estimation.
 
-    Loads the model once and exposes estimate(image) which returns a
-    colorized depth map (PIL Image) and a stats dict with min/max/mean depth.
+    Loads the HuggingFace ``depth-estimation`` pipeline once and exposes
+    ``estimate(image)`` which returns a colorized depth map (PIL Image) plus a
+    stats dict with min/max/mean depth.
 
     Attributes:
         model_name (str): HuggingFace model identifier.
         device (str): Torch device string.
-        _is_da3 (bool): True if model uses the depth-anything-3 library.
+        _max_edge (int): Long-edge cap (px) for input downscale before inference.
     """
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(
+        self,
+        provider: str,
+        connConfig: Dict[str, Any],
+        bag: Dict[str, Any],
+    ):
         """Load model and configure from provider settings."""
         from ai.common.torch import torch
 
         config = Config.getNodeConfig(provider, connConfig)
-        self.model_name = config.get('model', 'depth-anything/DA3-SMALL')
+        self.model_name = DEFAULT_MODEL
 
+        # max_edge: bound input resolution so inference memory stays predictable.
+        # Falls back to 1024 to match services.json default if config omits it.
+        try:
+            self._max_edge = int(config.get('maxEdge', 1024))
+        except (TypeError, ValueError):
+            self._max_edge = 1024
+
+        # Device: prefer CUDA, then Apple Silicon MPS, then CPU.
         if torch.cuda.is_available():
             self.device = 'cuda:0'
         elif torch.backends.mps.is_available():
@@ -40,28 +58,23 @@ class DepthEstimator:
         else:
             self.device = 'cpu'
 
-        # DA3 uses its own library; V2 uses standard transformers pipeline
-        self._is_da3 = 'DA3' in self.model_name or 'da3' in self.model_name.lower()
+        # fp32 everywhere — model is ~50MB so the memory savings from fp16/bf16
+        # aren't worth the dtype-mismatch failures HF pipelines hit on MPS, and
+        # CPU kernels are unreliable in lower precision.
+        self._torch_dtype = torch.float32
 
-        if self._is_da3:
-            self._load_da3()
-        else:
-            self._load_v2()
+        self._load_pipeline()
 
-    def _load_da3(self):
-        try:
-            from depth_anything_3 import DepthAnything3
-        except ImportError:
-            raise ImportError('depth-anything-3 must be installed manually (numpy conflict with opencv):\n  pip install depth-anything-3 --no-deps\n  pip install timm einops huggingface-hub\nOr switch to the V2 Small profile which installs automatically.')
-        self._model = DepthAnything3.from_pretrained(self.model_name).to(self.device).eval()
-
-    def _load_v2(self):
+    def _load_pipeline(self):
+        """Load the HF depth-estimation pipeline."""
         from transformers import pipeline as hf_pipeline
 
+        # transformers >= 4.36 accepts torch_dtype on pipeline(); we pin 4.53.3.
         self._pipe = hf_pipeline(
             task='depth-estimation',
             model=self.model_name,
             device=self.device,
+            torch_dtype=self._torch_dtype,
         )
 
     def estimate(self, image: Any) -> Tuple[Any, Dict[str, float]]:
@@ -73,27 +86,35 @@ class DepthEstimator:
 
         Returns:
             (colorized_depth_image, stats) where stats has min/max/mean keys.
+            Both the colorized image and the stats are at the *original* input
+            resolution — internal downscale happens behind max_edge.
         """
-        import numpy as np
-
         if image is None:
             raise ValueError('Image must not be None')
 
-        if self._is_da3:
-            result = self._model.infer(image)
-            depth_np = result.cpu().numpy() if hasattr(result, 'cpu') else np.array(result)
-        else:
-            result = self._pipe(image)
-            predicted = result['predicted_depth']
-            depth_np = predicted.squeeze().numpy()
+        # Downscale to bound inference memory; remember original size for upsample.
+        resized, original_size = resize_for_inference(image, self._max_edge)
+
+        result = self._pipe(resized)
+        predicted = result['predicted_depth']
+        # transformers depth pipeline returns a torch tensor; .squeeze().numpy() flattens to HxW.
+        depth_np = predicted.squeeze().detach().cpu().float().numpy()
+
+        # Upsample dense depth back to original resolution before computing stats so
+        # downstream consumers (and the stats themselves) are independent of max_edge.
+        depth_full = restore_dense_output(depth_np, original_size, mode='bilinear')
 
         stats = {
-            'min': float(depth_np.min()),
-            'max': float(depth_np.max()),
-            'mean': float(depth_np.mean()),
+            'min': float(depth_full.min()),
+            'max': float(depth_full.max()),
+            'mean': float(depth_full.mean()),
         }
 
-        colorized = self._colorize(depth_np)
+        colorized_small = self._colorize(depth_full)
+        # Colorized image is built from depth_full so it is already at original
+        # resolution; restore_dense_output here is a no-op but kept for symmetry
+        # in case _colorize ever changes shape.
+        colorized = restore_dense_output(colorized_small, original_size, mode='bilinear')
         return colorized, stats
 
     @staticmethod
