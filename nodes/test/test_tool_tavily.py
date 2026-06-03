@@ -116,3 +116,13 @@ def test_shape_results_maps_tavily_fields():
     assert shaped['results'][0]['score'] == 0.9
     assert shaped['results'][0]['content'] == 'snippet'
     assert shaped['results'][0]['published_date'] is None
+
+
+def test_shape_results_skips_non_dict_items():
+    # A malformed upstream payload may contain scalar/string entries; they must
+    # be skipped rather than raising AttributeError on item.get(...).
+    body = {'results': ['oops', None, 42, {'url': 'https://example.com', 'title': 'T'}]}
+    shaped = mod._shape_results('q', body)
+    assert shaped['success'] is True
+    assert shaped['num_results'] == 1
+    assert shaped['results'][0]['url'] == 'https://example.com'
