@@ -32,6 +32,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 DEFAULT_QIANFAN_BASE_URL = 'https://qianfan.baidubce.com/v2'
 VALIDATION_PROMPT = 'Hi'
+VALIDATION_MAX_TOKENS = 8
 
 
 class IGlobal(IGlobalBase):
@@ -84,7 +85,7 @@ class IGlobal(IGlobalBase):
                 client.chat.completions.create(
                     model=model.strip(),
                     messages=[{'role': 'user', 'content': VALIDATION_PROMPT}],
-                    max_tokens=1,
+                    max_tokens=VALIDATION_MAX_TOKENS,
                 )
             except AuthenticationError:
                 warning('Baidu Qianfan API key is invalid or unauthorized.')

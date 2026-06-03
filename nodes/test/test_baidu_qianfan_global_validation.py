@@ -6,7 +6,8 @@ import types
 from pathlib import Path
 
 
-def _load_iglobal(monkeypatch, error_name: str):
+def _load_iglobal(monkeypatch, error_name: str | None = None):
+    requests: list[dict] = []
     warnings: list[str] = []
 
     ai_module = types.ModuleType('ai')
@@ -51,9 +52,11 @@ def _load_iglobal(monkeypatch, error_name: str):
         pass
 
     class FakeCompletions:
-        def create(self, **_kwargs):
-            raised_error = getattr(openai_module, error_name)(error_name)
-            raise raised_error
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            if error_name is not None:
+                raised_error = getattr(openai_module, error_name)(error_name)
+                raise raised_error
 
     class FakeChat:
         def __init__(self):
@@ -92,11 +95,11 @@ def _load_iglobal(monkeypatch, error_name: str):
     instance = module.IGlobal()
     instance.glb = types.SimpleNamespace(logicalType='llm_baidu_qianfan', connConfig={})
 
-    return instance, warnings
+    return instance, requests, warnings
 
 
 def test_validate_config_prefers_authentication_error_message(monkeypatch):
-    instance, warnings = _load_iglobal(monkeypatch, 'AuthenticationError')
+    instance, _requests, warnings = _load_iglobal(monkeypatch, 'AuthenticationError')
 
     instance.validateConfig()
 
@@ -104,8 +107,23 @@ def test_validate_config_prefers_authentication_error_message(monkeypatch):
 
 
 def test_validate_config_prefers_rate_limit_error_message(monkeypatch):
-    instance, warnings = _load_iglobal(monkeypatch, 'RateLimitError')
+    instance, _requests, warnings = _load_iglobal(monkeypatch, 'RateLimitError')
 
     instance.validateConfig()
 
     assert warnings == ['Baidu Qianfan rate limit exceeded while validating the configuration.']
+
+
+def test_validate_config_uses_non_degenerate_probe_token_limit(monkeypatch):
+    instance, requests, warnings = _load_iglobal(monkeypatch)
+
+    instance.validateConfig()
+
+    assert warnings == []
+    assert requests == [
+        {
+            'model': 'ernie-4.5-turbo-128k',
+            'messages': [{'role': 'user', 'content': 'Hi'}],
+            'max_tokens': 8,
+        }
+    ]
