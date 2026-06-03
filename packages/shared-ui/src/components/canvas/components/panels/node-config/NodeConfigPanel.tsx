@@ -40,7 +40,7 @@
 import { ReactElement, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { RJSFValidationError } from '@rjsf/utils';
 import Form from '@rjsf/core';
-import validator from '../../../util/csp-safe-validator';
+import validator from '@rjsf/validator-ajv8';
 
 import { TextField } from '@mui/material';
 import { IFormData } from '../../../types';
