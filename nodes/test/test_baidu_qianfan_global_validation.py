@@ -6,7 +6,7 @@ import types
 from pathlib import Path
 
 
-def _load_iglobal(monkeypatch, error_name: str | None = None):
+def _load_iglobal(monkeypatch, error_name: str | None = None, config_overrides: dict | None = None):
     requests: list[dict] = []
     warnings: list[str] = []
 
@@ -23,12 +23,15 @@ def _load_iglobal(monkeypatch, error_name: str | None = None):
     class Config:
         @staticmethod
         def getNodeConfig(_logical_type, _conn_config):
-            return {
+            config = {
                 'apikey': 'test-key',
                 'model': 'ernie-4.5-turbo-128k',
                 'serverbase': 'https://qianfan.baidubce.com/v2',
                 'modelTotalTokens': 128000,
             }
+            if config_overrides:
+                config.update(config_overrides)
+            return config
 
     class IGlobalBase:
         pass
@@ -127,3 +130,29 @@ def test_validate_config_uses_non_degenerate_probe_token_limit(monkeypatch):
             'max_tokens': 8,
         }
     ]
+
+
+def test_validate_config_accepts_numeric_string_token_limit(monkeypatch):
+    instance, requests, warnings = _load_iglobal(monkeypatch, config_overrides={'modelTotalTokens': '128000'})
+
+    instance.validateConfig()
+
+    assert warnings == []
+    assert len(requests) == 1
+
+
+def test_validate_config_rejects_non_numeric_token_limit_with_user_warning(monkeypatch):
+    instance, requests, warnings = _load_iglobal(monkeypatch, config_overrides={'modelTotalTokens': 'abc'})
+
+    instance.validateConfig()
+
+    assert requests == []
+    assert warnings == ['Token limit must be greater than 0']
+
+
+def test_format_error_keeps_fallback_when_only_status_is_available(monkeypatch):
+    instance, _requests, _warnings = _load_iglobal(monkeypatch)
+
+    message = instance._format_error(500, None, None, 'provider fallback message')
+
+    assert message == 'Error 500: provider fallback message'

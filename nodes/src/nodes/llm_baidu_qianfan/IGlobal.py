@@ -76,9 +76,15 @@ class IGlobal(IGlobalBase):
                 warning('Baidu Qianfan model name must not be empty.')
                 return
 
-            if modelTotalTokens is not None and modelTotalTokens <= 0:
-                warning('Token limit must be greater than 0')
-                return
+            if modelTotalTokens is not None:
+                try:
+                    model_total_tokens = int(modelTotalTokens)
+                except (TypeError, ValueError):
+                    warning('Token limit must be greater than 0')
+                    return
+                if model_total_tokens <= 0:
+                    warning('Token limit must be greater than 0')
+                    return
 
             try:
                 client = OpenAI(api_key=apikey.strip(), base_url=serverbase)
@@ -149,7 +155,12 @@ class IGlobal(IGlobalBase):
             if etype:
                 parts.append('-')
             parts.append(str(emsg))
-        message = ' '.join(parts) if parts else fallback
+        if etype or emsg:
+            message = ' '.join(parts)
+        elif status is not None and fallback:
+            message = f'{" ".join(parts)} {fallback}'
+        else:
+            message = fallback
         message = re.sub(r'\s+', ' ', message).strip()
         if len(message) > 500:
             message = message[:500].rstrip() + '\u2026'
