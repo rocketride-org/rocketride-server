@@ -100,6 +100,16 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 | `text_output`       | Text output                                                                                 |
 | `local_text_output` | Local text file output                                                                      |
 
+## Agent Tools
+
+Tool nodes (`classType: ["tool"]`) expose capabilities to agents via the control-plane invoke channel rather than data lanes.
+
+| Node          | Description                            | Documentation                                      |
+| ------------- | ------------------------------------- | -------------------------------------------------- |
+| `tool_tavily` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily/README.md) |
+
+Like any tool node, `tool_tavily` is agent-agnostic: it attaches to any agent node's tool channel (e.g. `agent_deepagent`, `agent_langchain`, `agent_crewai`). Paired with an LLM provider such as `llm_nebius`, it builds agentic web-search pipelines.
+
 ## Internal
 
 | Node       | Description                                                           |
