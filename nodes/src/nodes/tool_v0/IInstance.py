@@ -75,7 +75,6 @@ class IInstance(IInstanceBase):
                 'success': {'type': 'boolean'},
                 'code': {'type': 'string', 'description': 'Generated React component code.'},
                 'message_id': {'type': 'string', 'description': 'v0 message ID for follow-up refinements.'},
-                'error': {'type': 'string', 'description': 'Error message on failure.'},
             },
         },
         description='Generate a React UI component from a natural-language description. Provide a detailed prompt describing the desired UI and receive production-ready React + Tailwind CSS code.',
@@ -86,7 +85,7 @@ class IInstance(IInstanceBase):
 
         prompt = args.get('prompt')
         if not prompt:
-            return {'success': False, 'error': 'generate_ui requires a `prompt` parameter'}
+            raise ValueError('generate_ui requires a `prompt` parameter')
 
         model = args.get('model') or 'v0-1.0-md'
 
@@ -94,17 +93,12 @@ class IInstance(IInstanceBase):
             {'role': 'user', 'content': prompt},
         ]
 
-        try:
-            response = self._call_v0_api(messages, model)
-            code, message_id = _extract_code(response)
-        except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
-            return {'success': False, 'error': f'v0 API call failed: {e}'}
+        response = self._call_v0_api(messages, model)
+        code, message_id = _extract_code(response)
 
         if not code:
-            return {
-                'success': False,
-                'error': 'No code generated',
-            }
+            api_error = response.get('error')
+            raise RuntimeError(f'v0 returned no code: {api_error}' if api_error else 'v0 returned no code')
 
         return {
             'success': True,
@@ -115,7 +109,7 @@ class IInstance(IInstanceBase):
     @tool_function(
         input_schema={
             'type': 'object',
-            'required': ['prompt', 'message_id'],
+            'required': ['prompt', 'message_id', 'prior_messages'],
             'properties': {
                 'prompt': {
                     'type': 'string',
@@ -149,7 +143,6 @@ class IInstance(IInstanceBase):
                 'success': {'type': 'boolean'},
                 'code': {'type': 'string', 'description': 'Refined React component code.'},
                 'message_id': {'type': 'string', 'description': 'Updated message ID for further refinements.'},
-                'error': {'type': 'string', 'description': 'Error message on failure.'},
             },
         },
         description='Refine a previously generated UI component by providing follow-up instructions. Requires the message_id from a prior generate_ui call.',
@@ -160,34 +153,36 @@ class IInstance(IInstanceBase):
 
         prompt = args.get('prompt')
         if not prompt:
-            return {'success': False, 'error': 'refine_ui requires a `prompt` parameter'}
+            raise ValueError('refine_ui requires a `prompt` parameter')
 
         message_id = args.get('message_id')
         if not message_id:
-            return {'success': False, 'error': 'refine_ui requires a `message_id` from a prior generation'}
+            raise ValueError('refine_ui requires a `message_id` from a prior generation')
 
         model = args.get('model') or 'v0-1.0-md'
 
-        # Build the messages array with prior history as a stateless fallback.
-        # The v0 /v1/chat endpoint may be stateful (server-side history keyed by
-        # parent_message_id) or stateless (standard OpenAI-compatible, requiring
-        # the full conversation in messages).  We include both: the prior context
-        # in `messages` and `parent_message_id` as an extra parameter so the
-        # request works correctly regardless of the server's behaviour.
-        prior_messages: List[Dict[str, str]] = args.get('prior_messages') or []
+        # Replay the full prior conversation so refinement works regardless of
+        # whether the v0 /v1/chat endpoint is stateful (server-side history keyed
+        # by parent_message_id) or stateless (standard OpenAI-compatible). We
+        # require `prior_messages` rather than treating it as optional: without
+        # it, a stateless endpoint receives only the new instruction (e.g. "make
+        # it blue") with no component to refine and silently returns an unrelated
+        # fresh generation. `parent_message_id` is sent too as a stateful hint.
+        prior_messages: List[Dict[str, str]] = args.get('prior_messages')
+        if not prior_messages:
+            raise ValueError(
+                'refine_ui requires `prior_messages` — the prior user/assistant turns '
+                '(original prompt and generated component) — so the v0 API has the full '
+                'context to refine. Without it, refinement produces an unrelated component.'
+            )
         messages = [*prior_messages, {'role': 'user', 'content': prompt}]
 
-        try:
-            response = self._call_v0_api(messages, model, parent_message_id=message_id)
-            code, new_message_id = _extract_code(response)
-        except (httpx.HTTPError, ValueError, json.JSONDecodeError) as e:
-            return {'success': False, 'error': f'v0 API call failed: {e}'}
+        response = self._call_v0_api(messages, model, parent_message_id=message_id)
+        code, new_message_id = _extract_code(response)
 
         if not code:
-            return {
-                'success': False,
-                'error': 'No code generated',
-            }
+            api_error = response.get('error')
+            raise RuntimeError(f'v0 returned no code: {api_error}' if api_error else 'v0 returned no code')
 
         return {
             'success': True,
@@ -265,6 +260,10 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
     if not isinstance(input_obj, dict):
         warning(f'v0: unexpected input type {type(input_obj).__name__} (content redacted)')
         return {}
+
+    # Shallow-copy so the envelope merge and the security_context pop below never
+    # mutate a caller-owned dict (the engine passes the live args dict through).
+    input_obj = dict(input_obj)
 
     if 'input' in input_obj and isinstance(input_obj['input'], dict):
         inner = input_obj['input']

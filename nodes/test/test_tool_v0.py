@@ -15,6 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # rocketlib stub — must be installed before importing the module under test
 # ---------------------------------------------------------------------------
@@ -150,6 +152,12 @@ class TestNormalizeToolInput:
         assert 'security_context' not in result
         assert result['prompt'] == 'test'
 
+    def test_does_not_mutate_caller_dict(self):
+        original = {'prompt': 'hi', 'security_context': {'token': 'secret'}}
+        _normalize_tool_input(original)
+        # the caller-owned dict must be untouched
+        assert original == {'prompt': 'hi', 'security_context': {'token': 'secret'}}
+
     def test_non_dict_type_logs_type_name_only(self):
         _normalize_tool_input(42)
         assert len(_WARNING_CALLS) == 1
@@ -212,13 +220,12 @@ class TestExtractCode:
 
 
 class TestGenerateUi:
-    def test_missing_prompt_returns_error(self):
+    def test_missing_prompt_raises_valueerror(self):
         inst = _make_instance()
-        result = inst.generate_ui({})
-        assert result['success'] is False
-        assert 'prompt' in result['error']
+        with pytest.raises(ValueError, match='prompt'):
+            inst.generate_ui({})
 
-    def test_http_status_error_returns_failure(self):
+    def test_http_status_error_propagates(self):
         import httpx
 
         inst = _make_instance()
@@ -227,18 +234,21 @@ class TestGenerateUi:
         err = httpx.HTTPStatusError('Unauthorized', request=MagicMock(), response=mock_response)
 
         with patch.object(inst, '_call_v0_api', side_effect=err):
-            result = inst.generate_ui({'prompt': 'make a button'})
+            with pytest.raises(httpx.HTTPStatusError):
+                inst.generate_ui({'prompt': 'make a button'})
 
-        assert result['success'] is False
-        assert 'error' in result
-
-    def test_empty_choices_returns_no_code_generated(self):
+    def test_empty_code_raises_runtimeerror(self):
         inst = _make_instance()
         with patch.object(inst, '_call_v0_api', return_value={'choices': [], 'id': 'x'}):
-            result = inst.generate_ui({'prompt': 'make a button'})
+            with pytest.raises(RuntimeError, match='no code'):
+                inst.generate_ui({'prompt': 'make a button'})
 
-        assert result['success'] is False
-        assert result['error'] == 'No code generated'
+    def test_api_error_surfaced_when_no_code(self):
+        inst = _make_instance()
+        resp = {'choices': [], 'error': 'monthly quota exceeded'}
+        with patch.object(inst, '_call_v0_api', return_value=resp):
+            with pytest.raises(RuntimeError, match='quota exceeded'):
+                inst.generate_ui({'prompt': 'make a button'})
 
 
 # =============================================================================
@@ -247,11 +257,20 @@ class TestGenerateUi:
 
 
 class TestRefineUi:
-    def test_missing_message_id_returns_error(self):
+    def test_missing_message_id_raises_valueerror(self):
         inst = _make_instance()
-        result = inst.refine_ui({'prompt': 'change color to blue'})
-        assert result['success'] is False
-        assert 'message_id' in result['error']
+        with pytest.raises(ValueError, match='message_id'):
+            inst.refine_ui({'prompt': 'change color to blue'})
+
+    def test_missing_prompt_raises_valueerror(self):
+        inst = _make_instance()
+        with pytest.raises(ValueError, match='prompt'):
+            inst.refine_ui({'message_id': 'msg-old'})
+
+    def test_missing_prior_messages_raises_valueerror(self):
+        inst = _make_instance()
+        with pytest.raises(ValueError, match='prior_messages'):
+            inst.refine_ui({'prompt': 'change color', 'message_id': 'msg-old'})
 
     def test_prior_messages_forwarded_into_call(self):
         inst = _make_instance()
