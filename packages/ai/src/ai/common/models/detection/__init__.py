@@ -1,5 +1,15 @@
-"""SAM3 object detection and segmentation (loader + facade)."""
+"""Permissive-license detection and segmentation loaders."""
 
-from .detection import DetectionLoader, Sam3Model
+from .detection import (
+    Mask2FormerInstanceLoader,
+    Mask2FormerSemanticLoader,
+    MmGDinoLoader,
+    RFDetrLoader,
+)
 
-__all__ = ['DetectionLoader', 'Sam3Model']
+__all__ = [
+    'Mask2FormerInstanceLoader',
+    'Mask2FormerSemanticLoader',
+    'MmGDinoLoader',
+    'RFDetrLoader',
+]

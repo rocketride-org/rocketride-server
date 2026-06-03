@@ -40,8 +40,13 @@ from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
 # Vision (CLIP / ViT) image embedding
 from .vision import VisionLoader, CLIPModel, ViTModel
 
-# Detection (SAM3 grounded segmentation)
-from .detection import DetectionLoader, Sam3Model
+# Detection / segmentation (RF-DETR, MM-Grounding-DINO, Mask2Former)
+from .detection import (
+    Mask2FormerInstanceLoader,
+    Mask2FormerSemanticLoader,
+    MmGDinoLoader,
+    RFDetrLoader,
+)
 
 __all__ = [
     # Base
@@ -73,7 +78,9 @@ __all__ = [
     'VisionLoader',
     'CLIPModel',
     'ViTModel',
-    # Detection
-    'DetectionLoader',
-    'Sam3Model',
+    # Detection / segmentation
+    'Mask2FormerInstanceLoader',
+    'Mask2FormerSemanticLoader',
+    'MmGDinoLoader',
+    'RFDetrLoader',
 ]
