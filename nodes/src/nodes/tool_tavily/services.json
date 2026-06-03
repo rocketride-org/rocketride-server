@@ -117,18 +117,18 @@
 	},
 	//
 	//	Test configuration for automated node testing.
-	//	Gated on ROCKETRIDE_TAVILY_KEY: the dynamic test builds a pipeline and runs the
-	//	node, which calls beginGlobal() and therefore needs a key, so the case is
-	//	skipped when the key is absent (e.g. CI without the secret). Node
-	//	structure is still validated by the keyless contract tests.
+	//	Runs keyless under ROCKETRIDE_MOCK: the test framework injects a placeholder
+	//	apikey (see _LLM_MOCK_CREDENTIALS in nodes/test/framework/pipeline.py), so
+	//	beginGlobal() succeeds and the dynamic test builds/starts the node without a
+	//	real key (matches tool_exa_search). The tool is invoked via an agent's
+	//	control channel, so this case just smoke-tests that the node builds.
 	//
 	"test": {
-		"requires": ["ROCKETRIDE_TAVILY_KEY"],
 		"profiles": ["default"],
 		"outputs": [],
 		"cases": [
 			{
-				"name": "Tavily smoke test (requires key)",
+				"name": "Tavily smoke test (placeholder key)",
 				"text": "test query"
 			}
 		]
