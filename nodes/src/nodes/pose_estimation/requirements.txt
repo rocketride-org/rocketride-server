@@ -1,0 +1,14 @@
+# Pose Estimation node — uses rtmlib (Apache-2.0), a lightweight ONNX wrapper
+# from the OpenMMLab team. Bundles RTMDet-nano (person detection) + RTMPose
+# (keypoint inference) in a single top-down pipeline. Deliberately avoids the
+# heavy C++ build chain that the full upstream MM* packages require, which is
+# fragile on Apple Silicon.
+#
+# CPU baseline below. For NVIDIA GPUs, install `onnxruntime-gpu` separately
+# (rtmlib will then pick the CUDAExecutionProvider when device='cuda').
+# On Apple Silicon (device='mps') rtmlib will try CoreMLExecutionProvider and
+# fall back to CPU automatically if the provider fails to load.
+rtmlib>=0.0.13
+onnxruntime
+Pillow
+numpy
