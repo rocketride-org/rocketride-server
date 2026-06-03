@@ -52,7 +52,14 @@ class IGlobal(IGlobalBase):
         try:
             self._ensure_dependencies()
 
-            from openai import APIConnectionError, APIStatusError, AuthenticationError, OpenAI, OpenAIError, RateLimitError
+            from openai import (
+                APIConnectionError,
+                APIStatusError,
+                AuthenticationError,
+                OpenAI,
+                OpenAIError,
+                RateLimitError,
+            )
 
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             apikey = config.get('apikey')

@@ -82,7 +82,7 @@ def _load_iglobal(monkeypatch, error_name: str):
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib_module)
     monkeypatch.setitem(sys.modules, 'openai', openai_module)
 
-    module_path = Path('nodes/src/nodes/llm_baidu_qianfan/IGlobal.py')
+    module_path = Path(__file__).resolve().parents[1] / 'src' / 'nodes' / 'llm_baidu_qianfan' / 'IGlobal.py'
     spec = importlib.util.spec_from_file_location('baidu_qianfan_iglobal_under_test', module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
