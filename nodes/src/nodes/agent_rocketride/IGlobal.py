@@ -14,9 +14,10 @@ stateless across runs and safe to share.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from rocketlib import IGlobalBase
+from rocketlib import IGlobalBase, OPEN_MODE
 
 
 class IGlobal(IGlobalBase):
@@ -41,6 +42,17 @@ class IGlobal(IGlobalBase):
         ``AgentBase.__init__`` via ``Config.getNodeConfig``, so no
         config handling is needed here.
         """
+        # In CONFIG mode the driver is never used, so skip the dependency
+        # install (and its side effects) — same guard as the other nodes.
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        # Install dependencies
+        from depends import depends  # type: ignore
+
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)
+
         from .rocketride_agent import RocketRideDriver
 
         self.agent = RocketRideDriver(self)
