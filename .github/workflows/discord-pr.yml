@@ -195,7 +195,7 @@ jobs:
             --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
 
           DISCORD_MSG_ID=$(echo "$COMMENTS" | \
-            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .body' | \
+            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->"))) | .body' | \
             grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
 
           WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
@@ -212,7 +212,7 @@ jobs:
 
             if [ "$PATCH_STATUS" = "404" ]; then
               STALE_COMMENT_ID=$(echo "$COMMENTS" | \
-                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
+                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->"))) | .id' | head -1)
               gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
               DISCORD_MSG_ID=""
             elif [ "$PATCH_STATUS" != "200" ]; then
@@ -233,7 +233,7 @@ jobs:
 
             # ── Race guard: re-check for a comment created by a concurrent run ──
             EXISTING=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
-              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))] | first // empty' 2>/dev/null)
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->")))] | first // empty' 2>/dev/null)
 
             if [ -n "$EXISTING" ]; then
               # Another run won the race — delete our duplicate message, use theirs
@@ -244,8 +244,16 @@ jobs:
                 "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
+              COMMENT_BODY=$(printf '%s\n' \
+                '<details>' \
+                '<summary>🤖 Internal: Discord sync marker</summary>' \
+                '' \
+                'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID. Do not edit or delete.' \
+                '' \
+                "<!-- discord-msg-id:${DISCORD_MSG_ID} -->" \
+                '</details>')
               gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
                 -X POST \
-                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+                -f body="$COMMENT_BODY"
             fi
           fi
