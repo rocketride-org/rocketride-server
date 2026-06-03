@@ -47,6 +47,7 @@ import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import DebugPanel from './DebugPanel';
 import type { ShellConfig } from '../../workspace/types';
+import { commonStyles } from 'shared/themes/styles';
 
 // =============================================================================
 // STYLES
@@ -78,6 +79,39 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 		fontFamily: 'var(--rr-font-family)',
 		fontSize: 13,
+	} as CSSProperties,
+	// Load-failure state — fills the same client-area slot as appLoading but
+	// stacks a title/message/Retry, mirroring AppErrorBoundary's error screen.
+	appLoadError: {
+		display: 'flex',
+		flex: 1,
+		flexDirection: 'column',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 16,
+		padding: 40,
+		fontFamily: 'var(--rr-font-family)',
+		color: 'var(--rr-text-primary)',
+		backgroundColor: 'var(--rr-bg-default)',
+		textAlign: 'center',
+	} as CSSProperties,
+	appLoadErrorTitle: {
+		fontSize: 18,
+		fontWeight: 700,
+		color: 'var(--rr-color-error, #ef4444)',
+	} as CSSProperties,
+	appLoadErrorMessage: {
+		fontSize: 13,
+		color: 'var(--rr-text-secondary)',
+		maxWidth: 480,
+		lineHeight: 1.6,
+		wordBreak: 'break-word',
+	} as CSSProperties,
+	appLoadErrorButton: {
+		...commonStyles.buttonPrimary,
+		padding: '8px 20px',
+		fontWeight: 600,
+		marginTop: 8,
 	} as CSSProperties,
 	overlayContainer: {
 		position: 'relative',
@@ -122,7 +156,7 @@ export interface ShellLayoutProps {
 export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
 }) => {
-	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest } = useWorkspace();
+	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp } = useWorkspace();
 
 	// --- Merge API config: build-time -> setting defaults -> user settings ----
 	const mergedApiConfig = useMemo(() => {
@@ -231,6 +265,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									identity={identity}
 								/>
 							</AppErrorBoundary>
+						) : appLoadErrors[activeAppId] ? (
+							<div style={styles.appLoadError}>
+								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
+								<div style={styles.appLoadErrorMessage} role="alert">
+									{appLoadErrors[activeAppId]}
+								</div>
+								<button type="button" style={styles.appLoadErrorButton} onClick={() => retryApp(activeAppId)}>
+									Retry
+								</button>
+							</div>
 						) : appLoading || !activeApp ? (
 							<div style={styles.appLoading}>Loading...</div>
 						) : null}
