@@ -5,11 +5,8 @@
 #
 # Face Detection node — MediaPipe BlazeFace (Apache-2.0).
 #
-# SCOPE: This file produces axis-aligned bounding boxes plus (optionally)
-# 6 coarse alignment-grade keypoints per detected face. It MUST NOT, and
-# does not, produce any biometric face template / per-face vector / facial
-# identity signature. Such outputs would trigger BIPA / GDPR Art. 9
-# biometric-identifier rules. Do not add any such code path here.
+# Produces axis-aligned bounding boxes plus (optionally) 6 coarse
+# alignment-grade keypoints per detected face.
 # =============================================================================
 
 import os
@@ -46,9 +43,8 @@ MODEL_URLS: Dict[str, str] = {
 }
 
 # BlazeFace returns exactly 6 keypoints per face, in this order. These are
-# COARSE alignment-grade points (sub-pixel-ish), suitable for cropping /
-# rotating a face thumbnail before downstream tasks that DO NOT involve
-# per-subject matching. They are NOT biometric features on their own.
+# coarse alignment-grade points, suitable for cropping / rotating a face
+# thumbnail before downstream tasks.
 KEYPOINT_NAMES: List[str] = [
     'right_eye',
     'left_eye',
@@ -64,7 +60,7 @@ class FaceDetector:
     Wrapper over MediaPipe Tasks BlazeFace face detector.
 
     Emits axis-aligned bounding boxes and, optionally, 6 coarse alignment
-    keypoints per face. Does NOT compute or expose any per-face vector.
+    keypoints per face.
 
     Attributes:
         profile (str): Selected profile key (currently always 'short').
@@ -172,8 +168,6 @@ class FaceDetector:
                     'centroid': {'x', 'y'},
                     'landmarks': [{'name', 'x', 'y'}, ...],  # optional
                 }
-
-            NEVER contains a per-face vector / biometric signature.
         """
         if image is None:
             raise ValueError('Image must not be None')

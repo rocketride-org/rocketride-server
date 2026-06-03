@@ -18,9 +18,6 @@ class IInstance(IInstanceBase):
     Accepts image lane (AVI stream). Emits per frame:
       - text lane: JSON array of face detections
       - image lane: annotated frame with boxes + optional landmark dots
-
-    Output guarantee: no per-face vector, no biometric signature. Boxes
-    (and optionally 6 coarse keypoints) only.
     """
 
     IGlobal: IGlobal

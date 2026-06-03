@@ -7,13 +7,11 @@
 	"node": "python",
 	"path": "nodes.face_detection",
 	"prefix": "face_detection",
-	"chains_to_embedding": false,
 	"description": [
 		"Per-frame face detection using MediaPipe BlazeFace (Apache-2.0). ",
 		"Emits axis-aligned bounding boxes and (optionally) 6 coarse alignment-grade ",
 		"keypoints per face: right_eye, left_eye, nose_tip, mouth_center, right_ear_tragion, ",
 		"left_ear_tragion. ",
-		"Privacy: Boxes only. Does not produce face embeddings. Cannot be chained to embedding nodes. ",
 		"Use as a fast face-presence gate or for face-aware framing. For object detection on arbitrary ",
 		"classes use the Object Detection node. ",
 		"Runtime: MediaPipe Tasks Python runs on CPU/XNNPACK regardless of the declared device ",
@@ -73,7 +71,7 @@
 		"face_detection.emit_landmarks": {
 			"type": "boolean",
 			"title": "Emit 6 alignment keypoints",
-			"description": "Include coarse 6-point keypoints per face (eyes, nose, mouth, ear tragions). Alignment-grade only - not biometric features.",
+			"description": "Include coarse 6-point keypoints per face (eyes, nose, mouth, ear tragions) for face-aware framing and alignment.",
 			"default": true
 		}
 	},
