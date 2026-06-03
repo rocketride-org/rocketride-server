@@ -18,6 +18,7 @@ canonical import path is ``from ai.common.utils import <name>``.
 
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
 from .config_utils import config_int, parse_bool
+from .http_retry import post_with_retry
 from .string_utils import safe_str
 from .tool_args import (
     normalize_tool_input,
@@ -37,6 +38,7 @@ __all__ = [
     'langchain_messages_to_transcript',
     'normalize_bound_tools',
     'normalize_tool_input',
+    'post_with_retry',
     'optional_bool',
     'optional_int',
     'optional_str',

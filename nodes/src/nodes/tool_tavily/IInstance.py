@@ -31,14 +31,13 @@ Exposes ``tavily`` as a @tool_function for real-time web search via the Tavily A
 
 from __future__ import annotations
 
-import time
 from typing import Any, Dict
 
 import requests
 
-from rocketlib import IInstanceBase, tool_function, debug
+from rocketlib import IInstanceBase, tool_function
 
-from ai.common.utils import normalize_tool_input, validate_public_url
+from ai.common.utils import normalize_tool_input, post_with_retry, validate_public_url
 
 from .IGlobal import IGlobal
 
@@ -154,9 +153,35 @@ class IInstance(IInstanceBase):
         }
 
         try:
-            body = _request_with_retry(url=TAVILY_API_URL, headers=headers, payload=payload)
-        except RuntimeError as exc:
-            return {'success': False, 'query': query, 'num_results': 0, 'results': [], 'error': str(exc)}
+            resp = post_with_retry(TAVILY_API_URL, headers=headers, json=payload)
+            body = resp.json()
+        except requests.RequestException as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            detail = f' (HTTP {status})' if status else ''
+            return {
+                'success': False,
+                'query': query,
+                'num_results': 0,
+                'results': [],
+                'error': f'Tavily request failed{detail}: {type(exc).__name__}',
+            }
+        except ValueError:
+            # 200 with a non-JSON body.
+            return {
+                'success': False,
+                'query': query,
+                'num_results': 0,
+                'results': [],
+                'error': 'Tavily returned a non-JSON response body',
+            }
+        if not isinstance(body, dict):
+            return {
+                'success': False,
+                'query': query,
+                'num_results': 0,
+                'results': [],
+                'error': f'Tavily returned an unexpected payload type: {type(body).__name__}',
+            }
 
         return _shape_results(query, body)
 
@@ -187,59 +212,3 @@ def _shape_results(query: str, body: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
     return {'success': True, 'query': query, 'num_results': len(results), 'results': results}
-
-
-def _request_with_retry(
-    *, url: str, headers: Dict[str, str], payload: Dict[str, Any], max_retries: int = 3, base_delay: float = 2.0
-) -> Dict[str, Any]:
-    """POST to the Tavily API with exponential-backoff retry on 429/5xx (clone of tool_exa_search)."""
-    for attempt in range(max_retries + 1):
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-
-            if resp.status_code == 429:
-                if attempt < max_retries:
-                    delay = base_delay * (2**attempt)
-                    debug(f'Tavily rate limit hit (429), retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
-                    time.sleep(delay)
-                    continue
-                resp.raise_for_status()
-
-            if 500 <= resp.status_code < 600:
-                if attempt < max_retries:
-                    delay = base_delay * (2**attempt)
-                    debug(
-                        f'Tavily server error ({resp.status_code}), retrying in {delay}s (attempt {attempt + 1}/{max_retries})'
-                    )
-                    time.sleep(delay)
-                    continue
-                resp.raise_for_status()
-
-            resp.raise_for_status()
-            try:
-                data = resp.json()
-            except ValueError as exc:
-                # A 200 with a non-JSON body would otherwise raise ValueError,
-                # which tavily() does not catch; convert it to the RuntimeError
-                # contract so the caller returns {'success': False, ...}.
-                raise RuntimeError('Tavily returned a non-JSON response body') from exc
-            if not isinstance(data, dict):
-                raise RuntimeError(f'Tavily returned an unexpected payload type: {type(data).__name__}')
-            return data
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-            # Transient transport failures (timeouts, dropped/refused connections)
-            # are retried with the same backoff as 429/5xx responses.
-            if attempt < max_retries:
-                delay = base_delay * (2**attempt)
-                debug(
-                    f'Tavily transport error ({type(exc).__name__}), retrying in {delay}s ({attempt + 1}/{max_retries})'
-                )
-                time.sleep(delay)
-                continue
-            raise RuntimeError(f'Tavily: {type(exc).__name__} after all retries') from None
-        except requests.RequestException as exc:
-            status = getattr(getattr(exc, 'response', None), 'status_code', None)
-            detail = f' (HTTP {status})' if status else ''
-            raise RuntimeError(f'Tavily request failed{detail}: {type(exc).__name__}') from None
-    raise RuntimeError('Tavily: max retries exceeded')
