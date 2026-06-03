@@ -494,7 +494,7 @@ Expected: PASS — 8 tests.
 
 Run from repo root:
 ```
-node builder vscode:compile
+./builder vscode:compile
 ```
 Expected: exit 0; `agents-core:build` runs first, then the extension compiles and bundles with no TS errors.
 
