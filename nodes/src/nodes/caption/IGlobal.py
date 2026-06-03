@@ -10,9 +10,9 @@ from rocketlib import IGlobalBase, OPEN_MODE
 
 class IGlobal(IGlobalBase):
     """
-    IGlobal manages global lifecycle for the describe node.
+    IGlobal manages global lifecycle for the caption node.
 
-    Loads Florence-2 once at pipeline start and provides a device lock
+    Loads Florence-2 Base once at pipeline start and provides a device lock
     for thread-safe inference.
     """
 
@@ -27,13 +27,13 @@ class IGlobal(IGlobalBase):
 
         import ai.common.torch  # noqa: F401
 
-        from .describe import Describer
+        from .caption import Captioner
 
         bag = self.IEndpoint.endpoint.bag
 
-        self.describer = Describer(self.glb.logicalType, self.glb.connConfig, bag)
+        self.captioner = Captioner(self.glb.logicalType, self.glb.connConfig, bag)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):
-        self.describer = None
+        self.captioner = None
         self.device_lock = None
