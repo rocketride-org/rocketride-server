@@ -192,6 +192,13 @@ jobs:
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
         run: |
+          # OIDC trusted publishing — no NPM_TOKEN. Auth uses this job's
+          # id-token (already granted for --provenance). Requires npm >= 11.5.1;
+          # Node 20 ships npm 10.x, so upgrade in place. The trusted publisher
+          # must be configured on npmjs.com against the CALLER workflow
+          # (release.yaml) + environment "release" — not this reusable child.
+          npm install -g npm@latest
+          npm --version
           VERSION="${{ matrix.version }}"
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
@@ -200,8 +207,6 @@ jobs:
             echo "Publishing ${TARBALL}"
             npm publish "./${TARBALL}" --access public --provenance
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # --- PyPI ---
       - name: Set up Python
