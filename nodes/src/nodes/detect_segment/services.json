@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Detect & Segment",
+	"title": "Segmentation",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -47,81 +47,64 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["⚠️ NOT YET FUNCTIONAL — requires manual setup before use. ", "Grounded detection + pixel-level segmentation using SAM 3.1 (Segment Anything Model 3). ", "Three blockers must be resolved before this node runs: ", "(1) Install SAM3 from GitHub: git clone https://github.com/facebookresearch/sam3 && pip install -e . ", "(2) Upgrade model server to CUDA 12.6+ and PyTorch 2.10 (currently on CUDA 12.1). ", "(3) Set HF_TOKEN with approved access to facebook/sam3.1 on HuggingFace. ", "(4) Register DetectionLoader in rocketride-saas model_manager.py. ", "Once unblocked: image+video in, annotated image + JSON detections out (red boxes)."],
+	"description": ["Pixel-level segmentation with HuggingFace-native engines: ", "Mask2Former-instance (MIT, default) for closed-set instance masks; ", "Mask2Former-semantic (MIT) for per-pixel class maps. ", "Image in (single frame or multi-frame via frame_grabber documents); annotated overlay + Masks JSON out."],
 	//
 	// Optional:
 	//		The icon to display in the UI for this node
 	//
-	"icon": "util-image.svg",
+	"icon": "segmentation.svg",
 	"documentation": "https://docs.rocketride.org",
 	//
 	// Optional:
 	//		Rendering hints indicating which fields to display on the canvas tile
 	//
-	"tile": ["Prompt: ${parameters.detect_segment.prompt}"],
+	"tile": ["Mode: ${parameters.detect_segment.mode}", "Engine: ${parameters.detect_segment.engine}"],
 	//
 	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"image": ["documents", "text"],
-		"video": ["documents", "text"]
+		"image": ["text", "image"]
 	},
 	"input": [
 		{
 			"lane": "image",
-			"description": "AVI image stream to run object detection on (e.g. from frame_grabber).",
+			"description": "AVI image stream to segment.",
 			"output": [
 				{
-					"lane": "documents",
-					"description": "Annotated image with bounding boxes drawn for each detection."
+					"lane": "image",
+					"description": "Annotated image (translucent mask overlay) as raw stream."
 				},
 				{
 					"lane": "text",
-					"description": "JSON array of detections: [{label, score, box, centroid}]."
-				}
-			]
-		},
-		{
-			"lane": "video",
-			"description": "Raw video file — frames are extracted at the configured interval and detected.",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Annotated frames with bounding boxes drawn, one doc per frame."
-				},
-				{
-					"lane": "text",
-					"description": "JSON array of detections per frame: [{label, score, box, centroid}]."
+					"description": "Masks JSON. instance: [{label, score, box, mask}]. semantic: {semantic_map, classes, size}."
 				}
 			]
 		}
 	],
 	//
 	// Optional:
-	//		Profile section — configuration options used by the driver
+	//		Profile section - configuration options used by the driver
 	//
 	"preconfig": {
-		"default": "sam3",
+		"default": "mask2former-instance",
 		"profiles": {
-			"custom": {
-				"title": "Custom model",
-				"model": "",
-				"threshold": 0.5,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
+			"mask2former-instance": {
+				"title": "Mask2Former — Object Instances (COCO, 80 classes, default)",
+				"mode": "instance",
+				"engine": "mask2former-instance",
+				"model": "facebook/mask2former-swin-tiny-coco-instance",
+				"threshold": 0.3,
+				"maxEdge": 1024
 			},
-			"sam3": {
-				"title": "SAM 3.1 (facebook/sam3.1)",
-				"model": "facebook/sam3.1",
-				"threshold": 0.5,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
+			"mask2former-semantic": {
+				"title": "Mask2Former — Scene Regions (ADE20K, 150 classes)",
+				"mode": "semantic",
+				"engine": "mask2former-semantic",
+				"model": "facebook/mask2former-swin-tiny-ade-semantic",
+				"threshold": 0.0,
+				"maxEdge": 1024
 			}
 		}
 	},
@@ -130,72 +113,50 @@
 	//		Local field definitions for this service
 	//
 	"fields": {
-		"detect_segment.model": {
+		"detect_segment.mode": {
 			"type": "string",
-			"title": "Model",
-			"description": "HuggingFace model ID (requires HF_TOKEN with approved access)",
-			"minLength": 2,
-			"maxLength": 256
+			"title": "Mode",
+			"description": "Segmentation mode. instance: per-instance masks (default). semantic: per-pixel class map. Both use Mask2Former under the hood.",
+			"default": "instance",
+			"enum": ["instance", "semantic"]
+		},
+		"detect_segment.engine": {
+			"type": "string",
+			"title": "Engine",
+			"description": "Backing engine. Gated by mode: instance -> mask2former-instance; semantic -> mask2former-semantic.",
+			"default": "mask2former-instance",
+			"enum": ["mask2former-instance", "mask2former-semantic"]
 		},
 		"detect_segment.threshold": {
 			"type": "number",
 			"title": "Confidence threshold",
-			"description": "Minimum confidence score (0.0–1.0) to include a detection",
-			"default": 0.5,
+			"description": "Minimum score (0.0-1.0) to include a mask",
+			"default": 0.3,
 			"minimum": 0.0,
 			"maximum": 1.0
 		},
-		"detect_segment.prompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "Detection prompt",
-			"description": "Objects to detect, period-separated (e.g. 'person . car . dog')"
-		},
-		"detect_segment.interval": {
+		"detect_segment.maxEdge": {
 			"type": "number",
-			"title": "Frame interval (seconds)",
-			"description": "Time between extracted frames for video input",
-			"default": 1
-		},
-		"detect_segment.max_frames": {
-			"type": "number",
-			"title": "Max frames (0 = unlimited)",
-			"description": "Maximum number of frames to extract from a video file",
-			"default": 0
-		},
-		"detect_segment.maxVideoSizeMB": {
-			"type": "number",
-			"title": "Max video size (MB)",
-			"description": "Videos exceeding this size are rejected",
-			"default": 500
-		},
-		"detect_segment.video": {
-			"object": "video",
-			"title": "Video settings",
-			"properties": ["detect_segment.interval", "detect_segment.max_frames", "detect_segment.maxVideoSizeMB"]
-		},
-		"detect_segment.custom": {
-			"object": "custom",
-			"properties": ["detect_segment.model", "detect_segment.threshold", "detect_segment.prompt", "detect_segment.video"]
-		},
-		"detect_segment.sam3": {
-			"object": "sam3",
-			"properties": ["detect_segment.threshold", "detect_segment.prompt", "detect_segment.video"]
+			"title": "Max input edge (px)",
+			"description": "Downscale source so long edge <= this value before inference; masks are upsampled back to the source size. Lower = faster + less VRAM.",
+			"default": 1024,
+			"minimum": 256,
+			"maximum": 4096
 		},
 		"detect_segment.profile": {
-			"title": "Detection Model",
-			"description": "Select the object detection model",
+			"title": "Profile",
+			"description": "Segmentation preset. Runs on CPU/MPS/CUDA via transformers.",
 			"type": "string",
-			"default": "sam3",
+			"default": "mask2former-instance",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
-					"value": "custom",
-					"properties": ["detect_segment.custom"]
+					"value": "mask2former-instance",
+					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
 				},
 				{
-					"value": "sam3",
-					"properties": ["detect_segment.sam3"]
+					"value": "mask2former-semantic",
+					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
 				}
 			]
 		}
@@ -207,22 +168,21 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Object Detection",
+			"title": "Segmentation",
 			"properties": ["detect_segment.profile"]
 		}
 	],
 	"test": {
-		"profiles": ["sam3"],
-		"outputs": ["documents"],
-		"timeout": 120,
+		"profiles": ["mask2former-instance"],
+		"outputs": ["documents", "text"],
+		"timeout": 180,
 		"cases": [
 			{
-				"name": "Detect objects in image",
+				"name": "Segment image with Mask2Former-instance",
 				"image": "images/ocr_test_text.png",
 				"expect": {
-					"documents": {
-						"notEmpty": true
-					}
+					"documents": { "notEmpty": true },
+					"text": { "notEmpty": true }
 				}
 			}
 		]

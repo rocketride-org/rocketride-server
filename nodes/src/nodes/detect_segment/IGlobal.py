@@ -23,29 +23,26 @@
 
 import os
 import threading
+
 from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     """
-    IGlobal manages global lifecycle for the detect_segment node.
+    IGlobal manages global lifecycle for the Segmentation (``detect_segment``) node.
 
-    Loads SAM3 once at pipeline start and provides a device lock
-    for thread-safe inference across IInstance handlers.
+    Constructs the configured Segmenter (mode + engine) once at pipeline
+    start and provides a device lock for thread-safe inference across
+    concurrent IInstance handlers.
+
+    Mode/engine defaults:
+      - mode = ``instance`` (default) or ``semantic``.
+      - Engine is Mask2Former (MIT, HuggingFace, CPU/MPS/CUDA).
     """
 
     def beginGlobal(self):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
-
-        # TODO: detect_segment is not yet functional. Four blockers:
-        # 1. SAM3 must be installed from GitHub (not PyPI):
-        #      git clone https://github.com/facebookresearch/sam3.git && cd sam3 && pip install -e .
-        # 2. Model server Dockerfile must be upgraded: CUDA 12.1 → 12.6+, torch 2.3 → 2.10
-        # 3. HF_TOKEN env var must be set with approved access to facebook/sam3.1
-        # 4. DetectionLoader must be registered in rocketride-saas/model_manager.py
-        raise NotImplementedError('detect_segment is not yet functional. Blockers: (1) Install SAM3 from GitHub — see node description. (2) Upgrade model server to CUDA 12.6+ / PyTorch 2.10. (3) Set HF_TOKEN with facebook/sam3.1 access. (4) Register DetectionLoader in model_manager.py.')
 
         from depends import depends
 
@@ -54,18 +51,14 @@ class IGlobal(IGlobalBase):
 
         import ai.common.torch  # noqa: F401
 
-        from .detect_segment import Detector
+        from .detect_segment import Segmenter
 
         bag = self.IEndpoint.endpoint.bag
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        self.detector = Detector(self.glb.logicalType, self.glb.connConfig, bag)
+        self.segmenter = Segmenter(self.glb.logicalType, self.glb.connConfig, bag)
 
-        self.interval = config.get('interval', 1)
-        self.max_frames = config.get('max_frames', 0)
-        self.max_video_size_bytes = config.get('maxVideoSizeMB', 500) * 1024 * 1024
         self.device_lock = threading.Lock()
 
     def endGlobal(self):
-        self.detector = None
+        self.segmenter = None
         self.device_lock = None
