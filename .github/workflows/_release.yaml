@@ -319,15 +319,25 @@ jobs:
 
       - name: Set release body
         id: release_body
-        if: inputs.prerelease
         run: |
+          # Pull the top CHANGELOG section (everything from the first "## ["
+          # header to the next one) so the GitHub Release shows the real,
+          # human-written change list instead of just the batched stage->main
+          # merge PR that generate_release_notes would otherwise emit.
+          NOTES="$(awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md | sed '1d')"
           {
             echo 'body<<RELEASE_BODY'
-            echo "Automated nightly prerelease from \`${{ github.ref_name }}\`."
-            echo ""
-            echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "_Automated nightly prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo ""
+            fi
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
+            else
+              echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            fi
             echo 'RELEASE_BODY'
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
