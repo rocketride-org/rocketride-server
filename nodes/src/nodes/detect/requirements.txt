@@ -1,1 +1,8 @@
-ultralytics
+# Object detection node.
+#
+# Engine deps are also declared in ai/common/models/detection/requirements_detection.txt,
+# but `transformers` must be pinned here so `depends()` installs it at module-load time
+# — MmGDinoLoader imports transformers directly in __init__ and doesn't go through
+# BaseLoader._ensure_dependencies(). Mirrors the pattern in caption/requirements.txt
+# and detect_segment/requirements.txt.
+transformers==4.53.3

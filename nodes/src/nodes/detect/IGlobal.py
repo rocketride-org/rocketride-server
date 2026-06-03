@@ -6,15 +6,15 @@
 import os
 import threading
 from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     """
     IGlobal manages global lifecycle for the detect node.
 
-    Loads YOLO-World once at pipeline start. Provides a device lock
-    for thread-safe inference across concurrent IInstance handlers.
+    Loads the configured detection engine (RF-DETR closed-set or MM-Grounding-DINO open-vocab)
+    once at pipeline start. Provides a device lock for thread-safe inference
+    across concurrent IInstance handlers.
     """
 
     def beginGlobal(self):
@@ -31,13 +31,8 @@ class IGlobal(IGlobalBase):
         from .detect import Detector
 
         bag = self.IEndpoint.endpoint.bag
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         self.detector = Detector(self.glb.logicalType, self.glb.connConfig, bag)
-
-        self.interval = config.get('interval', 1)
-        self.max_frames = config.get('max_frames', 0)
-        self.max_video_size_bytes = config.get('maxVideoSizeMB', 500) * 1024 * 1024
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

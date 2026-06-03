@@ -9,83 +9,108 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+from rocketlib import warning
 from ai.common.config import Config
+
+
+# Engine keys → default HuggingFace / package model IDs.
+ENGINE_DEFAULTS: Dict[str, str] = {
+    'rfdetr': 'PekingU/rtdetr_r50vd',
+    'mmgdino': 'IDEA-Research/grounding-dino-tiny',
+}
+
+# Engines that require a prompt to do anything useful.
+OPEN_VOCAB_ENGINES = {'mmgdino'}
 
 
 class Detector:
     """
-    Wraps YOLO-World for fast open-vocabulary object detection.
+    Object detector facade — RF-DETR (closed-set, default) or MM-Grounding-DINO (open-vocab).
 
-    Reads model, threshold, and prompt from node config. The prompt is
-    split into a class list that YOLO-World uses for open-vocabulary
-    detection - no fixed class list required.
+    - ``rfdetr``   RF-DETR closed-set, 80 COCO classes. No prompt needed.
+    - ``mmgdino``  Grounding-DINO open-vocab. Requires a prompt.
+
+    Returns canonical detection dicts:
+    ``[{label, score, box: {x1, y1, x2, y2}, centroid: {x, y}}]``.
 
     Attributes:
-        model_name (str): YOLO-World model variant.
+        engine (str): Selected detection engine key.
+        model_name (str): Backing HuggingFace model identifier.
         threshold (float): Minimum confidence score.
-        prompt (str): Raw config prompt string.
+        prompt (str): Raw config prompt string (open-vocab only).
         classes (List[str]): Parsed class list from prompt.
-        model: YOLOWorld instance.
-        device (str): Torch device string.
+        loader: Underlying engine loader instance exposing ``detect``.
+        device (str): Torch device string the loader is using.
     """
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """Load model and configure from provider settings."""
-        from ultralytics import YOLOWorld
-        from ai.common.torch import torch
+        """Resolve engine + model from config and lazily construct the loader."""
+        from ai.common.torch import torch  # noqa: F401  (ensure torch is set up)
 
         config = Config.getNodeConfig(provider, connConfig)
 
-        self.model_name = config.get('model', 'yolov8s-worldv2')
+        self.engine = str(config.get('engine', 'rfdetr')).lower().strip()
+        if self.engine not in ENGINE_DEFAULTS:
+            warning(f'detect: unknown engine "{self.engine}", defaulting to rfdetr')
+            self.engine = 'rfdetr'
+
+        # Probe multiple plausible locations for the prompt — UI config plumbing
+        # may surface conditional fields under prefixed keys or inside profile dicts.
+        self.prompt = (
+            config.get('prompt') or connConfig.get('detect.prompt') or connConfig.get('prompt') or ''
+        ).strip()
+
+        warning(
+            f'detect: __init__ engine={self.engine!r} prompt={self.prompt!r} '
+            f'config_keys={sorted(config.keys())[:30]} '
+            f'connConfig_keys={sorted(connConfig.keys())[:30]}'
+        )
+
         self.threshold = float(config.get('threshold', 0.3))
-        self.prompt = config.get('prompt', '')
 
-        # Split prompt on periods or commas: "monster . npc . door" → ["monster","npc","door"]
-        self.classes = [c.strip() for c in self.prompt.replace('.', ',').split(',') if c.strip()]
+        self.model_name = ENGINE_DEFAULTS[self.engine]
 
-        # Device: prefer MPS on Apple Silicon, CUDA on server, CPU as fallback
-        if torch.cuda.is_available():
-            self.device = 'cuda:0'
-        elif torch.backends.mps.is_available():
-            self.device = 'mps'
-        else:
-            self.device = 'cpu'
+        # Parse prompt: "person . car . dog" → ["person", "car", "dog"]
+        self.classes: List[str] = [c.strip() for c in self.prompt.replace('.', ',').split(',') if c.strip()]
 
-        self.model = YOLOWorld(f'{self.model_name}.pt')
-        self.model.to(self.device)
+        # Open-vocab engines need a prompt. The UI marks `detect.prompt` as
+        # required (optional: false) for the mmgdino profile, so reaching this
+        # branch means either an out-of-band config or a UI/save race. Fail
+        # loud — the previous silent fallback to RF-DETR masked real bugs and
+        # cascaded into harder-to-diagnose import errors.
+        if self.engine in OPEN_VOCAB_ENGINES and not self.classes:
+            raise ValueError(
+                f'detect: engine "{self.engine}" requires a non-empty prompt '
+                '(detect.prompt). Set a prompt in the UI (e.g. "person . car . dog") '
+                'and fully restart the pipeline.'
+            )
 
-        if self.classes:
-            self.model.set_classes(self.classes)
+        self.loader = self._build_loader()
+        self.device = getattr(self.loader, 'device', 'cpu')
+
+    def _build_loader(self):
+        """Construct the right loader for the resolved engine."""
+        from ai.common.models.detection.detection import (
+            MmGDinoLoader,
+            RFDetrLoader,
+        )
+
+        if self.engine == 'mmgdino':
+            return MmGDinoLoader(model_name=self.model_name, threshold=self.threshold)
+        return RFDetrLoader(model_name=self.model_name, threshold=self.threshold)
 
     def detect(self, image: Any) -> List[Dict[str, Any]]:
         """
-        Run open-vocabulary detection on a PIL Image.
-
-        Args:
-            image: PIL Image object (RGB).
+        Run object detection on a PIL Image.
 
         Returns:
-            List of {label, score, box: {x1,y1,x2,y2}, centroid: {x,y}} dicts.
+            List of canonical detection dicts:
+            ``[{label, score, box: {x1, y1, x2, y2}, centroid: {x, y}}]``.
         """
         if image is None:
             raise ValueError('Image must not be None')
 
-        results = self.model.predict(image, conf=self.threshold, verbose=False, device=self.device)
-
-        detections = []
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
-                score = float(box.conf[0])
-                label = r.names[int(box.cls[0])]
-                detections.append(
-                    {
-                        'label': label,
-                        'score': score,
-                        'box': {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
-                        'centroid': {'x': (x1 + x2) / 2.0, 'y': (y1 + y2) / 2.0},
-                    }
-                )
-
-        return detections
+        prompt: Optional[str] = self.prompt if self.classes else None
+        return self.loader.detect(image, prompt)

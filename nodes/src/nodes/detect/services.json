@@ -1,5 +1,5 @@
 {
-	"title": "Detect",
+	"title": "Object Detection",
 	"protocol": "detect://",
 	"classType": ["image"],
 	"capabilities": ["gpu", "experimental"],
@@ -7,13 +7,12 @@
 	"node": "python",
 	"path": "nodes.detect",
 	"prefix": "detect",
-	"description": ["Per-frame open-vocabulary detection using YOLO-World. Unlike fixed-class detectors (DETR, YOLOS), ", "YOLO-World accepts any text prompt at runtime - 'monster . npc . door' - with no fixed class list. ", "Image in, bounding boxes + labels + centroids out. Runs in real-time on CPU, MPS, and CUDA. ", "Use as a fast per-frame gate before heavier models. For pixel masks use Detect & Segment. ", "For video segment capture with pre/post roll, use the video detection gate node instead."],
-	"icon": "util-image.svg",
+	"description": ["Per-frame object detection. RF-DETR (Apache-2.0, default) is a fast closed-set detector over 80 COCO classes (person, car, dog, etc.). MM-Grounding-DINO (Apache-2.0/BSD-3) is the open-vocab option: type a prompt to detect anything. ", "Image in, bounding boxes + labels + centroids out. ", "Use as a fast per-frame gate before heavier models. For pixel masks use Segmentation."],
+	"icon": "detect.svg",
 	"documentation": "https://docs.rocketride.org",
-	"tile": ["Prompt: ${parameters.detect.prompt}"],
+	"tile": ["Model: ${parameters.detect.profile}", "Prompt: ${parameters.detect.prompt}"],
 	"lanes": {
-		"image": ["documents", "text", "image"],
-		"video": ["documents", "text", "image"]
+		"image": ["text", "image"]
 	},
 	"input": [
 		{
@@ -25,83 +24,32 @@
 					"description": "Annotated image as raw stream - pipe to any node accepting image input."
 				},
 				{
-					"lane": "documents",
-					"description": "Annotated image as document - pipe to response or downstream vision nodes."
-				},
-				{
 					"lane": "text",
 					"description": "JSON array of detections: [{label, score, box, centroid}]."
-				}
-			]
-		},
-		{
-			"lane": "video",
-			"description": "Raw video file - frames extracted and detected at the configured interval.",
-			"output": [
-				{
-					"lane": "image",
-					"description": "Annotated frames as raw stream."
-				},
-				{
-					"lane": "documents",
-					"description": "Annotated frames as documents, one per frame."
-				},
-				{
-					"lane": "text",
-					"description": "JSON array of detections per frame: [{label, score, box, centroid}]."
 				}
 			]
 		}
 	],
 	"preconfig": {
-		"default": "small",
+		"default": "rfdetr",
 		"profiles": {
-			"small": {
-				"title": "YOLO-World Small - fast, lightweight",
-				"model": "yolov8s-worldv2",
+			"rfdetr": {
+				"title": "RF-DETR — Common Objects (COCO, 80 classes, default)",
+				"engine": "rfdetr",
+				"model": "PekingU/rtdetr_r50vd",
 				"threshold": 0.3,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
+				"prompt": ""
 			},
-			"medium": {
-				"title": "YOLO-World Medium - balanced",
-				"model": "yolov8m-worldv2",
+			"mmgdino": {
+				"title": "MM-Grounding-DINO — Open-Vocabulary (any prompt)",
+				"engine": "mmgdino",
+				"model": "IDEA-Research/grounding-dino-tiny",
 				"threshold": 0.3,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
-			},
-			"large": {
-				"title": "YOLO-World Large - most accurate",
-				"model": "yolov8l-worldv2",
-				"threshold": 0.3,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
-			},
-			"custom": {
-				"title": "Custom model",
-				"model": "",
-				"threshold": 0.3,
-				"prompt": "",
-				"interval": 1,
-				"max_frames": 0,
-				"maxVideoSizeMB": 500
+				"prompt": ""
 			}
 		}
 	},
 	"fields": {
-		"detect.model": {
-			"type": "string",
-			"title": "Model",
-			"description": "YOLO-World model variant filename (without .pt extension)",
-			"minLength": 2,
-			"maxLength": 256
-		},
 		"detect.threshold": {
 			"type": "number",
 			"title": "Confidence threshold",
@@ -114,58 +62,30 @@
 			"type": "string",
 			"format": "textarea",
 			"title": "Detection prompt",
-			"description": "Objects to detect, period or comma-separated (e.g. 'person . car . dog')"
-		},
-		"detect.interval": {
-			"type": "number",
-			"title": "Frame interval (seconds)",
-			"description": "Time between extracted frames for video input",
-			"default": 1
-		},
-		"detect.max_frames": {
-			"type": "number",
-			"title": "Max frames (0 = unlimited)",
-			"description": "Maximum number of frames to extract from a video file",
-			"default": 0
-		},
-		"detect.maxVideoSizeMB": {
-			"type": "number",
-			"title": "Max video size (MB)",
-			"description": "Videos exceeding this size are rejected",
-			"default": 500
-		},
-		"detect.video": {
-			"object": "video",
-			"title": "Video settings",
-			"properties": ["detect.interval", "detect.max_frames", "detect.maxVideoSizeMB"]
-		},
-		"detect.custom": {
-			"object": "custom",
-			"properties": ["detect.model", "detect.threshold", "detect.prompt", "detect.video"]
+			"description": "Example: \"person . car . dog\" (period or comma-separated list) or \"red car\" / \"person in a hat\" (described object). Returns all matching regions. Matches objects and attributes — not spatial relationships, so \"the car on the left\" returns all cars, not just the left one.",
+			"optional": false,
+			"minLength": 1
 		},
 		"detect.profile": {
 			"title": "Model",
-			"description": "YOLO-World variant - smaller is faster, larger is more accurate",
 			"type": "string",
-			"default": "small",
+			"default": "rfdetr",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
-				{ "value": "small", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
-				{ "value": "medium", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
-				{ "value": "large", "properties": ["detect.threshold", "detect.prompt", "detect.video"] },
-				{ "value": "custom", "properties": ["detect.custom"] }
+				{ "value": "rfdetr", "properties": ["detect.threshold"] },
+				{ "value": "mmgdino", "properties": ["detect.prompt", "detect.threshold"] }
 			]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Fast Detection",
+			"title": "Object Detection",
 			"properties": ["detect.profile"]
 		}
 	],
 	"test": {
-		"profiles": ["small"],
+		"profiles": ["rfdetr"],
 		"outputs": ["documents", "text"],
 		"timeout": 60,
 		"cases": [
