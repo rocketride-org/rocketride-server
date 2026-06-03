@@ -147,6 +147,71 @@ jobs:
           BUILD_STAMP: ${{ inputs.build_stamp }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
+      # MinIO for S3Store integration tests (Linux only). Env vars are exported
+      # to $GITHUB_ENV only after MinIO is healthy; S3 tests gate on those vars
+      # so they skip on win/macOS.
+      - name: Start MinIO for tests / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then ready=1; break; fi
+            sleep 2
+          done
+          [ "${ready:-}" = "1" ] || { echo "MinIO did not become ready"; docker logs minio || true; exit 1; }
+          # Create bucket and smoke put/get.
+          aws --endpoint-url http://localhost:9000 s3 mb s3://rocketride-test
+          printf 'minio smoke\n' > /tmp/minio-smoke.txt
+          aws --endpoint-url http://localhost:9000 s3 cp /tmp/minio-smoke.txt s3://rocketride-test/smoke.txt
+          aws --endpoint-url http://localhost:9000 s3 ls s3://rocketride-test/
+          # Export test vars only once S3 is live.
+          {
+            echo "ROCKETRIDE_TEST_S3_ENDPOINT=http://localhost:9000"
+            echo "ROCKETRIDE_TEST_S3_REGION=us-east-1"
+            echo "ROCKETRIDE_TEST_S3_ACCESS_KEY_ID=minioadmin"
+            echo "ROCKETRIDE_TEST_S3_SECRET_ACCESS_KEY=minioadmin"
+            echo "ROCKETRIDE_TEST_S3_BUCKET=rocketride-test"
+          } >> "$GITHUB_ENV"
+
+      # Azurite for AzureBlobStore integration tests (Linux only). Health check
+      # via nc (no dedicated endpoint). Account key is Azurite's public dev
+      # credential — not a secret. Env vars exported to $GITHUB_ENV only after
+      # Azurite is live; Azure tests gate on those vars, so they skip on win/macOS.
+      - name: Start Azurite for tests / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        run: |
+          set -euo pipefail
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:3.35.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          for i in $(seq 1 30); do
+            if nc -z localhost 10000 2>/dev/null; then ready=1; break; fi
+            sleep 2
+          done
+          [ "${ready:-}" = "1" ] || { echo "Azurite did not become ready"; docker logs azurite || true; exit 1; }
+          # Smoke-test Azure Blob.
+          AZURITE_ACCOUNT_KEY="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==" # gitleaks:allow — Azurite's public dev key, documented at learn.microsoft.com/azure/storage/common/storage-use-azurite
+          AZURITE_CONN_STR="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=${AZURITE_ACCOUNT_KEY};BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+          az storage container create --name azurite-smoke --connection-string "$AZURITE_CONN_STR"
+          printf 'azurite smoke\n' > /tmp/azurite-smoke.txt
+          az storage blob upload --container-name azurite-smoke --name smoke.txt --file /tmp/azurite-smoke.txt --connection-string "$AZURITE_CONN_STR"
+          az storage blob list --container-name azurite-smoke --connection-string "$AZURITE_CONN_STR" --output table
+          # Export test vars only once Azurite is live.
+          {
+            echo "ROCKETRIDE_TEST_AZURE_DEFAULT_PROTOCOL=http"
+            echo "ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME=devstoreaccount1"
+            echo "ROCKETRIDE_TEST_AZURE_ACCOUNT_KEY=${AZURITE_ACCOUNT_KEY}"
+            echo "ROCKETRIDE_TEST_AZURE_BLOB_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1"
+            echo "ROCKETRIDE_TEST_AZURE_CONTAINER=rocketride-test"
+          } >> "$GITHUB_ENV"
+
       - name: Test
         if: inputs.codeql == false
         # Integration tests boot a local server on :5565 and connect a test
@@ -170,7 +235,9 @@ jobs:
         # (.env.template, the engine's built-in dev key).
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
-        run: ${{ matrix.builder_cmd }} test --verbose -s
+        # note: Sequential execution should be changed to parallel execution
+        #       after the appropriate fixes have been made, see #743 #1048 for details.
+        run: ${{ matrix.builder_cmd }} test --verbose --sequential
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'

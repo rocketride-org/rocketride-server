@@ -382,6 +382,67 @@
 				// "qwen-turbo": 131072,
 				// "qwen-max": 32768
 			}
+		},
+		// ----------------------------------------------------------------------
+		// MiniMax — text chat models (OpenAI-compatible API)
+		// Uses openai.OpenAI pointed at https://api.minimax.io/v1.
+		// Excludes embedding, audio (T2A/TTS), image and video generation models.
+		// ----------------------------------------------------------------------
+		"llm_minimax": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_MINIMAX_KEY",
+			"module": "minimax",
+			"models_endpoint": "https://api.minimax.io/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				// Current MiniMax catalog uses the "MiniMax-" prefix exclusively (M2 family).
+				"include_prefixes": ["MiniMax-", "minimax-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": [
+					"embed",
+					"embedding",
+					"t2a", // text-to-audio
+					"tts",
+					"audio",
+					"voice",
+					"image",
+					"video",
+					"speech"
+				]
+			},
+			// MiniMax cloud profiles don't always appear in OpenRouter — protect
+			// so the fallback path doesn't deprecate them on no-key runs.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["minimax-m2", "2026-10-09"],
+				["minimax-m2-1", "2026-10-09"],
+				["minimax-m2-1-highspeed", "2026-10-09"],
+				["minimax-m2-5", "2026-10-09"],
+				["minimax-m2-5-highspeed", "2026-10-09"],
+				["minimax-m2-7", "2026-10-09"],
+				["minimax-m2-7-highspeed", "2026-10-09"],
+				["minimax-m3", "2026-10-09"],
+				["minimax-m2-local", "2026-10-09"],
+				["minimax-m2-5-local", "2026-10-09"],
+				["minimax-m2-7-local", "2026-10-09"]
+			],
+			"token_limit_overrides": {
+				// MiniMax's /v1/models endpoint doesn't return context_window. Lock every
+				// MiniMax model at its docs-stated context window so discovery (which can
+				// otherwise pull stale or wrong numbers from OpenRouter/LiteLLM) never
+				// silently shifts these values.
+				// https://platform.minimax.io/docs/api-reference/text-chat-openai.md
+				"MiniMax-M3": 1000000,
+				"MiniMax-M2": 204800,
+				"MiniMax-M2.1": 204800,
+				"MiniMax-M2.1-highspeed": 204800,
+				"MiniMax-M2.5": 204800,
+				"MiniMax-M2.5-highspeed": 204800,
+				"MiniMax-M2.7": 204800,
+				"MiniMax-M2.7-highspeed": 204800
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -420,6 +481,8 @@
 		"grok-": "Grok ",
 		"sonar": "Sonar",
 		"qwen-": "Qwen ",
+		"MiniMax-": "MiniMax ",
+		"minimax-": "MiniMax ",
 		"text-embedding-": "Text Embedding ",
 		"o1": "o1",
 		"o3": "o3",
@@ -447,6 +510,17 @@
 			"embed": 0 // embedding models have no output tokens
 		},
 		"overrides": {
+			// MiniMax — see https://platform.minimax.io/docs/api-reference/text-chat-openai.md
+			// "For MiniMax-M3 the recommended value is 131072 (128K); for other models the
+			// recommended value is 65536 (64K)."
+			"MiniMax-M3": 131072,
+			"MiniMax-M2": 65536,
+			"MiniMax-M2.1": 65536,
+			"MiniMax-M2.1-highspeed": 65536,
+			"MiniMax-M2.5": 65536,
+			"MiniMax-M2.5-highspeed": 65536,
+			"MiniMax-M2.7": 65536,
+			"MiniMax-M2.7-highspeed": 65536,
 			// // Anthropic — see comment block above for source
 			// "claude-opus-4-6": 131072,
 			// "claude-sonnet-4-6": 65536,

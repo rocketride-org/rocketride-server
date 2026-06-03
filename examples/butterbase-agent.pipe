@@ -1,0 +1,158 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_rocketride_1",
+      "provider": "agent_rocketride",
+      "name": "RocketRide Wave",
+      "config": {
+        "instructions": [
+          "You are a backend engineer agent. I'm using Butterbase as my backend. Call the butterbase.butterbase_docs tool with topic \"overview\" first to learn the platform.",
+          "Provision and manage the backend with the butterbase tools: create the app, define and apply the schema, configure auth and row-level rules, seed data, and deploy functions/frontend. Developer Mode must be enabled on the app for create/modify operations to succeed.",
+          "Keep field names identical between the database schema and any frontend or code you generate — if the column is \"body\", read and write \"body\", not \"content\".",
+          "When you build a frontend for the app: use the ABSOLUTE data API base https://api.butterbase.ai/v1/<app_id>, and the auth base https://api.butterbase.ai/auth/<app_id> for signup/login/me (auth is NOT under /v1). Set is_published=true so anonymous visitors can read public rows, auto-login right after signup (email verification is not required to log in), and confirm the frontend deployment reaches status READY so the domain serves the real app.",
+          "Inspect available butterbase tools before acting, prefer dry-run/preview where offered, and confirm destructive changes."
+        ],
+        "max_waves": 20,
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "memory_internal_1",
+      "provider": "memory_internal",
+      "name": "Memory (Internal)",
+      "config": {
+        "type": "memory_internal"
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_butterbase_1",
+      "provider": "tool_butterbase",
+      "name": "Butterbase MCP Client",
+      "config": {
+        "type": "tool_butterbase",
+        "transport": "streamable-http",
+        "endpoint": "https://api.butterbase.ai/mcp",
+        "serverName": "butterbase",
+        "bearer": "${ROCKETRIDE_BUTTERBASE_API_KEY}"
+      },
+      "ui": {
+        "position": {
+          "x": 500,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_anthropic_1",
+      "provider": "llm_anthropic",
+      "name": "Anthropic",
+      "config": {
+        "profile": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 80,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_rocketride_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "b5c8c9fa-a05d-4c9c-b7e0-fd250ee5b679",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 13
+}

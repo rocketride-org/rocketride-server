@@ -61,6 +61,7 @@ jobs:
             [llm_xai]=ROCKETRIDE_XAI_KEY
             [llm_perplexity]=ROCKETRIDE_PERPLEXITY_KEY
             [llm_qwen]=ROCKETRIDE_QWEN_KEY
+            [llm_minimax]=ROCKETRIDE_MINIMAX_KEY
           )
 
           for PROVIDER in "${!PROVIDER_KEY[@]}"; do
@@ -86,6 +87,7 @@ jobs:
           ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
+          ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
 
       # Strict sync: only providers whose API key is configured. Native API
       # discovers and smoke-tests new models. No OpenRouter pollution.
@@ -104,6 +106,7 @@ jobs:
           ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
+          ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
 
       # Fallback sync: providers without an API key. OpenRouter / LiteLLM
       # are permitted as discovery sources for these. Smoke tests are skipped

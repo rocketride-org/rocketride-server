@@ -2,9 +2,10 @@
 
 import asyncio
 import json
+from fnmatch import fnmatch
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from ..store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
+from ...store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
 
 
 class AzureBlobStore(IStore):
@@ -306,6 +307,84 @@ class AzureBlobStore(IStore):
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from Azure: {e}') from e
 
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        name_pattern=None,
+    ) -> list:
+        def _match(name):
+            return not name_pattern or fnmatch(name, name_pattern)
+
+        if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
+            raise StorageError(f'Invalid name pattern: {name_pattern}')
+        if name_pattern == '..':
+            raise StorageError(f'Path traversal detected: {name_pattern}')
+
+        try:
+
+            def _part_len(path):
+                return path.count('/') + 1 if path else 0
+
+            client = self._get_client()
+            container_client = client.get_container_client(self._container)
+
+            files = []
+            seen_dirs = set() if recursive and include_dirs else None
+
+            blob_prefix = self._get_blob_name(prefix) if prefix else self._prefix
+            prefix_part_len = _part_len(blob_prefix) - _part_len(self._prefix)
+            list_prefix = f'{blob_prefix.rstrip("/")}/' if blob_prefix else ''
+
+            blob_list = (
+                await asyncio.to_thread(container_client.list_blobs, name_starts_with=list_prefix)
+                if recursive
+                else await asyncio.to_thread(
+                    container_client.walk_blobs,
+                    name_starts_with=list_prefix,
+                    delimiter='/',
+                )
+            )
+
+            for blob in blob_list:
+                # Remove prefix to get relative path
+                if self._prefix and blob.name.startswith(self._prefix + '/'):
+                    relative_name = blob.name[len(self._prefix) + 1 :]
+                elif self._prefix and blob.name.startswith(self._prefix):
+                    relative_name = blob.name[len(self._prefix) :]
+                else:
+                    relative_name = blob.name
+
+                if recursive and include_dirs:
+                    parts = relative_name.split('/')
+                    for i in range(prefix_part_len + 1, len(parts)):
+                        dir_path = '/'.join(parts[:i])
+                        if dir_path not in seen_dirs:
+                            seen_dirs.add(dir_path)
+                            if _match(parts[i - 1]):
+                                files.append(dir_path + '/')
+
+                is_dir = relative_name.endswith('/')
+                file_name = relative_name.rstrip('/').split('/')[-1]
+                if ((include_files and not is_dir) or (include_dirs and is_dir)) and _match(file_name):
+                    files.append(relative_name)
+
+            return sorted(files)
+
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to list files with prefix {prefix} from Azure: {e}') from e
+
     # =========================================================================
     # Handle-Based I/O
     # =========================================================================
@@ -478,5 +557,10 @@ class AzureBlobStore(IStore):
             # Ensure the resolved name stays within the prefix
             if not full_name.startswith(self._prefix + '/') and full_name != self._prefix:
                 raise StorageError(f'Path traversal detected: {path}')
-            return full_name
-        return posixpath.normpath(path)
+        else:
+            full_name = posixpath.normpath(path)
+            # This isn't a path traversal case, but let's still raise
+            # an error to ensure consistency across all providers
+            if full_name.startswith('../') or full_name == '..':
+                raise StorageError(f'Path traversal detected: {path}')
+        return full_name

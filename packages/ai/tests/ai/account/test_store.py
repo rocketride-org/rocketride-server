@@ -9,39 +9,34 @@ Tests cover:
 - Error handling
 """
 
+import asyncio
+import configparser
+import json
 import os
-import pytest
-import tempfile
 import shutil
+import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
+from uuid import uuid4
 
-from ai.account.store import Store, StorageError
-from ai.account.store_providers.filesystem import FilesystemStore
-from ai.account.store_providers.s3 import S3Store
+import pytest
+
+from ai.account.file_store import FileStore
+from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
 from ai.account.store_providers.azure import AzureBlobStore
+from ai.account.store_providers.filesystem import FilesystemStore
+from ai.account.store_providers.memory import MemoryStore
+from ai.account.store_providers.s3 import S3Store
 
 
-# ============================================================================
-# Filesystem Tests (Real I/O)
-# ============================================================================
+class BaseStoreTest:
+    """Base test class for Store implementations.
 
-
-class TestFilesystemStore:
-    """Test filesystem storage with real file operations."""
-
-    @pytest.fixture
-    def temp_dir(self):
-        """Create temporary directory for tests."""
-        temp_path = tempfile.mkdtemp()
-        yield temp_path
-        shutil.rmtree(temp_path, ignore_errors=True)
-
-    @pytest.fixture
-    def store(self, temp_dir):
-        """Create filesystem store instance."""
-        url = f'filesystem://{temp_dir}'
-        return FilesystemStore(url)
+    This class defines common tests for all Store implementations. Each specific
+    backend (filesystem, memory, S3, Azure) will have its own test class that
+    inherits from this and provides the appropriate store fixture.
+    """
 
     @pytest.mark.asyncio
     async def test_write_and_read_file(self, store):
@@ -56,19 +51,6 @@ class TestFilesystemStore:
         content = await store.read_file(filename)
 
         assert content == data
-
-    @pytest.mark.asyncio
-    async def test_write_creates_directories(self, store, temp_dir):
-        """Test that write_file creates parent directories."""
-        filename = 'deep/nested/path/file.txt'
-        data = 'Test data'
-
-        await store.write_file(filename, data)
-
-        # Verify directory structure was created
-        full_path = Path(temp_dir) / 'deep' / 'nested' / 'path' / 'file.txt'
-        assert full_path.exists()
-        assert full_path.read_text() == data
 
     @pytest.mark.asyncio
     async def test_overwrite_existing_file(self, store):
@@ -148,6 +130,417 @@ class TestFilesystemStore:
         assert content == data
         assert len(content) == 1024 * 1024
 
+    # -------------------------------------------------------------------------
+    # list_entries
+    # -------------------------------------------------------------------------
+
+    @pytest.fixture
+    async def populated_store(self, store):
+        """Filesystem store pre-populated with a known directory tree."""
+        await store.write_file('a.txt', '')
+        await store.write_file('b.json', '')
+        await store.write_file('sub/c.txt', '')
+        await store.write_file('sub/d.json', '')
+        await store.write_file('sub/nested/e.txt', '')
+        await store.write_file('sub/nested/f.json', '')
+        return store
+
+    @pytest.mark.asyncio
+    async def test_list_entries_default(self, populated_store):
+        result = await populated_store.list_entries()
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_files(self, populated_store):
+        result = await populated_store.list_entries(include_dirs=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_dirs(self, populated_store):
+        result = await populated_store.list_entries(include_files=False)
+        assert result == [
+            'sub/',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(recursive=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive_files(self, populated_store):
+        result = await populated_store.list_entries(include_dirs=False, recursive=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_non_recursive_dirs(self, populated_store):
+        result = await populated_store.list_entries(include_files=False, recursive=False)
+        assert result == [
+            'sub/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix(self, populated_store):
+        result = await populated_store.list_entries('sub')
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_files(self, populated_store):
+        result = await populated_store.list_entries('sub', include_dirs=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_dirs(self, populated_store):
+        result = await populated_store.list_entries('sub', include_files=False)
+        assert result == [
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', recursive=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_files_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', include_dirs=False, recursive=False)
+        assert result == [
+            'sub/c.txt',
+            'sub/d.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_dirs_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', include_files=False, recursive=False)
+        assert result == [
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_traversal_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries('sub/../..')
+
+        assert 'Path traversal detected' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_nonexistent(self, populated_store):
+        result = await populated_store.list_entries('nonexistent')
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*.txt')
+        assert result == [
+            'a.txt',
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern_non_recursive(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*.txt', recursive=False)
+        assert result == ['a.txt']
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern_files(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*', include_dirs=False)
+        assert result == [
+            'a.txt',
+            'b.json',
+            'sub/c.txt',
+            'sub/d.json',
+            'sub/nested/e.txt',
+            'sub/nested/f.json',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern_dirs(self, populated_store):
+        result = await populated_store.list_entries(name_pattern='*', include_files=False)
+        assert result == [
+            'sub/',
+            'sub/nested/',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_pattern(self, populated_store):
+        result = await populated_store.list_entries('sub', name_pattern='*.txt')
+        assert result == [
+            'sub/c.txt',
+            'sub/nested/e.txt',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_entries_prefix_pattern_non_recursive(self, populated_store):
+        result = await populated_store.list_entries('sub', name_pattern='*.txt', recursive=False)
+        assert result == ['sub/c.txt']
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern_traversal_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries(name_pattern='..')
+        assert 'Path traversal detected' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_entries_pattern_name_protection(self, populated_store):
+        with pytest.raises(StorageError) as exc_info:
+            await populated_store.list_entries(name_pattern='sub/*.txt')
+        assert 'Invalid name pattern' in str(exc_info.value)
+
+
+# ============================================================================
+# Filesystem Tests (Real I/O)
+# ============================================================================
+
+
+class TestFilesystemStore(BaseStoreTest):
+    """Test filesystem storage with real file operations."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for tests."""
+        temp_path = tempfile.mkdtemp()
+        yield temp_path
+        shutil.rmtree(temp_path, ignore_errors=True)
+
+    @pytest.fixture
+    def store(self, temp_dir):
+        """Create filesystem store instance."""
+        url = f'filesystem://{temp_dir}'
+        return FilesystemStore(url)
+
+    @pytest.mark.asyncio
+    async def test_write_creates_directories(self, store, temp_dir):
+        """Test that write_file creates parent directories."""
+        filename = 'deep/nested/path/file.txt'
+        data = 'Test data'
+
+        await store.write_file(filename, data)
+
+        # Verify directory structure was created
+        full_path = Path(temp_dir) / 'deep' / 'nested' / 'path' / 'file.txt'
+        assert full_path.exists()
+        assert full_path.read_text() == data
+
+
+# ============================================================================
+# Memory Tests
+# ============================================================================
+
+
+class TestMemoryStore(BaseStoreTest):
+    """Test in-memory storage."""
+
+    @pytest.fixture
+    def store(self):
+        """Create in-memory store instance."""
+        return MemoryStore()
+
+
+# ============================================================================
+# S3 Tests
+# ============================================================================
+
+
+class BaseS3StoreTest:
+    @pytest.fixture
+    def test_config(self):
+        return {
+            'secret_key': {
+                'endpoint': os.getenv('ROCKETRIDE_TEST_S3_ENDPOINT'),
+                'region': os.getenv('ROCKETRIDE_TEST_S3_REGION'),
+                'access_key_id': os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'),
+                'secret_access_key': os.getenv('ROCKETRIDE_TEST_S3_SECRET_ACCESS_KEY'),
+            },
+            'bucket': os.getenv('ROCKETRIDE_TEST_S3_BUCKET'),
+        }
+
+    @pytest.fixture
+    def client(self, test_config):
+        """Create S3 client for direct bucket operations (setup/teardown)."""
+        if not os.getenv('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID'):
+            pytest.skip('ROCKETRIDE_TEST_S3_ACCESS_KEY_ID not configured for S3 tests')
+
+        import boto3
+
+        return boto3.client(
+            's3',
+            endpoint_url=test_config['secret_key']['endpoint'],
+            aws_access_key_id=test_config['secret_key']['access_key_id'],
+            aws_secret_access_key=test_config['secret_key']['secret_access_key'],
+            region_name=test_config['secret_key']['region'],
+        )
+
+    def _clean_bucket(self, client, bucket, prefix=''):
+        """Delete all objects in the bucket."""
+        paginator = client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            objects = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
+            if objects:
+                client.delete_objects(Bucket=bucket, Delete={'Objects': objects})
+
+
+class TestS3Store(BaseS3StoreTest, BaseStoreTest):
+    """Test S3 storage with real boto3."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create S3 store instance."""
+        from botocore.exceptions import ClientError
+
+        try:
+            client.head_bucket(Bucket=test_config['bucket'])
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code') != '404':
+                raise e
+            client.create_bucket(Bucket=test_config['bucket'])
+
+        prefix = f'tmp_{uuid4().hex[:8]}'
+        url = f's3://{test_config["bucket"]}/{prefix}'
+        secret_key = json.dumps(test_config['secret_key'])
+
+        yield S3Store(url, secret_key)
+
+        self._clean_bucket(client, test_config['bucket'], prefix='tmp_')  # Clean up all tmp_-s to be safe
+
+
+class TestS3StoreNoPrefix(BaseS3StoreTest, BaseStoreTest):
+    """Test S3 storage with no prefix (root of bucket)."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create S3 store instance."""
+        bucket_prefix = f'{test_config["bucket"]}-tmp-'
+        bucket = f'{bucket_prefix}{uuid4().hex[:8]}'
+
+        client.create_bucket(Bucket=bucket)
+
+        url = f's3://{bucket}'
+        secret_key = json.dumps(test_config['secret_key'])
+
+        yield S3Store(url, secret_key)
+
+        # Delete all temp buckets to be safe
+        for b in client.list_buckets().get('Buckets', []):
+            name = b.get('Name')
+            if not name or not name.startswith(bucket_prefix):
+                continue
+            self._clean_bucket(client, name)
+            client.delete_bucket(Bucket=name)
+
+
+# ===========================================================================
+# Azure Blob Tests
+# ============================================================================
+
+
+class BaseAzureStoreTest:
+    @pytest.fixture
+    def test_config(self):
+        return {
+            'account_name': os.getenv('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME'),
+            'connection_string': (
+                f'DefaultEndpointsProtocol={os.getenv("ROCKETRIDE_TEST_AZURE_DEFAULT_PROTOCOL")};'
+                f'AccountName={os.getenv("ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME")};'
+                f'AccountKey={os.getenv("ROCKETRIDE_TEST_AZURE_ACCOUNT_KEY")};'
+                f'BlobEndpoint={os.getenv("ROCKETRIDE_TEST_AZURE_BLOB_ENDPOINT")};'
+            ),
+            'container': os.getenv('ROCKETRIDE_TEST_AZURE_CONTAINER'),
+        }
+
+    @pytest.fixture
+    def client(self, test_config):
+        """Create Azure BlobServiceClient for direct container/blob operations (setup/teardown)."""
+        if not os.getenv('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME'):
+            pytest.skip('ROCKETRIDE_TEST_AZURE_ACCOUNT_NAME not configured')
+
+        from azure.storage.blob import BlobServiceClient
+
+        return BlobServiceClient.from_connection_string(test_config['connection_string'])
+
+
+class TestAzureBlobStore(BaseAzureStoreTest, BaseStoreTest):
+    """Test Azure Blob storage with a prefix inside a shared container."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create Azure Blob storage instance."""
+        from azure.core.exceptions import ResourceExistsError
+
+        container_client = client.get_container_client(test_config['container'])
+        try:
+            container_client.create_container()
+        except ResourceExistsError as e:
+            if e.error_code != 'ContainerAlreadyExists':
+                raise e
+
+        prefix = f'tmp_{uuid4().hex[:8]}'
+        secret_key = json.dumps({'connection_string': test_config['connection_string']})
+
+        yield AzureBlobStore(f'azure://{test_config["container"]}/{prefix}', secret_key)
+
+        for blob in container_client.list_blobs(name_starts_with='tmp_'):  # cleanup all tmp_-s to be safe
+            container_client.delete_blob(blob.name)
+
+
+class TestAzureBlobStoreNoPrefix(BaseAzureStoreTest, BaseStoreTest):
+    """Test Azure Blob storage with no prefix (root of container)."""
+
+    @pytest.fixture
+    def store(self, test_config, client):
+        """Create Azure Blob storage instance."""
+        container_prefix = f'{test_config["container"]}-tmp-'
+        container_name = f'{container_prefix}{uuid4().hex[:8]}'
+
+        client.create_container(container_name)
+
+        secret_key = json.dumps({'connection_string': test_config['connection_string']})
+
+        yield AzureBlobStore(f'azure://{container_name}', secret_key)
+
+        # Delete all temp containers to be safe
+        for c in client.list_containers(name_starts_with=container_prefix):
+            client.delete_container(c['name'])
+
 
 # ============================================================================
 # Store Factory Tests
@@ -221,8 +614,6 @@ class TestStoreFactory:
 
     def test_tilde_expansion(self):
         """Test tilde expansion to user home directory."""
-        from pathlib import Path
-
         url = 'filesystem://~/.rocketlib/test-storage'
         store = Store.create(url=url)
 
@@ -253,15 +644,12 @@ class TestStoreFactory:
 # ============================================================================
 
 
-class TestS3Store:
+class TestS3StoreMocked:
     """Test S3 storage with mocked boto3."""
 
     @pytest.fixture
     def mock_s3_client(self, monkeypatch):
         """Create mock S3 client."""
-        import sys
-        from unittest.mock import MagicMock  # noqa: F811
-
         # Mock boto3 module
         mock_boto3 = MagicMock()
         mock_client = Mock()
@@ -304,8 +692,6 @@ class TestS3Store:
         assert client is not None
 
         # Verify boto3.client was called without explicit credentials
-        import sys
-
         if 'boto3' in sys.modules:
             mock_boto3 = sys.modules['boto3']
             # Check that client was called with just region_name (no explicit credentials)
@@ -422,8 +808,6 @@ class TestS3Store:
     @pytest.mark.asyncio
     async def test_write_fails_after_max_retries(self, store, mock_s3_client, monkeypatch):
         """Test that write fails after max retries (with instant retry for speed)."""
-        from ai.account.store import STORE_MAX_RETRY_ATTEMPTS
-        import asyncio
 
         # Mock asyncio.sleep to make retries instant
         async def instant_sleep(seconds):
@@ -534,8 +918,6 @@ class TestS3Store:
 
         Scenario: File keeps getting deleted between check and write, exhausting all retries.
         """
-        from ai.account.store import STORE_MAX_RETRY_ATTEMPTS
-        import asyncio
 
         # Mock asyncio.sleep to make retries instant
         async def instant_sleep(seconds):
@@ -572,9 +954,6 @@ class TestS3Store:
         To see which credential source is actually used, run:
         python rocketlib-ai/tests/ai/account/check_aws_credentials.py
         """
-        import os
-        from pathlib import Path
-
         # Temporarily remove STORE_SECRET_KEY if set
         original_store_secret = os.environ.pop('STORE_SECRET_KEY', None)
         original_aws_key = os.environ.pop('AWS_ACCESS_KEY_ID', None)
@@ -665,10 +1044,6 @@ class TestS3Store:
 
         This creates a temporary credentials file and verifies boto3 reads it.
         """
-        import os
-        import configparser
-        from unittest.mock import patch, MagicMock
-
         # Create temporary .aws directory
         aws_dir = tmp_path / '.aws'
         aws_dir.mkdir()
@@ -742,15 +1117,12 @@ class TestS3Store:
 # ============================================================================
 
 
-class TestAzureBlobStore:
+class TestAzureBlobStoreMocked:
     """Test Azure Blob storage with mocked SDK."""
 
     @pytest.fixture
     def mock_blob_client(self, monkeypatch):
         """Create mock Azure Blob client."""
-        import sys
-        from unittest.mock import MagicMock  # noqa: F811
-
         # Mock Azure modules
         mock_azure_storage = MagicMock()
         mock_azure_core = MagicMock()
@@ -873,8 +1245,6 @@ class TestStoreFileStore:
 
     def test_get_file_store_returns_file_store(self, store):
         """Test that get_file_store returns a FileStore instance."""
-        from ai.account.file_store import FileStore
-
         fs = store.get_file_store('test-user')
         assert isinstance(fs, FileStore)
 
@@ -942,8 +1312,6 @@ class TestStoreIntegration:
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, temp_dir):
         """Test concurrent file operations."""
-        import asyncio
-
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
         fs = store.get_file_store('test-user')
