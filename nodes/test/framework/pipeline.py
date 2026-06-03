@@ -130,6 +130,7 @@ _LLM_MOCK_CREDENTIALS = {
     'llm_vision_ollama': {'apikey': 'sk-mock-placeholder-for-tests'},
     'rerank_cohere': {'apikey': 'mock-cohere-placeholder-for-tests'},
     'tool_exa_search': {'apikey': 'mock-exa-search-placeholder-for-tests'},
+    'tool_tavily': {'apikey': 'mock-tavily-placeholder-for-tests'},
 }
 
 
