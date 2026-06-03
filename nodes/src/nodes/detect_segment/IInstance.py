@@ -215,13 +215,14 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
 
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-
-            with self.IGlobal.device_lock:
-                result = self.IGlobal.segmenter.segment(image)
-
-            self._emit(image, result, self._chunk_id)
-
-            self._image_data = None
-            self._chunk_id += 1
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                with self.IGlobal.device_lock:
+                    result = self.IGlobal.segmenter.segment(image)
+                self._emit(image, result, self._chunk_id)
+            except Exception as exc:
+                warning(f'detect_segment: dropping frame {self._chunk_id} due to inference error: {exc}')
+            finally:
+                self._image_data = None
+                self._chunk_id += 1
             return self.preventDefault()

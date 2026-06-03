@@ -202,10 +202,16 @@ class PoseEstimator:
         if scores_arr.ndim != 2 or scores_arr.shape[0] != keypoints_arr.shape[0]:
             return []
 
-        n_persons, n_kpts = keypoints_arr.shape[0], keypoints_arr.shape[1]
-        if n_kpts != len(COCO_17_KEYPOINTS):
-            warning(f'pose_estimation: unexpected keypoint count {n_kpts}, expected {len(COCO_17_KEYPOINTS)}')
-            n_kpts = min(n_kpts, len(COCO_17_KEYPOINTS))
+        n_persons = keypoints_arr.shape[0]
+        # Clamp against score columns and the COCO label count so neither
+        # scs[k_idx] nor COCO_17_KEYPOINTS[k_idx] can raise IndexError.
+        n_kpts = min(keypoints_arr.shape[1], scores_arr.shape[1], len(COCO_17_KEYPOINTS))
+        if n_kpts == 0:
+            return []
+        if keypoints_arr.shape[1] != len(COCO_17_KEYPOINTS):
+            warning(
+                f'pose_estimation: unexpected keypoint count {keypoints_arr.shape[1]}, expected {len(COCO_17_KEYPOINTS)}'
+            )
 
         # Per-person mean keypoint score, used both as a detection-quality
         # proxy for sorting and as the bbox confidence in the emitted JSON.

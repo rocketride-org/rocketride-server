@@ -62,12 +62,6 @@ class Detector:
             config.get('prompt') or connConfig.get('detect.prompt') or connConfig.get('prompt') or ''
         ).strip()
 
-        warning(
-            f'detect: __init__ engine={self.engine!r} prompt={self.prompt!r} '
-            f'config_keys={sorted(config.keys())[:30]} '
-            f'connConfig_keys={sorted(connConfig.keys())[:30]}'
-        )
-
         self.threshold = float(config.get('threshold', 0.3))
 
         self.model_name = ENGINE_DEFAULTS[self.engine]

@@ -39,7 +39,7 @@ class IGlobal(IGlobalBase):
         """
         self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         if self.config is None:
-            raise RuntimeError(f'getNodeConfig returned None for logicalType={self.glb.logicalType!r} connConfig={self.glb.connConfig!r}')
+            raise RuntimeError(f'getNodeConfig returned None for logicalType={self.glb.logicalType!r}')
         self.config['type'] = self.glb.connConfig.get('profile', 'standard')
 
     def endGlobal(self):

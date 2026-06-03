@@ -69,6 +69,9 @@ class BackgroundRemover:
             self._max_edge = int(config.get('maxEdge', 1024))
         except (TypeError, ValueError):
             self._max_edge = 1024
+        # Clamp to service-contract bounds so direct config can't push memory/latency
+        # into unstable territory with negative or extreme values.
+        self._max_edge = min(4096, max(256, self._max_edge))
 
         # Device: prefer CUDA, then Apple Silicon MPS, then CPU.
         if torch.cuda.is_available():

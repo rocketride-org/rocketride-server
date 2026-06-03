@@ -115,11 +115,15 @@ class IGlobal(IGlobalBase):
             'child_nodes',
         ):
             value = getattr(endpoint, attr, None)
-            if value:
-                try:
-                    return list(value)
-                except TypeError:
-                    return [value]
+            if value is None:
+                continue
+            # Normalize without splitting a dict into its keys or a str into chars,
+            # which would feed _looks_biometric the wrong objects.
+            if isinstance(value, dict):
+                return [value]
+            if isinstance(value, (list, tuple, set)):
+                return list(value)
+            return [value]
 
         return None
 

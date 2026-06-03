@@ -35,9 +35,8 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
 
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-
             try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
                 with self.IGlobal.device_lock:
                     caption_text = self.IGlobal.captioner.caption(image)
             except Exception as e:

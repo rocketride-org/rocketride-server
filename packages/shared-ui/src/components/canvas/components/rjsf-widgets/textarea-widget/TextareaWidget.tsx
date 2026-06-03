@@ -91,7 +91,7 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				error={!!rawErrors?.length}
 				variant="outlined"
 				InputLabelProps={{ shrink: true }}
-				helperText={(options?.description as string) ?? schema?.description}
+				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
 			/>
 			{envKeys.length > 0 && (
 				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />

@@ -111,6 +111,7 @@ class FaceDetector:
     def _resolve_model_path(self) -> str:
         """Download the .task bundle (cached) and return a local file path."""
         import hashlib
+        import shutil
         import tempfile
         import urllib.request
 
@@ -125,7 +126,9 @@ class FaceDetector:
             tmp_fd, tmp_path = tempfile.mkstemp(suffix='.tflite', dir=cache_dir)
             os.close(tmp_fd)
             try:
-                urllib.request.urlretrieve(self.model_url, tmp_path)
+                # Explicit timeout so a stalled CDN/socket can't hang global init indefinitely.
+                with urllib.request.urlopen(self.model_url, timeout=60) as resp, open(tmp_path, 'wb') as out:
+                    shutil.copyfileobj(resp, out)
                 os.replace(tmp_path, local_path)
             except Exception:
                 if os.path.exists(tmp_path):

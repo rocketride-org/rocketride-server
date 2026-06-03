@@ -49,6 +49,9 @@ class DepthEstimator:
             self._max_edge = int(config.get('maxEdge', 1024))
         except (TypeError, ValueError):
             self._max_edge = 1024
+        # Clamp before resize_for_inference: guard against 0/negative/oversized
+        # values that bypass UI constraints and cause invalid resize or memory spikes.
+        self._max_edge = min(4096, max(256, self._max_edge))
 
         # Device: prefer CUDA, then Apple Silicon MPS, then CPU.
         if torch.cuda.is_available():

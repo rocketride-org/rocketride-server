@@ -5,7 +5,7 @@
 
 import json
 
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import ImageProcessor
 
 from .IGlobal import IGlobal
@@ -74,13 +74,14 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
 
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-
-            with self.IGlobal.device_lock:
-                faces = self.IGlobal.detector.detect(image)
-
-            self._emit(image, faces, self._chunk_id)
-
-            self._image_data = None
-            self._chunk_id += 1
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                with self.IGlobal.device_lock:
+                    faces = self.IGlobal.detector.detect(image)
+                self._emit(image, faces, self._chunk_id)
+            except Exception as exc:
+                warning(f'face_detection: dropped frame {self._chunk_id}: {exc}')
+            finally:
+                self._image_data = None
+                self._chunk_id += 1
             return self.preventDefault()

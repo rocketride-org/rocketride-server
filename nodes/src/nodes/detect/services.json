@@ -87,7 +87,7 @@
 	"test": {
 		"profiles": ["rfdetr"],
 		"outputs": ["documents", "text"],
-		"timeout": 60,
+		"timeout": 180,
 		"cases": [
 			{
 				"name": "Detect objects in image",

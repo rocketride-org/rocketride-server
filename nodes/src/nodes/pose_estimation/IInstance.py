@@ -6,7 +6,7 @@
 import json
 from typing import Any, Dict, List
 
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 from .pose_estimation import COCO_17_EDGES
@@ -106,9 +106,15 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
 
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-            persons = self._estimate(image)
-            self._emit(image, persons, self._chunk_id)
-            self._image_data = None
-            self._chunk_id += 1
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                persons = self._estimate(image)
+                self._emit(image, persons, self._chunk_id)
+            except Exception as exc:
+                warning(
+                    f'pose_estimation: dropping frame {self._chunk_id} due to error ({exc.__class__.__name__}: {exc})'
+                )
+            finally:
+                self._image_data = None
+                self._chunk_id += 1
             return self.preventDefault()

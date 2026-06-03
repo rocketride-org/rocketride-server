@@ -48,8 +48,12 @@ def _plog(msg: str) -> None:
     import datetime
 
     line = f'[{datetime.datetime.now().isoformat(timespec="milliseconds")}] [video_composer] {msg}\n'
-    with open(_PLOG, 'a') as f:
-        f.write(line)
+    try:
+        with open(_PLOG, 'a') as f:
+            f.write(line)
+    except OSError as e:
+        # Read-only FS / disk full / permissions must not crash the pipeline.
+        _logger.debug(f'_plog disabled due to file I/O error: {e}')
 
 
 class IInstance(IInstanceBase):
@@ -83,9 +87,14 @@ class IInstance(IInstanceBase):
         self._filename = 'output.mp4'
 
         cfg = self.IGlobal.config
-        self._fps = cfg.get('fps', 1.0)
-        self._codec = cfg.get('codec', 'libx264')
-        self._crf = int(cfg.get('crf', 23))
+        # Normalize numeric types up front so the range checks in _encode_video
+        # can't blow up with TypeError/ValueError on non-numeric config values.
+        try:
+            self._fps = float(cfg.get('fps', 1.0))
+            self._crf = int(cfg.get('crf', 23))
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f'Invalid video composer config values: {e}') from e
+        self._codec = str(cfg.get('codec', 'libx264'))
 
     def endInstance(self):
         """Release per-instance resources."""
@@ -247,14 +256,18 @@ class IInstance(IInstanceBase):
         while offset < len(video_data):
             chunk = video_data[offset : offset + chunk_size]
             self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
-            self.instance.sendSSE(
-                'video_chunk',
-                filename=self._filename,
-                chunk_index=chunk_index,
-                total_chunks=total_chunks,
-                mime_type='video/mp4',
-                data=base64.b64encode(chunk).decode('ascii'),
-            )
+            try:
+                self.instance.sendSSE(
+                    'video_chunk',
+                    filename=self._filename,
+                    chunk_index=chunk_index,
+                    total_chunks=total_chunks,
+                    mime_type='video/mp4',
+                    data=base64.b64encode(chunk).decode('ascii'),
+                )
+            except Exception as e:
+                # A transport hiccup on one SSE send shouldn't abort the whole stream.
+                _log(f'_output_video: sendSSE failed at chunk {chunk_index}: {e}')
             offset += chunk_size
             chunk_index += 1
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
