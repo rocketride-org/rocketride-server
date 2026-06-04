@@ -1,0 +1,25 @@
+# tool_exa_search
+
+Give your agents live web search powered by [Exa](https://exa.ai)'s semantic search.
+
+> Experimental — this node is marked `experimental` and may change.
+
+## What it does
+
+When an agent calls this tool, it runs a real-time Exa search and hands back structured results: titles, URLs, text content, relevance scores, and dates.
+
+There are no pipeline lanes here (`lanes` is `{}`). Only agent runtimes reach it, through the `invoke` capability.
+
+## Setup
+
+Drop your Exa API key into the **API Key** config field (grab one at https://exa.ai). It's encrypted at rest and masked in the UI.
+
+## Config fields
+
+| Field                | Default | Description                                                       |
+| -------------------- | ------- | ----------------------------------------------------------------- |
+| API Key              | *(empty)* | Exa API key (from https://exa.ai). Encrypted at rest.           |
+| Number of Results    | `10`    | Maximum number of search results to return (1–50).                |
+| Use Autoprompt       | `Yes`   | Let Exa optimize the query for better results.                    |
+| Search Type          | `Auto`  | `Auto`, `Neural`, or `Keyword`.                                   |
+| Include Text Content | `Yes`   | Include full text content in each result.                         |
