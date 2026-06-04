@@ -79,8 +79,8 @@ export type { IBillingViewProps } from './modules/billing';
 export { CreditsPanel } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------
-export { CheckoutModal } from './modules/checkout';
-export type { CheckoutModalProps, CheckoutPlan } from './modules/checkout';
+export { CheckoutModal, PlanPicker } from './modules/checkout';
+export type { CheckoutModalProps, CheckoutPlan, PlanAction, PlanPickerProps } from './modules/checkout';
 
 // --- Chat module (conversational chat surface) --------------------------------
 export { ChatView } from './modules/chat';
@@ -99,4 +99,6 @@ export type { ConnectionMode, ConnectionStatus, ManagerInfo, IAuthProvider } fro
 // --- Shared hooks & utilities ------------------------------------------------
 export { useClickOutside } from './hooks/useClickOutside';
 export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
+export { useAnnouncements } from './hooks/useAnnouncements';
+export type { Announcement } from './hooks/useAnnouncements';
 export { PopupRow } from './components/PopupRow';

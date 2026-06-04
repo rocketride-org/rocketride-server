@@ -238,21 +238,38 @@ packages/server/
 ├── engine-core/apLib/              # Core utilities library
 │   ├── application/                # CmdLine parsing, options
 │   ├── async/                      # Threading primitives
-│   ├── compression/                # FastPFor, LZ4
+│   ├── compress/                   # FastPFor, LZ4
 │   ├── crypto/                     # OpenSSL-based cryptography
-│   ├── io/                         # File I/O and scanning
+│   ├── error/                      # Error handling
+│   ├── factory/                    # Object factories
+│   ├── file/                       # File I/O and scanning
 │   ├── json/                       # JSON processing
-│   ├── logging/                    # Logging system
-│   └── string/                     # String utilities
+│   ├── log/                        # Logging system
+│   ├── match/                      # Pattern matching
+│   ├── memory/                     # Memory management
+│   ├── plat/                       # Platform abstractions
+│   ├── string/                     # String utilities
+│   ├── time/                       # Time utilities
+│   ├── url/                        # URL handling
+│   ├── util/                       # General utilities
+│   └── xml/                        # XML processing
 ├── engine-lib/engLib/              # Main engine library
+│   ├── config/                     # Configuration management
 │   ├── core/                       # Init/deinit, global config
-│   ├── task/                       # Task system and execution
+│   ├── headers/                    # Shared headers
+│   ├── index/                      # Inverted index, search
+│   ├── java/                       # Java/Tika integration
+│   ├── keystore/                   # Key storage
+│   ├── monitor/                    # Monitoring system
+│   ├── net/                        # RPC, TLS networking
+│   ├── perms/                      # ACL handling
+│   ├── plat/                       # Platform-specific code
+│   ├── python/                     # Python integration
 │   ├── store/                      # Store/pipeline, endpoints
 │   ├── stream/                     # Stream providers
-│   ├── net/                        # RPC, TLS networking
-│   ├── index/                      # Inverted index, search
-│   ├── permissions/                # ACL handling
-│   └── integration/                # Python/Java integration
+│   ├── sysinfo/                    # System information
+│   ├── tag/                        # Tag system
+│   └── task/                       # Task system and execution
 └── CMakeLists.txt                  # Build orchestration
 ```
 

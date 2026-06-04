@@ -463,7 +463,7 @@ export class RocketRideClient extends DAPClient {
 	 * ``rrext_public_probe`` command. The server responds with version,
 	 * capabilities, platform, and public apps without requiring credentials.
 	 *
-	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://cloud.rocketride.ai"``)
+	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://api.rocketride.ai"``)
 	 * @param timeout - Optional timeout in ms for the entire operation
 	 * @returns Server info including version and capability tags
 	 * @throws Error if the server is unreachable or does not support probes

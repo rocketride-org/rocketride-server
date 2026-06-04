@@ -66,6 +66,7 @@ _PROVIDER_REGISTRY: Dict[str, str] = {
     'llm_qwen': 'providers.qwen:QwenProvider',
     'llm_minimax': 'providers.minimax:MiniMaxProvider',
     'llm_kimi': 'providers.kimi:KimiProvider',
+    'llm_baidu_qianfan': 'providers.baidu_qianfan:BaiduQianfanProvider',
 }
 
 # Maps provider name → relative path to its services.json from the repo root
@@ -81,6 +82,7 @@ _SERVICES_JSON_PATHS: Dict[str, str] = {
     'llm_qwen': 'nodes/src/nodes/llm_qwen/services.json',
     'llm_minimax': 'nodes/src/nodes/llm_minimax/services.json',
     'llm_kimi': 'nodes/src/nodes/llm_kimi/services.json',
+    'llm_baidu_qianfan': 'nodes/src/nodes/llm_baidu_qianfan/services.json',
 }
 
 # Default extra fields added to every new profile (placeholder for API key)

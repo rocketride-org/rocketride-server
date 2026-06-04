@@ -2396,8 +2396,8 @@ Integration tests may fail. Please ensure:
 @pytest.mark.parametrize(
     ('input_uri', 'expected_uri'),
     [
-        ('wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
-        ('https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('wss://api.rocketride.ai', 'wss://api.rocketride.ai/task/service'),
+        ('https://api.rocketride.ai', 'wss://api.rocketride.ai/task/service'),
         ('ws://localhost:5565', 'ws://localhost:5565/task/service'),
         ('http://localhost:5565', 'ws://localhost:5565/task/service'),
     ],

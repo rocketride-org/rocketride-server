@@ -12,6 +12,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | -------------------- | ------------------------------------------ | --------------------------------------------------------- |
 | `llm_openai`         | OpenAI GPT models                          |                                                           |
 | `llm_anthropic`      | Anthropic Claude                           |                                                           |
+| `llm_baidu_qianfan`  | Baidu Qianfan / ERNIE                      | [README](../nodes/src/nodes/llm_baidu_qianfan/README.md) |
 | `llm_gemini`         | Google Gemini                              |                                                           |
 | `llm_bedrock`        | AWS Bedrock                                |                                                           |
 | `llm_ollama`         | Local Ollama models                        |                                                           |
@@ -20,10 +21,19 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `llm_deepseek`       | DeepSeek models                            |                                                           |
 | `llm_minimax`        | MiniMax models                             |                                                           |
 | `llm_xai`            | xAI (Grok)                                 |                                                           |
-| `llm_vertex`         | Google Vertex AI                           |                                                           |
 | `llm_ibm_watson`     | IBM Watson                                 |                                                           |
-| `llm_nebius`         | Nebius Token Factory (branded preset of `llm_openai_api`) | [README](../nodes/src/nodes/llm_openai_api/README.md)      |
-| `llm_vision_mistral` | Mistral Vision (multimodal, image-to-text) | [README](../nodes/src/nodes/llm_vision_mistral/README.md) |
+| `llm_nebius`         | Nebius AI (preset of `llm_openai_api` — defined via `services.nebius.json`, not a separate directory) | [README](../nodes/src/nodes/llm_openai_api/README.md)      |
+| `llm_gmi_cloud`      | GMI Cloud models                           |                                                           |
+| `llm_qwen`           | Qwen models                                |                                                           |
+
+## Vision Models
+
+| Node                  | Description                                      | Documentation                                             |
+| --------------------- | ------------------------------------------------ | --------------------------------------------------------- |
+| `llm_vision_gemini`   | Google Gemini Vision (multimodal, image-to-text)  |                                                           |
+| `llm_vision_ollama`   | Ollama Vision (multimodal, image-to-text)         |                                                           |
+| `llm_vision_openai`   | OpenAI Vision (multimodal, image-to-text)         |                                                           |
+| `llm_vision_mistral`  | Mistral Vision (multimodal, image-to-text)        | [README](../nodes/src/nodes/llm_vision_mistral/README.md) |
 
 ## Vector Databases
 
@@ -45,6 +55,7 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `embedding_openai`      | OpenAI embeddings            |
 | `embedding_transformer` | Local transformer embeddings |
 | `embedding_image`       | Image embeddings             |
+| `embedding_video`       | Video embeddings             |
 
 ## Document Processing
 
@@ -67,6 +78,9 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `anonymize`        | PII redaction            |                                            |
 | `summarization`    | Text summarization       |                                            |
 | `audio_transcribe` | Audio to text (Whisper)  |                                            |
+| `guardrails`         | Pipeline guardrails and safety checks |                                  |
+| `rerank_cohere`      | Cohere reranking                      |                                  |
+| `accessibility_describe` | Accessibility image descriptions  |                                  |
 
 ## Media
 
@@ -76,6 +90,8 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `image_cleanup` | Image preprocessing    |
 | `thumbnail`     | Thumbnail generation   |
 | `audio_player`  | Audio playback         |
+| `audio_tts`     | Text-to-speech synthesis |
+| `twelvelabs`    | TwelveLabs video AI      |
 
 ## Storage and Connectivity
 
@@ -84,6 +100,11 @@ For information on testing nodes, see [README-node-testing.md](README-node-testi
 | `remote`       | S3, Azure Blob, GCS       |
 | `db_mysql`     | MySQL database            |
 | `index_search` | Elasticsearch, OpenSearch |
+| `db_clickhouse` | ClickHouse database       |
+| `db_neo4j`      | Neo4j graph database      |
+| `db_postgres`   | PostgreSQL database       |
+| `search_exa`    | Exa search                |
+| `telegram`      | Telegram integration      |
 
 The `core` module provides built-in connectors for OneDrive, SharePoint, Google Drive, Outlook, Confluence, Jira, Slack, SMB, and filesystem sources. These are configured via pipeline JSON rather than as standalone nodes.
 
@@ -99,23 +120,47 @@ The `core` module provides built-in connectors for OneDrive, SharePoint, Google 
 | `dictionary`        | Dictionary lookups                                                                          |
 | `text_output`       | Text output                                                                                 |
 | `local_text_output` | Local text file output                                                                      |
+| `memory_internal`   | Internal conversation memory                                                                |
+| `memory_persistent` | Persistent conversation memory                                                              |
+
+## Agent Nodes
+
+Agent nodes orchestrate multi-step reasoning with tool use.
+
+| Node                | Description                              |
+| ------------------- | ---------------------------------------- |
+| `agent_crewai`      | CrewAI multi-agent orchestration         |
+| `agent_deepagent`   | DeepAgent autonomous reasoning           |
+| `agent_langchain`   | LangChain agent framework                |
+| `agent_rocketride`  | Native RocketRide agent                  |
 
 ## Agent Tools
 
 Tool nodes (`classType: ["tool"]`) expose capabilities to agents via the control-plane invoke channel rather than data lanes.
 
-| Node          | Description                            | Documentation                                      |
-| ------------- | ------------------------------------- | -------------------------------------------------- |
-| `tool_tavily` | Tavily real-time web search for agents | [README](../nodes/src/nodes/tool_tavily/README.md) |
+| Node                 | Description                             | Documentation                                      |
+| -------------------- | --------------------------------------- | -------------------------------------------------- |
+| `tool_tavily`        | Tavily real-time web search for agents  | [README](../nodes/src/nodes/tool_tavily/README.md) |
+| `tool_bland_ai`      | Bland AI phone call tool                |                                                    |
+| `tool_chartjs`       | Chart.js chart generation               |                                                    |
+| `tool_exa_search`    | Exa search tool for agents              |                                                    |
+| `tool_filesystem`    | Filesystem operations                   |                                                    |
+| `tool_firecrawl`     | FireCrawl web scraping                  |                                                    |
+| `tool_git`           | Git operations                          |                                                    |
+| `tool_github`        | GitHub API operations                   |                                                    |
+| `tool_http_request`  | HTTP request tool                       |                                                    |
+| `tool_mcp_client`    | MCP client tool                         |                                                    |
+| `tool_pipe`          | Pipeline-to-pipeline invocation         |                                                    |
+| `tool_python`        | Python code execution                   |                                                    |
+| `tool_xtrace_memory` | XTrace memory tool                      |                                                    |
 
-Like any tool node, `tool_tavily` is agent-agnostic: it attaches to any agent node's tool channel (e.g. `agent_deepagent`, `agent_langchain`, `agent_crewai`). Paired with an LLM provider such as `llm_nebius`, it builds agentic web-search pipelines.
+Like any tool node, these are agent-agnostic: they attach to any agent node's tool channel (e.g. `agent_deepagent`, `agent_langchain`, `agent_crewai`).
 
 ## Internal
 
 | Node       | Description                                                           |
 | ---------- | --------------------------------------------------------------------- |
 | `llm_base` | Compatibility wrapper; canonical base is `ai.common.llm_base.LLMBase` |
-| `library`  | Shared library utilities                                              |
 | `core`     | Core services (cloud connectors, parsing, etc.)                       |
 
 ---
@@ -142,7 +187,7 @@ Like any tool node, `tool_tavily` is agent-agnostic: it attaches to any agent no
            return output_data
    ```
 
-3. Add `services.json` for the node definition.
+3. Add `services.json` (or `services.<variant>.json` for branded presets) for the node definition.
 4. Drop the node icon SVG next to `services.json` and reference it by filename:
 
    ```json
