@@ -428,7 +428,7 @@ interface AppManifest {
   settings?: AppSettingDefinition[];
   /** Internal: MF module identifier (derived from id). */
   moduleId?: string;
-  /** App availability status (e.g. 'available', 'coming_soon'). */
+  /** App lifecycle status (e.g. 'auth', 'free', 'unsubscribed', 'subscribed', 'trialing', 'past_due', 'canceled'). */
   appStatus?: string;
   /** Whether the app is available on the desktop (non-cloud) platform. */
   onDesktop?: boolean;
@@ -675,12 +675,12 @@ useEffect(() => {
 | `shell:subscribe` | `{ app: AppManifestEntry }` | Apps → Shell | Open subscription checkout for an app |
 | `shell:myApps` | `{}` | Apps → Shell | Navigate to My Apps |
 | `shell:accountUpdate` | `ConnectResult` | Server → Shell | Server-pushed account/subscription change |
-| `shell:servicesUpdated` | `{}` | Shell → Apps | Service catalog fetch completed |
+| `shell:servicesUpdated` | `{ services: Record<string, unknown>; servicesError?: string }` | Shell → Apps | Service catalog fetch completed |
 | `shell:sidebarCollapsing` | `{}` | Shell → Apps | Sidebar is collapsing (for layout adjustments) |
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
 | `shell:statusMessage` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:statusChange` | `{ connected: boolean; ... }` | Shell → Apps | Full connection state machine update |
-| `shell:error` | `{ message: string }` | Shell → Apps | Connection or operation error |
+| `shell:error` | `{ error: Error \| unknown }` | Shell → Apps | Connection or operation error |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
 
 ### Extending the event map

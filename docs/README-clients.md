@@ -55,8 +55,8 @@ The engine serves the latest client packages via HTTP endpoints. Once the server
 
 ```bash
 # Download and install Python client (use "latest" as filename for newest version)
-curl -O http://localhost:5565/client/python/latest
-pip install rocketride-*.whl
+curl -o rocketride-latest.whl http://localhost:5565/client/python/latest
+pip install rocketride-latest.whl
 
 # Download and install TypeScript client
 curl -O http://localhost:5565/client/typescript
