@@ -14,7 +14,7 @@ A comprehensive guide to avoiding common pitfalls when building RocketRide pipel
 - [Language-Specific SDK Mistakes](#language-specific-sdk-mistakes)
 - [Component Configuration Mistakes](#component-configuration-mistakes)
 - [Data Flow Mistakes](#data-flow-mistakes)
-- [Engine Extension (Python–C++ Interop)](#engine-extension-python-c-interop)
+- [Engine Extension (Python–C++ Interop)](#engine-extension-pythonc-interop)
 - [Quick Reference](#quick-reference)
 
 ---

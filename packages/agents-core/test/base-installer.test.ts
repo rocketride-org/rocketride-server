@@ -85,4 +85,16 @@ describe('BaseAgentInstaller', () => {
     expect(content).toContain('and me');
     expect(content).not.toContain('ROCKETRIDE:BEGIN');
   });
+
+  it('uninstall returns false and leaves a file with no marker block untouched', async () => {
+    const ws = await mkTempWorkspace();
+    const target = path.join(ws, 'subdir/test.md');
+    await (await import('fs/promises')).mkdir(path.dirname(target), { recursive: true });
+    await (await import('fs/promises')).writeFile(target, 'just user content\n', 'utf8');
+    const inst = new TestInstaller();
+    const removed = await inst.uninstall(ws);
+    expect(removed).toBe(false);
+    expect(await exists(target)).toBe(true);
+    expect(await readFile(target)).toBe('just user content\n');
+  });
 });

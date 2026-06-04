@@ -41,7 +41,7 @@ Before writing ANY RocketRide code, you MUST:
 
 - [ ] Read all RocketRide documentation
 - [ ] Read ROCKETRIDE_PIPELINE_RULES.md, ROCKETRIDE_COMPONENT_REFERENCE.md and ROCKETRIDE_COMMON_MISTAKES.md
-- [ ] If you are creating a python project, create a virtual environment
+- [ ] If you are creating a Python project, create a virtual environment
 - [ ] Create the pipeline file(s) using `.pipe` extension (e.g., `chat.pipe`, `ingestion.pipe`)
 - [ ] The extension automatically creates/updates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from settings
 - [ ] Create an `env.example` file documenting any custom variables used in your pipeline files
@@ -52,4 +52,4 @@ Before writing ANY RocketRide code, you MUST:
   - **TypeScript (pnpm):** `pnpm add rocketride`
 - [ ] Create the code around the pipelines you wrote
 - [ ] Always create a check.py or check.ts program to check that everything is setup properly
-- [ ] Pay attention to python char encoding issues if running on Windows
+- [ ] Pay attention to Python char encoding issues if running on Windows

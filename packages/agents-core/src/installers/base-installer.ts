@@ -51,6 +51,10 @@ export abstract class BaseAgentInstaller {
       return false;
     }
     const stripped = this.stripMarkedContent(existing);
+    if (stripped === existing) {
+      // No RocketRide marked content was present — nothing to remove.
+      return false;
+    }
     if (stripped.trim() === '') {
       await fs.unlink(target);
     } else {
