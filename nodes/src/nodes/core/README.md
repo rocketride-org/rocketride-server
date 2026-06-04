@@ -2,7 +2,7 @@
 
 ## What it does
 
-`core` is not a single pipeline node — it is the module that registers RocketRide's family of common services. These services are defined across the `services.*.json` files in this directory (for example `services.common.aws.json`, `services.common.google.json`, `services.common.vector.json`, `services.parse.json`, `services.hash.json`, `services.indexer.json`, `services.zip.json`, and `services.filesys.json`) and are configured as part of a pipeline rather than added as one standalone node.
+`core` isn't one node — it's the module that registers RocketRide's family of shared services. They live in the `services.*.json` files in this directory (for example `services.common.aws.json`, `services.common.google.json`, `services.common.vector.json`, `services.parse.json`, `services.hash.json`, `services.indexer.json`, `services.zip.json`, and `services.filesys.json`), and you configure them inside a pipeline rather than dropping one standalone node on the canvas.
 
 ## Service families
 

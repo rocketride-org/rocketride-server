@@ -1,9 +1,8 @@
 # Pipeline Nodes
 
-Pipeline nodes are modular components that extend the engine's data-processing
-capabilities. Each node handles one task — parsing documents, calling an LLM,
-storing embeddings in a vector database, transcribing audio, and so on — and
-nodes are composed into pipelines through their service definitions.
+A node is the unit you build pipelines from. Each one does a single job — parse a
+document, call an LLM, store embeddings, transcribe audio — and you chain them
+together through their service definitions.
 
 Every node is declared in one or more `services*.json` files under
 `nodes/src/nodes/<node>/`. A single directory may register **several services**
@@ -19,8 +18,9 @@ rather than directories.
 
 ## How nodes connect
 
-There are **two distinct ways** nodes relate to each other. Understanding both is
-essential when assembling a pipeline (and when asking an LLM to assemble one).
+Nodes connect in **two different ways**, and knowing which is which is the
+difference between a pipeline that runs and one that doesn't — whether you wire it
+by hand or hand the job to an LLM.
 
 ### 1. Data flow — typed lanes
 

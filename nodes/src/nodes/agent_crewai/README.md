@@ -1,16 +1,16 @@
 # agent_crewai
 
-CrewAI-backed agent nodes for RocketRide — a standalone agent, a hierarchical manager, and managed sub-agents.
+Run [CrewAI](https://docs.crewai.com) agents inside RocketRide — solo, as a manager, or as managed workers.
 
 ## What it does
 
-Wraps [CrewAI](https://docs.crewai.com) into three node variants that share the same base driver:
+Three node variants share the same base driver:
 
 - **CrewAI Agent** (`agent_crewai`) — a standalone single agent. It assembles a CrewAI `Agent` + `Task` and runs it to answer the incoming question.
-- **CrewAI Manager** (`agent_crewai_manager`) — a multi-agent orchestrator. It runs CrewAI's hierarchical process: it fans out to the connected CrewAI Subagent nodes, assembles a Crew with the manager as delegator, and synthesizes their outputs into a single answer.
-- **CrewAI Subagent** (`agent_crewai_subagent`) — a managed worker. It is wired into a Manager via the `crewai` channel and is delegated to by name (its `role`); it has no `questions` lane and cannot be invoked directly.
+- **CrewAI Manager** (`agent_crewai_manager`) — orchestrates a crew. It runs CrewAI's hierarchical process: fans out to the connected CrewAI Subagent nodes, assembles a Crew with the manager as delegator, and synthesizes their outputs into one answer.
+- **CrewAI Subagent** (`agent_crewai_subagent`) — a managed worker. Wired into a Manager via the `crewai` channel and delegated to by name (its `role`); it has no `questions` lane and cannot be invoked directly.
 
-The Agent and Manager are agents in the data-flow sense: they consume `questions` and produce `answers` (`"questions": ["answers"]`). Both also register as tools (`classType: ["agent", "tool"]`) and expose themselves as `<nodeId>.run_agent`, so a parent agent can delegate to them in hierarchical pipelines. Tools are attached through the agent's `tool` invoke channel (control-plane invoke), not through lanes; the Subagent likewise has its own `tool` channel. Each variant requires exactly one `llm` channel (`min: 1`).
+In data-flow terms, the Agent and Manager consume `questions` and produce `answers` (`"questions": ["answers"]`). Both also register as tools (`classType: ["agent", "tool"]`) and expose themselves as `<nodeId>.run_agent`, so a parent agent can delegate to them in hierarchical pipelines. Tools attach through the agent's `tool` invoke channel (control-plane invoke), not through lanes; the Subagent has its own `tool` channel too. Each variant requires exactly one `llm` channel (`min: 1`).
 
 ## Configuration
 

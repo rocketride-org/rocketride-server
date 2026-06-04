@@ -1,10 +1,10 @@
 # rerank_cohere
 
-Reranks retrieved documents by relevance using [Cohere's Rerank API](https://docs.cohere.com/reference/rerank).
+Got search results, but not in the right order? This node reranks them by relevance with [Cohere's Rerank API](https://docs.cohere.com/reference/rerank).
 
 ## What it does
 
-Improves search quality by reordering a set of already-retrieved documents based on their relevance to the query. Each document is scored by the Cohere Rerank API, results are sorted by relevance, optionally truncated to the top N, and filtered by a minimum score threshold. Supports the `rerank-english-v3.0` and `rerank-v3.5` models, plus a custom model option.
+Takes documents you've already retrieved and reorders them by how well they match the query. Cohere scores each one, then results are sorted, optionally cut to the top N, and dropped below a minimum score. Works with the `rerank-english-v3.0` and `rerank-v3.5` models, or a custom one.
 
 **Lanes:**
 
@@ -13,11 +13,11 @@ Improves search quality by reordering a set of already-retrieved documents based
 | `questions` | `documents` | Produces reranked documents ordered by relevance score     |
 | `questions` | `answers`   | Produces an answer with reranked documents                 |
 
-Place this node downstream of a retrieval/vector-store node so it can rerank the documents attached to each question.
+Put it downstream of a retrieval or vector-store node so it can rerank the documents attached to each question.
 
 ## Setup
 
-Requires a Cohere API key. Provide it via the node config field **API Key**, or via the environment variable:
+You'll need a Cohere API key. Set it in the node's **API Key** field, or via the environment variable:
 
 ```bash
 ROCKETRIDE_RERANK_COHERE_KEY=...

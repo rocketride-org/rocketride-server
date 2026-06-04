@@ -1,12 +1,12 @@
 # tool_pipe
 
-Exposes an inline pipeline as an agent tool node.
+Turn a whole inline pipeline into a single agent tool.
 
 ## What it does
 
-Agents invoke this node via the tool invoke channel. When the agent calls the tool, the input is routed to every connected output lane, the inline pipeline runs, and the configured response value is returned to the agent.
+When the agent calls the tool, its input fans out to every connected output lane, the inline pipeline runs, and the configured response value comes back to the agent.
 
-Unlike the other `tool_*` nodes, `tool_pipe` does have output lanes (`text`, `questions`, `documents`, `table`, `answers`) on its `_source` channel. Connect these to any pipeline nodes on the same canvas to build the tool's behavior. End each connected branch with a response node so results can be returned. The agent binding itself still happens through the `invoke` capability.
+`tool_pipe` is the one `tool_*` node with real output lanes (`text`, `questions`, `documents`, `table`, `answers`) on its `_source` channel. Wire them to other nodes on the same canvas to shape the tool's behavior, and cap each branch with a response node so results can flow back. As always, the agent binds through the `invoke` capability.
 
 ## Config fields
 

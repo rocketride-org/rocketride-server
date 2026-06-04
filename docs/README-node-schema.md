@@ -1,7 +1,7 @@
 # Node Service Definitions (`services.json`)
 
-Every pipeline node is declared by one or more **`services*.json`** files in
-`nodes/src/nodes/<node>/`. This single file does three jobs:
+A node lives in `nodes/src/nodes/<node>/` and is defined by one or more
+**`services*.json`** files. That one file pulls triple duty:
 
 1. **Registers** the node with the engine (protocol, class, executable).
 2. **Declares how it connects** to other nodes (`lanes`).

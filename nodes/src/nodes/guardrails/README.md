@@ -1,12 +1,12 @@
 # guardrails
 
-An input/output safety filter for AI pipelines.
+Stops bad input from reaching your LLM, and bad output from reaching your users.
 
 ## What it does
 
-Checks questions before they reach the LLM and answers after the LLM responds. On the input side it can detect prompt injection attempts, enforce topic restrictions (blocked/allowed keywords), and cap input length or estimated token count. On the output side it can detect hallucinations (grounding answers against source documents), flag unsafe content, detect PII leaks (emails, phones, SSNs, credit cards), and validate the output format.
+It screens questions on the way in and answers on the way out. Going in, it catches prompt injection, enforces topic rules (blocked/allowed keywords), and caps input length or estimated tokens. Coming out, it catches hallucinations (checking answers against source documents), flags unsafe content, spots PII leaks (emails, phones, SSNs, credit cards), and checks the output format.
 
-Each violation is handled according to the **policy mode**: `block` rejects the offending question/answer, `warn` logs the violation and forwards anyway, and `log` records it silently.
+How it reacts is up to the **policy mode**: `block` rejects the offending question/answer, `warn` logs the violation and forwards anyway, and `log` records it silently.
 
 **Lanes:**
 
