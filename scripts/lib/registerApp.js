@@ -145,13 +145,8 @@ function registerApp(appRoot) {
 			const mode = appManifest.mode
 				?? (appManifest.stripeProductId ? 'subscription' : 'free');
 
-			// Validate: subscription and paywall modes require a stripeProductId
-			if ((mode === 'subscription' || mode === 'paywall') && !appManifest.stripeProductId) {
-				throw new Error(
-					`App "${appManifest.id}" has mode="${mode}" but no stripeProductId. `
-					+ 'Paid modes require a Stripe product.'
-				);
-			}
+			// Note: subscription/paywall apps get their stripeProductId at runtime
+			// via seed_apps → ensure_stripe_billing, not at build time.
 
 			// Validate mode value
 			if (!['free', 'subscription', 'paywall'].includes(mode)) {
@@ -223,10 +218,12 @@ function registerApp(appRoot) {
 				...(appManifest.showHeader === false ? { showHeader: false } : {}),
 				// Include showStatusBar only when explicitly false
 				...(appManifest.showStatusBar === false ? { showStatusBar: false } : {}),
-				// Include stripeProductId only when set
-				...(appManifest.stripeProductId ? { stripeProductId: appManifest.stripeProductId } : {}),
+				// stripeProductId is NOT included — it is created at runtime by
+				// seed_apps → ensure_stripe_billing and stored in the DB only.
 				// Include public only when explicitly false (default is true)
 				...(appManifest.public === false ? { public: false } : {}),
+				// Include billing section (plans array) for seed_apps to provision Stripe products
+				...(appManifest.billing ? { billing: appManifest.billing } : {}),
 			};
 
 			// Upsert into build/apps.json (dev server publicDir)
