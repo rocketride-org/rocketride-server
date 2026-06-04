@@ -115,8 +115,8 @@ export interface StripePlan {
 	/** ISO currency code. */
 	currency: string;
 
-	/** Billing interval: "month", "year", or empty for non-recurring plans. */
-	interval: 'month' | 'year' | '';
+	/** Billing interval: "month", "year", "one_time", or empty for non-recurring plans. */
+	interval: 'month' | 'year' | 'one_time' | '';
 
 	/** Feature description lines from Stripe price metadata, or null. */
 	description?: string[] | null;

@@ -106,7 +106,7 @@ class StripePlan(TypedDict):
         amount: Display price string (e.g. "$29", "$290", "Free", "Custom").
         cents: Price in USD cents.
         currency: ISO currency code.
-        interval: Billing interval: "month", "year", or empty for non-recurring plans.
+        interval: Billing interval: "month", "year", "one_time", or empty for non-recurring plans.
         description: Feature description lines from Stripe price metadata, or None.
         action: Alternative click action (link/mailto). None means normal checkout.
         order: Sort order for card positioning. Lower values appear first. Defaults to 500.
@@ -119,7 +119,7 @@ class StripePlan(TypedDict):
     amount: str
     cents: int
     currency: str
-    interval: Literal['month', 'year', '']
+    interval: Literal['month', 'year', 'one_time', '']
     description: NotRequired[list[str] | None]
     action: NotRequired[PlanAction | None]
     order: NotRequired[int]
