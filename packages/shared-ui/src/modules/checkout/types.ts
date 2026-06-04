@@ -53,8 +53,8 @@ export interface CheckoutPlan {
 	/** Human-readable label shown in the plan selector (e.g. "Monthly", "Annual"). */
 	label: string;
 
-	/** Billing interval — used for the toggle and to group plans. */
-	interval: 'month' | 'year' | '';
+	/** Billing interval — used for the toggle and to group plans. Empty or 'one_time' for non-recurring. */
+	interval: 'month' | 'year' | 'one_time' | '';
 
 	/** Display price string (e.g. "$29 / mo", "$276 / yr", "Free", "Custom"). */
 	amount: string;

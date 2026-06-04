@@ -104,7 +104,7 @@ async function fetchAnnouncements(): Promise<Announcement[]> {
 
 	fetchPromise = (async () => {
 		try {
-			const res = await fetch(FETCH_URL);
+			const res = await fetch(FETCH_URL, { signal: AbortSignal.timeout(10_000) });
 			if (!res.ok) return cachedAnnouncements;
 
 			const data: AnnouncementsPayload = await res.json();

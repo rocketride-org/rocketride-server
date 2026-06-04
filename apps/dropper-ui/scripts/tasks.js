@@ -78,6 +78,7 @@ module.exports = {
 	actions: [
 		{ name: 'dropper-ui:bundle',   action: makeBundleAction },
 		{ name: 'dropper-ui:copy',     action: makeCopyAction },
+		// No-op: dropper-ui is a standalone page, not a shell-ui MF remote — no apps.json registration needed.
 		{ name: 'dropper-ui:register', action: () => ({ run: async () => {} }) },
 
 		{
