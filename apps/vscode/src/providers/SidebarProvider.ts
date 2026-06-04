@@ -42,6 +42,9 @@ interface ProjectEntryDTO {
 	sources?: { id: string; name: string; provider?: string }[];
 }
 
+/** Fallback poll interval to reconcile task state if a push event is missed. */
+const TASK_POLL_INTERVAL_MS = 5_000;
+
 // =============================================================================
 // PROVIDER
 // =============================================================================
@@ -57,6 +60,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
+
+	// ── Task monitoring state ────────────────────────────────────────────────
+	/** True while the wildcard task monitor is subscribed. */
+	private taskMonitorActive = false;
+	private pollTimer: ReturnType<typeof setInterval> | null = null;
+	private snapshotInFlight = false;
 
 	/**
 	 * Creates the sidebar provider.
@@ -91,15 +100,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					case 'view:ready':
 						await this.sendFullUpdate();
 						if (this.connectionManager.isConnected()) {
-							try {
-								const client = this.connectionManager.getClient();
-								const dashboard = client ? await client.getDashboard() : null;
-								if (dashboard?.tasks) {
-									this._view?.webview.postMessage({ type: 'dashboardSnapshot', tasks: dashboard.tasks });
-								}
-							} catch {
-								/* ignore */
-							}
+							await this.ensureTaskMonitor();
+							await this.sendDashboardSnapshot();
+							this.startPolling();
 						}
 						break;
 					case 'connect':
@@ -155,6 +158,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		});
 
 		webviewView.onDidDispose(() => {
+			this.stopPolling();
 			this._view = undefined;
 		});
 	}
@@ -279,17 +283,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			this.sendFullUpdate();
 		});
 		const connected = this.connectionManager.on('shell:connected', async () => {
-			// Subscribe to task lifecycle events
-			const client = this.connectionManager.getClient();
-			if (client) {
-				client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
-					console.error('[SidebarProvider] Failed to subscribe to task events:', err);
-				});
-			}
-			// Teams come from ConnectResult — no fetch needed, just update the webview
+			// Subscribe before anything else so we don't miss events from tasks
+			// already running on (re)connect, then reconcile state.
+			await this.ensureTaskMonitor();
 			this.sendFullUpdate();
+			await this.sendDashboardSnapshot();
+			this.startPolling();
 		});
 		const disconnected = this.connectionManager.on('shell:disconnected', () => {
+			this.taskMonitorActive = false;
+			this.stopPolling();
 			this.sendFullUpdate();
 		});
 		const error = this.connectionManager.on('shell:error', () => {
@@ -353,6 +356,54 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		});
+	}
+
+	// =========================================================================
+	// TASK MONITORING
+	// =========================================================================
+
+	/** Subscribes to the wildcard task monitor once; awaited and idempotent. */
+	private async ensureTaskMonitor(): Promise<void> {
+		if (this.taskMonitorActive) return;
+		const client = this.connectionManager.getClient();
+		if (!client) return;
+		try {
+			await client.addMonitor({ token: '*' }, ['task', 'output']);
+			this.taskMonitorActive = true;
+		} catch (err) {
+			console.error('[SidebarProvider] Failed to subscribe to task events:', err);
+		}
+	}
+
+	/** Fetches the dashboard and pushes a full task snapshot; coalesces overlaps. */
+	private async sendDashboardSnapshot(): Promise<void> {
+		if (!this._view || this.snapshotInFlight || !this.connectionManager.isConnected()) return;
+		this.snapshotInFlight = true;
+		try {
+			const client = this.connectionManager.getClient();
+			const dashboard = client ? await client.getDashboard() : null;
+			if (dashboard?.tasks) {
+				this._view?.webview.postMessage({ type: 'dashboardSnapshot', tasks: dashboard.tasks });
+			}
+		} catch {
+			/* best-effort — push events remain the primary update path */
+		} finally {
+			this.snapshotInFlight = false;
+		}
+	}
+
+	private startPolling(): void {
+		this.stopPolling();
+		this.pollTimer = setInterval(() => {
+			this.sendDashboardSnapshot().catch(() => {});
+		}, TASK_POLL_INTERVAL_MS);
+	}
+
+	private stopPolling(): void {
+		if (this.pollTimer) {
+			clearInterval(this.pollTimer);
+			this.pollTimer = null;
+		}
 	}
 
 	// =========================================================================
@@ -523,6 +574,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			const missing = await checkMissingEnvVars(client, pipelineJson);
 			if (missing.length > 0) return;
 
+			// Ensure the monitor is live before starting, else the first
+			// lifecycle events race the subscription and the view stays stale.
+			await this.ensureTaskMonitor();
+
 			const pipeName = path.basename(fsPath).replace(/\.pipe(?:\.json)?$/, '');
 			await client.use({
 				pipeline: pipelineJson,
@@ -530,6 +585,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name: pipeName,
 			});
+
+			await this.sendDashboardSnapshot();
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
 		}
@@ -665,10 +722,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Unsubscribes from task events and disposes all listeners. */
 	public dispose(): void {
+		this.stopPolling();
 		const client = this.connectionManager.getClient();
 		if (client) {
 			client.removeMonitor({ token: '*' }, ['task', 'output']).catch(() => {});
 		}
+		this.taskMonitorActive = false;
 		for (const d of this.disposables) d.dispose();
 		this.disposables = [];
 	}
