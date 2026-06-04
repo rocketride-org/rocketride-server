@@ -215,10 +215,16 @@ def test_flag_explicit_false_disables():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('bad_access', [['write'], {'tier': 'write'}, 123])
+@pytest.mark.parametrize('bad_access', [['write'], {'tier': 'write'}, 123, 0, False, [], {}])
 def test_non_string_access_raises_googleaccesserror(bad_access):
+    # Includes falsey non-strings (0/False/[]/{}) that must NOT silently fall
+    # back to the default tier; only None/'' / a missing key default (see below).
     with pytest.raises(GoogleAccessError):
         resolve_google_access({'access': bad_access}, _FIXTURE)
+
+
+def test_none_access_falls_back_to_default():
+    assert resolve_google_access({'access': None}, _FIXTURE).tier == 'write'
 
 
 # ---------------------------------------------------------------------------

@@ -40,11 +40,14 @@ class GoogleAccessError(PermissionError):
 
 @dataclass(frozen=True)
 class AccessSpec:
+    """Per-API access contract: tier->scopes, default tier, and honored gate flags."""
+
     scopes: dict[str, list[str]]  # access tier -> OAuth scopes
     default: str  # tier used when config omits access
     flags: tuple[str, ...] = ()  # config boolean field names honored
 
     def __post_init__(self) -> None:
+        """Validate the spec at construction."""
         if not self.scopes:
             raise GoogleAccessError('AccessSpec.scopes must declare at least one tier')
         if self.default not in self.scopes:
@@ -55,12 +58,15 @@ class AccessSpec:
 
 @dataclass(frozen=True)
 class GoogleAccess:
+    """Resolved access for one node: granted scopes, write capability, and gate flags."""
+
     tier: str
     scopes: list[str]
     can_write: bool
     flags: dict[str, bool]
 
     def require_write(self, op: str) -> None:
+        """Raise if the node is read-only."""
         if not self.can_write:
             raise GoogleAccessError(
                 f'{op} needs write access, but this node is read-only '
@@ -68,6 +74,7 @@ class GoogleAccess:
             )
 
     def require_flag(self, name: str, op: str) -> None:
+        """Raise if the named destructive gate is not enabled."""
         if not self.flags.get(name, False):
             raise GoogleAccessError(
                 f'{op} is gated by {name!r}, which is off by default. Enable {name!r} in the node config to allow it.'
@@ -75,6 +82,7 @@ class GoogleAccess:
 
 
 def _resolve_flags(config: dict, spec: AccessSpec) -> dict[str, bool]:
+    """Resolve declared gate flags, rejecting non-bool config values."""
     # Strict: a destructive gate must fail loud on misconfig, not coerce. Only an
     # explicit bool True enables; a present non-bool ('false', 1, 'no') is an error.
     flags: dict[str, bool] = {}
@@ -90,9 +98,17 @@ def _resolve_flags(config: dict, spec: AccessSpec) -> dict[str, bool]:
 
 
 def resolve_google_access(config: dict, spec: AccessSpec) -> GoogleAccess:
-    tier = config.get('access') or spec.default
-    if not isinstance(tier, str):
-        raise GoogleAccessError(f'access must be a string tier name, got {type(tier).__name__}')
+    """Resolve a node's config + AccessSpec into a GoogleAccess (scopes + gates)."""
+    # Blank/omitted access means "use the default tier" (e.g. an empty UI field).
+    # Any other non-string value is malformed config and must raise rather than
+    # silently fall through to the default.
+    raw = config.get('access')
+    if raw is None or raw == '':
+        tier = spec.default
+    elif not isinstance(raw, str):
+        raise GoogleAccessError(f'access must be a string tier name, got {type(raw).__name__}')
+    else:
+        tier = raw
     if tier not in spec.scopes:
         raise GoogleAccessError(f'unknown access tier {tier!r}; expected one of {sorted(spec.scopes)}')
     tier_scopes = spec.scopes[tier]
