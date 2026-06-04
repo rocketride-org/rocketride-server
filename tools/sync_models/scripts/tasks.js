@@ -6,12 +6,12 @@
  */
 
 const path = require('path');
-const { execCommand, PROJECT_ROOT, DIST_ROOT } = require('../../scripts/lib');
+const { execCommand, PROJECT_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 const TOOLS_SRC = path.join(__dirname, '..', 'src', 'sync_models.py');
 
 // Maps provider key → relative path to its services.json from the repo root.
-// Mirrors _SERVICES_JSON_PATHS in tools/src/sync_models.py.
+// Mirrors _SERVICES_JSON_PATHS in tools/sync_models/src/sync_models.py.
 const SERVICES_JSON_PATHS = {
 	llm_openai: 'nodes/src/nodes/llm_openai/services.json',
 	embedding_openai: 'nodes/src/nodes/embedding_openai/services.json',

@@ -5,7 +5,7 @@ These tests require no server, no running engine, and no API keys.
 They test the merge, deprecation, smoke-test gate, and comment-preservation
 logic against mocked provider responses.
 
-Run: pytest tools/test/test_sync_logic.py
+Run: pytest tools/sync_models/test/test_sync_logic.py
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# tools/src is added to sys.path by conftest.py
+# tools/sync_models/src is added to sys.path by conftest.py
 from core.merger import merge, _make_profile_key, _derive_title
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
@@ -500,8 +500,8 @@ class TestCliValidation:
         import subprocess
         import sys
 
-        repo_root = Path(__file__).resolve().parents[2]
-        script = repo_root / 'tools' / 'src' / 'sync_models.py'
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / 'tools' / 'sync_models' / 'src' / 'sync_models.py'
         result = subprocess.run(
             [sys.executable, str(script), *args],
             capture_output=True,

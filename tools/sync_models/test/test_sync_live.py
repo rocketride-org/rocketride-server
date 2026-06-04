@@ -7,10 +7,10 @@ profile in services.json has a model ID that still exists in the live API.
 All tests are skipped when the required API key environment variable is not set.
 
 Run with all keys:
-  pytest tools/test/test_sync_live.py
+  pytest tools/sync_models/test/test_sync_live.py
 
 Run for a single provider:
-  ROCKETRIDE_OPENAI_KEY=sk-... pytest tools/test/test_sync_live.py -k openai
+  ROCKETRIDE_OPENAI_KEY=sk-... pytest tools/sync_models/test/test_sync_live.py -k openai
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import warnings
 from pathlib import Path
 from typing import Dict, Any, Set
 
-# markers.py is a regular module in tools/test/ (importable unlike conftest)
+# markers.py is a regular module in tools/sync_models/test/ (importable unlike conftest)
 from markers import (
     requires_openai,
     requires_anthropic,

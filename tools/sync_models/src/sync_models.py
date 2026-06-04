@@ -3,9 +3,9 @@ sync_models.py — CLI entry point for LLM model list synchronisation.
 
 Usage
 -----
-  python tools/src/sync_models.py --provider openai [--apply]
-  python tools/src/sync_models.py --provider anthropic [--apply]
-  python tools/src/sync_models.py --all [--apply]
+  python tools/sync_models/src/sync_models.py --provider openai [--apply]
+  python tools/sync_models/src/sync_models.py --provider anthropic [--apply]
+  python tools/sync_models/src/sync_models.py --all [--apply]
 
 Without ``--apply`` the script runs in dry-run mode: it prints what would
 change but does not write any files.
@@ -33,7 +33,7 @@ try:
 except ImportError:
     pass  # python-dotenv not installed — rely on shell environment
 
-# Make tools/src importable when running as a script from any CWD
+# Make tools/sync_models/src importable when running as a script from any CWD
 _TOOLS_SRC = Path(__file__).parent
 if str(_TOOLS_SRC) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SRC))
@@ -135,7 +135,7 @@ def _find_repo_root() -> Path:
     Raises:
         RuntimeError: If the repo root cannot be found
     """
-    candidate = _TOOLS_SRC.parent.parent  # tools/src -> tools -> repo root
+    candidate = _TOOLS_SRC.parent.parent.parent  # tools/sync_models/src -> sync_models -> tools -> repo root
     if (candidate / 'nodes').exists():
         return candidate
     # Try CWD as fallback

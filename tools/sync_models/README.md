@@ -10,15 +10,15 @@ the results into `nodes/src/nodes/*/services.json` profile lists.
 **Direct (Python):**
 
 ```bash
-python tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
-python tools/src/sync_models.py --all
+python tools/sync_models/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
+python tools/sync_models/src/sync_models.py --all
 ```
 
 **Via the engine:**
 
 ```bash
-engine run tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
-engine run tools/src/sync_models.py --all
+engine run tools/sync_models/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
+engine run tools/sync_models/src/sync_models.py --all
 ```
 
 **Via the builder** (runs sync + Prettier in one step):
@@ -48,19 +48,19 @@ Validation: `--model-source` may not list duplicate values. `--allow-fallback-di
 
 ```bash
 # Default: dry-run, enrichment-only — updates token data on existing profiles, no new profiles added
-python tools/src/sync_models.py --provider llm_openai
+python tools/sync_models/src/sync_models.py --provider llm_openai
 
 # Production CI path: discovery on, strict mode — only providers with keys get new profiles
-python tools/src/sync_models.py --all --enable-discovery --apply
+python tools/sync_models/src/sync_models.py --all --enable-discovery --apply
 
 # Dev workflow without API keys, explicit fallback opt-in (may add OpenRouter aliases)
-python tools/src/sync_models.py --provider llm_openai --enable-discovery --allow-fallback-discovery
+python tools/sync_models/src/sync_models.py --provider llm_openai --enable-discovery --allow-fallback-discovery
 
 # Custom source ordering — LiteLLM first for token data, OpenRouter as backup, no provider API
-python tools/src/sync_models.py --provider llm_openai --model-source litellm --model-source openrouter
+python tools/sync_models/src/sync_models.py --provider llm_openai --model-source litellm --model-source openrouter
 
 # Discovery from OpenRouter alone, suitable for an aggregator-style node
-python tools/src/sync_models.py --provider llm_openai --model-source openrouter --enable-discovery --allow-fallback-discovery
+python tools/sync_models/src/sync_models.py --provider llm_openai --model-source openrouter --enable-discovery --allow-fallback-discovery
 ```
 
 ---
@@ -158,7 +158,7 @@ The sync has two distinct modes:
 
 ---
 
-## Configuration — `tools/src/sync_models.config.json`
+## Configuration — `tools/sync_models/src/sync_models.config.json`
 
 ### Top-level keys
 
@@ -260,10 +260,10 @@ passes the sync tool will automatically re-evaluate the profile against the prov
 
 ## Dependencies
 
-Managed in `tools/requirements.txt`. Install with:
+Managed in `tools/sync_models/requirements.txt`. Install with:
 
 ```bash
-pip install -r tools/requirements.txt
+pip install -r tools/sync_models/requirements.txt
 ```
 
 | Package                    | Purpose                                                                  |
@@ -282,10 +282,10 @@ pip install -r tools/requirements.txt
 
 ```bash
 # Offline logic tests (no API key, no server)
-pytest tools/test/test_sync_logic.py
+pytest tools/sync_models/test/test_sync_logic.py
 
 # Live API tests (skipped if keys not set)
-pytest tools/test/test_sync_live.py
+pytest tools/sync_models/test/test_sync_live.py
 ```
 
 ---
@@ -295,7 +295,7 @@ pytest tools/test/test_sync_live.py
 `.github/workflows/sync-models.yml` runs every Monday at 05:00 UTC and on
 manual dispatch. It:
 
-1. Runs a dry-run first (`python tools/src/sync_models.py --all --enable-discovery`) — fails fast if the script errors.
+1. Runs a dry-run first (`python tools/sync_models/src/sync_models.py --all --enable-discovery`) — fails fast if the script errors.
 2. Runs with `--apply --pr-body` to write changes and capture the report.
 3. Opens a PR via `peter-evans/create-pull-request` with the report as the body.
 
@@ -309,8 +309,8 @@ the full list).
 
 ## Adding a New Provider
 
-1. Create `tools/src/providers/<name>.py` subclassing `CloudProvider`
+1. Create `tools/sync_models/src/providers/<name>.py` subclassing `CloudProvider`
 2. Implement `make_client(api_key)` and `fetch_models(client)`
-3. Add an entry to `_PROVIDER_REGISTRY` and `_SERVICES_JSON_PATHS` in `tools/src/sync_models.py`
-4. Add a provider config block to `tools/src/sync_models.config.json`
-5. Run `python tools/src/sync_models.py --provider <name>` to verify
+3. Add an entry to `_PROVIDER_REGISTRY` and `_SERVICES_JSON_PATHS` in `tools/sync_models/src/sync_models.py`
+4. Add a provider config block to `tools/sync_models/src/sync_models.config.json`
+5. Run `python tools/sync_models/src/sync_models.py --provider <name>` to verify

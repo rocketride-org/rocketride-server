@@ -1,8 +1,8 @@
 """
-conftest.py — pytest fixtures and configuration for tools/test/.
+conftest.py — pytest fixtures and configuration for tools/sync_models/test/.
 
 Provides:
-  - sys.path setup so tools/src/ modules are importable
+  - sys.path setup so tools/sync_models/src/ modules are importable
   - mock_provider_api fixture for offline tests
   - sample_services_json fixture for patcher tests
 
@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup — must happen before any tools/src imports
+# Path setup — must happen before any tools/sync_models/src imports
 # ---------------------------------------------------------------------------
 
 _TOOLS_TEST = Path(__file__).parent
@@ -42,7 +42,7 @@ except ImportError:
 
 if load_dotenv is not None:
     try:
-        load_dotenv(_TOOLS_TEST.parent.parent / '.env')
+        load_dotenv(_TOOLS_TEST.parent.parent.parent / '.env')
     except OSError as exc:
         import warnings
 
