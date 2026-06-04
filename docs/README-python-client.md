@@ -506,7 +506,7 @@ async def main():
         question.addQuestion("Summarize the main points and list keywords.")
         response = await client.chat(token=token, question=question)
         answer_text = response.get("data", {}).get("answer") or (response.get("answers") or [None])[0]
-        answer = Answer()
+        answer = Answer(expectJson=True)
         answer.setAnswer(answer_text or "")
         if answer.isJson():
             structured = answer.getJson()
