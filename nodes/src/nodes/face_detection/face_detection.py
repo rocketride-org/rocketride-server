@@ -7,6 +7,8 @@
 #
 # Produces axis-aligned bounding boxes plus (optionally) 6 coarse
 # alignment-grade keypoints per detected face.
+#
+# Runs locally (not on the model server): mediapipe runs on CPU, not GPU.
 # =============================================================================
 
 import os
@@ -67,8 +69,6 @@ class FaceDetector:
         model_url (str): Resolved .task bundle URL.
         threshold (float): Minimum detection confidence.
         emit_landmarks (bool): Whether to include 6 keypoints per face.
-        device (str): Informational device label; MediaPipe Tasks Python
-            runs on CPU/XNNPACK regardless of this value.
     """
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -79,30 +79,12 @@ class FaceDetector:
         self.threshold = float(config.get('threshold', 0.5))
         self.emit_landmarks = bool(config.get('emit_landmarks', True))
 
-        # Informational only. MediaPipe Tasks Python runs CPU/XNNPACK.
-        self.device = self._pick_device()
-
         self.model_name = f'blazeface-{self.profile}'
         self._detector = self._build_detector()
 
     # -------------------------------------------------------------------------
     # Setup
     # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _pick_device() -> str:
-        """Informational device pick: CUDA -> MPS -> CPU. Engine runs CPU."""
-        try:
-            import torch  # noqa: F401
-
-            if torch.cuda.is_available():
-                return 'cuda'
-            mps = getattr(getattr(torch, 'backends', None), 'mps', None)
-            if mps is not None and mps.is_available():
-                return 'mps'
-        except Exception:
-            pass
-        return 'cpu'
 
     def _resolve_model_path(self) -> str:
         """Download the .task bundle (cached) and return a local file path."""

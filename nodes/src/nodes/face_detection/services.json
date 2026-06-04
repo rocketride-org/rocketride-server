@@ -84,14 +84,14 @@
 	],
 	"test": {
 		"profiles": ["short"],
-		"outputs": ["documents"],
+		"outputs": ["text"],
 		"timeout": 60,
 		"cases": [
 			{
-				"name": "Detect faces in image",
-				"image": "images/ocr_test_text.png",
+				"name": "Detect a face in a portrait photo",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "face" }
 				}
 			}
 		]
