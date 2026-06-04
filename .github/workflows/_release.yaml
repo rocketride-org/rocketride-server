@@ -191,15 +191,22 @@ jobs:
 
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
+        env:
+          VERSION: ${{ matrix.version }}
         run: |
           # OIDC trusted publishing — no NPM_TOKEN. Auth uses this job's
           # id-token (already granted for --provenance). Requires npm >= 11.5.1;
           # Node 20 ships npm 10.x, so upgrade in place. The trusted publisher
           # must be configured on npmjs.com against the CALLER workflow
           # (release.yaml) + environment "release" — not this reusable child.
-          npm install -g npm@latest
+          npm install -g npm@11.5.1
           npm --version
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
           else
@@ -217,31 +224,45 @@ jobs:
 
       - name: Publish rocketride to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-python'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish rocketride-mcp to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-mcp'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
@@ -324,15 +345,25 @@ jobs:
 
       - name: Set release body
         id: release_body
-        if: inputs.prerelease
         run: |
+          # Pull the top CHANGELOG section (everything from the first "## ["
+          # header to the next one) so the GitHub Release shows the real,
+          # human-written change list instead of just the batched stage->main
+          # merge PR that generate_release_notes would otherwise emit.
+          NOTES="$(awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md | sed '1d')"
           {
             echo 'body<<RELEASE_BODY'
-            echo "Automated nightly prerelease from \`${{ github.ref_name }}\`."
-            echo ""
-            echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "_Automated nightly prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo ""
+            fi
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
+            else
+              echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            fi
             echo 'RELEASE_BODY'
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'

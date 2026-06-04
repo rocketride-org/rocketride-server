@@ -113,8 +113,8 @@ CONST_TRANSPORT_PROCESS_WAIT_TIMEOUT = 5.0  # seconds to wait for process termin
 # =============================================================================
 CONST_MODEL_SERVER_PORT = 5590  # default model server port
 CONST_MODEL_SERVER_HOST = 'localhost'  # default bind address (localhost only; use 0.0.0.0 in Docker/K8s)
-CONST_MODEL_QUEUE_SCALE_UP_THRESHOLD = 50  # queue depth to trigger replica addition
-CONST_MODEL_QUEUE_SCALE_DOWN_THRESHOLD = 5  # queue depth to trigger replica removal
-CONST_MODEL_QUEUE_SCALE_UP_DELAY = 30  # seconds to wait before scaling up
-CONST_MODEL_QUEUE_SCALE_DOWN_DELAY = 300  # seconds to wait before scaling down (5 min)
-CONST_MODEL_REPLICA_MANAGER_INTERVAL = 10  # seconds between auto-scaling checks
+CONST_SCALE_UP_DRAIN_TIME_S = 30  # scale up if estimated drain time exceeds this (seconds)
+CONST_SCALE_UP_DELAY_S = 15  # ...sustained for this long before acting (seconds)
+CONST_SCALE_DOWN_DRAIN_TIME_S = 2  # scale down if drain time below this (seconds)
+CONST_SCALE_DOWN_DELAY_S = 300  # ...sustained for this long (5 min)
+CONST_REPLICA_MANAGER_INTERVAL_S = 10  # seconds between auto-scaling checks

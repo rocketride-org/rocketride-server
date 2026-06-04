@@ -187,7 +187,7 @@ const ToolbarDivider = () => {
  */
 export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
-	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady } = useFlowGraph();
+	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
@@ -235,14 +235,6 @@ export default function Canvas(): ReactElement {
 
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
-	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);
-
-	// Auto-hide config snackbar after 6 seconds
-	useEffect(() => {
-		if (configSnackbar === null) return;
-		const timer = setTimeout(() => setConfigSnackbar(null), 6000);
-		return () => clearTimeout(timer);
-	}, [configSnackbar]);
 
 	const instantiateTemplate = useCallback(
 		(...args: Parameters<typeof rawInstantiateTemplate>) => {
@@ -252,7 +244,7 @@ export default function Canvas(): ReactElement {
 			}
 			return unconfigured;
 		},
-		[rawInstantiateTemplate]
+		[rawInstantiateTemplate, setConfigSnackbar]
 	);
 
 	// --- Callback for when a source node is added from the welcome screen ----
@@ -263,7 +255,7 @@ export default function Canvas(): ReactElement {
 				setConfigSnackbar('1 node needs configuration — look for the red gear');
 			}
 		},
-		[requestFitView]
+		[requestFitView, setConfigSnackbar]
 	);
 
 	// --- Compute ReactFlow props from navigation mode and lock state --------

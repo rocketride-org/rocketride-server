@@ -31,6 +31,7 @@ from markers import (
     requires_perplexity,
     requires_qwen,
     requires_minimax,
+    requires_baidu_qianfan,
 )
 from core.patcher import get_profiles
 
@@ -259,3 +260,20 @@ def test_minimax_profiles_exist_in_api():
     profiles = _load_profiles('llm_minimax')
     live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.minimax.io/v1')
     _check_missing_models(profiles, live_ids, 'llm_minimax')
+
+
+# ---------------------------------------------------------------------------
+# Baidu Qianfan
+# ---------------------------------------------------------------------------
+
+
+@requires_baidu_qianfan
+def test_baidu_qianfan_profiles_exist_in_api():
+    """Every non-deprecated llm_baidu_qianfan profile model ID must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_BAIDU_QIANFAN_KEY']
+    profiles = _load_profiles('llm_baidu_qianfan')
+    live_ids = _fetch_openai_model_ids(
+        api_key,
+        base_url='https://qianfan.baidubce.com/v2',
+    )
+    _check_missing_models(profiles, live_ids, 'llm_baidu_qianfan')

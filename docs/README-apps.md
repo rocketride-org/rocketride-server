@@ -426,6 +426,12 @@ interface AppManifest {
   showStatusBar?: boolean;
   /** Settings the app requires. Shown in the shell's Settings overlay. */
   settings?: AppSettingDefinition[];
+  /** Internal: MF module identifier (derived from id). */
+  moduleId?: string;
+  /** App lifecycle status (e.g. 'auth', 'free', 'unsubscribed', 'subscribed', 'trialing', 'past_due', 'canceled'). */
+  appStatus?: string;
+  /** Whether the app is available on the desktop (non-cloud) platform. */
+  onDesktop?: boolean;
 }
 ```
 
@@ -585,6 +591,14 @@ The workspace context provides:
 - `settings` — User-configured settings
 - `activeAppId` — Current app ID
 - `appManifest` — All registered apps
+- `appLoading` — Whether the active app is currently loading
+- `loadedApps` — Map of already-loaded app descriptors (for cross-app component loading)
+- `loadApp(appId)` — Trigger lazy loading of an app's descriptor
+- `updateAppState(patch)` — Update per-app state
+- `updateSetting(key, value)` — Update a single setting
+- `updatePrefs(patch)` — Update workspace preferences
+- `themeOptions` — Available theme choices
+- `setTheme(themeId)` — Switch the active theme
 - `dispatch(action)` — Update prefs or switch apps
 - `emit(event, payload)` / `on(event, handler)` — Event bus (delegates to connectionManager)
 
@@ -661,9 +675,12 @@ useEffect(() => {
 | `shell:subscribe` | `{ app: AppManifestEntry }` | Apps → Shell | Open subscription checkout for an app |
 | `shell:myApps` | `{}` | Apps → Shell | Navigate to My Apps |
 | `shell:accountUpdate` | `ConnectResult` | Server → Shell | Server-pushed account/subscription change |
+| `shell:servicesUpdated` | `{ services: Record<string, unknown>; servicesError?: string }` | Shell → Apps | Service catalog fetch completed |
 | `shell:sidebarCollapsing` | `{}` | Shell → Apps | Sidebar is collapsing (for layout adjustments) |
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
-| `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Status bar message update |
+| `shell:statusMessage` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
+| `shell:statusChange` | `{ connected: boolean; ... }` | Shell → Apps | Full connection state machine update |
+| `shell:error` | `{ error: Error \| unknown }` | Shell → Apps | Connection or operation error |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
 
 ### Extending the event map
@@ -798,6 +815,10 @@ All operations are methods on the `Documents` instance:
 | `closeGroup(groupId)` | Close all editors in a group |
 | `setActiveEditor(groupId, index)` | Activate an editor within a group |
 | `setActiveGroup(groupId)` | Focus a group |
+| `openStaticDocument(uri, label, content?, groupId?)` | Open a read-only static document with a display label |
+| `splitGroupWithDocument(groupId, orientation)` | Split a group, moving the active document to the new pane |
+| `updateSplitSizes(splitNodeId, sizes)` | Update the sizes of a split layout node |
+| `updateEditorViewState(editorId, viewState)` | Persist an editor's view state (e.g. scroll, cursor) |
 | `getState()` | Read state without subscribing |
 | `getDocument(uri)` | Get a single document by URI |
 | `destroy()` | Clean up the instance |
@@ -1091,7 +1112,7 @@ The API surface is identical — same types, same hooks, same functions.
 
 ### Hooks
 
-`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`, `useShellEvents()`, `useClickOutside()`, `useFixedPopupPosition()`
+`useShellConnection()`, `useShellApiConfig()`, `useWorkspace()`, `useAuthUser()`, `useLogout()`, `useSubscriptions()`, `useAppComponent()`, `useShellEvents()`, `useShellEvent()`, `useClient()`, `useConnectionStatus()`, `usePolling()`, `useClickOutside()`, `useFixedPopupPosition()`
 
 ### Functions
 
@@ -1103,4 +1124,4 @@ The API surface is identical — same types, same hooks, same functions.
 
 ### Components
 
-`ShellApp`, `Shell`, `Sidebar`, `NavButton`, `BottomPanel`, `ConfirmDialog`, `DebugPanel`, `PopupRow`, `AccountPage`, `BillingPage`, `SettingsPage`, `DocExplorer`, `DocTabs`
+`Shell`, `Sidebar`, `NavButton`, `BottomPanel`, `ConfirmDialog`, `DebugPanel`, `PopupRow`, `AccountPage`, `BillingPage`, `SettingsPage`, `DocExplorer`, `DocTabs`, `DocSplitLayout`

@@ -184,15 +184,14 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 		return <RocketRideMark size={size} color="var(--rr-brand)" />;
 	};
 
-	// Collapsed: show RocketRide mark centered
+	// Collapsed: show the same icon as the expanded state, centered
 	if (collapsed) {
 		return (
 			<div style={{
 				width: COLLAPSED_BTN, height: COLLAPSED_BTN, margin: '0 auto',
 				display: 'flex', alignItems: 'center', justifyContent: 'center',
-				color: 'var(--rr-brand)',
 			}}>
-				<RocketRideMark size={20} color="var(--rr-brand)" />
+				{resolveIcon(20)}
 			</div>
 		);
 	}

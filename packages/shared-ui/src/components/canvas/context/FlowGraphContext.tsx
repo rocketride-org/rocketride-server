@@ -200,8 +200,9 @@ export interface IFlowGraphContext {
 	 * Loads a project into the canvas, replacing all nodes and edges.
 	 *
 	 * @param project - The project to load.
+	 * @returns Number of nodes that failed validation (unconfigured).
 	 */
-	loadData: (project: IProject) => void;
+	loadData: (project: IProject) => number;
 
 	/**
 	 * Low-level canvas loader. Sets nodes and edges, resets isFlowReady,
@@ -224,6 +225,12 @@ export interface IFlowGraphContext {
 	 * when all nodes have measured dimensions.
 	 */
 	isFlowReady: boolean;
+
+	/** Snackbar message shown when nodes need configuration (red gear). Null when hidden. */
+	configSnackbar: string | null;
+
+	/** Set or clear the config snackbar message. */
+	setConfigSnackbar: (msg: string | null) => void;
 }
 
 const FlowGraphContext = createContext<IFlowGraphContext | null>(null);
@@ -310,6 +317,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	/** ID of the node whose config panel is open (undefined = closed). */
 	const [editingNodeId, setEditingNodeId] = useState<string | undefined>(undefined);
 	const [quickAddState, setQuickAddState] = useState<IQuickAddState | null>(null);
+
+	// Config snackbar — shown when nodes need configuration
+	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);
+
+	// Auto-hide config snackbar after 6 seconds
+	useEffect(() => {
+		if (configSnackbar === null) return;
+		const timer = setTimeout(() => setConfigSnackbar(null), 6000);
+		return () => clearTimeout(timer);
+	}, [configSnackbar]);
 
 	// =====================================================================
 	// Content change notification
@@ -926,8 +943,27 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * queues viewport restoration for when isFlowReady transitions to true.
 	 */
 	const loadData = useCallback(
-		(project: IProject) => {
+		(project: IProject): number => {
 			const newNodes = getNodesFromProject(project);
+
+			// Re-validate formDataValid for every node against current schemas.
+			// Saved pipelines may have stale formDataValid (e.g. true when the
+			// apikey was empty — before the empty-string validation fix).
+			let unconfigured = 0;
+			for (const node of newNodes) {
+				const data = node.data as Record<string, unknown>;
+				const provider = data?.provider as string;
+				const service = servicesJson?.[provider];
+				const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
+				if (pipe?.schema) {
+					const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+					const validation = validateFormData(pipe.schema, formData);
+					const valid = validation.errors.length === 0;
+					(data as any).formDataValid = valid;
+					if (!valid) unconfigured++;
+				}
+			}
+
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
 			const newEdges = getEdgesFromNodes(sortedNodes);
 
@@ -950,8 +986,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			} else {
 				pendingViewportRef.current = null;
 			}
+
+			return unconfigured;
 		},
-		[loadCanvas, updateProjectLayout]
+		[loadCanvas, updateProjectLayout, servicesJson]
 	);
 
 	// --- Detect when ReactFlow has measured all nodes -----------------------
@@ -986,9 +1024,54 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 		lastSentVersion.current = incomingVersion;
 		lastLoadedProjectId.current = incomingProjectId;
-		loadData(currentProject);
+		const unconfigured = loadData(currentProject);
+		if (unconfigured > 0) {
+			setConfigSnackbar(unconfigured === 1
+				? '1 node needs configuration — look for the red gear'
+				: `${unconfigured} nodes need configuration — look for the red gear`);
+		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingVersion, incomingProjectId]);
+
+	// --- Re-validate nodes when servicesJson arrives (may be empty on first load) ---
+	useEffect(() => {
+		if (!servicesJson || Object.keys(servicesJson).length === 0) return;
+		if (nodes.length === 0) return;
+
+		let unconfigured = 0;
+		let changed = false;
+		const updated = nodes.map((node) => {
+			const data = node.data as Record<string, unknown>;
+			const provider = data?.provider as string;
+			const service = servicesJson[provider];
+			const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
+			if (!pipe?.schema) return node;
+
+			const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+			const validation = validateFormData(pipe.schema, formData);
+			const valid = validation.errors.length === 0;
+			if ((data as any).formDataValid !== valid) {
+				changed = true;
+				return { ...node, data: { ...data, formDataValid: valid } };
+			}
+			if (!valid) unconfigured++;
+			return node;
+		});
+
+		if (changed) {
+			setNodes(updated as FlowNode[]);
+			// Recount after update
+			unconfigured = updated.filter((n) => (n.data as any)?.formDataValid === false).length;
+		}
+
+		if (unconfigured > 0) {
+			setConfigSnackbar(unconfigured === 1
+				? '1 node needs configuration — look for the red gear'
+				: `${unconfigured} nodes need configuration — look for the red gear`);
+		}
+		// Only re-run when servicesJson changes, not on every node change
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [servicesJson]);
 
 	// --- Restore viewport + clear loading guard when flow is ready ----------
 	useEffect(() => {
@@ -1039,6 +1122,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		isFlowReady,
 		quickAddState,
 		setQuickAddState,
+		configSnackbar,
+		setConfigSnackbar,
 	};
 
 	return <FlowGraphContext.Provider value={value}>{children}</FlowGraphContext.Provider>;

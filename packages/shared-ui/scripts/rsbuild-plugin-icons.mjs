@@ -63,7 +63,11 @@ export const pluginRocketrideIcons = () => ({
 						// SVGR's `dimensions: false` then removes those too).
 						{
 							name: 'preset-default',
-							params: { overrides: { removeViewBox: false } },
+							// removeComments must stay disabled: our autoCurrentColor plugin
+							// reads <!-- preserve-colors --> comments to opt brand SVGs out of
+							// auto-tinting. preset-default's removeComments runs before custom
+							// plugins and would strip the marker before we ever see it.
+							params: { overrides: { removeViewBox: false, removeComments: false } },
 						},
 						autoCurrentColor,
 					],
