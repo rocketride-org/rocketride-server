@@ -376,13 +376,13 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
 								</div>
 								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-									{current.link ? (
-										<a href={current.link} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
+									{current.link && /^https?:\/\//i.test(current.link) ? (
+										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
 									) : <span />}
 									{announcements.length > 1 && (
 										<div style={{ display: 'flex', gap: 2 }}>
-											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
-											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
+											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
+											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
 										</div>
 									)}
 								</div>
@@ -450,13 +450,13 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
 								</div>
 								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-									{current.link ? (
-										<a href={current.link} style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
+									{current.link && /^https?:\/\//i.test(current.link) ? (
+										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
 									) : <span />}
 									{announcements.length > 1 && (
 										<div style={{ display: 'flex', gap: 2 }}>
-											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
-											<button onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
+											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
+											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
 										</div>
 									)}
 								</div>

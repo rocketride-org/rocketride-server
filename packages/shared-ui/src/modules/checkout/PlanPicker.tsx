@@ -242,8 +242,11 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// Reset interval when plans change (e.g. different app loaded)
 	useEffect(() => {
 		const hasMonth = plans.some((p) => p.interval === 'month');
-		if (!hasMonth && plans.some((p) => p.interval === 'year')) {
+		const hasYear = plans.some((p) => p.interval === 'year');
+		if (!hasMonth && hasYear) {
 			setInterval('year');
+		} else if (hasMonth) {
+			setInterval('month');
 		}
 	}, [plans]);
 
