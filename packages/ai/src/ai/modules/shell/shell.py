@@ -159,6 +159,10 @@ async def apps_static(request: Request):
     if not raw_path:
         raise HTTPException(status_code=404, detail='Not found')
 
+    # Apps haven't been built/copied yet — surface a clearer signal.
+    if not os.path.isdir(_apps_root):
+        raise HTTPException(status_code=503, detail='App bundles not built. Run the app build/copy step.')
+
     # Resolve safely within the apps root
     file_path = _resolve_safe(_apps_root, raw_path)
 
