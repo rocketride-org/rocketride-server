@@ -30,16 +30,18 @@ other nodes that need an LLM. Can also be used directly via lanes.
 
 ## Profiles
 
-| Profile                | Model                   | Context     |
-| ---------------------- | ----------------------- | ----------- |
-| Kimi K2 0905 _(default)_ | `kimi-k2-0905-preview`  | 256K tokens |
-| Kimi K2 Turbo          | `kimi-k2-turbo-preview` | 256K tokens |
-| Kimi K2 0711           | `kimi-k2-0711-preview`  | 128K tokens |
-| Kimi Latest            | `kimi-latest`           | 128K tokens |
-| Kimi Thinking          | `kimi-thinking-preview` | 128K tokens |
-| Moonshot v1 8K         | `moonshot-v1-8k`        | 8K tokens   |
-| Moonshot v1 32K        | `moonshot-v1-32k`       | 32K tokens  |
-| Moonshot v1 128K       | `moonshot-v1-128k`      | 128K tokens |
+| Profile             | Model            | Context     |
+| ------------------- | ---------------- | ----------- |
+| Kimi K2.6 _(default)_ | `kimi-k2.6`      | 256K tokens |
+| Kimi K2.5           | `kimi-k2.5`      | 256K tokens |
+| Moonshot v1 8K      | `moonshot-v1-8k`  | 8K tokens   |
+| Moonshot v1 32K     | `moonshot-v1-32k` | 32K tokens  |
+| Moonshot v1 128K    | `moonshot-v1-128k`| 128K tokens |
+
+> Moonshot also offers `moonshot-v1-{8k,32k,128k}-vision-preview` image-input
+> models. Those belong in a dedicated vision node (see the `llm_vision_*`
+> nodes), not this text LLM node, which exposes only the `questions → answers`
+> lane.
 
 ## Upstream docs
 

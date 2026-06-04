@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that connects to Moonshot AI's Kimi large language models for ", "advanced natural language processing. It enables text generation, long-context ", "reasoning, summarization, and tool use. The Kimi K2 family offers very large ", "context windows and strong agentic performance, while the classic Moonshot v1 ", "models provide cost-effective options across 8K, 32K, and 128K context sizes. ", "The component is suitable for integrating intelligent reasoning and content ", "generation into pipelines where long context and accuracy are key."],
+	"description": ["A component that connects to Moonshot AI's Kimi large language models for ", "advanced natural language processing. It enables text generation, long-context ", "reasoning, summarization, and tool use. The Kimi K2 family offers a 256K context ", "window with thinking and non-thinking modes and strong agentic performance, while ", "the classic Moonshot v1 models provide cost-effective options across 8K, 32K, and ", "128K context sizes. The component is suitable for integrating intelligent ", "reasoning and content generation into pipelines where long context and accuracy ", "are key."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -77,51 +77,24 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "kimi-k2-0905",
+		"default": "kimi-k2-6",
 		// Defines profiles used with the "profile": key
 		"profiles": {
-			"kimi-k2-0905": {
-				"title": "Kimi K2 0905",
-				"model": "kimi-k2-0905-preview",
+			"kimi-k2-6": {
+				"title": "Kimi K2.6",
+				"model": "kimi-k2.6",
 				"modelSource": "manual",
 				"modelTotalTokens": 262144,
-				"modelOutputTokens": 8192,
+				"modelOutputTokens": 16384,
 				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
-			"kimi-k2-turbo": {
-				"title": "Kimi K2 Turbo",
-				"model": "kimi-k2-turbo-preview",
+			"kimi-k2-5": {
+				"title": "Kimi K2.5",
+				"model": "kimi-k2.5",
 				"modelSource": "manual",
 				"modelTotalTokens": 262144,
-				"modelOutputTokens": 8192,
-				"serverbase": "https://api.moonshot.ai/v1",
-				"apikey": ""
-			},
-			"kimi-k2-0711": {
-				"title": "Kimi K2 0711",
-				"model": "kimi-k2-0711-preview",
-				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 8192,
-				"serverbase": "https://api.moonshot.ai/v1",
-				"apikey": ""
-			},
-			"kimi-latest": {
-				"title": "Kimi Latest",
-				"model": "kimi-latest",
-				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 8192,
-				"serverbase": "https://api.moonshot.ai/v1",
-				"apikey": ""
-			},
-			"kimi-thinking": {
-				"title": "Kimi Thinking",
-				"model": "kimi-thinking-preview",
-				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 8192,
+				"modelOutputTokens": 16384,
 				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
@@ -166,24 +139,12 @@
 			"title": "Model",
 			"description": "Kimi (Moonshot) model"
 		},
-		"kimi.kimi-k2-0905": {
-			"object": "kimi-k2-0905",
+		"kimi.kimi-k2-6": {
+			"object": "kimi-k2-6",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"kimi.kimi-k2-turbo": {
-			"object": "kimi-k2-turbo",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"kimi.kimi-k2-0711": {
-			"object": "kimi-k2-0711",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"kimi.kimi-latest": {
-			"object": "kimi-latest",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"kimi.kimi-thinking": {
-			"object": "kimi-thinking",
+		"kimi.kimi-k2-5": {
+			"object": "kimi-k2-5",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"kimi.moonshot-v1-8k": {
@@ -202,28 +163,16 @@
 			"title": "Model",
 			"description": "Kimi (Moonshot) LLM model",
 			"type": "string",
-			"default": "kimi-k2-0905",
+			"default": "kimi-k2-6",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
-					"value": "kimi-k2-0905",
-					"properties": ["kimi.kimi-k2-0905"]
+					"value": "kimi-k2-6",
+					"properties": ["kimi.kimi-k2-6"]
 				},
 				{
-					"value": "kimi-k2-turbo",
-					"properties": ["kimi.kimi-k2-turbo"]
-				},
-				{
-					"value": "kimi-k2-0711",
-					"properties": ["kimi.kimi-k2-0711"]
-				},
-				{
-					"value": "kimi-latest",
-					"properties": ["kimi.kimi-latest"]
-				},
-				{
-					"value": "kimi-thinking",
-					"properties": ["kimi.kimi-thinking"]
+					"value": "kimi-k2-5",
+					"properties": ["kimi.kimi-k2-5"]
 				},
 				{
 					"value": "moonshot-v1-8k",
@@ -253,7 +202,7 @@
 		}
 	],
 	"test": {
-		"profiles": ["kimi-k2-0905"],
+		"profiles": ["kimi-k2-6"],
 		"outputs": ["answers"],
 		"cases": [
 			{
