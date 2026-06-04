@@ -2,9 +2,9 @@
 
 ## What it does
 
-Writes pipeline text output to the file system over SMB. Receives text from upstream nodes and saves each object as a `.txt` file, preserving the source directory structure under the target path. This is a target (sink) node — it consumes the `text` lane and has no output lane.
+Saves your pipeline's text to disk over SMB. Each upstream object becomes a `.txt` file, mirroring the source directory layout under the target path. It's the end of the line — consumes the `text` lane, emits nothing.
 
-Objects that produce no text are skipped, and objects whose source and target are unchanged since the last run are skipped to avoid redundant writes. Files are written in UTF-8 and target subdirectories are created automatically.
+Empty objects are skipped, and so are objects unchanged since the last run, so you don't rewrite the same file twice. Output is UTF-8, and target subdirectories are created for you.
 
 Requires the `network` capability and is not available in remote (`noremote`) or SaaS (`nosaas`) deployments.
 

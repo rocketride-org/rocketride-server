@@ -1,15 +1,15 @@
 # agent_deepagent
 
-Deep Agents node for RocketRide — a planning-capable agent plus optional managed sub-agents.
+A planning-capable agent for RocketRide, with optional managed sub-agents.
 
 ## What it does
 
-Wraps [Deep Agents](https://github.com/langchain-ai/deepagents) (built on LangChain/LangGraph) into two node variants:
+[Deep Agents](https://github.com/langchain-ai/deepagents) (built on LangChain/LangGraph) come in two node variants:
 
-- **Deep Agent** (`agent_deepagent`) — a single agent that layers strategic planning, persistent state, and long-context management on top of a normal LangChain tool-calling loop. It answers the incoming question via `deepagents.create_deep_agent`.
-- **Deep Agent Subagent** (`agent_deepagent_subagent`) — a managed worker. It is wired into a Deep Agent via the `deepagent` channel and the orchestrator delegates to it based on its `description`; it has no `questions` lane and cannot be invoked directly.
+- **Deep Agent** (`agent_deepagent`) — a single agent that adds strategic planning, persistent state, and long-context management on top of a normal LangChain tool-calling loop. It answers the incoming question via `deepagents.create_deep_agent`.
+- **Deep Agent Subagent** (`agent_deepagent_subagent`) — a managed worker. Wired into a Deep Agent via the `deepagent` channel; the orchestrator delegates to it based on its `description`. It has no `questions` lane and cannot be invoked directly.
 
-The Deep Agent is an agent in the data-flow sense: it consumes `questions` and produces `answers` (`"questions": ["answers"]`). It also registers as a tool (`classType: ["agent", "tool"]`) and exposes itself as `<nodeId>.run_agent`, so a parent agent can delegate to it in hierarchical pipelines. Connecting Deep Agent Subagent nodes on the optional `deepagent` channel (`min: 0`) turns it into a hierarchical orchestrator that can delegate to those sub-agents. Tools are attached through the `tool` invoke channel (control-plane invoke), not through lanes; the Subagent has its own `tool` channel. Each variant requires exactly one `llm` channel (`min: 1`).
+In data-flow terms, the Deep Agent consumes `questions` and produces `answers` (`"questions": ["answers"]`). It also registers as a tool (`classType: ["agent", "tool"]`) and exposes itself as `<nodeId>.run_agent`, so a parent agent can delegate to it in hierarchical pipelines. Connect Deep Agent Subagent nodes on the optional `deepagent` channel (`min: 0`) and it becomes a hierarchical orchestrator that delegates to them. Tools attach through the `tool` invoke channel (control-plane invoke), not through lanes; the Subagent has its own `tool` channel. Each variant requires exactly one `llm` channel (`min: 1`).
 
 ## Configuration
 

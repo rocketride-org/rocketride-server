@@ -1,10 +1,10 @@
 # embedding_video
 
-Generates vector embeddings from video by extracting and encoding frames.
+Turns video into searchable vectors by sampling and encoding its frames.
 
 ## What it does
 
-Extracts frames from a video at a configurable interval and encodes each one with a vision model such as CLIP, turning the video's visual features into numerical representations. The resulting embeddings capture the semantic and structural characteristics of the video, enabling similarity search, clustering, and integration into multimodal RAG workflows. Runs on the model server and is GPU-accelerated when available.
+It pulls frames from a video at an interval you choose and runs each through a vision model like CLIP, converting what's on screen into numbers. Those embeddings capture the video's semantic and structural features, so you can run similarity search, cluster videos, or feed them into multimodal RAG workflows. It runs on the model server and uses the GPU when one is available.
 
 **Lanes:**
 

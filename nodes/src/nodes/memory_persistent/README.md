@@ -1,14 +1,14 @@
 # memory_persistent
 
-A persistent, cross-session memory store for pipelines.
+Gives your pipeline a memory that survives across runs, keyed by `session_id`.
 
 ## What it does
 
-Retains data across pipeline invocations, keyed by `session_id`. Unlike [memory_internal](../memory_internal/) — which is run-scoped, wired only to the Wave agent, and cleared at the end of each run — this node persists session state between runs and is wired into the pipeline as a pass-through filter on the `questions` and `answers` lanes.
+Unlike [memory_internal](../memory_internal/) — which is run-scoped, wired only to the Wave agent, and cleared at the end of each run — this node keeps session state between runs and sits in the pipeline as a pass-through filter on the `questions` and `answers` lanes.
 
-When a question carries a `session_id` in its metadata, the node resumes (or creates) that session and attaches its stored keys to the question as memory context before forwarding. Answers for that session are persisted back (e.g. `last_answer`, an `answer_count`) for future retrieval. Questions without a `session_id` pass through unchanged.
+When a question carries a `session_id` in its metadata, the node resumes (or creates) that session and attaches its stored keys to the question as memory context before forwarding. Answers for that session are saved back (e.g. `last_answer`, an `answer_count`) for later. Questions without a `session_id` pass through untouched.
 
-It supports session management, keyed storage, history tracking, and automatic summarization of older history entries once the limit is reached.
+You get session management, keyed storage, history tracking, and automatic summarization of older entries once the limit is hit.
 
 **Lanes:**
 

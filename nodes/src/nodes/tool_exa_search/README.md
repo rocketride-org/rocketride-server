@@ -1,18 +1,18 @@
 # tool_exa_search
 
-Exposes [Exa](https://exa.ai) semantic web search as an agent tool node.
+Give your agents live web search powered by [Exa](https://exa.ai)'s semantic search.
 
 > Experimental — this node is marked `experimental` and may change.
 
 ## What it does
 
-Agents invoke this node via the tool invoke channel. The node performs a real-time web search using the Exa API and returns structured results containing titles, URLs, text content, relevance scores, and dates.
+When an agent calls this tool, it runs a real-time Exa search and hands back structured results: titles, URLs, text content, relevance scores, and dates.
 
-Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes — it is consumed exclusively by agent runtimes through the `invoke` capability.
+There are no pipeline lanes here (`lanes` is `{}`). Only agent runtimes reach it, through the `invoke` capability.
 
 ## Setup
 
-Set your Exa API key via the node config field **API Key** (from https://exa.ai). The field is encrypted at rest and masked in the UI.
+Drop your Exa API key into the **API Key** config field (grab one at https://exa.ai). It's encrypted at rest and masked in the UI.
 
 ## Config fields
 

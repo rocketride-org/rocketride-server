@@ -1,12 +1,12 @@
 # telegram
 
-A Telegram Bot source node that receives messages from users via the Telegram Bot API and feeds them into a pipeline.
+Turn a Telegram bot into the front door of your pipeline. Messages come in, pipeline replies go straight back to the chat.
 
 ## What it does
 
-This is a `source` node (`telegram://`) that connects to a bot created with @BotFather and listens for incoming messages. It supports text messages and media files — images, audio, voice, video, and documents — downloading each file (up to Telegram's 20 MB bot limit) and routing it to the matching pipeline lane. Pipeline responses are automatically sent back as replies to the originating chat.
+A `source` node (`telegram://`) that connects to a bot you create with @BotFather and listens for incoming messages. It handles text and media alike — images, audio, voice, video, and documents — downloading each file (up to Telegram's 20 MB bot limit) and routing it to the matching pipeline lane. Replies go back to the chat that sent them, automatically.
 
-It uses `_source` as its internal input and emits to these output lanes:
+Internally it reads from `_source` and emits to these output lanes:
 
 | Telegram message | Output lane |
 | ---------------- | ----------- |
@@ -16,11 +16,11 @@ It uses `_source` as its internal input and emits to these output lanes:
 | Video            | `video`     |
 | Document (PDF, Word, etc.) | `tags` |
 
-Updates can be delivered by **polling** (works anywhere without a public URL) or **webhook** (requires a public HTTPS endpoint that Telegram POSTs updates to).
+Pick how updates arrive: **polling** (works anywhere, no public URL) or **webhook** (a public HTTPS endpoint that Telegram POSTs updates to).
 
 ## Setup
 
-A Telegram bot token from @BotFather is required (e.g. `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`). It is stored as a secure field. For webhook mode you also need a public HTTPS URL.
+You need a bot token from @BotFather (e.g. `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`), stored as a secure field. Webhook mode also needs a public HTTPS URL.
 
 ## Configuration
 

@@ -1,15 +1,15 @@
 # index_search
 
-Index and search node backed by Elasticsearch or OpenSearch, supporting both classic BM25 text search and vector (semantic) search.
+Store your documents and search them back — by keyword (BM25) or by meaning (vectors). Backed by Elasticsearch or OpenSearch.
 
 ## What it does
 
-A single node implementation with two service variants — **Elasticsearch** and **OpenSearch** — for ingesting documents and retrieving them at query time. Each variant can operate in two modes (controlled by the **Store Mode** toggle):
+One node, two service variants — **Elasticsearch** and **OpenSearch** — that ingest documents and retrieve them at query time. Each variant runs in one of two modes, set by the **Store Mode** toggle:
 
 - **Index mode** — classic BM25 full-text search over the index, with configurable match operator (`or`, `and`, `exact` phrase) and optional contextual snippet highlighting.
 - **Vector store mode** — semantic similarity search over embedded documents, with a minimum retrieval score threshold.
 
-The Elasticsearch variant supports self-managed, Elastic Cloud Hosted, and Elastic Cloud Serverless deployments. The OpenSearch variant works with self-managed OpenSearch.
+Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serverless deployments. OpenSearch covers self-managed OpenSearch.
 
 **Lanes:**
 
@@ -19,7 +19,7 @@ The Elasticsearch variant supports self-managed, Elastic Cloud Hosted, and Elast
 | `text`      | —                                       | Ingest raw text                                                  |
 | `questions` | `text`, `documents`, `answers`, `questions` | Search and return matches as text, documents, an answer, or enrich the question for downstream nodes |
 
-(The OpenSearch variant produces `text`, `answers`, `documents` from `questions`.) In vector store mode, documents must be run through an embedding node before reaching this node.
+(The OpenSearch variant produces `text`, `answers`, `documents` from `questions`.) In vector store mode, run documents through an embedding node before they reach this one.
 
 ## Setup
 
