@@ -130,10 +130,9 @@ await client.connect();
 
 | Method                | Signature                                                                      | Returns   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect`             | `connect(timeout?: number): Promise<void>`                                     | -         | Opens the WebSocket and performs DAP auth. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only; in persist mode timeout is not applied). In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does _not_ retry so the app can fix credentials and call `connect()` again. |
-| `disconnect`          | `disconnect(): Promise<void>`                                                  | -         | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down.                                                                                                                                                                                                                                                      |
-| `isConnected`         | `isConnected(): boolean`                                                       | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors.                                                                                                                                                                                                                                                                            |
-| `setConnectionParams` | `setConnectionParams(options: { uri?: string; auth?: string }): Promise<void>` | -         | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client.                                                                                                               |
+| `connect`    | `connect(timeout?: number): Promise<void>` | -         | Opens the WebSocket and performs DAP auth. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only; in persist mode timeout is not applied). In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does _not_ retry so the app can fix credentials and call `connect()` again. |
+| `disconnect` | `disconnect(): Promise<void>`              | -         | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down.                                                                                                                                                                                                                                                      |
+| `isConnected`| `isConnected(): boolean`                   | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors.                                                                                                                                                                                                                                                                            |
 
 **How to use:** For one-off scripts, call `connect()` once, do your work, then `disconnect()`. For UIs, use `persist: true` and rely on the client to reconnect; only call `disconnect()` when the user logs out or you are done with the client. The client supports `await using` (Symbol.asyncDispose) for automatic disconnect when exiting scope.
 
@@ -143,7 +142,6 @@ await client.connect();
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `buildRequest` | `buildRequest(command: string, options?: { token?: string; arguments?: Record<string, unknown>; data?: Uint8Array \| string }): DAPMessage` | `DAPMessage`          | Builds a DAP request message with the next sequence number. Use when you need a custom command not wrapped by `use()`, `send()`, etc.                                                       |
 | `request`      | `request(request: DAPMessage, timeout?: number): Promise<DAPMessage>`                                                                       | `Promise<DAPMessage>` | Sends the request and returns the response. Pass `timeout` (ms) to override the config default for this call. Check `didFail(response)` or `response.success` before using `response.body`. |
-| `dapRequest`   | `dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage>`                        | `Promise<DAPMessage>` | Shorthand: builds a request and sends it in one call. Equivalent to `buildRequest()` + `request()`.                                                                                         |
 | `didFail`      | `didFail(response: DAPMessage): boolean`                                                                                                    | `boolean`             | Returns `true` when the server indicated failure (`success === false`). Use after `request()` to decide whether to use `body` or surface `message` as an error.                             |
 
 **Example - custom DAP command:**
@@ -295,7 +293,6 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 
 | Method               | Signature                            | Description                                             |
 | -------------------- | ------------------------------------ | ------------------------------------------------------- |
-| `Answer.parseJson`   | `parseJson(value: string): any`      | Parses JSON from AI text (strips markdown/code blocks). |
 | `Answer.parsePython` | `parsePython(value: string): string` | Extracts Python code from a code block in the response. |
 
 ---
@@ -438,7 +435,9 @@ question.addQuestion('Summarize the main points and list keywords.');
 
 const response = await client.chat({ token, question });
 const answerText = response?.data?.answer ?? response?.answers?.[0];
-const structured = answerText ? Answer.parseJson(answerText) : null;
+const answer = new Answer();
+answer.setAnswer(answerText ?? '');
+const structured = answer.isJson() ? answer.getJson() : answer.getText();
 console.log(structured);
 
 await client.terminate(token);
