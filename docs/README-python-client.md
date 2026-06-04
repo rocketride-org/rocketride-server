@@ -24,7 +24,7 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
+    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
         result = await client.use(filepath="pipeline.pipe")
         token = result["token"]
         out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
@@ -132,7 +132,7 @@ Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is
 
 ```python
 client = RocketRideClient(
-    uri="https://cloud.rocketride.ai",
+    uri="https://api.rocketride.ai",
     auth="my-key",
     persist=True,
     max_retry_time=300000,
@@ -153,7 +153,7 @@ client = RocketRideClient(
 **Example:**
 
 ```python
-async with RocketRideClient(uri="wss://cloud.rocketride.ai", auth=os.environ["ROCKETRIDE_APIKEY"]) as client:
+async with RocketRideClient(uri="wss://api.rocketride.ai", auth=os.environ["ROCKETRIDE_APIKEY"]) as client:
     result = await client.use(filepath="pipeline.pipe")
     token = result["token"]
     await client.send(token, "Hello, pipeline!")
@@ -377,7 +377,7 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    client = RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key")
+    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
     await client.connect()
     result = await client.use(filepath="pipeline.pipe")
     token = result["token"]
@@ -396,7 +396,7 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    async with RocketRideClient(uri="wss://cloud.rocketride.ai", auth="my-key") as client:
+    async with RocketRideClient(uri="wss://api.rocketride.ai", auth="my-key") as client:
         result = await client.use(pipeline={"pipeline": my_pipeline_config})
         token = result["token"]
         await client.send(token, '{"data": 1}')
@@ -415,7 +415,7 @@ from rocketride import RocketRideClient
 
 async def main():
     client = RocketRideClient(
-        uri="https://cloud.rocketride.ai",
+        uri="https://api.rocketride.ai",
         auth="my-key",
         persist=True,
         max_retry_time=300000,
@@ -438,7 +438,7 @@ from pathlib import Path
 from rocketride import RocketRideClient
 
 async def main():
-    client = RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key")
+    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
     await client.connect()
     result = await client.use(filepath="vectorize.pipe")
     token = result["token"]
@@ -471,7 +471,7 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
+    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
         result = await client.use(filepath="ingest.pipe")
         token = result["token"]
         pipe = await client.pipe(token, objinfo={"name": "large.csv"}, mime_type="text/csv")
@@ -497,7 +497,7 @@ from rocketride import RocketRideClient
 from rocketride.schema import Question, Answer
 
 async def main():
-    async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
+    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
         result = await client.use(filepath="chat_pipeline.pipe")
         token = result["token"]
         question = Question(expectJson=True)
@@ -525,7 +525,7 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    client = RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key")
+    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
     await client.connect()
     services = await client.get_services()
     print("Available:", list(services.keys()))
@@ -563,7 +563,7 @@ All commands accept `--uri` and `--apikey` flags, or read from environment varia
 
 | Variable            | Description                                                            |
 | ------------------- | ---------------------------------------------------------------------- |
-| `ROCKETRIDE_URI`    | Server URI (e.g. `wss://cloud.rocketride.ai` or `ws://localhost:5565`) |
+| `ROCKETRIDE_URI`    | Server URI (e.g. `wss://api.rocketride.ai` or `ws://localhost:5565`) |
 | `ROCKETRIDE_APIKEY` | API key for authentication                                             |
 
 ## Links

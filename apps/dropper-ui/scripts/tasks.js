@@ -76,8 +76,9 @@ module.exports = {
 	description: 'File Dropper Application',
 
 	actions: [
-		{ name: 'dropper-ui:bundle', action: makeBundleAction },
-		{ name: 'dropper-ui:copy',   action: makeCopyAction },
+		{ name: 'dropper-ui:bundle',   action: makeBundleAction },
+		{ name: 'dropper-ui:copy',     action: makeCopyAction },
+		{ name: 'dropper-ui:register', action: () => ({ run: async () => {} }) },
 
 		{
 			name: 'dropper-ui:build',

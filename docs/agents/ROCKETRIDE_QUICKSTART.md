@@ -8,7 +8,7 @@ The RocketRide extension automatically creates/updates `.env` with your configur
 
 ```env
 # Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://cloud.rocketride.ai  # Your configured server
+ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
 ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
 
 # Add your custom variables:
@@ -112,7 +112,7 @@ The RocketRide extension automatically creates/updates `.env` with your configur
 
 ```env
 # Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://cloud.rocketride.ai  # Your configured server
+ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
 ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
 
 # Add your custom variables:

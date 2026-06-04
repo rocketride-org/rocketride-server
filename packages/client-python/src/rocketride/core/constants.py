@@ -63,7 +63,7 @@ CONST_DEFAULT_WEB_LOCAL = f'{CONST_DEFAULT_WEB_PROTOCOL}{CONST_DEFAULT_WEB_HOST}
 
 # Default cloud RocketRide service endpoint URL
 # This points to the production Enterprise as a Service (EaaS) instance
-CONST_DEFAULT_WEB_CLOUD = 'https://cloud.rocketride.ai:80'
+CONST_DEFAULT_WEB_CLOUD = 'https://api.rocketride.ai:80'
 
 # Deprecated: use CONST_DEFAULT_WEB_CLOUD instead
 CONST_DEFAULT_SERVICE = CONST_DEFAULT_WEB_CLOUD
