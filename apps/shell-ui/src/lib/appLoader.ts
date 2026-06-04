@@ -86,6 +86,12 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		{ force: true },
 	);
 
+	// Log registered MF modules and their remote entry paths
+	console.log(
+		'[shell-ui] MF remotes registered:',
+		validApps.map((a) => `${a.moduleId} → ${a.entry}`),
+	);
+
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return validApps.map((a) => ({
 		id:            a.id,

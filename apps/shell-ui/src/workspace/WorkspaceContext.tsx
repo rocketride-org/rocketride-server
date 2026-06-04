@@ -101,6 +101,10 @@ export interface IWorkspaceContext {
 	loadedApps: Record<string, AppDescriptor>;
 	/** Triggers a lazy load of an app's descriptor if not already loaded. */
 	loadApp: (appId: string) => void;
+	/** Per-app descriptor load-failure messages, keyed by appId. Absent ⇒ no error. */
+	appLoadErrors: Record<string, string>;
+	/** Clears the recorded load error for an app and re-attempts its descriptor load. */
+	retryApp: (appId: string) => void;
 	/** Persisted settings — keyed by setting key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
 	settings: Record<string, string>;
 	/** Persist a single setting value. */
@@ -174,6 +178,12 @@ export const WorkspaceProvider: React.FC<{
 	const loadedAppsRef = useRef<Record<string, AppDescriptor>>({});
 	// Tracks which appIds currently have an in-flight load
 	const loadingSetRef = useRef<Set<string>>(new Set());
+	// Tracks appIds whose load has FAILED so the auto-load effect won't silently
+	// re-attempt them (only retryApp clears this). Directly mutated, like loadingSetRef.
+	const failedSetRef = useRef<Set<string>>(new Set());
+	// Per-app descriptor load-failure messages, keyed by appId (surfaced to the UI
+	// so a failed remote shows an error + Retry instead of an indefinite "Loading…")
+	const [appLoadErrors, setAppLoadErrors] = useState<Record<string, string>>({});
 
 	// Keep the ref mirror up to date
 	useEffect(() => { loadedAppsRef.current = loadedApps; }, [loadedApps]);
@@ -191,6 +201,9 @@ export const WorkspaceProvider: React.FC<{
 		if (loadedAppsRef.current[appId]) { return; }
 		// Skip if a load is already in flight
 		if (loadingSetRef.current.has(appId)) { return; }
+		// Skip if this app already failed — only retryApp re-attempts it (it clears
+		// failedSetRef first), so the auto-load effect can't silently re-arm the load.
+		if (failedSetRef.current.has(appId)) { return; }
 		// Find the manifest entry
 		const entry = apps.find((a) => a.id === appId);
 		if (!entry) return;
@@ -198,6 +211,8 @@ export const WorkspaceProvider: React.FC<{
 		// Mark as in-flight and raise loading flag
 		loadingSetRef.current.add(appId);
 		setAppLoading(true);
+		// A fresh (re)attempt clears any stale error recorded for this app
+		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
 		try {
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
@@ -211,17 +226,32 @@ export const WorkspaceProvider: React.FC<{
 			// Validate the descriptor has the minimum required shape
 			if (!descriptor || !descriptor.components?.App) {
 				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing components.App`);
+				failedSetRef.current.add(appId);
+				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (components.App) — the bundle may be stale or only partially deployed.` }));
 				return;
 			}
 
 			setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
 		} catch (e) {
 			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}":`, e);
+			failedSetRef.current.add(appId);
+			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
 		} finally {
 			loadingSetRef.current.delete(appId);
 			if (loadingSetRef.current.size === 0) setAppLoading(false);
 		}
 	}, [apps]);
+
+	/**
+	 * Re-attempts an app's descriptor load after a failure. Clears the failure
+	 * marker synchronously (failedSetRef is what stops the auto-load effect from
+	 * silently re-trying a down app, so an explicit retry must clear it first);
+	 * loadDescriptor itself clears the displayed error when the attempt starts.
+	 */
+	const retryApp = useCallback((appId: string) => {
+		failedSetRef.current.delete(appId);
+		loadDescriptor(appId);
+	}, [loadDescriptor]);
 
 	// Load the active app's descriptor once workspace state is ready
 	// (seeded is enough — don't wait for the full disk load)
@@ -320,6 +350,7 @@ export const WorkspaceProvider: React.FC<{
 			appManifest: apps,
 			loadedApps,
 			loadApp: loadDescriptor,
+			appLoadErrors, retryApp,
 			settings, updateSetting,
 			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
 		}}>

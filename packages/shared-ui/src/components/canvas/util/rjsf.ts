@@ -24,7 +24,7 @@
 import { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { ValidationData } from '@rjsf/utils';
 import { getDefaultFormState as RJSFGetDefaultFormState } from '@rjsf/utils';
-import validator from './csp-safe-validator';
+import validator from '@rjsf/validator-ajv8';
 import { traverseObject } from './traverse-object';
 
 /**
@@ -55,8 +55,26 @@ export function getDefaultFormState(schema: RJSFSchema): Record<string, unknown>
  * @param formData - form data to validate
  * @returns validation result with any errors
  */
+/**
+ * Recursively strip empty strings from an object so that JSON Schema's
+ * ``required`` keyword treats them as missing.  By deleting empty-string
+ * keys before validation, ``required`` catches unconfigured fields.
+ */
+function stripEmptyStrings(data: unknown): unknown {
+	if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+	const copy: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+		if (value === '') continue;
+		copy[key] = (value && typeof value === 'object' && !Array.isArray(value))
+			? stripEmptyStrings(value) : value;
+	}
+	return copy;
+}
+
 export function validateFormData<T = Record<string, unknown>>(schema: RJSFSchema, formData: Record<string, unknown> = {}): ValidationData<T> {
-	return validator.validateFormData(formData, schema);
+	// Strip empty strings so `required` catches them as missing
+	const cleaned = stripEmptyStrings(formData) as Record<string, unknown>;
+	return validator.validateFormData(cleaned, schema);
 }
 
 /**

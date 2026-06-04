@@ -164,6 +164,7 @@ const styles = {
 		fontFamily: 'var(--rr-font-family-mono, monospace)',
 		whiteSpace: 'pre-wrap',
 		wordBreak: 'break-all',
+		color: 'var(--rr-text-editor, #d4d4d4)',
 	} as CSSProperties,
 
 	sectionTitle: {

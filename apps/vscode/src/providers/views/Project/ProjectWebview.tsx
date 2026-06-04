@@ -140,6 +140,7 @@ const ProjectWebview: React.FC = () => {
 				}
 				setIsConnected(msg.isConnected);
 				if ((msg as any).isSubscribed !== undefined) setSubscribed((msg as any).isSubscribed);
+				if (msg.serverHost) setServerHost(msg.serverHost);
 				break;
 			case 'checkout:required':
 				// Host says subscription is required — show inline prompt (handled by ProjectView's Subscribe button)

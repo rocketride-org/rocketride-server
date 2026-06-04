@@ -156,6 +156,7 @@ from .deploy import DeploymentRecord
 # Billing types: subscriptions, Stripe plans, compute credits.
 from .billing import (
     BillingDetail,
+    PlanAction,
     StripePlan,
     CreditBalance,
     CreditPack,
@@ -255,6 +256,7 @@ __all__ = [
     'DeploymentRecord',
     # Billing types
     'BillingDetail',
+    'PlanAction',
     'StripePlan',
     'CreditBalance',
     'CreditPack',

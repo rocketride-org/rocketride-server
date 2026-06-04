@@ -12,7 +12,7 @@ each expose multiple variants), which is why the catalog below lists **services*
 rather than directories.
 
 > This catalog is generated from the `services*.json` definitions on `develop`
-> (87 node directories → 117 services). For node testing, see
+> (88 node directories → 118 services). For node testing, see
 > [README-node-testing.md](README-node-testing.md).
 
 ---
@@ -80,6 +80,7 @@ the same `tool_github` or `tool_tavily` can attach to `agent_deepagent`,
 | `llm_xai`        | questions → answers  | xAI Grok models                              |
 | `llm_perplexity` | questions → answers  | Perplexity Sonar (web-search models)         |
 | `llm_gmi_cloud`  | questions → answers  | GMI Cloud models                             |
+| `llm_baidu_qianfan` | questions → answers | Baidu Qianfan / ERNIE (OpenAI-compatible Qianfan API) |
 | `llm_openai_api` | questions → answers  | Any OpenAI-compatible endpoint (also ships a Nebius Token Factory preset) |
 
 > `nodes/src/nodes/llm_ibm_watson/` exists but currently ships **no service

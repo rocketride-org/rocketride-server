@@ -77,6 +77,25 @@ export interface BillingDetail {
 }
 
 /**
+ * Alternative click action for a plan card. Plans without an action
+ * proceed to Stripe checkout. Plans with an action navigate the user
+ * elsewhere (e.g. GitHub repo for free tier, mailto for enterprise).
+ */
+export interface PlanAction {
+	/** ``link`` opens a URL, ``mailto`` opens email compose. */
+	type: 'link' | 'mailto';
+
+	/** Target URL (for ``link``) or email address (for ``mailto``). */
+	url: string;
+
+	/** Optional email subject line (only for ``mailto``). */
+	subject?: string;
+
+	/** Button label shown on the card (e.g. "Get started", "Contact us"). */
+	label: string;
+}
+
+/**
  * Stripe plan/price row for a given product, returned by the `prices`
  * subcommand. Used in the checkout plan picker.
  */
@@ -84,14 +103,35 @@ export interface StripePlan {
 	/** Stripe price_* identifier. */
 	priceId: string;
 
-	/** Billing interval: "month" or "year". */
-	interval: 'month' | 'year';
+	/** Human-readable label shown in the plan selector (e.g. "Starter", "Pro"). */
+	label: string;
+
+	/** Display price string (e.g. "$29 / mo", "$290 / yr", "Free", "Custom"). */
+	amount: string;
 
 	/** Price in USD cents. */
-	unitAmount: number;
+	cents: number;
 
-	/** Human-readable nickname, e.g. "Pro Monthly". */
-	nickname: string;
+	/** ISO currency code. */
+	currency: string;
+
+	/** Billing interval: "month", "year", "one_time", or empty for non-recurring plans. */
+	interval: 'month' | 'year' | 'one_time' | '';
+
+	/** Feature description lines from Stripe price metadata, or null. */
+	description?: string[] | null;
+
+	/** Alternative click action (link/mailto). Null means normal checkout. */
+	action?: PlanAction | null;
+
+	/** Sort order for card positioning. Lower values appear first. Defaults to 500. */
+	order?: number;
+
+	/** Credit grants config from Stripe price metadata, or null. */
+	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+
+	/** Display templates for credit resource types, or null. */
+	labels?: Record<string, string> | null;
 }
 
 // =============================================================================

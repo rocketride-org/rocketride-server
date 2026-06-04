@@ -53,3 +53,8 @@ requires_minimax = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_MINIMAX_KEY'),
     reason='ROCKETRIDE_MINIMAX_KEY not set',
 )
+
+requires_baidu_qianfan = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_BAIDU_QIANFAN_KEY'),
+    reason='ROCKETRIDE_BAIDU_QIANFAN_KEY not set',
+)

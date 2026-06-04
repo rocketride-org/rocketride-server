@@ -770,6 +770,9 @@ export class Documents {
 		if (!doc) return;
 		// Static documents are not backed by VFS — nothing to write
 		if (doc.static) return;
+		// New (untitled) documents should not be written to disk — the caller
+		// must provide a real filename via save-as before any disk write.
+		if (doc.isNew) return;
 		if (this._vfs) {
 			await this._vfs.write(uri, doc.content);
 		}

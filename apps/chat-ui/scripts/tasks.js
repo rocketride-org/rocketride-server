@@ -93,8 +93,10 @@ module.exports = {
 	description: 'Chat Interface Application',
 
 	actions: [
-		{ name: 'chat-ui:bundle', action: makeBundleAction },
-		{ name: 'chat-ui:copy',   action: makeCopyAction },
+		{ name: 'chat-ui:bundle',   action: makeBundleAction },
+		{ name: 'chat-ui:copy',     action: makeCopyAction },
+		// No-op: chat-ui is a standalone page, not a shell-ui MF remote — no apps.json registration needed.
+		{ name: 'chat-ui:register', action: () => ({ run: async () => {} }) },
 
 		{
 			name: 'chat-ui:build',

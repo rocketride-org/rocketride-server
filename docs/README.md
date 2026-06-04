@@ -75,10 +75,8 @@ The project uses a unified build system. See [README-builder.md](../README-build
 After building, the engine executable is located in `dist/server/`. Run it directly:
 
 ```bash
-./dist/server/rocketride --stream
+./dist/server/engine ai/eaas.py
 ```
-
-The `--stream` flag enables streaming mode, reading JSON task configurations from stdin for interactive execution.
 
 ### Connect the VS Code extension
 

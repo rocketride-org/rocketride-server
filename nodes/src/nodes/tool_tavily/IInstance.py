@@ -155,6 +155,16 @@ class IInstance(IInstanceBase):
         try:
             resp = post_with_retry(TAVILY_API_URL, headers=headers, json=payload)
             body = resp.json()
+        except requests.exceptions.InvalidJSONError:
+            # resp.json() raises JSONDecodeError (subclass of InvalidJSONError
+            # AND RequestException) — catch it first to avoid the generic handler.
+            return {
+                'success': False,
+                'query': query,
+                'num_results': 0,
+                'results': [],
+                'error': 'Tavily returned a non-JSON response body',
+            }
         except requests.RequestException as exc:
             status = getattr(getattr(exc, 'response', None), 'status_code', None)
             detail = f' (HTTP {status})' if status else ''
@@ -164,15 +174,6 @@ class IInstance(IInstanceBase):
                 'num_results': 0,
                 'results': [],
                 'error': f'Tavily request failed{detail}: {type(exc).__name__}',
-            }
-        except ValueError:
-            # 200 with a non-JSON body.
-            return {
-                'success': False,
-                'query': query,
-                'num_results': 0,
-                'results': [],
-                'error': 'Tavily returned a non-JSON response body',
             }
         if not isinstance(body, dict):
             return {
@@ -193,8 +194,18 @@ class IInstance(IInstanceBase):
 
 def _shape_results(query: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Map a Tavily response body into the tool's output schema, dropping unsafe URLs."""
+    raw_results = body.get('results', []) or []
+    if not isinstance(raw_results, list):
+        return {
+            'success': False,
+            'query': query,
+            'num_results': 0,
+            'results': [],
+            'error': 'Tavily returned an unexpected results payload',
+        }
+
     results = []
-    for item in body.get('results', []) or []:
+    for item in raw_results:
         if not isinstance(item, dict):
             continue
         url = item.get('url', '')

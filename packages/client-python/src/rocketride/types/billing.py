@@ -34,7 +34,7 @@ Types Defined:
     CreditPack: Per-pack pricing row for the credit top-up modal.
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 
 # =============================================================================
@@ -58,6 +58,8 @@ class BillingDetail(TypedDict):
         currentPeriodStart: ISO 8601 datetime when the current billing period started, or None.
         currentPeriodEnd: ISO 8601 datetime when the current billing period ends, or None.
         cancelAtPeriodEnd: True when the user has requested cancellation at period end.
+        credits: Credit grants config from Stripe price metadata, or None.
+        creditLabels: Display templates for credit resource types, or None.
     """
 
     appId: str
@@ -70,6 +72,27 @@ class BillingDetail(TypedDict):
     currentPeriodStart: str | None
     currentPeriodEnd: str | None
     cancelAtPeriodEnd: bool
+    credits: dict[str, dict[str, int]] | None
+    creditLabels: dict[str, str] | None
+
+
+class PlanAction(TypedDict):
+    """
+    Alternative click action for a plan card. Plans without an action
+    proceed to Stripe checkout. Plans with an action navigate the user
+    elsewhere (e.g. GitHub repo for free tier, mailto for enterprise).
+
+    Attributes:
+        type: ``link`` opens a URL, ``mailto`` opens email compose.
+        url: Target URL (for ``link``) or email address (for ``mailto``).
+        subject: Optional email subject line (only for ``mailto``).
+        label: Button label shown on the card (e.g. "Get started", "Contact us").
+    """
+
+    type: Literal['link', 'mailto']
+    url: str
+    subject: NotRequired[str]
+    label: str
 
 
 class StripePlan(TypedDict):
@@ -79,15 +102,29 @@ class StripePlan(TypedDict):
 
     Attributes:
         priceId: Stripe price_* identifier.
-        interval: Billing interval: "month" or "year".
-        unitAmount: Price in USD cents.
-        nickname: Human-readable nickname, e.g. "Pro Monthly".
+        label: Human-readable label shown in the plan selector (e.g. "Starter", "Pro").
+        amount: Display price string (e.g. "$29", "$290", "Free", "Custom").
+        cents: Price in USD cents.
+        currency: ISO currency code.
+        interval: Billing interval: "month", "year", "one_time", or empty for non-recurring plans.
+        description: Feature description lines from Stripe price metadata, or None.
+        action: Alternative click action (link/mailto). None means normal checkout.
+        order: Sort order for card positioning. Lower values appear first. Defaults to 500.
+        credits: Credit grants config from Stripe price metadata, or None.
+        labels: Display templates for credit resource types, or None.
     """
 
     priceId: str
-    interval: Literal['month', 'year']
-    unitAmount: int
-    nickname: str
+    label: str
+    amount: str
+    cents: int
+    currency: str
+    interval: Literal['month', 'year', 'one_time', '']
+    description: NotRequired[list[str] | None]
+    action: NotRequired[PlanAction | None]
+    order: NotRequired[int]
+    credits: NotRequired[dict[str, dict[str, int]] | None]
+    labels: NotRequired[dict[str, str] | None]
 
 
 # =============================================================================
@@ -106,11 +143,15 @@ class CreditBalance(TypedDict):
         balances: Current unspent balances per resource type.
         lifetimePurchased: Total purchased per resource type.
         lifetimeConsumed: Total consumed per resource type.
+        labels: Human-readable display templates per resource type, from Stripe
+            price metadata. Supports ``{amount}`` substitution. Falls back to
+            the raw resource key when a label is not configured.
     """
 
     balances: dict[str, int]
     lifetimePurchased: dict[str, int]
     lifetimeConsumed: dict[str, int]
+    labels: dict[str, str]
 
 
 class CreditPack(TypedDict):
