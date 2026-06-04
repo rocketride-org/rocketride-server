@@ -294,6 +294,7 @@ export function useWorkspaceState(
 		if (!hasStoreApi(client)) {
 			if (!loaded) {
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
+				setSeeded(true);
 				setLoaded(true);
 			}
 			return;
@@ -339,12 +340,14 @@ export function useWorkspaceState(
 				setActiveAppId(restoredAppId);
 				setApps({ [restoredAppId]: mergedState });
 				if (savedSettings && typeof savedSettings === 'object') setSettings(savedSettings);
+				setSeeded(true);
 				setLoaded(true);
 			})
 			.catch(() => {
 				// Load failure — seed defaults
 				setActiveAppId(defaultAppId);
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
+				setSeeded(true);
 				setLoaded(true);
 			});
 	// eslint-disable-next-line react-hooks/exhaustive-deps
