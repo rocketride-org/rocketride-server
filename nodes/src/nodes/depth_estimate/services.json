@@ -64,14 +64,28 @@
 	],
 	"test": {
 		"profiles": ["v2-small"],
-		"outputs": ["documents"],
+		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [
 			{
-				"name": "Estimate depth from image",
-				"image": "images/ocr_test_text.png",
+				"name": "Estimate depth and emit stats",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "mean" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["v2-small"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Estimate depth and emit stats",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "mean" }
 				}
 			}
 		]
