@@ -49,13 +49,13 @@ The engine serves the latest client packages via HTTP endpoints. Once the server
 
 | Endpoint                 | Package                | Response                                |
 | ------------------------ | ---------------------- | --------------------------------------- |
-| `GET /client/python`     | Python SDK wheel       | `rocketride-{version}-py3-none-any.whl` |
+| `GET /client/python/{filename}` | Python SDK wheel | `rocketride-{version}-py3-none-any.whl` |
 | `GET /client/typescript` | TypeScript SDK tarball | `rocketride-{version}.tgz`              |
 | `GET /client/vscode`     | VSCode extension       | `rocketride-{version}.vsix`             |
 
 ```bash
-# Download and install Python client
-curl -O http://localhost:5565/client/python
+# Download and install Python client (use "latest" as filename for newest version)
+curl -O http://localhost:5565/client/python/latest
 pip install rocketride-*.whl
 
 # Download and install TypeScript client

@@ -161,14 +161,13 @@ async with RocketRideClient(uri="wss://cloud.rocketride.ai", auth=os.environ["RO
 
 ### Connection
 
-| Method                  | Signature                                                                                   | Returns       | Description                                                                                                                                                                                                                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect`               | `async def connect(self, uri: str = None, auth: str = None, timeout: float = None) -> None` | -             | Opens the WebSocket and performs DAP auth. Optional `uri`/`auth` override the constructor values for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. |
-| `disconnect`            | `async def disconnect(self) -> None`                                                        | -             | Closes the connection and cancels reconnection. Call when the user disconnects or the script is done.                                                                                                                                                                                                                                 |
-| `is_connected`          | `def is_connected(self) -> bool`                                                            | `bool`        | Whether the client is connected. Check before calling `use()` or `send()` if needed.                                                                                                                                                                                                                                                  |
-| `set_connection_params` | `async def set_connection_params(self, uri: str = None, auth: str = None) -> None`          | -             | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client.                                                             |
-| `get_connection_info`   | `def get_connection_info(self) -> dict`                                                     | `dict`        | Current connection state and URI. Returns `{ 'connected': bool, 'transport': str, 'uri': str }`. Useful for debugging or displaying "Connected to ..." in the UI.                                                                                                                                                                     |
-| `get_apikey`            | `def get_apikey(self) -> Optional[str]`                                                     | `str \| None` | The API key in use. For debugging only; avoid logging in production.                                                                                                                                                                                                                                                                  |
+| Method                | Signature                                                                                             | Returns         | Description                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect`             | `async def connect(self, credential: Optional[str] = None, *, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Opens the WebSocket and performs DAP auth. Optional `credential` overrides the constructor `auth` for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. |
+| `disconnect`          | `async def disconnect(self) -> None`                                                                  | -               | Closes the connection and cancels reconnection. Call when the user disconnects or the script is done.                                                                                                                                                                                                                           |
+| `is_connected`        | `def is_connected(self) -> bool`                                                                      | `bool`          | Whether the client is connected. Check before calling `use()` or `send()` if needed.                                                                                                                                                                                                                                            |
+| `get_connection_info` | `def get_connection_info(self) -> dict`                                                               | `dict`          | Current connection state and URI. Returns `{ 'connected': bool, 'transport': str, 'uri': str }`. Useful for debugging or displaying "Connected to ..." in the UI.                                                                                                                                                               |
+| `get_apikey`          | `def get_apikey(self) -> Optional[str]`                                                               | `str \| None`   | The API key in use. For debugging only; avoid logging in production.                                                                                                                                                                                                                                                            |
 
 ### Low-level DAP
 
@@ -300,6 +299,7 @@ Question(
 | `addHistory`     | `addHistory(self, item: QuestionHistory)`                           | Adds a history item for multi-turn chat.                                   |
 | `addQuestion`    | `addQuestion(self, question: str)`                                  | Appends the question text.                                                 |
 | `addDocuments`   | `addDocuments(self, documents: Doc \| List[Doc])`                   | Adds documents for the AI to reference.                                    |
+| `addGoal`        | `addGoal(self, goal: str)`                                          | Adds a goal statement for the AI.                                          |
 | `getPrompt`      | `getPrompt(self, has_previous_json_failed: bool = False) -> str`    | Returns the full prompt (internal).                                        |
 
 ---
@@ -313,7 +313,6 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 | `getText`     | `getText(self) -> str`                 | Get the answer as plain text.                                    |
 | `getJson`     | `getJson(self) -> Optional[dict]`      | Get the answer as parsed JSON; returns `None` if not valid JSON. |
 | `isJson`      | `isJson(self) -> bool`                 | Whether the answer contains valid JSON.                          |
-| `parseJson`   | `parseJson(self, value: str) -> Any`   | Parses JSON from AI text (strips markdown/code blocks).          |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response.          |
 
 ---
@@ -507,7 +506,12 @@ async def main():
         question.addQuestion("Summarize the main points and list keywords.")
         response = await client.chat(token=token, question=question)
         answer_text = response.get("data", {}).get("answer") or (response.get("answers") or [None])[0]
-        structured = Answer().parseJson(answer_text) if answer_text else None
+        answer = Answer()
+        answer.setAnswer(answer_text or "")
+        if answer.isJson():
+            structured = answer.getJson()
+        else:
+            structured = answer.getText()
         print(structured)
         await client.terminate(token)
 

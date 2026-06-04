@@ -46,14 +46,19 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `client-mcp` | MCP Protocol client | build, clean, test |
 | `client-python` | Python SDK | build, clean, test |
 | `client-typescript` | TypeScript/JavaScript SDK | build, clean, test |
-| `console-chat` | Example chat application | build, clean |
 | `dropper-ui` | File drop web interface | build, clean, dev |
+| `hello-ui` | Hello world example app | build, clean |
 | `java` | JDK, JRE, and Maven (auto-installed for Tika) | build, clean |
+| `monitor-ui` | Server monitor web interface | build, clean |
 | `nodes` | Pipeline nodes | build, clean, test, test-contracts |
+| `profiler-ui` | Profiler web interface | build, clean |
 | `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, package |
+| `shared-ui` | Shared UI component library | build, clean |
+| `shell-ui` | Shell micro-frontend host | build, clean, dev |
 | `tika` | Java document parser | build, clean |
 | `vcpkg` | C++ package manager (auto-installed for server build) | build, clean |
 | `vscode` | VSCode extension | build, compile, clean |
+| `world-ui` | World/globe visualization app | build, clean |
 
 ### Examples
 
@@ -261,6 +266,9 @@ The build system searches these directories:
 - `apps/*/scripts/tasks.js`
 - `nodes/scripts/tasks.js`
 - `examples/*/scripts/tasks.js`
+- `extension/**/scripts/tasks.js`
+- `tools/**/scripts/tasks.js`
+- `scripts/tasks.js` (root-level)
 
 ### Required imports
 
@@ -283,7 +291,7 @@ const {
     parallel, sequence, bracket, when, whenNot,
 
     // Path constants
-    PROJECT_ROOT, BUILD_DIR
+    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT
 } = require('../../../scripts/lib');
 ```
 
@@ -1062,10 +1070,11 @@ run: async (ctx, task) => {
 ### Path constants
 
 ```javascript
-const { PROJECT_ROOT, BUILD_ROOT } = require('../../../scripts/lib');
+const { PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 // PROJECT_ROOT: Root of the monorepo
 // BUILD_ROOT: {PROJECT_ROOT}/build by default, can be overlayed
+// DIST_ROOT: {PROJECT_ROOT}/dist — final distributable outputs
 ```
 
 ---
