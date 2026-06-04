@@ -562,7 +562,7 @@
 		"proper-lockfile": "^4.1.2",
 		"rocketride": "workspace:*",
 		"shared": "workspace:*",
-		"tar": "^7.5.15"
+		"tar": "^7.5.16"
 	},
 	"files": [
 		"README.md",

@@ -19,7 +19,7 @@
     "build:prod": "pnpm rsbuild build --env-mode production"
   },
   "dependencies": {
-    "@module-federation/rsbuild-plugin": "^0.9.0",
+    "@module-federation/rsbuild-plugin": "^0.24.1",
     "shell-ui": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

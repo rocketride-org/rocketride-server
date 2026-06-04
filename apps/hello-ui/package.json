@@ -26,7 +26,7 @@
     "safari >= 13"
   ],
   "dependencies": {
-    "@module-federation/rsbuild-plugin": "^0.9.0",
+    "@module-federation/rsbuild-plugin": "^0.24.1",
     "shell-ui": "workspace:*",
     "shared": "workspace:*",
     "react": "^18.2.0",
