@@ -13,6 +13,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from rocketlib import debug
 from ai.web.metrics import metrics
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
@@ -243,11 +244,20 @@ class TransformersLoader(BaseLoader):
 
         try:
             return AutoTokenizer.from_pretrained(model_name)
-        except Exception:
+        except Exception as e:
+            # Fast tokenizer conversion fails for SentencePiece/Tiktoken models
+            # (e.g. XLM-RoBERTa) — fall back to slow Python tokenizer
+            debug(f'Fast tokenizer load failed for {model_name}: {e}; trying slow tokenizer')
             try:
-                return AutoProcessor.from_pretrained(model_name)
-            except Exception:
-                return None
+                return AutoTokenizer.from_pretrained(model_name, use_fast=False)
+            except Exception as e2:
+                debug(f'Slow tokenizer load failed for {model_name}: {e2}; trying AutoProcessor')
+
+        try:
+            return AutoProcessor.from_pretrained(model_name)
+        except Exception as e3:
+            debug(f'No tokenizer or processor could be loaded for {model_name}: {e3}')
+            return None
 
     @staticmethod
     def preprocess(

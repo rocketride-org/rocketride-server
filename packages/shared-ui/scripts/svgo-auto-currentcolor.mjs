@@ -112,6 +112,7 @@ export const description =
 export const fn = () => {
 	const colors = new Set();
 	let hasMulticolorMarker = false;
+	let hasPreserveMarker = false;
 
 	// Refs collected during traversal so we can mutate them in root.exit
 	// once we know whether the SVG is monochrome.
@@ -120,6 +121,11 @@ export const fn = () => {
 	const styleBlockTexts = []; // text/cdata children of <style> elements
 
 	return {
+		comment: {
+			enter: (node) => {
+				if (node.value.trim() === 'preserve-colors') hasPreserveMarker = true;
+			},
+		},
 		element: {
 			enter: (node) => {
 				if (
@@ -162,7 +168,7 @@ export const fn = () => {
 		},
 		root: {
 			exit: () => {
-				if (hasMulticolorMarker) return;
+				if (hasMulticolorMarker || hasPreserveMarker) return;
 				if (colors.size !== 1) return;
 
 				for (const { node, attr } of attrRefs) {

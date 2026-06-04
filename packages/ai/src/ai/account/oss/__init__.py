@@ -139,9 +139,10 @@ class Account(AccountBase):
                     ],
                 }
             ],
-            # OSS: all apps are on the desktop and free
+            # OSS: all apps are on the desktop and free — return full manifest
+            # entries so the shell can register MF remotes after auth
             apps=[
-                {'id': a.get('id', ''), 'appStatus': 'free', 'onDesktop': True}
+                {**a, 'appStatus': 'free', 'onDesktop': True}
                 for a in self._read_apps_json(public_only=False)
                 if a.get('id')
             ],

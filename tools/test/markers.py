@@ -48,3 +48,8 @@ requires_qwen = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_QWEN_KEY'),
     reason='ROCKETRIDE_QWEN_KEY not set',
 )
+
+requires_minimax = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_MINIMAX_KEY'),
+    reason='ROCKETRIDE_MINIMAX_KEY not set',
+)

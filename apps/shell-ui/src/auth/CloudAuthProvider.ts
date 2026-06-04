@@ -130,8 +130,9 @@ export class CloudAuthProvider implements IAuthProvider {
 			register,
 		);
 
-		// Full-page redirect to Zitadel
-		window.location.href = url;
+		// Replace current history entry so the browser back button skips
+		// the expired Zitadel authRequestID page
+		window.location.replace(url);
 	}
 
 	// =========================================================================

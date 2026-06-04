@@ -41,12 +41,12 @@
 // =============================================================================
 
 import { RocketRideClient, ConnectResult } from 'rocketride';
-import type { ShellConnectionEventMap, IConnectionManager } from 'shared';
+import type { ShellConnectionEventMap, IConnectionManager, IAuthProvider } from 'shared';
 import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
-import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
 	SS_APP_ID,
@@ -73,9 +73,15 @@ export interface InitOptions {
 	env?: Record<string, unknown>;
 	/** Server connection mode (determines auth strategy). */
 	connectionMode?: ConnectionMode;
-	/** Zitadel OAuth2 authority URL (e.g. https://auth.example.com). */
+	/**
+	 * Auth provider for OAuth sign-in and callback handling.
+	 * When set, ConnectionManager delegates all OAuth operations to it
+	 * instead of managing PKCE flows internally.
+	 */
+	authProvider?: IAuthProvider;
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 authority URL. */
 	zitadelUrl?: string;
-	/** Zitadel OAuth2 client ID for the PKCE flow. */
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 client ID. */
 	zitadelClientId?: string;
 }
 
@@ -259,7 +265,10 @@ export class ConnectionManager implements IConnectionManager {
 			},
 		});
 
-		// Store OAuth config for startOAuth()
+		// Store auth provider (preferred) or legacy OAuth config
+		if (options?.authProvider) {
+			this.authProvider = options.authProvider;
+		}
 		this.zitadelUrl = options?.zitadelUrl ?? '';
 		this.zitadelClientId = options?.zitadelClientId ?? '';
 
@@ -281,29 +290,38 @@ export class ConnectionManager implements IConnectionManager {
 	// OAUTH — PKCE redirect flow (SaaS mode)
 	// =========================================================================
 
-	/** Zitadel config stored from init(). */
+	/** Auth provider for OAuth sign-in (set via init options). */
+	private authProvider: IAuthProvider | null = null;
+
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelUrl = '';
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelClientId = '';
 
 	/** Module-level flag to prevent double bootstrap under React StrictMode. */
 	private bootStarted = false;
 
 	/**
-	 * Redirect the browser to Zitadel for PKCE OAuth2 authorization.
+	 * Redirect the browser to the OAuth provider for authorization.
 	 *
-	 * Sets the session phase to 'authenticating' so the callback page
-	 * knows to exchange the authorization code.
+	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
+	 * the legacy PKCE flow if no auth provider is configured.
 	 */
 	public async startOAuth(): Promise<void> {
+		if (this.authProvider) {
+			await this.authProvider.signIn();
+			return;
+		}
+		// Legacy fallback — remove once all callers pass authProvider
 		if (!this.zitadelUrl || !this.zitadelClientId) {
 			console.error('[ConnectionManager] Zitadel not configured');
 			this.emit('shell:error', { error: new Error('Zitadel not configured') });
 			return;
 		}
+		const { generatePkce, buildAuthUrl } = await import('../util/pkce');
 		const { challenge } = await generatePkce();
 		const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
-		// Full-page redirect to the Zitadel OAuth2 authorize endpoint
-		window.location.href = url;
+		window.location.replace(url);
 	}
 
 	/**
@@ -323,17 +341,20 @@ export class ConnectionManager implements IConnectionManager {
 		onThemeChange?: (theme: string) => void;
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		// Guard against double-execution (React StrictMode dev double-mount)
-		if (this.bootStarted) return null;
+		if (this.bootStarted) { console.log('[CM] bootstrap: already started, returning null'); return null; }
 		this.bootStarted = true;
 
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 
 		// Ensure the transport is attached before any login attempt
+		console.log('[CM] bootstrap: awaiting attach...');
 		await this._attachPromise;
+		console.log('[CM] bootstrap: attached');
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
 		const sessionAppId = this.getSessionAppId();
+		console.log('[CM] bootstrap: code=%s, sessionAppId=%s', !!code, sessionAppId);
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
@@ -343,53 +364,66 @@ export class ConnectionManager implements IConnectionManager {
 			window.history.replaceState({}, '', window.location.pathname);
 
 			if (!verifier) {
+				console.log('[CM] bootstrap: OAuth code but no verifier');
 				// Missing verifier — can't exchange. Restart auth for locked apps.
 				if (sessionAppId) { await this.startOAuth(); return null; }
 				return null;
 			}
 
+			console.log('[CM] bootstrap: exchanging OAuth code...');
 			const result = await this.client.login({ code, verifier, redirectUri: window.location.origin });
+			console.log('[CM] bootstrap: OAuth exchange done, finishing connect...');
 			return await this.finishConnect(result, sessionAppId, config);
 		}
 
 		// ── Session-locked app — reconnect with stored token ─────────────
 		if (sessionAppId) {
 			const token = this.loadToken();
+			console.log('[CM] bootstrap: session-locked app, hasToken=%s', !!token);
 			if (token) {
 				try {
+					console.log('[CM] bootstrap: logging in with stored token...');
 					const result = await this.client.login(token);
+					console.log('[CM] bootstrap: login done, finishing connect...');
 					return await this.finishConnect(result, sessionAppId, config);
 				} catch {
 					// Token expired or invalid — clear and restart OAuth
+					console.log('[CM] bootstrap: token login failed, restarting OAuth');
 					this.clearToken();
 					await this.startOAuth();
 					return null;
 				}
 			}
 			// No token — redirect to OAuth
+			console.log('[CM] bootstrap: no token, starting OAuth');
 			await this.startOAuth();
 			return null;
 		}
 
 		// ── Home flow (no session lock) — try token with timeout ─────────
 		const token = this.loadToken();
+		console.log('[CM] bootstrap: home flow, hasToken=%s', !!token);
 		if (token) {
 			try {
+				console.log('[CM] bootstrap: logging in with token (8s timeout)...');
 				const result = await Promise.race([
 					this.client.login(token),
 					new Promise<never>((_, reject) =>
 						setTimeout(() => reject(new Error('timeout')), 8000),
 					),
 				]);
+				console.log('[CM] bootstrap: login done, finishing connect...');
 				return await this.finishConnect(result, '', config);
-			} catch {
+			} catch (err) {
 				// Connect failed — clear stale token
+				console.log('[CM] bootstrap: token login failed:', err);
 				this.clearToken();
 				return null;
 			}
 		}
 
 		// No token — show shell unauthenticated (transport is attached, public APIs work)
+		console.log('[CM] bootstrap: no token, unauthenticated shell');
 		return null;
 	}
 
@@ -408,6 +442,8 @@ export class ConnectionManager implements IConnectionManager {
 			onThemeChange?: (theme: string) => void;
 		},
 	): Promise<{ result: ConnectResult; appId: string }> {
+		console.log('[CM] finishConnect: start');
+
 		// Persist the token for future page loads
 		if (result.userToken) this.saveToken(result.userToken);
 
@@ -416,27 +452,32 @@ export class ConnectionManager implements IConnectionManager {
 
 		// Publish identity to all listeners
 		this.emit('shell:login', { user: result });
+		console.log('[CM] finishConnect: login emitted');
 
 		// Restore saved theme from workspace file
 		if (config?.onThemeChange) {
 			try {
 				const dir = config.workspaceDir ?? DEFAULT_WORKSPACE_DIR;
+				console.log('[CM] finishConnect: reading theme from %s/global.json...', dir);
 				const global = await this.client!.fsReadJson<{ shellPrefs?: { theme?: string } }>(`${dir}/global.json`);
+				console.log('[CM] finishConnect: theme read done');
 				if (global?.shellPrefs?.theme) config.onThemeChange(global.shellPrefs.theme);
 			} catch (e) {
-				console.error('[ConnectionManager] Failed to restore theme:', e);
+				console.log('[CM] finishConnect: theme read failed (ok):', e);
 			}
 		}
 
 		// Resolve the target app — check pending app ID from OAuth flow
 		const pendingAppId = this.getPendingAppId();
 		const resolvedAppId = appId || pendingAppId;
+		console.log('[CM] finishConnect: resolvedAppId=%s', resolvedAppId);
 
 		// Notify the workspace to switch to the target app
 		if (resolvedAppId) {
 			this.emit('shell:switchApp', { appId: resolvedAppId });
 		}
 
+		console.log('[CM] finishConnect: done');
 		return { result, appId: resolvedAppId };
 	}
 

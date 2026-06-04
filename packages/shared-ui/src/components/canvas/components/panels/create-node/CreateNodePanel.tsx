@@ -229,7 +229,7 @@ interface ICreateNodePanelProps {
 
 export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): ReactElement {
 	const { inventory } = useFlowProject();
-	const { addNode, setTempNode } = useFlowGraph();
+	const { addNode, setTempNode, onDrop, onDragOver } = useFlowGraph();
 	const { getPreference, setPreference } = useFlowPreferences();
 
 	const [search, setSearch] = useState('');
@@ -381,7 +381,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 
 	return (
 		<>
-			<div style={styles.backdrop} onClick={onClose} />
+			<div style={styles.backdrop} onClick={onClose} onDragOver={onDragOver} onDrop={onDrop} />
 			<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px`, userSelect: isResizing ? 'none' : 'auto' }}>
 				{/* Resize handle */}
 				<div style={styles.resizeHitArea} onMouseDown={onResizeMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>

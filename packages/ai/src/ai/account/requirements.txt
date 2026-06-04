@@ -4,7 +4,6 @@ aiofiles
 # Retry logic for cloud storage providers (s3, azure)
 tenacity
 
-# Optional cloud storage backends — install only if needed:
-#   boto3                          (S3 support)
-#   azure-storage-blob             (Azure Blob Storage)
-#   azure-identity                 (Azure credential chain)
+# Cloud storage backends auto-install their own deps on first import:
+#   store_providers/s3/requirements.txt     (boto3)
+#   store_providers/azure/requirements.txt  (azure-storage-blob, azure-identity)

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- preserve-colors -->
+  <!-- Supabase bolt/lightning mark — simplified clean path, official brand color #3ECF8E -->
+  <path
+    d="M13.5 2.5L4 14h8l-1.5 7.5L20 10h-8l1.5-7.5z"
+    fill="#3ECF8E"
+    stroke="none"
+  />
+</svg>

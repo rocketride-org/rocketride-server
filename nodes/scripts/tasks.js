@@ -141,8 +141,8 @@ function makeRunPytestAction(options = {}) {
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
             const bracket = ctx.brackets?.['node-test-server'];
-            const port = bracket?.port || ctx.port;
-            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
+            if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
+            const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
 
             const testEnv = {
                 ...process.env,

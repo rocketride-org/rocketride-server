@@ -30,6 +30,20 @@ import plugin from './svgo-auto-currentcolor.mjs';
 // (no preset-default minification or attribute reordering noise).
 const run = (input) => optimize(input, { plugins: [plugin] }).data;
 
+// Run svgo with the same plugin chain used in production (preset-default first,
+// then our plugin). removeComments must be disabled in preset-default so the
+// <!-- preserve-colors --> marker survives to our plugin.
+const runWithPreset = (input) =>
+	optimize(input, {
+		plugins: [
+			{
+				name: 'preset-default',
+				params: { overrides: { removeViewBox: false, removeComments: false } },
+			},
+			plugin,
+		],
+	}).data;
+
 const SVG_OPEN = '<svg xmlns="http://www.w3.org/2000/svg">';
 const SVG_CLOSE = '</svg>';
 const wrap = (inner) => `${SVG_OPEN}${inner}${SVG_CLOSE}`;
@@ -165,6 +179,44 @@ describe('svgo-auto-currentcolor — leaves multicolor SVGs alone', () => {
 		assert.match(out, /fill="#000"/);
 		assert.match(out, /fill="#fff"/);
 		assert.doesNotMatch(out, /currentColor/);
+	});
+});
+
+describe('svgo-auto-currentcolor — preserve-colors opt-out comment', () => {
+	test('single-color SVG with <!-- preserve-colors --> is left unchanged', () => {
+		const input = `<!-- preserve-colors -->${wrap('<path fill="#fb5e1a" d="M0 0h10v10H0z"/>')}`;
+		const out = run(input);
+		assert.match(out, /fill="#fb5e1a"/);
+		assert.doesNotMatch(out, /currentColor/);
+	});
+
+	test('preserve-colors comment inside the svg element is also honoured', () => {
+		const input = wrap('<!-- preserve-colors --><path fill="#ffcc00" d="M0 0h10v10H0z"/>');
+		const out = run(input);
+		assert.match(out, /fill="#ffcc00"/);
+		assert.doesNotMatch(out, /currentColor/);
+	});
+
+	test('single-color SVG without the comment is still rewritten', () => {
+		const out = run(wrap('<path fill="#fb5e1a" d="M0 0h10v10H0z"/>'));
+		assert.match(out, /fill="currentColor"/);
+		assert.doesNotMatch(out, /#fb5e1a/);
+	});
+
+	test('preserve-colors survives the full production plugin chain (preset-default + autoCurrentColor)', () => {
+		// Regression: preset-default's removeComments was stripping the marker
+		// before autoCurrentColor ran, causing all single-color brand SVGs to be
+		// tinted regardless of the opt-out comment.
+		const input = wrap('<!-- preserve-colors --><path fill="#fb5e1a" d="M0 0h10v10H0z"/>');
+		const out = runWithPreset(input);
+		assert.match(out, /fill="#fb5e1a"/);
+		assert.doesNotMatch(out, /currentColor/);
+	});
+
+	test('single-color SVG without comment is still tinted through the full chain', () => {
+		const out = runWithPreset(wrap('<path fill="#fb5e1a" d="M0 0h10v10H0z"/>'));
+		assert.match(out, /fill="currentColor"/);
+		assert.doesNotMatch(out, /#fb5e1a/);
 	});
 });
 

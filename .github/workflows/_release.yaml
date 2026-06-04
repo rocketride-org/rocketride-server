@@ -206,20 +206,22 @@ jobs:
 
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
+        env:
+          VERSION: ${{ matrix.version }}
         run: |
-          npm install -g npm@latest
-          echo "=== OIDC env diagnostics ==="
-          echo "npm: $(npm --version)"
-          echo "CI=$CI"
-          echo "GITHUB_ACTIONS=$GITHUB_ACTIONS"
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL is $([ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && echo SET || echo UNSET)"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is $([ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ] && echo SET || echo UNSET)"
-          echo "NODE_AUTH_TOKEN is $([ -n "$NODE_AUTH_TOKEN" ] && echo SET || echo UNSET)"
-          echo "npm config get registry: $(npm config get registry)"
-          ls -la "$RUNNER_TEMP/.npmrc" 2>/dev/null || echo ".npmrc not in RUNNER_TEMP"
-          ls -la "$HOME/.npmrc" 2>/dev/null || echo ".npmrc not in HOME"
-          echo "=== begin publish ==="
-          VERSION="${{ matrix.version }}"
+          # OIDC trusted publishing — no NPM_TOKEN. Auth uses this job's
+          # id-token (already granted for --provenance). Requires npm >= 11.5.1;
+          # Node 20 ships npm 10.x, so upgrade in place. The trusted publisher
+          # must be configured on npmjs.com against the CALLER workflow
+          # (release.yaml) + environment "release" — not this reusable child.
+          npm install -g npm@11.5.1
+          npm --version
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
           else
@@ -237,31 +239,45 @@ jobs:
 
       - name: Publish rocketride to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-python'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish rocketride-mcp to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-mcp'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 

@@ -25,7 +25,7 @@
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export const SDK_VERSION = '1.1.0';
+export const SDK_VERSION = '1.2.0';
 
 /**
  * Default protocol for connections when none is specified.
@@ -52,7 +52,7 @@ export const CONST_DEFAULT_WEB_LOCAL = `${CONST_DEFAULT_WEB_PROTOCOL}${CONST_DEF
  * Default cloud RocketRide service endpoint URL.
  * Used when no custom URI is provided in the client configuration.
  */
-export const CONST_DEFAULT_WEB_CLOUD = 'https://cloud.rocketride.ai:80';
+export const CONST_DEFAULT_WEB_CLOUD = 'https://api.rocketride.ai';
 
 /**
  * @deprecated Use CONST_DEFAULT_WEB_CLOUD instead.
