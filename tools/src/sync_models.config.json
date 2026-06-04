@@ -443,6 +443,34 @@
 				"MiniMax-M2.7": 204800,
 				"MiniMax-M2.7-highspeed": 204800
 			}
+		},
+		// ----------------------------------------------------------------------
+		// Kimi (Moonshot) — Kimi K2 + Moonshot v1 chat/generation models.
+		// Vision variants (moonshot-v1-*-vision-preview) are excluded — they
+		// belong in a dedicated vision node, not this text-only node.
+		// ----------------------------------------------------------------------
+		"llm_kimi": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_KIMI_KEY",
+			"module": "kimi",
+			"models_endpoint": "https://api.moonshot.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"model_filter": {
+				"include_prefixes": ["kimi-", "moonshot-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["vision", "embed", "audio", "tts", "ocr", "speech"]
+			},
+			// Moonshot's /v1/models endpoint does not return context_window, so lock
+			// each model at its docs-stated context. https://platform.moonshot.ai/docs/models
+			"token_limit_overrides": {
+				"kimi-k2.6": 262144,
+				"kimi-k2.5": 262144,
+				"moonshot-v1-8k": 8192,
+				"moonshot-v1-32k": 32768,
+				"moonshot-v1-128k": 131072
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -483,6 +511,8 @@
 		"qwen-": "Qwen ",
 		"MiniMax-": "MiniMax ",
 		"minimax-": "MiniMax ",
+		"kimi-": "Kimi ",
+		"moonshot-": "Moonshot ",
 		"text-embedding-": "Text Embedding ",
 		"o1": "o1",
 		"o3": "o3",
@@ -521,6 +551,10 @@
 			"MiniMax-M2.5-highspeed": 65536,
 			"MiniMax-M2.7": 65536,
 			"MiniMax-M2.7-highspeed": 65536,
+			// Kimi — K2 reasoning models support large outputs; Moonshot v1 fall
+			// back to the chat default (4096) via the defaults section.
+			"kimi-k2.6": 16384,
+			"kimi-k2.5": 16384,
 			// // Anthropic — see comment block above for source
 			// "claude-opus-4-6": 131072,
 			// "claude-sonnet-4-6": 65536,
