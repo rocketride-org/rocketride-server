@@ -1158,7 +1158,6 @@ export class RocketRideClient extends DAPClient {
 					source: options.source,
 					pipeline: options.pipeline,
 				},
-				{ token: '*' }
 			);
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);

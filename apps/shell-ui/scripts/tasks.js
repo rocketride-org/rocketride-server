@@ -136,7 +136,7 @@ function makeCopyAction() {
 		run: async (ctx, task) => {
 			// Exclude apps/ from mirror — app bundles are copied by their own tasks
 			// and must not be deleted when shell-ui syncs its build output.
-			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**'] });
+			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**'], package: true });
 			task.output = formatSyncStats(stats);
 		},
 	};

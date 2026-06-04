@@ -43,7 +43,7 @@
 
 const fs   = require('node:fs');
 const path = require('node:path');
-const { BUILD_ROOT, DIST_ROOT } = require('./index');
+const { BUILD_ROOT, DIST_ROOT, setState } = require('./index');
 
 const BUILD_APPS_JSON = path.join(BUILD_ROOT, 'apps.json');
 const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
@@ -231,6 +231,9 @@ function registerApp(appRoot) {
 
 			// Upsert into dist/server/static/apps.json (production server)
 			writeManifest(DIST_APPS_JSON, upsert(readManifest(DIST_APPS_JSON), appEntry));
+
+			// Register apps.json for packaging so it's included in release archives
+			await setState(['package', DIST_APPS_JSON], ['static/apps.json']);
 
 			task.output = `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`;
 		},
