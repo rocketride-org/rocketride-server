@@ -62,7 +62,7 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 pip install rocketride-mcp
 ```
 
-Requires Python 3.10+ and `rocketride-client-python` >= 1.1.0.
+Requires Python 3.10+ and `rocketride` >= 1.0.4.
 
 ## Client Configuration
 

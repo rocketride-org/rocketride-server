@@ -106,6 +106,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			try {
 				if (connectionStatus.state === ConnectionState.CONNECTED) {
 					this.onConnectedClearStaleData();
+					// Start monitoring for all open editors that missed initial subscription
+					for (const [panel] of this.editorStates) {
+						this.startMonitoring(panel).catch((err) => {
+							this.logger.error(`Starting monitoring on reconnect: ${err}`);
+						});
+					}
 				}
 				this.broadcastConnectionState(this.connectionManager.isConnected());
 			} catch (error) {
@@ -172,7 +178,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		const subscribed = isSubscribed(client, PIPE_BUILDER_APP_ID);
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
-				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected, isSubscribed: subscribed }).then(undefined, (err: unknown) => {
+				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected, isSubscribed: subscribed, serverHost: this.connectionManager.getHttpUrl() }).then(undefined, (err: unknown) => {
 					this.logger.error(`Failed to post connectionState to webview: ${err}`);
 				});
 			}

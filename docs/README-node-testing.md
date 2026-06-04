@@ -6,7 +6,7 @@ This framework enables automated testing of Python pipeline nodes by defining te
 
 ## Quick Start
 
-Add a `test` property to your node's `service.json`:
+Add a `test` property to your node's `services.json`:
 
 ```json
 {
@@ -403,7 +403,7 @@ Content matchers and `property` can be used together -- content matchers check t
 
 ### Contract tests
 
-Contract tests validate service.json structure (required fields, lane names, module existence) without running a server:
+Contract tests validate `services*.json` structure (required fields, lane names, module existence) without running a server:
 
 ```bash
 # Run contract tests
@@ -421,7 +421,7 @@ pytest nodes/test/test_contracts.py -k "llm_openai" -v
 
 ### Integration tests
 
-Integration tests execute the test cases defined in `service.json` through a live pipeline. This starts a test server automatically:
+Integration tests execute the test cases defined in `services*.json` through a live pipeline. This starts a test server automatically:
 
 ```bash
 # Run full integration tests
