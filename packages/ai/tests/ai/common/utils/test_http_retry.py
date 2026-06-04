@@ -74,6 +74,19 @@ def test_retries_429_then_succeeds(monkeypatch):
     assert calls['n'] == 2
 
 
+def test_retries_5xx_then_succeeds(monkeypatch):
+    calls = {'n': 0}
+    ok = _FakeResp(200, {})
+
+    def fake_post(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(500) if calls['n'] == 1 else ok
+
+    _patch_post(monkeypatch, fake_post)
+    assert post_with_retry('https://api.example.com', base_delay=0) is ok
+    assert calls['n'] == 2
+
+
 def test_does_not_retry_4xx(monkeypatch):
     calls = {'n': 0}
 

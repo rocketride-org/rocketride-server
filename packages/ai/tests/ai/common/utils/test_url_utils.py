@@ -50,6 +50,14 @@ def test_rejects_private_resolved_host(monkeypatch):
         validate_public_url('https://internal.example.com/admin')
 
 
+def test_rejects_cgnat_resolved_host(monkeypatch):
+    # 100.64.0.0/10 is shared/CGNAT space: is_private is False but is_global is
+    # also False, so the old per-flag check let it through. is_global blocks it.
+    _stub_resolve(monkeypatch, '100.64.0.1')
+    with pytest.raises(ValueError):
+        validate_public_url('https://carrier-nat.example.com/internal')
+
+
 def test_rejects_unresolvable_host(monkeypatch):
     def _boom(*a, **k):
         raise socket.gaierror('name resolution failed')

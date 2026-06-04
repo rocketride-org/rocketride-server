@@ -195,6 +195,8 @@ def _shape_results(query: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Map a Tavily response body into the tool's output schema, dropping unsafe URLs."""
     results = []
     for item in body.get('results', []) or []:
+        if not isinstance(item, dict):
+            continue
         url = item.get('url', '')
         if not url:
             continue
