@@ -64,9 +64,19 @@ class Chat(ChatBase):
         if 'api.moonshot' in serverbase and not apikey.startswith('sk-'):
             raise ValueError('Invalid Kimi (Moonshot) API key format, please check your API key.')
 
+        # Kimi K2 reasoning models reject any temperature other than 1
+        # ("invalid temperature: only 1 is allowed for this model"). The classic
+        # Moonshot v1 generation models accept the full range, so default them to
+        # 0 for deterministic pipeline output.
+        temperature = 1 if self._model.startswith('kimi-k2') else 0
+
         # Get the llm
         self._llm = ChatOpenAI(
-            model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
+            model=self._model,
+            base_url=serverbase,
+            api_key=apikey,
+            temperature=temperature,
+            max_tokens=self._modelOutputTokens,
         )
 
         # Save our chat class into the bag
