@@ -1,0 +1,108 @@
+name: Discord Release Notification
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # `released` already excludes prereleases (and fires when a prerelease is
+    # promoted to a full release); guard defensively so prereleases never post.
+    if: github.event.release.prerelease == false
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASES_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
+      # Pass release fields through env (not inline ${{ }}) so free-text body
+      # content can't break out of the shell script.
+      TAG: ${{ github.event.release.tag_name }}
+      RELEASE_NAME: ${{ github.event.release.name }}
+      RELEASE_URL: ${{ github.event.release.html_url }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+      AUTHOR: ${{ github.event.release.author.login }}
+      AVATAR: ${{ github.event.release.author.avatar_url }}
+    steps:
+      # Checkout default branch only — we just need the helper script. Pinning
+      # to the trusted default branch (not the release ref) keeps the sourced
+      # script trusted.
+      - name: Checkout helper script
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            .github/workflows/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Build embed and post to Discord
+        run: |
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_RELEASES_WEBHOOK_URL secret is not set — skipping"
+            exit 0
+          fi
+
+          # ── Source the shared discord_curl helper (retry/backoff + status sink) ──
+          # shellcheck source=scripts/discord-helper.sh
+          source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
+
+          # ── Map component tag prefix → display name + emoji ──────────────
+          # Each release wave publishes one tag per component; this posts one
+          # message per component (e.g. server-v3.2.1, vscode-v1.1.1, …).
+          case "$TAG" in
+            server-*)            COMPONENT="🚀 RocketRide Server" ;;
+            vscode-*)            COMPONENT="🧩 VS Code Extension" ;;
+            client-typescript-*) COMPONENT="📘 TypeScript Client" ;;
+            client-python-*)     COMPONENT="🐍 Python Client" ;;
+            client-mcp-*)        COMPONENT="🔌 MCP Client" ;;
+            *)                   COMPONENT="📦 $TAG" ;;
+          esac
+
+          # ── Title: prefer the release name, fall back to the tag ──────────
+          TITLE="${RELEASE_NAME:-$TAG}"
+
+          # ── Description: changelog body, truncated to Discord's 4096 limit ──
+          DESC="$RELEASE_BODY"
+          if [ "${#DESC}" -gt 3900 ]; then
+            DESC="${DESC:0:3900}…"$'\n\n'"[Full release notes →]($RELEASE_URL)"
+          fi
+          [ -z "$DESC" ] && DESC="_No release notes provided._"
+
+          # ── Build payload ────────────────────────────────────────────────
+          PAYLOAD=$(jq -n \
+            --arg  title  "$TITLE" \
+            --arg  url    "$RELEASE_URL" \
+            --arg  desc   "$DESC" \
+            --arg  comp   "$COMPONENT" \
+            --arg  tag    "$TAG" \
+            --arg  repo   "$REPO" \
+            --arg  author "$AUTHOR" \
+            --arg  avatar "$AVATAR" \
+            '{embeds: [{
+              title: $title,
+              url: $url,
+              description: $desc,
+              color: 3066993,
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Component", value: $comp, inline: true},
+                {name: "Tag",       value: $tag,  inline: true},
+                {name: "Repo",      value: $repo, inline: true}
+              ]
+            }]}')
+
+          # ── Post (at-most-once: --no-retry-5xx avoids duplicate messages) ──
+          if ! discord_curl --no-retry-5xx -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"; then
+            echo "::error::Discord POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
+            exit 1
+          fi
