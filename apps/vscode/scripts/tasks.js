@@ -305,6 +305,8 @@ module.exports = {
 					await setState(SRC_HASH_KEY, null);
 					await setState(BUNDLE_HASH_KEY, null);
 					await setState(SHARED_UI_HASH_KEY, null);
+					await setState(COMPILE_AGENTS_CORE_HASH_KEY, null);
+					await setState(BUNDLE_AGENTS_CORE_HASH_KEY, null);
 					task.output = 'Cleaned vscode';
 				},
 			}),
