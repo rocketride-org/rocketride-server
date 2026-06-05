@@ -700,6 +700,10 @@ function makeCompileEngineAction(options = {}) {
 
 			// Save content hash after successful compilation
 			await setState('server.buildHash', ctx.serverSourceHash);
+			// A local compile supersedes any prior downloaded-engine marker;
+			// clear it so `server:test` doesn't read a stale `downloadHash` and
+			// wrongly skip the test block for a freshly-compiled engine.
+			await setState('server.downloadHash', null);
 
 			task.output = `Compiled v${version}`;
 		},
