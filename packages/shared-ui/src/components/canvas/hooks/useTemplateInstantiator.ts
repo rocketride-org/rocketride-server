@@ -45,6 +45,7 @@ import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowProject } from '../context/FlowProjectContext';
 import { generateNodeId, getEdgesFromNodes, getProjectComponents } from '../util/graph';
 import type { IProject } from '../types';
+import { PIPELINE_SCHEMA_VERSION } from '../types';
 import { resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import type { ITemplate } from '../templates/types';
@@ -85,12 +86,22 @@ export function useTemplateInstantiator() {
 		setPendingIds([]);
 
 		// Notify host directly — onContentUpdated is blocked by isLoadingRef
-		// which hasn't been cleared yet (parent effect runs after child)
+		// which hasn't been cleared yet (parent effect runs after child).
+		// We must include proper version bookkeeping (docRevision + schema version)
+		// so FlowGraphContext's incoming-version guard doesn't reject this update
+		// as a stale echo.
 		if (onContentChanged) {
 			const components = getProjectComponents(nodes as unknown as INode[], edges);
-			const project: IProject = { ...currentProject, components };
+			const nextRevision = ((currentProject?.docRevision as number) ?? 0) + 1;
+			const project: IProject = {
+				...currentProject,
+				components,
+				version: PIPELINE_SCHEMA_VERSION,
+				docRevision: nextRevision,
+			};
+			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
-			console.log('[TemplateInstantiator] post-ready: notifying host, nodes=%d, edges=%d, components=%d', nodes.length, edges.length, components.length);
+			console.log('[TemplateInstantiator] post-ready: notifying host, nodes=%d, edges=%d, components=%d, docRevision=%d', nodes.length, edges.length, components.length, nextRevision);
 			onContentChanged(project);
 		}
 		fitView({ padding: 0.15, duration: 300 });

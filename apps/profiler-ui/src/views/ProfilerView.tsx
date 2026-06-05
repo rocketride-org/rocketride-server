@@ -380,6 +380,8 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			setReport(textResult.report || 'No report available.');
 		} catch (err) {
 			console.log('[ProfilerView] Text report fetch failed:', err);
+			// Clear stale report so the UI doesn't show outdated results
+			setReport('');
 		}
 
 		// Fetch tree data — may not be available on older servers
@@ -388,6 +390,8 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			setTreeData(treeResult);
 		} catch (err) {
 			console.log('[ProfilerView] Tree report fetch failed:', err);
+			// Clear stale tree data so visualisations don't show outdated results
+			setTreeData(null);
 		}
 	}, [target]);
 

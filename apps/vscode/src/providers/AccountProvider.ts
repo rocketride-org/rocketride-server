@@ -229,8 +229,10 @@ export class AccountProvider {
 				break;
 
 			case 'billing:subscribe':
-				// Open the Stripe customer portal where the user can manage subscriptions
-				await this.handleOpenPortal();
+				// Open the pipeline editor which has the embedded Stripe checkout flow
+				// for new subscriptions. The portal is for managing existing subscriptions
+				// only; new subscriptions require the checkout session flow in ProjectProvider.
+				await this.handleSubscribe(panel);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -852,6 +854,31 @@ export class AccountProvider {
 		} catch (error) {
 			console.error(`[AccountProvider] Failed to cancel subscription: ${error}`);
 			this.postError(panel, `Failed to cancel subscription: ${error}`);
+		}
+	}
+
+	/**
+	 * Handles a new subscription request from the billing UI.
+	 *
+	 * New subscriptions require the Stripe Elements checkout flow which is
+	 * hosted in the ProjectProvider's custom editor webview.  We open a
+	 * pipeline file to trigger that editor, which shows the subscribe
+	 * banner with the embedded checkout when the user is not yet subscribed.
+	 *
+	 * @param panel - The webview panel (used to post error messages if needed).
+	 */
+	private async handleSubscribe(panel: vscode.WebviewPanel): Promise<void> {
+		try {
+			// Open or focus the pipeline editor — its webview renders the
+			// embedded Stripe checkout flow for new subscriptions
+			await vscode.commands.executeCommand('workbench.action.files.newUntitledFile', {
+				languageId: 'rocketride-pipeline',
+			});
+		} catch {
+			// Fallback: inform the user to open a pipeline file manually
+			vscode.window.showInformationMessage(
+				'To subscribe, open a .rrpipe file. The pipeline editor includes the checkout flow.'
+			);
 		}
 	}
 

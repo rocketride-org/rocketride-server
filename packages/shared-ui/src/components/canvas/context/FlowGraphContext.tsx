@@ -580,22 +580,32 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(params: Connection) => {
 			if (isLocked) return;
 
-			// Derive edge ID and lane/classType from handle IDs
-			const isInvoke = params.sourceHandle?.startsWith('invoke-source');
-			const laneOrClass = isInvoke
-				? (params.sourceHandle?.split('.').at(1) ?? '')
-				: (params.sourceHandle?.split('-')?.at(1) ?? '');
-			const edgeId = `${params.source}::${params.target}::${laneOrClass}`;
+			// Normalize reversed invoke connections — isValidConnection handles
+			// both drag directions, but params arrive with the raw drag order.
+			// If the user dragged from invoke-target to invoke-source, swap
+			// source/target so the persisted edge is always source→target.
+			let { source, target, sourceHandle, targetHandle } = params;
+			if (sourceHandle?.startsWith('invoke-target') && targetHandle?.startsWith('invoke-source')) {
+				// Swap source ↔ target to normalize
+				[source, target] = [target, source];
+				[sourceHandle, targetHandle] = [targetHandle, sourceHandle];
+			}
 
+			// Derive edge ID and lane/classType from handle IDs
+			const isInvoke = sourceHandle?.startsWith('invoke-source');
+			const laneOrClass = isInvoke
+				? (sourceHandle?.split('.').at(1) ?? '')
+				: (sourceHandle?.split('-')?.at(1) ?? '');
+			const edgeId = `${source}::${target}::${laneOrClass}`;
 
 			// Add edge directly — ReactFlow owns edges at runtime
 			const newEdge: Edge = {
 				...DEFAULT_EDGE,
 				id: edgeId,
-				source: params.source,
-				target: params.target,
-				sourceHandle: params.sourceHandle,
-				targetHandle: params.targetHandle,
+				source,
+				target,
+				sourceHandle,
+				targetHandle,
 			};
 
 			setEdges((eds) => [...eds, newEdge]);

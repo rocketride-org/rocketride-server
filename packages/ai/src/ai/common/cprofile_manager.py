@@ -290,6 +290,20 @@ class CProfileManager:
             Dict with 'tree' (root node), 'total_time', and 'total_calls',
             or an error message if no stats data is available.
         """
+        # Validate and clamp max_depth to a reasonable integer range
+        try:
+            max_depth = int(max_depth)
+        except (TypeError, ValueError):
+            max_depth = 50
+        max_depth = max(1, min(max_depth, 500))
+
+        # Validate and clamp min_pct to a reasonable float range
+        try:
+            min_pct = float(min_pct)
+        except (TypeError, ValueError):
+            min_pct = 0.1
+        min_pct = max(0.0, min(min_pct, 100.0))
+
         with self._lock:
             if self._last_stats_data is None:
                 return {

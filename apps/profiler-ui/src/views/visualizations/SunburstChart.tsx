@@ -257,11 +257,14 @@ const SunburstChart: React.FC<SunburstChartProps> = ({ treeData, selectedNode, o
 				}
 			});
 
-		// Click arc to zoom
+		// Click arc to select and optionally zoom into subtree
 		paths.on('click', (_event, d) => {
+			// Always select the clicked node (enables leaf-arc selection)
+			onNodeSelect(d.data);
+
+			// Zoom into subtree only if the node has children
 			if (d.children && d.children.length > 0) {
 				setZoomNode(d.data);
-				onNodeSelect(d.data);
 			}
 		});
 

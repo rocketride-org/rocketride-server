@@ -263,6 +263,17 @@ class WebServer:
         else:
             cors_origins = []
 
+        # Fail fast when RR_CORS_ORIGINS is explicitly set but parsed to zero
+        # valid origins — this indicates a misconfiguration (e.g. only whitespace
+        # or empty comma-separated values) and should not silently fall back to
+        # the permissive localhost regex.
+        if cors_origins_env and not cors_origins:
+            debug(
+                f'WARNING: RR_CORS_ORIGINS is set to {cors_origins_env!r} but '
+                f'parsed to zero valid origins. Falling back to localhost regex. '
+                f'Check the value — origins must be comma-separated URLs.'
+            )
+
         if cors_origins:
             self.app.add_middleware(
                 CORSMiddleware,

@@ -183,7 +183,7 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 			if (existing) {
 				existing.ncalls += node.ncalls;
 				existing.tottime += node.tottime;
-				existing.cumtime = Math.max(existing.cumtime, node.cumtime);
+				existing.cumtime += node.cumtime;
 			} else {
 				map.set(key, {
 					name: node.name,
@@ -299,6 +299,22 @@ const StatsTable: React.FC<{
 		onNodeSelect(row.refNode);
 	}, [onNodeSelect]);
 
+	/** Handle keyboard activation (Enter/Space) on a sortable column header. */
+	const handleThKeyDown = useCallback((e: React.KeyboardEvent, col: SortColumn) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			handleSort(col);
+		}
+	}, [handleSort]);
+
+	/** Handle keyboard activation (Enter/Space) on a selectable row. */
+	const handleRowKeyDown = useCallback((e: React.KeyboardEvent, row: FlatRow) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			handleRowClick(row);
+		}
+	}, [handleRowClick]);
+
 	// =========================================================================
 	// HELPERS
 	// =========================================================================
@@ -356,7 +372,11 @@ const StatsTable: React.FC<{
 										textAlign: col.align,
 										...(sortCol === col.key ? styles.thActive : {}),
 									}}
+									tabIndex={0}
+									role="button"
+									aria-sort={sortCol === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
 									onClick={() => handleSort(col.key)}
+									onKeyDown={(e) => handleThKeyDown(e, col.key)}
 								>
 									{col.label}{sortArrow(col.key)}
 								</th>
@@ -378,7 +398,10 @@ const StatsTable: React.FC<{
 										...(isSelected ? styles.trSelected : {}),
 										...(hoveredIdx === i && !isSelected ? styles.trHover : {}),
 									}}
+									tabIndex={0}
+									role="row"
 									onClick={() => handleRowClick(row)}
+									onKeyDown={(e) => handleRowKeyDown(e, row)}
 									onMouseEnter={() => setHoveredIdx(i)}
 									onMouseLeave={() => setHoveredIdx(-1)}
 								>

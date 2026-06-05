@@ -77,6 +77,37 @@ interface ReportTextProps {
 }
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Fallback clipboard copy using a temporary textarea and execCommand.
+ *
+ * Used when the Clipboard API is unavailable (VS Code webviews,
+ * non-secure HTTP contexts, older browsers).
+ *
+ * @param text    - The text to copy to the clipboard.
+ * @param setCopied - State setter to show the "Copied!" feedback.
+ */
+function copyViaExecCommand(text: string, setCopied: (v: boolean) => void): void {
+	try {
+		// Create an off-screen textarea to hold the text
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.style.position = 'fixed';
+		textarea.style.left = '-9999px';
+		document.body.appendChild(textarea);
+		textarea.select();
+		document.execCommand('copy');
+		document.body.removeChild(textarea);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	} catch (err) {
+		console.log('[ReportText] Fallback clipboard copy failed:', err);
+	}
+}
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -88,14 +119,28 @@ interface ReportTextProps {
 const ReportText: React.FC<ReportTextProps> = ({ report }) => {
 	const [copied, setCopied] = useState(false);
 
-	/** Copy report to clipboard. */
+	/**
+	 * Copy report to clipboard.
+	 *
+	 * Uses navigator.clipboard when available (modern browsers), falls back
+	 * to the legacy execCommand('copy') approach for environments where the
+	 * Clipboard API is unavailable (e.g. VS Code webviews, non-secure contexts).
+	 */
 	const handleCopy = useCallback(() => {
-		navigator.clipboard.writeText(report).then(() => {
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		}).catch((err) => {
-			console.log('[ReportText] Clipboard write failed:', err);
-		});
+		// Try the modern Clipboard API first
+		if (navigator.clipboard?.writeText) {
+			navigator.clipboard.writeText(report).then(() => {
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			}).catch((err) => {
+				console.log('[ReportText] Clipboard API failed, trying fallback:', err);
+				// Fall back to execCommand for restricted environments
+				copyViaExecCommand(report, setCopied);
+			});
+		} else {
+			// Clipboard API not available — use legacy fallback
+			copyViaExecCommand(report, setCopied);
+		}
 	}, [report]);
 
 	return (
