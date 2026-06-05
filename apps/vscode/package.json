@@ -548,7 +548,7 @@
 		"@vscode/debugprotocol": "^1.68.0",
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
-		"@vscode/vsce": "^3.9.1",
+		"@vscode/vsce": "^3.9.2",
 		"esbuild": "^0.28.0",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
