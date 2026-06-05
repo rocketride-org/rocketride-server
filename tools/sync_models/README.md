@@ -299,11 +299,12 @@ manual dispatch. It:
 2. Runs with `--apply --pr-body` to write changes and capture the report.
 3. Opens a PR via `peter-evans/create-pull-request` with the report as the body.
 
-The workflow uses `--enable-discovery` (so model lists grow over time) but **does NOT** use `--allow-fallback-discovery`. This is intentional: when a provider's secret is missing from the GitHub Actions environment, the resulting PR body shows `Discovery skipped — set ROCKETRIDE_APIKEY_<PROVIDER>` for that provider. A reviewer sees the gap and can decide whether to add the secret rather than silently shipping fallback-discovered profiles to production.
+The workflow uses `--enable-discovery` (so model lists grow over time) but **does NOT** use `--allow-fallback-discovery`. This is intentional: when a provider's secret is missing from the GitHub Actions environment, the resulting PR body shows a `Discovery skipped — set the provider API key` note for that provider. A reviewer sees the gap and can decide whether to add the secret rather than silently shipping fallback-discovered profiles to production.
 
 Provider API keys are stored as GitHub Actions secrets named
-`ROCKETRIDE_APIKEY_<PROVIDER>` (see `.github/workflows/sync-models.yml` for
-the full list).
+`ROCKETRIDE_<PROVIDER>_KEY` (e.g. `ROCKETRIDE_OPENAI_KEY`,
+`ROCKETRIDE_ANTHROPIC_KEY`; see `.github/workflows/sync-models.yml` for the
+full list).
 
 ---
 

@@ -39,7 +39,7 @@ from core.patcher import get_profiles
 # Helpers
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).parent.parent.parent
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 
 def _load_profiles(node_name: str) -> Dict[str, Any]:
