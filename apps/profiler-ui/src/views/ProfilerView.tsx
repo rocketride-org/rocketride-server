@@ -21,20 +21,25 @@
 // SOFTWARE.
 
 // =============================================================================
-// PROFILER VIEW — Profiling controls and report display for one connection
+// PROFILER VIEW — Profiling controls, status, and tabbed visualisations
 // =============================================================================
 //
 // Connects to a server via the shell's RocketRide client. Provides:
 // - Target selector (Server Process or running pipeline)
 // - Start/Stop profiling controls
 // - Status display with owner and runtime
-// - Full pstats report in a scrollable <pre> block
+// - Tabbed visualisation area: Flame Graph | Sunburst | Table | Text
 // =============================================================================
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection, getClient } from 'shell-ui';
 import { commonStyles } from 'shared/themes/styles';
+import type { ProfileTreeNode, ProfileTreeResponse, ProfilerTab } from './visualizations/types';
+import ReportText from './visualizations/ReportText';
+import FlameGraph from './visualizations/FlameGraph';
+import SunburstChart from './visualizations/SunburstChart';
+import StatsTable from './visualizations/StatsTable';
 
 // =============================================================================
 // TYPES
@@ -66,18 +71,28 @@ const STATUS_POLL_MS = 3000;
 /** Task list refresh interval in milliseconds. */
 const TASKS_POLL_MS = 10000;
 
+/** Tab definitions for the visualisation switcher. */
+const TABS: { key: ProfilerTab; label: string }[] = [
+	{ key: 'flame', label: 'Flame Graph' },
+	{ key: 'sunburst', label: 'Sunburst' },
+	{ key: 'table', label: 'Table' },
+	{ key: 'text', label: 'Text' },
+];
+
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
+	/** Root container fills entire client area. */
 	container: {
 		...commonStyles.columnFill,
 		padding: 20,
-		gap: 16,
-		overflow: 'auto',
+		gap: 12,
+		overflow: 'hidden',
 	} as CSSProperties,
 
+	/** Controls row — target selector, session name, buttons. */
 	controls: {
 		display: 'flex',
 		alignItems: 'center',
@@ -85,6 +100,7 @@ const styles = {
 		flexWrap: 'wrap',
 	} as CSSProperties,
 
+	/** Target dropdown. */
 	select: {
 		padding: '6px 10px',
 		border: '1px solid var(--rr-border)',
@@ -96,6 +112,7 @@ const styles = {
 		minWidth: 200,
 	} as CSSProperties,
 
+	/** Session name text input. */
 	sessionInput: {
 		padding: '6px 10px',
 		border: '1px solid var(--rr-border)',
@@ -106,6 +123,7 @@ const styles = {
 		fontFamily: 'var(--rr-font-family)',
 	} as CSSProperties,
 
+	/** Generic button base. */
 	button: {
 		padding: '6px 14px',
 		border: 'none',
@@ -116,16 +134,19 @@ const styles = {
 		fontFamily: 'var(--rr-font-family)',
 	} as CSSProperties,
 
+	/** Start profiling button colour. */
 	startButton: {
 		background: 'var(--rr-brand)',
 		color: '#fff',
 	} as CSSProperties,
 
+	/** Stop profiling button colour. */
 	stopButton: {
 		background: 'var(--rr-error, #f44747)',
 		color: '#fff',
 	} as CSSProperties,
 
+	/** Status bar below controls. */
 	statusBar: {
 		padding: '8px 12px',
 		borderRadius: 4,
@@ -133,46 +154,32 @@ const styles = {
 		border: '1px solid var(--rr-border)',
 	} as CSSProperties,
 
+	/** Active-session status bar variant. */
 	statusActive: {
 		background: 'rgba(40, 167, 69, 0.15)',
 		borderColor: 'rgba(40, 167, 69, 0.4)',
 	} as CSSProperties,
 
+	/** Inactive/idle status bar variant. */
 	statusInactive: {
 		background: 'rgba(108, 117, 125, 0.1)',
 		borderColor: 'rgba(108, 117, 125, 0.3)',
 	} as CSSProperties,
 
+	/** Error text. */
 	error: {
 		color: 'var(--rr-error, #f44747)',
 		fontSize: 13,
 	} as CSSProperties,
 
-	reportContainer: {
-		flex: 1,
-		overflow: 'auto',
-		background: 'var(--rr-bg-editor, #1e1e1e)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 4,
-		padding: 12,
-	} as CSSProperties,
-
-	reportPre: {
-		margin: 0,
-		fontSize: 12,
-		lineHeight: 1.5,
-		fontFamily: 'var(--rr-font-family-mono, monospace)',
-		whiteSpace: 'pre-wrap',
-		wordBreak: 'break-all',
-		color: 'var(--rr-text-editor, #d4d4d4)',
-	} as CSSProperties,
-
+	/** Section title. */
 	sectionTitle: {
 		fontSize: 14,
 		fontWeight: 600,
 		margin: 0,
 	} as CSSProperties,
 
+	/** Disconnected state placeholder. */
 	disconnected: {
 		...commonStyles.columnFill,
 		display: 'flex',
@@ -180,6 +187,46 @@ const styles = {
 		justifyContent: 'center',
 		color: 'var(--rr-text-secondary)',
 		fontSize: 14,
+	} as CSSProperties,
+
+	// =========================================================================
+	// TAB BAR
+	// =========================================================================
+
+	/** Horizontal tab bar container. */
+	tabBar: {
+		display: 'flex',
+		gap: 0,
+		borderBottom: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
+	/** Individual tab button (inactive). */
+	tab: {
+		padding: '8px 16px',
+		border: 'none',
+		borderBottom: '2px solid transparent',
+		background: 'transparent',
+		color: 'var(--rr-text-secondary)',
+		fontSize: 13,
+		fontWeight: 500,
+		cursor: 'pointer',
+		fontFamily: 'var(--rr-font-family)',
+		transition: 'color 0.15s, border-color 0.15s',
+	} as CSSProperties,
+
+	/** Active tab button override. */
+	tabActive: {
+		color: 'var(--rr-brand)',
+		borderBottomColor: 'var(--rr-brand)',
+	} as CSSProperties,
+
+	/** Content area below the tab bar — fills remaining space. */
+	tabContent: {
+		flex: 1,
+		display: 'flex',
+		flexDirection: 'column',
+		minHeight: 0,
+		overflow: 'hidden',
 	} as CSSProperties,
 };
 
@@ -204,16 +251,24 @@ interface ProfilerViewProps {
  * Profiler view for a single server connection.
  *
  * Provides a target selector (Server Process or running pipelines),
- * start/stop controls, status display, and full pstats report.
+ * start/stop controls, status display, and tabbed visualisation area
+ * with flame graph, sunburst, sortable table, and raw text views.
  */
 const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	const { isConnected } = useShellConnection();
 
+	// =========================================================================
+	// STATE
+	// =========================================================================
+
 	// Current profiling status from the server
 	const [status, setStatus] = useState<CProfileStatus | null>(null);
 
-	// Full pstats report text
+	// Full pstats report text (for the Text tab)
 	const [report, setReport] = useState<string>('');
+
+	// Structured call tree data (for Flame Graph, Sunburst, Table tabs)
+	const [treeData, setTreeData] = useState<ProfileTreeResponse | null>(null);
 
 	// Available pipeline targets (from rrext_get_tasks)
 	const [tasks, setTasks] = useState<TaskEntry[]>([]);
@@ -226,6 +281,12 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	// Error message to display
 	const [error, setError] = useState<string>('');
+
+	// Active visualisation tab
+	const [activeTab, setActiveTab] = useState<ProfilerTab>('flame');
+
+	// Selected node for cross-highlighting between visualisations
+	const [selectedNode, setSelectedNode] = useState<ProfileTreeNode | null>(null);
 
 	// Refs for polling intervals
 	const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -301,6 +362,36 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	}, [isConnected, fetchTasks]);
 
 	// =========================================================================
+	// REPORT FETCHING
+	// =========================================================================
+
+	/** Fetch the text report and the structured tree independently. */
+	const fetchReport = useCallback(async () => {
+		const client = getClient();
+		if (!client) return;
+
+		// Build shared arguments
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+
+		// Fetch text report — always available
+		try {
+			const textResult = await client.call<{ report: string }>('rrext_cprofile_report', args);
+			setReport(textResult.report || 'No report available.');
+		} catch (err) {
+			console.log('[ProfilerView] Text report fetch failed:', err);
+		}
+
+		// Fetch tree data — may not be available on older servers
+		try {
+			const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', args);
+			setTreeData(treeResult);
+		} catch (err) {
+			console.log('[ProfilerView] Tree report fetch failed:', err);
+		}
+	}, [target]);
+
+	// =========================================================================
 	// ACTIONS
 	// =========================================================================
 
@@ -319,7 +410,10 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				setError(result.message || 'Failed to start profiling');
 			} else {
 				setError('');
-				setReport(''); // Clear stale report
+				// Clear stale data
+				setReport('');
+				setTreeData(null);
+				setSelectedNode(null);
 			}
 			// Refresh status immediately
 			await fetchStatus();
@@ -342,27 +436,12 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				setError(result.message || 'Failed to stop profiling');
 			} else {
 				setError('');
-				// Fetch the full report after stopping
+				// Fetch both report types after stopping
 				await fetchReport();
 			}
 			await fetchStatus();
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : 'Failed to stop profiling');
-		}
-	};
-
-	/** Fetch the full pstats report from the last completed session. */
-	const fetchReport = async () => {
-		const client = getClient();
-		if (!client) return;
-		try {
-			const args: Record<string, unknown> = {};
-			if (target) args.target = target;
-
-			const result = await client.call<{ report: string }>('rrext_cprofile_report', args);
-			setReport(result.report || 'No report available.');
-		} catch (err) {
-			console.log('[ProfilerView] Report fetch failed:', err);
 		}
 	};
 
@@ -445,11 +524,45 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				</div>
 			)}
 
-			{/* Report display */}
-			<div style={styles.reportContainer}>
-				<pre style={styles.reportPre}>
-					{report || 'No profiling report available. Start and stop a session to generate one.'}
-				</pre>
+			{/* Visualisation tab bar */}
+			<div style={styles.tabBar}>
+				{TABS.map((tab) => (
+					<button
+						key={tab.key}
+						style={{ ...styles.tab, ...(activeTab === tab.key ? styles.tabActive : {}) }}
+						onClick={() => setActiveTab(tab.key)}
+					>
+						{tab.label}
+					</button>
+				))}
+			</div>
+
+			{/* Visualisation content area */}
+			<div style={styles.tabContent}>
+				{activeTab === 'flame' && (
+					<FlameGraph
+						treeData={treeData}
+						selectedNode={selectedNode}
+						onNodeSelect={setSelectedNode}
+					/>
+				)}
+				{activeTab === 'sunburst' && (
+					<SunburstChart
+						treeData={treeData}
+						selectedNode={selectedNode}
+						onNodeSelect={setSelectedNode}
+					/>
+				)}
+				{activeTab === 'table' && (
+					<StatsTable
+						treeData={treeData}
+						selectedNode={selectedNode}
+						onNodeSelect={setSelectedNode}
+					/>
+				)}
+				{activeTab === 'text' && (
+					<ReportText report={report} />
+				)}
 			</div>
 		</div>
 	);

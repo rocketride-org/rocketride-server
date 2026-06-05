@@ -252,7 +252,11 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Configure CORS origins and credentials
+        # Configure CORS origins and credentials.
+        # When RR_CORS_ORIGINS is set, only those origins are allowed.
+        # When empty (default for local dev), any localhost/127.0.0.1 origin
+        # is accepted on any port so the dynamic engine port works with
+        # browser access.
         cors_origins_env = os.environ.get('RR_CORS_ORIGINS', '')
         if cors_origins_env:
             cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
@@ -260,18 +264,22 @@ class WebServer:
             cors_origins = []
 
         if cors_origins:
-            allow_credentials = True
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=cors_origins,
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
         else:
-            cors_origins = ['*']
-            allow_credentials = False
-
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=allow_credentials,
-            allow_methods=['*'],
-            allow_headers=['*'],
-        )
+            # Allow any localhost origin (any port) with credentials
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$',
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
 
         # Store the server configuration
         self.config = config if config is not None else {}

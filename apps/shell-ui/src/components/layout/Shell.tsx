@@ -104,12 +104,13 @@ const styles = {
 /**
  * What the component should render during the auth bootstrap sequence.
  *
- * - 'loading'  — bootstrap in progress; show spinner.
- * - 'shell'    — show Shell (identity may be null for marketplace).
- * - 'error'    — unrecoverable auth failure.
- * - 'goodbye'  — post-logout screen for session-locked apps.
+ * - 'loading'    — bootstrap in progress; show spinner.
+ * - 'shell'      — show Shell (identity may be null for marketplace).
+ * - 'error'      — unrecoverable auth failure.
+ * - 'goodbye'    — post-logout screen for session-locked apps.
+ * - 'waitlisted' — authenticated but not yet granted access.
  */
-type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye';
+type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
 
 // =============================================================================
 // SHELL COMPONENT
@@ -220,7 +221,8 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
 				}
-				setRenderPhase('shell');
+				// Gate on waitlist — authenticated but not yet granted access
+				setRenderPhase(result?.result?.waitlisted ? 'waitlisted' : 'shell');
 			} catch (err) {
 				console.error('[Shell] Bootstrap failed:', err);
 				if (mountedRef.current) setRenderPhase('error');
@@ -238,9 +240,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	useEffect(() => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
 			if (result.userToken) cm.saveToken(result.userToken);
-			if (mountedRef.current) setIdentity(result);
+			if (mountedRef.current) {
+				setIdentity(result);
+				// Auto-transition off waitlist when an admin grants access
+				if (renderPhase === 'waitlisted' && !result.waitlisted) {
+					setRenderPhase('shell');
+				}
+			}
 		});
-	}, [cm]);
+	}, [cm, renderPhase]);
 
 	// Sign-in request from marketplace
 	useEffect(() => {
@@ -355,6 +363,27 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
 						Close this tab or sign in again to continue.
 					</div>
+				</div>
+			</div>
+		);
+	}
+
+	// Waitlisted — authenticated but not yet granted access
+	if (renderPhase === 'waitlisted') {
+		return (
+			<div style={styles.statusScreen}>
+				<div style={{
+					display: 'flex', flexDirection: 'column', alignItems: 'center',
+					gap: 16, textAlign: 'center', maxWidth: 400,
+				}}>
+					<div style={{ fontSize: 18, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
+						You&apos;re on the waitlist
+					</div>
+					<div style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>
+						Your account has been created, but access has not been granted yet.
+						We&apos;ll notify you when your account is activated.
+					</div>
+					<button onClick={handleLogout} style={styles.signInButton}>Sign Out</button>
 				</div>
 			</div>
 		);

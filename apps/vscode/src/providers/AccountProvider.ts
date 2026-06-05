@@ -19,6 +19,7 @@ import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { ConnectionManager } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
+import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
@@ -62,6 +63,7 @@ export class AccountProvider {
 	private disposables: vscode.Disposable[] = [];
 
 	private connectionManager = ConnectionManager.getInstance();
+	private configManager = ConfigManager.getInstance();
 
 	/**
 	 * Creates the AccountProvider, registers the open command, and sets up
@@ -224,6 +226,11 @@ export class AccountProvider {
 
 			case 'billing:buyCredits':
 				await this.handleBuyCredits(message.packId as string);
+				break;
+
+			case 'billing:subscribe':
+				// Open the Stripe customer portal where the user can manage subscriptions
+				await this.handleOpenPortal();
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -885,33 +892,32 @@ export class AccountProvider {
 	// =========================================================================
 
 	/**
-	 * Resolves the best available client using dev → deploy cascade.
-	 * Prefers the dev client if it has account info (cloud mode), otherwise
-	 * falls back to the deploy client.
+	 * Resolves the best available client by checking which connection is
+	 * actually cloud-connected.  Dev takes priority; if dev is not cloud,
+	 * falls back to deploy.  Local/docker/service connections don't have
+	 * real cloud account info and should not be used for account operations.
 	 *
 	 * @returns The client, its account info, and the orgId (if available).
 	 */
 	private resolveClient(): { client: any | undefined; accountInfo: any | undefined; orgId: string | undefined } {
-		// Try dev client first
+		const config = this.configManager.getConfig();
+
 		const devClient = this.connectionManager.getClient();
 		const devInfo = devClient?.getAccountInfo();
-		if (devInfo?.displayName) {
-			const orgId = devInfo.organizations?.[0]?.id;
-			return { client: devClient, accountInfo: devInfo, orgId };
-		}
-
-		// Fall back to deploy client
 		const deployClient = DeployManager.getDeployInstance().getClient();
 		const deployInfo = deployClient?.getAccountInfo();
-		if (deployInfo?.displayName) {
-			const orgId = deployInfo.organizations?.[0]?.id;
-			return { client: deployClient, accountInfo: deployInfo, orgId };
-		}
 
-		// Neither has account info — return dev client anyway (may still be useful)
-		const fallbackInfo = devInfo ?? deployInfo;
-		const orgId = fallbackInfo?.organizations?.[0]?.id;
-		return { client: devClient ?? deployClient, accountInfo: fallbackInfo, orgId };
+		// Prefer whichever connection is cloud-connected (dev first).
+		const accountInfo =
+			(config.development.connectionMode === 'cloud' ? devInfo : null) ??
+			(config.deployment.connectionMode === 'cloud' ? deployInfo : null);
+
+		const client =
+			(config.development.connectionMode === 'cloud' && devClient ? devClient : null) ??
+			(config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
+
+		const orgId = accountInfo?.organizations?.[0]?.id;
+		return { client: client ?? undefined, accountInfo: accountInfo ?? undefined, orgId };
 	}
 
 	/**

@@ -57,7 +57,7 @@ import type { INodeData, INode } from '../types';
  *          of slot-name → chosen provider key.
  */
 export function useTemplateInstantiator() {
-	const { nodes, loadCanvas, isFlowReady } = useFlowGraph();
+	const { nodes, edges, loadCanvas, isFlowReady } = useFlowGraph();
 	const { servicesJson, onContentChanged, currentProject } = useFlowProject();
 	const { fitView } = useReactFlow();
 	const updateNodeInternals = useUpdateNodeInternals();
@@ -87,13 +87,14 @@ export function useTemplateInstantiator() {
 		// Notify host directly — onContentUpdated is blocked by isLoadingRef
 		// which hasn't been cleared yet (parent effect runs after child)
 		if (onContentChanged) {
-			const components = getProjectComponents(nodes as unknown as INode[]);
+			const components = getProjectComponents(nodes as unknown as INode[], edges);
 			const project: IProject = { ...currentProject, components };
 			delete (project as any).viewport;
+			console.log('[TemplateInstantiator] post-ready: notifying host, nodes=%d, edges=%d, components=%d', nodes.length, edges.length, components.length);
 			onContentChanged(project);
 		}
 		fitView({ padding: 0.15, duration: 300 });
-	}, [isFlowReady, pendingIds, nodes, updateNodeInternals, onContentChanged, currentProject, fitView]);
+	}, [isFlowReady, pendingIds, nodes, edges, updateNodeInternals, onContentChanged, currentProject, fitView]);
 
 	// -----------------------------------------------------------------
 	// instantiateTemplate — builds nodes with template positions
@@ -175,17 +176,21 @@ export function useTemplateInstantiator() {
 				};
 			});
 
-			// Merge existing + new nodes and compute edges, then load via loadCanvas
+			// Merge existing + new nodes; derive edges for new nodes only,
+			// keep existing ReactFlow edges for current nodes (they're the source of truth)
 			const allNodes = [...currentNodes, ...newNodes];
-			const edges = getEdgesFromNodes(allNodes as unknown as INode[]);
-			loadCanvas(allNodes, edges);
+			const templateEdges = getEdgesFromNodes(newNodes as unknown as INode[]);
+			const currentEdges = [...edges];
+			const mergedEdges = [...currentEdges, ...templateEdges];
+			console.log('[TemplateInstantiator] loading: nodes=%d (+%d new), edges=%d (existing=%d, template=%d)', allNodes.length, newNodes.length, mergedEdges.length, currentEdges.length, templateEdges.length);
+			loadCanvas(allNodes, mergedEdges);
 
 			// Track new IDs so the post-ready effect can update internals + fitView
 			setPendingIds(newIds);
 
 			return unconfiguredCount;
 		},
-		[nodes, loadCanvas, servicesJson]
+		[nodes, edges, loadCanvas, servicesJson]
 	);
 
 	/**

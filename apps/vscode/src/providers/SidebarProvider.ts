@@ -128,6 +128,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'setDevelopmentMode':
 						await this.configManager.updateConnectionMode('development', message.mode);
+						this.sendFullUpdate();
 						break;
 					case 'setDevelopmentTeam':
 						this.configManager.setTeamId('development', message.teamId);
@@ -138,6 +139,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						// Reconnect the DEPLOY manager (not dev) when deploy mode changes
 						await this.deployManager.disconnect();
 						await this.deployManager.initialize();
+						this.sendFullUpdate();
 						break;
 					case 'setDeployTargetTeam':
 						this.configManager.setTeamId('deployment', message.teamId);

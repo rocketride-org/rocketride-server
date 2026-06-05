@@ -25,7 +25,7 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -2331,6 +2331,26 @@ export class RocketRideClient extends DAPClient {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		return this.call<CProfileReportResponse>('rrext_cprofile_report', args);
+	}
+
+	/**
+	 * Get a structured call tree from the last completed profiling session.
+	 *
+	 * Returns a hierarchical JSON tree suitable for flame graph, sunburst,
+	 * and icicle visualisations.  Supports optional depth and minimum
+	 * percentage pruning parameters.
+	 *
+	 * @param target   - Task token if querying a pipeline, or undefined for server.
+	 * @param maxDepth - Maximum tree depth (default 50).
+	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
+	 * @returns Object containing the tree root, total_time, and total_calls.
+	 */
+	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number): Promise<CProfileReportTreeResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		if (maxDepth !== undefined) args.max_depth = maxDepth;
+		if (minPct !== undefined) args.min_pct = minPct;
+		return this.call<CProfileReportTreeResponse>('rrext_cprofile_report_tree', args);
 	}
 
 	// ============================================================================

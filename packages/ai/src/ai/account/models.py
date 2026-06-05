@@ -102,6 +102,18 @@ class AccountInfo(BaseModel):
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []
 
+    # Platform-level permission strings (e.g. ['sys.admin', 'sys.view']).
+    # Set manually in the database, never via API.
+    sysPermissions: list[str] = []
+
+    # Credit wallet balance snapshot — dict of resource→balance pairs.
+    # Populated from the credit_wallets table for the user's primary org.
+    credits: dict = {}
+
+    # True when the user is authenticated but not yet granted app access
+    # (email did not match any allowed pattern in the user_grants table)
+    waitlisted: bool = False
+
     def to_connect_result(self) -> dict:
         """
         Serialize to ConnectResult dict sent to the client (excludes auth).

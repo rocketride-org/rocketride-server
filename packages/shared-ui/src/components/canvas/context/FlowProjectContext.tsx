@@ -254,9 +254,9 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	// Type-narrow the raw servicesJson into our IServiceCatalog
 	const servicesJson = useMemo(() => (rawServicesJson ?? {}) as IServiceCatalog, [rawServicesJson]);
 
-	// --- Context value -----------------------------------------------------
+	// --- Context value (memoized to prevent consumer re-renders on unchanged props) ---
 
-	const value: IFlowProjectContext = {
+	const value: IFlowProjectContext = useMemo(() => ({
 		currentProject,
 		toolchainState,
 		patchToolchainState,
@@ -290,7 +290,15 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		isNew,
 		onSave,
 		envKeys,
-	};
+	}), [
+		currentProject, toolchainState, patchToolchainState, toggleDevMode,
+		isPipelineRunning, isReadonly, taskStatuses, componentPipeCounts, totalPipes,
+		servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap,
+		handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo,
+		oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
+		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected,
+		isSubscribed, initialViewport, isDirty, isNew, onSave, envKeys,
+	]);
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;
 }

@@ -121,6 +121,10 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'versionsLoaded';
 			versions: EngineVersionItem[];
+	  }
+	| {
+			type: 'subscriptionStatus';
+			isSubscribed: boolean;
 	  };
 
 /** Messages this webview sends **to** the extension host. */
@@ -145,6 +149,9 @@ export type SettingsOutgoingMessage =
 	  }
 	| {
 			type: 'fetchTeams';
+	  }
+	| {
+			type: 'openSubscribe';
 	  };
 
 // ============================================================================
@@ -230,6 +237,34 @@ export const settingsStyles = {
 		marginTop: 2,
 		marginBottom: 8,
 		lineHeight: 1.4,
+	} as CSSProperties,
+};
+
+// ============================================================================
+// SUBSCRIBE BANNER STYLES
+// ============================================================================
+
+const subscribeBannerStyles = {
+	container: {
+		background: 'var(--rr-color-warning-bg, rgba(255, 193, 7, 0.1))',
+		borderBottom: '1px solid var(--rr-color-warning, #ffc107)',
+		padding: '10px 16px',
+	} as CSSProperties,
+	content: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		gap: 12,
+	} as CSSProperties,
+	text: {
+		fontSize: 13,
+		color: 'var(--rr-text-primary)',
+		flex: 1,
+	} as CSSProperties,
+	button: {
+		...commonStyles.buttonPrimary,
+		whiteSpace: 'nowrap',
+		flexShrink: 0,
 	} as CSSProperties,
 };
 
@@ -330,6 +365,8 @@ export const Settings: React.FC = () => {
 
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
+	// Subscription state — true means subscribed, defaults to true (no banner until confirmed unsubscribed)
+	const [subscribed, setSubscribed] = useState(true);
 	const [cloudUserName, setCloudUserName] = useState('');
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -388,6 +425,10 @@ export const Settings: React.FC = () => {
 				case 'cloud:status' as any:
 					setCloudSignedIn((message as any).signedIn);
 					setCloudUserName((message as any).userName || '');
+					break;
+
+				case 'subscriptionStatus':
+					setSubscribed(message.isSubscribed);
 					break;
 
 				case 'teamsLoaded' as any:
@@ -824,8 +865,26 @@ export const Settings: React.FC = () => {
 		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
+	// ── Subscribe handler ───────────────────────────────────────────────
+	const handleSubscribeClick = useCallback(() => {
+		sendMessage({ type: 'openSubscribe' });
+	}, [sendMessage]);
+
 	return (
 		<div style={commonStyles.columnFill}>
+			{/* ── Subscribe banner (cloud-signed-in but not subscribed) ── */}
+			{cloudSignedIn && !subscribed && (
+				<div style={subscribeBannerStyles.container}>
+					<div style={subscribeBannerStyles.content}>
+						<span style={subscribeBannerStyles.text}>
+							Subscribe to RocketRide Pipe Builder to unlock pipeline execution and advanced features.
+						</span>
+						<button style={subscribeBannerStyles.button} onClick={handleSubscribeClick}>
+							Subscribe
+						</button>
+					</div>
+				</div>
+			)}
 			{/* ── Tab panel ─────────────────────────────────────────── */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} panels={panels} />
 		</div>
