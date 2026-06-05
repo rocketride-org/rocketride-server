@@ -39,6 +39,7 @@ from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+    from ..task_scheduler import TaskScheduler
 
 
 # Cron preset aliases accepted in addition to 5-field expressions.
@@ -87,6 +88,11 @@ class DeployCommands(DAPConn):
         """No-op — all state lives on TaskConn via the other mixins."""
         pass
 
+    @property
+    def _scheduler(self) -> 'TaskScheduler':
+        """The deployment scheduler, created and stored in server state at module init."""
+        return self._server._server.app.state.scheduler
+
     # ── rrext_deploy_add ─────────────────────────────────────────────────────
 
     async def on_rrext_deploy_add(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -120,8 +126,8 @@ class DeployCommands(DAPConn):
             updatedAt=time.time(),
         )
         await self._server.deployments.save(self._account_info.userId, record, mode='create')
-        self._server.scheduler.schedule(self._account_info.userId, record)
-        return self.build_response(request, body=record.model_dump())
+        self._scheduler.schedule(record)
+        return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_remove ──────────────────────────────────────────────────
 
@@ -135,7 +141,7 @@ class DeployCommands(DAPConn):
             raise ValueError('projectId is required')
 
         await self._server.deployments.delete(self._account_info.userId, project_id)
-        self._server.scheduler.unschedule(project_id)
+        self._scheduler.unschedule(project_id)
         return self.build_response(request, body={})
 
     # ── rrext_deploy_list ────────────────────────────────────────────────────
@@ -148,7 +154,7 @@ class DeployCommands(DAPConn):
         return self.build_response(
             request,
             body={
-                'deployments': [r.model_dump() for r in records],
+                'deployments': [r.to_client_record() for r in records],
             },
         )
 
@@ -164,7 +170,7 @@ class DeployCommands(DAPConn):
             raise ValueError('projectId is required')
 
         record = await self._server.deployments.get(self._account_info.userId, project_id)
-        return self.build_response(request, body=record.model_dump())
+        return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_update ──────────────────────────────────────────────────
 
@@ -198,5 +204,5 @@ class DeployCommands(DAPConn):
         record.updatedAt = time.time()
 
         await self._server.deployments.save(userId, record)
-        self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
+        self._scheduler.schedule(record)
         return self.build_response(request, body={})
