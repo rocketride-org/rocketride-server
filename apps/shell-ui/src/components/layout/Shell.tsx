@@ -48,6 +48,7 @@ import type { ShellConfig } from '../../workspace/types';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
+import { SS_PENDING_APP_ID } from '../../constants';
 
 // =============================================================================
 // STYLES
@@ -389,7 +390,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || sessionStorage.getItem('rr:appId') || defaultAppId}
+					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}
