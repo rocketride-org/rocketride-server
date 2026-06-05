@@ -389,7 +389,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || defaultAppId}
+					startupAppId={activeAppId || sessionAppId || sessionStorage.getItem('rr:appId') || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}

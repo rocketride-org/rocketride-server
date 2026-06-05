@@ -512,7 +512,7 @@ function makeDownloadAction(options = {}) {
 			}
 
 			task.output = `Downloaded server from ${matchedTag}`;
-			await setState('server.buildHash', null);
+			await setState('server.buildHash', releaseHash);
 			await setState('server.downloadHash', releaseHash);
 			ctx.serverReady = true;
 			ctx.serverDownloaded = true;
