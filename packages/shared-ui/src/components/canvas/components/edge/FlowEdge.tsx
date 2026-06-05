@@ -60,14 +60,15 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 
 	// Compute the bezier path, shifting endpoints away from the handle center
 	// so the curve visually starts/ends at the handle edge.
-	const [edgePath, labelX, labelY] = getBezierPath({
+	const pathInput = {
 		sourceX: !isInvokeEdge ? sourceX - HANDLE_OFFSET : sourceX,
 		sourceY: isInvokeEdge ? sourceY - HANDLE_OFFSET : sourceY,
 		sourcePosition,
 		targetX: !isInvokeEdge ? targetX + HANDLE_OFFSET : targetX,
 		targetY: isInvokeEdge ? targetY + HANDLE_OFFSET : targetY,
 		targetPosition,
-	});
+	};
+	const [edgePath, labelX, labelY] = getBezierPath(pathInput);
 
 	/** Removes this edge from the canvas. */
 	const onDelete = () => setEdges((edges) => edges.filter((e) => e.id !== id));

@@ -58,7 +58,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const [isStopping, setIsStopping] = useState(false);
 
 	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected, isSubscribed } = useFlowProject();
-	const { nodes } = useFlowGraph();
+	const { nodes, edges } = useFlowGraph();
 
 	// ── Running state ──────────────────────────────────────────────────────
 	const isRunning = useMemo(() => {
@@ -76,7 +76,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			console.log(`[RunButton] clicked nodeId=${nodeId} isRunning=${isRunning} isSubscribed=${isSubscribed} onRunPipeline=${!!onRunPipeline}`);
 			if (isRunning || !onRunPipeline) return;
 
-			const components = getProjectComponents(nodes as INode[]);
+			const components = getProjectComponents(nodes as INode[], edges);
 			const project: IProject = {
 				...currentProject,
 				components,
@@ -86,7 +86,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			console.log('[RunButton] calling onRunPipeline');
 			onRunPipeline(nodeId, project);
 		},
-		[isRunning, onRunPipeline, nodeId, nodes, currentProject, isSubscribed]
+		[isRunning, onRunPipeline, nodeId, nodes, edges, currentProject, isSubscribed]
 	);
 
 	const handleStop = useCallback(

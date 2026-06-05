@@ -146,6 +146,8 @@ export interface BillingPanelProps {
 	isOrgAdmin: boolean;
 	/** App manifest entries for resolving display names, icons, etc. from appId. */
 	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
+	/** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
+	onSubscribe?: () => void;
 }
 
 // =============================================================================
@@ -158,7 +160,7 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin, onSubscribe }) => {
 	// Build appId → app lookup for display name resolution
 	const appMap = React.useMemo(() => {
 		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
@@ -189,7 +191,14 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					{loading ? (
 						<div style={{ padding: '20px 18px', color: 'var(--rr-text-disabled)', fontSize: 12 }}>Loading subscriptions…</div>
 					) : subscriptions.length === 0 ? (
-						<div style={{ padding: '20px 18px', color: 'var(--rr-text-disabled)', fontSize: 12 }}>No active subscriptions. Subscribe to an app from the app store.</div>
+						<div style={{ padding: '20px 18px' }}>
+							<p style={{ color: 'var(--rr-text-disabled)', fontSize: 12, margin: '0 0 12px 0' }}>No active subscriptions.</p>
+							{onSubscribe && (
+								<button style={commonStyles.buttonPrimary as CSSProperties} onClick={onSubscribe}>
+									Subscribe to Pipe Builder
+								</button>
+							)}
+						</div>
 					) : (
 						subscriptions.map((sub, i) => {
 							const sv = statusVariant(sub.status);

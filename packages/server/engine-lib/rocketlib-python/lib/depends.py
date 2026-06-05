@@ -890,6 +890,23 @@ def depends(requirements: Optional[str] = None):
         _apply_pywin32_hack()
 
 
+def load_depends(current_file: str, requirements_file: str = 'requirements.txt') -> None:
+    """Install a requirements file located alongside the calling module.
+
+    Saves callers the os.path boilerplate of resolving a requirements file next
+    to their own module. Equivalent to ``depends(<dir of current_file>/<requirements_file>)``.
+
+    Args:
+        current_file: The caller's ``__file__``.
+        requirements_file: Requirements filename in that module's directory (default 'requirements.txt').
+
+    Returns:
+        None.
+    """
+    requirements = os.path.join(os.path.dirname(os.path.realpath(current_file)), requirements_file)
+    depends(requirements)
+
+
 # ---------------------------------------------------------------------------
 # Main Mode
 # ---------------------------------------------------------------------------

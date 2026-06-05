@@ -72,3 +72,37 @@ export interface CProfileReportResponse {
 	/** Full pstats-formatted text report. */
 	report: string;
 }
+
+// =============================================================================
+// CPROFILE TREE TYPES (for flame graph / sunburst / icicle visualisations)
+// =============================================================================
+
+/** A single node in the hierarchical call tree returned by rrext_cprofile_report_tree. */
+export interface CProfileTreeNode {
+	/** Function name. */
+	name: string;
+	/** Source filename. */
+	file: string;
+	/** Source line number. */
+	line: number;
+	/** Number of calls from the parent context. */
+	ncalls: number;
+	/** Total time spent in this function (excluding sub-calls). */
+	tottime: number;
+	/** Cumulative time spent in this function (including sub-calls). */
+	cumtime: number;
+	/** Child function calls. */
+	children: CProfileTreeNode[];
+}
+
+/** Response from rrext_cprofile_report_tree. */
+export interface CProfileReportTreeResponse {
+	/** Root node of the call tree (synthetic '<root>' wrapper). */
+	tree: CProfileTreeNode | null;
+	/** Total cumulative time across all profiled functions. */
+	total_time: number;
+	/** Total number of function calls recorded. */
+	total_calls: number;
+	/** Error message if no data is available. */
+	error?: string;
+}

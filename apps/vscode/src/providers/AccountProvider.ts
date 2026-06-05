@@ -19,6 +19,7 @@ import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { ConnectionManager } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
+import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
@@ -62,6 +63,7 @@ export class AccountProvider {
 	private disposables: vscode.Disposable[] = [];
 
 	private connectionManager = ConnectionManager.getInstance();
+	private configManager = ConfigManager.getInstance();
 
 	/**
 	 * Creates the AccountProvider, registers the open command, and sets up
@@ -224,6 +226,13 @@ export class AccountProvider {
 
 			case 'billing:buyCredits':
 				await this.handleBuyCredits(message.packId as string);
+				break;
+
+			case 'billing:subscribe':
+				// Open the pipeline editor which has the embedded Stripe checkout flow
+				// for new subscriptions. The portal is for managing existing subscriptions
+				// only; new subscriptions require the checkout session flow in ProjectProvider.
+				await this.handleSubscribe(panel);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -849,6 +858,31 @@ export class AccountProvider {
 	}
 
 	/**
+	 * Handles a new subscription request from the billing UI.
+	 *
+	 * New subscriptions require the Stripe Elements checkout flow which is
+	 * hosted in the ProjectProvider's custom editor webview.  We open a
+	 * pipeline file to trigger that editor, which shows the subscribe
+	 * banner with the embedded checkout when the user is not yet subscribed.
+	 *
+	 * @param panel - The webview panel (used to post error messages if needed).
+	 */
+	private async handleSubscribe(panel: vscode.WebviewPanel): Promise<void> {
+		try {
+			// Open or focus the pipeline editor — its webview renders the
+			// embedded Stripe checkout flow for new subscriptions
+			await vscode.commands.executeCommand('workbench.action.files.newUntitledFile', {
+				languageId: 'rocketride-pipeline',
+			});
+		} catch {
+			// Fallback: inform the user to open a pipeline file manually
+			vscode.window.showInformationMessage(
+				'To subscribe, open a .rrpipe file. The pipeline editor includes the checkout flow.'
+			);
+		}
+	}
+
+	/**
 	 * Creates a Stripe portal session and opens the URL in the user's browser.
 	 */
 	private async handleOpenPortal(): Promise<void> {
@@ -885,33 +919,32 @@ export class AccountProvider {
 	// =========================================================================
 
 	/**
-	 * Resolves the best available client using dev → deploy cascade.
-	 * Prefers the dev client if it has account info (cloud mode), otherwise
-	 * falls back to the deploy client.
+	 * Resolves the best available client by checking which connection is
+	 * actually cloud-connected.  Dev takes priority; if dev is not cloud,
+	 * falls back to deploy.  Local/docker/service connections don't have
+	 * real cloud account info and should not be used for account operations.
 	 *
 	 * @returns The client, its account info, and the orgId (if available).
 	 */
 	private resolveClient(): { client: any | undefined; accountInfo: any | undefined; orgId: string | undefined } {
-		// Try dev client first
+		const config = this.configManager.getConfig();
+
 		const devClient = this.connectionManager.getClient();
 		const devInfo = devClient?.getAccountInfo();
-		if (devInfo?.displayName) {
-			const orgId = devInfo.organizations?.[0]?.id;
-			return { client: devClient, accountInfo: devInfo, orgId };
-		}
-
-		// Fall back to deploy client
 		const deployClient = DeployManager.getDeployInstance().getClient();
 		const deployInfo = deployClient?.getAccountInfo();
-		if (deployInfo?.displayName) {
-			const orgId = deployInfo.organizations?.[0]?.id;
-			return { client: deployClient, accountInfo: deployInfo, orgId };
-		}
 
-		// Neither has account info — return dev client anyway (may still be useful)
-		const fallbackInfo = devInfo ?? deployInfo;
-		const orgId = fallbackInfo?.organizations?.[0]?.id;
-		return { client: devClient ?? deployClient, accountInfo: fallbackInfo, orgId };
+		// Prefer whichever connection is cloud-connected (dev first).
+		const accountInfo =
+			(config.development.connectionMode === 'cloud' ? devInfo : null) ??
+			(config.deployment.connectionMode === 'cloud' ? deployInfo : null);
+
+		const client =
+			(config.development.connectionMode === 'cloud' && devClient ? devClient : null) ??
+			(config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
+
+		const orgId = accountInfo?.organizations?.[0]?.id;
+		return { client: client ?? undefined, accountInfo: accountInfo ?? undefined, orgId };
 	}
 
 	/**

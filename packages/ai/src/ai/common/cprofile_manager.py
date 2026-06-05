@@ -45,7 +45,7 @@ import io
 import pstats
 import threading
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 
 # =============================================================================
@@ -85,6 +85,12 @@ class CProfileManager:
 
         # Most recent completed report text
         self._last_report: Optional[str] = None
+
+        # Raw pstats data from the last completed session, used by report_tree().
+        # Stored as the pstats.Stats.stats dict — keys are (filename, lineno, funcname)
+        # tuples, values are (cc, nc, tt, ct, callers) where callers maps caller
+        # tuples to (cc, nc, tt, ct).
+        self._last_stats_data: Optional[Dict] = None
 
         # Thread lock protecting all mutable state
         self._lock = threading.Lock()
@@ -173,9 +179,16 @@ class CProfileManager:
             report_buf.write(f'Duration: {runtime:.2f}s\n')
             report_buf.write('=' * 80 + '\n\n')
 
+            # Build Stats object once, reuse for both text reports and raw data
+            stats = pstats.Stats(self._profiler, stream=io.StringIO())
+
+            # Save raw stats dict for report_tree() — must copy before Profile
+            # is released, as pstats.Stats references the Profile internally
+            self._last_stats_data = dict(stats.stats)
+
             # Cumulative time sort — full stats
             stats_buf = io.StringIO()
-            stats = pstats.Stats(self._profiler, stream=stats_buf)
+            stats.stream = stats_buf
             stats.sort_stats('cumulative')
             stats.print_stats()
             report_buf.write('FUNCTIONS BY CUMULATIVE TIME:\n')
@@ -185,7 +198,7 @@ class CProfileManager:
 
             # Total time sort — top 30
             stats_buf = io.StringIO()
-            stats = pstats.Stats(self._profiler, stream=stats_buf)
+            stats.stream = stats_buf
             stats.sort_stats('tottime')
             stats.print_stats(30)
             report_buf.write('TOP 30 BY TOTAL TIME:\n')
@@ -254,6 +267,252 @@ class CProfileManager:
             return {
                 'report': self._last_report or 'No profiling data available. Run a session first.',
             }
+
+    def report_tree(
+        self,
+        max_depth: int = 50,
+        min_pct: float = 0.1,
+    ) -> Dict[str, Any]:
+        """
+        Build a hierarchical call-tree from the last completed profiling session.
+
+        Inverts the pstats callers dict to produce a parent→children tree
+        suitable for flame graph / sunburst / icicle visualisations.
+        Functions appearing in multiple call paths are duplicated (each parent
+        gets its own copy with caller-specific timing from the callers dict).
+
+        Args:
+            max_depth: Maximum tree depth before pruning (default 50).
+            min_pct:   Minimum percentage of total cumtime a node must have
+                       to be included in the tree (default 0.1).
+
+        Returns:
+            Dict with 'tree' (root node), 'total_time', and 'total_calls',
+            or an error message if no stats data is available.
+        """
+        # Validate and clamp max_depth to a reasonable integer range
+        try:
+            max_depth = int(max_depth)
+        except (TypeError, ValueError):
+            max_depth = 50
+        max_depth = max(1, min(max_depth, 500))
+
+        # Validate and clamp min_pct to a reasonable float range
+        try:
+            min_pct = float(min_pct)
+        except (TypeError, ValueError):
+            min_pct = 0.1
+        min_pct = max(0.0, min(min_pct, 100.0))
+
+        with self._lock:
+            if self._last_stats_data is None:
+                return {
+                    'tree': None,
+                    'total_time': 0,
+                    'total_calls': 0,
+                    'error': 'No profiling data available. Run a session first.',
+                }
+
+            # Copy the stats data while under the lock so we can process
+            # outside of it without holding it for the tree-building work
+            stats_data = dict(self._last_stats_data)
+
+        # --- Build the tree outside the lock (read-only on stats_data) ---
+        return self._build_tree(stats_data, max_depth, min_pct)
+
+    @staticmethod
+    def _build_tree(
+        stats_data: Dict,
+        max_depth: int,
+        min_pct: float,
+    ) -> Dict[str, Any]:
+        """
+        Transform raw pstats stats dict into a JSON-serializable call tree.
+
+        The pstats dict is keyed by (filename, lineno, funcname) tuples.
+        Each value is (primitive_calls, total_calls, tottime, cumtime, callers)
+        where callers maps caller-key → (cc, nc, tt, ct).
+
+        This method inverts the callers relationships to build a top-down tree:
+        for each function, every key in its callers dict becomes a parent, and
+        the function becomes a child of that parent with the timing data from
+        the caller relationship.
+
+        Args:
+            stats_data: Raw pstats.Stats.stats dict.
+            max_depth: Maximum recursion depth for tree building.
+            min_pct: Minimum cumtime percentage threshold for inclusion.
+
+        Returns:
+            Dict with 'tree', 'total_time', and 'total_calls'.
+        """
+        # Step 1: Compute total cumtime across all root-level functions for
+        # the min_pct threshold calculation
+        total_time = 0.0
+        total_calls = 0
+        for _key, (cc, nc, tt, ct, _callers) in stats_data.items():
+            total_time = max(total_time, ct)
+            total_calls += nc
+
+        # Minimum absolute time threshold (convert percentage to seconds)
+        min_time = total_time * (min_pct / 100.0) if total_time > 0 else 0
+
+        # Step 2: Build parent→children adjacency map.
+        # For each function, iterate its callers and record the function as
+        # a child of each caller with the caller-specific timing.
+        #
+        # children_map[parent_key] = list of (child_key, cc, nc, tt, ct)
+        children_map: Dict[
+            Tuple[str, int, str],
+            List[Tuple[Tuple[str, int, str], int, int, float, float]],
+        ] = {}
+
+        # Track which functions have callers (non-roots)
+        has_caller: set = set()
+
+        for func_key, (cc, nc, tt, ct, callers) in stats_data.items():
+            if callers:
+                for caller_key, caller_timing in callers.items():
+                    has_caller.add(func_key)
+                    # caller_timing can be (nc, nc, tt, ct) or (cc, nc, tt, ct)
+                    c_cc, c_nc, c_tt, c_ct = caller_timing
+                    if caller_key not in children_map:
+                        children_map[caller_key] = []
+                    children_map[caller_key].append((func_key, c_cc, c_nc, c_tt, c_ct))
+
+        # Step 3: Identify root nodes — functions that have no callers
+        root_keys = [k for k in stats_data if k not in has_caller]
+
+        # When profiling an already-running process (e.g. asyncio event loop),
+        # all recorded functions may have callers because the calling functions
+        # were already on the stack when profiling started.  These "phantom
+        # callers" appear in children_map but not in stats_data.
+        if not root_keys:
+            # Promote children of phantom callers to roots — these are the
+            # real entry points of the profiled portion
+            phantom_callers = set(children_map.keys()) - set(stats_data.keys())
+            promoted: set = set()
+            for pc in phantom_callers:
+                for child_key, _c_cc, _c_nc, _c_tt, _c_ct in children_map[pc]:
+                    promoted.add(child_key)
+            root_keys = list(promoted)
+
+        # Last resort fallback — pick the highest-cumtime functions
+        if not root_keys:
+            root_keys = sorted(
+                stats_data.keys(),
+                key=lambda k: stats_data[k][3],  # index 3 = cumtime
+                reverse=True,
+            )[:5]
+
+        # Step 4: Recursively build the tree with cycle detection.
+        # In asyncio servers, _run_once → handlers → callbacks → _run_once
+        # creates cycles.  We track the ancestor path and emit a leaf node
+        # tagged "[cycle]" when a function is encountered that already
+        # appears in the current call path.
+        def build_node(
+            func_key: Tuple[str, int, str],
+            nc: int,
+            tt: float,
+            ct: float,
+            depth: int,
+            ancestors: Optional[set] = None,
+        ) -> Optional[Dict[str, Any]]:
+            """
+            Recursively build a tree node for a single function.
+
+            Args:
+                func_key: (filename, lineno, funcname) tuple.
+                nc: Number of calls from the parent context.
+                tt: Total time from the parent context.
+                ct: Cumulative time from the parent context.
+                depth: Current recursion depth.
+                ancestors: Set of func_keys on the current call path (cycle detection).
+
+            Returns:
+                A dict representing the node, or None if pruned.
+            """
+            # Prune nodes below the minimum time threshold
+            if ct < min_time and depth > 1:
+                return None
+
+            filename, lineno, funcname = func_key
+
+            # Initialise ancestor tracking on first call
+            if ancestors is None:
+                ancestors = set()
+
+            # Cycle detection — if this function is already on the current
+            # call path, emit a leaf node tagged "[cycle]" instead of recursing
+            if func_key in ancestors:
+                return {
+                    'name': f'{funcname} [cycle]',
+                    'file': filename,
+                    'line': lineno,
+                    'ncalls': nc,
+                    'tottime': round(tt, 6),
+                    'cumtime': round(ct, 6),
+                    'children': [],
+                }
+
+            # Add this function to the ancestor path
+            path = ancestors | {func_key}
+
+            # Build child nodes if within depth limit
+            children: List[Dict[str, Any]] = []
+            if depth < max_depth and func_key in children_map:
+                for child_key, c_cc, c_nc, c_tt, c_ct in children_map[func_key]:
+                    child_node = build_node(
+                        child_key,
+                        c_nc,
+                        c_tt,
+                        c_ct,
+                        depth + 1,
+                        path,
+                    )
+                    if child_node is not None:
+                        children.append(child_node)
+
+                # Sort children by cumulative time descending for consistent layout
+                children.sort(key=lambda n: n['cumtime'], reverse=True)
+
+            return {
+                'name': funcname,
+                'file': filename,
+                'line': lineno,
+                'ncalls': nc,
+                'tottime': round(tt, 6),
+                'cumtime': round(ct, 6),
+                'children': children,
+            }
+
+        # Step 5: Build root children from the identified root functions
+        root_children: List[Dict[str, Any]] = []
+        for rk in root_keys:
+            cc, nc, tt, ct, _callers = stats_data[rk]
+            node = build_node(rk, nc, tt, ct, depth=0)
+            if node is not None:
+                root_children.append(node)
+
+        # Sort root children by cumulative time descending
+        root_children.sort(key=lambda n: n['cumtime'], reverse=True)
+
+        # Step 6: Wrap in a synthetic root node
+        root = {
+            'name': '<root>',
+            'file': '',
+            'line': 0,
+            'ncalls': total_calls,
+            'tottime': 0.0,
+            'cumtime': round(total_time, 6),
+            'children': root_children,
+        }
+
+        return {
+            'tree': root,
+            'total_time': round(total_time, 6),
+            'total_calls': total_calls,
+        }
 
     def release(self, owner_id: str) -> None:
         """
