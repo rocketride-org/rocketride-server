@@ -55,12 +55,14 @@ def make_record(
     project_id: str = 'proj-1',
     schedule: str = '*/15 * * * *',
     state: str = 'active',
-    created_by: str = 'user-1',
+    userId: str = 'user-1',
+    userToken: str = 'rr_test',
     **kwargs,
 ) -> DeploymentRecord:
     return DeploymentRecord(
         pipeline={'project_id': project_id, 'components': []},
-        created_by=created_by,
+        userId=userId,
+        userToken=userToken,
         schedule=schedule,
         state=state,
         **kwargs,
@@ -104,11 +106,11 @@ async def _run_loop_once(scheduler: TaskScheduler) -> None:
 def test_scheduling_active_deployment_creates_future_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     assert rec.pipeline['project_id'] in s._tasks
     task = s._tasks[rec.pipeline['project_id']]
     assert task.next_run > datetime.now().timestamp()
-    assert task.client_id == rec.created_by
+    assert task.client_id == rec.userId
     assert not task.cancelled
 
 
@@ -121,10 +123,10 @@ def test_scheduling_manual_deployment_is_ignored():
 def test_switching_active_to_manual_cancels_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     old_task = s._tasks[rec.pipeline['project_id']]
 
-    s.schedule(rec.created_by, make_record(schedule='manual'))
+    s.schedule(rec.userId, make_record(schedule='manual'))
     assert old_task.cancelled
     assert rec.pipeline['project_id'] not in s._tasks
 
@@ -132,10 +134,10 @@ def test_switching_active_to_manual_cancels_task():
 def test_switching_active_to_paused_cancels_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     old_task = s._tasks[rec.pipeline['project_id']]
 
-    s.schedule(rec.created_by, make_record(state='paused'))
+    s.schedule(rec.userId, make_record(state='paused'))
     assert old_task.cancelled
     assert rec.pipeline['project_id'] not in s._tasks
 
@@ -143,10 +145,10 @@ def test_switching_active_to_paused_cancels_task():
 def test_switching_active_to_errored_cancels_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     old_task = s._tasks[rec.pipeline['project_id']]
 
-    s.schedule(rec.created_by, make_record(state='errored'))
+    s.schedule(rec.userId, make_record(state='errored'))
     assert old_task.cancelled
     assert rec.pipeline['project_id'] not in s._tasks
 
@@ -154,10 +156,10 @@ def test_switching_active_to_errored_cancels_task():
 def test_rescheduling_replaces_existing_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     first_task = s._tasks[rec.pipeline['project_id']]
 
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     assert first_task.cancelled
     assert len(s._tasks) == 1
     new_task = s._tasks[rec.pipeline['project_id']]
@@ -173,7 +175,7 @@ def test_rescheduling_replaces_existing_task():
 def test_unschedule_cancels_and_removes_scheduled_task():
     s = _make_scheduler()
     rec = make_record()
-    s.schedule(rec.created_by, rec)
+    s.schedule(rec.userId, rec)
     task = s._tasks[rec.pipeline['project_id']]
 
     s.unschedule(rec.pipeline['project_id'])
@@ -202,7 +204,7 @@ def test_unschedule_unknown_deployment_is_noop():
 async def test_startup_schedules_active_deployments():
     s = _make_scheduler()
     rec = make_record(schedule='@hourly', state='active')
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
     await s.start()
     await s.stop()
     assert rec.pipeline['project_id'] in s._tasks
@@ -212,7 +214,7 @@ async def test_startup_schedules_active_deployments():
 async def test_startup_skips_manual_deployments():
     s = _make_scheduler()
     rec = make_record(schedule='manual')
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
     await s.start()
     await s.stop()
     assert rec.pipeline['project_id'] not in s._tasks
@@ -223,7 +225,7 @@ async def test_startup_loads_multiple_deployments():
     s = _make_scheduler()
     records = [make_record('proj-1'), make_record('proj-2'), make_record('proj-3')]
     for r in records:
-        await s._server.deployments.save(r.created_by, r)
+        await s._server.deployments.save(r.userId, r)
     await s.start()
     await s.stop()
     assert set(s._tasks) == {'proj-1', 'proj-2', 'proj-3'}
@@ -250,10 +252,10 @@ async def test_startup_survives_store_error():
 async def test_overdue_task_triggers_start_task():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
         await _run_loop_once(s)
@@ -263,8 +265,8 @@ async def test_overdue_task_triggers_start_task():
     call = s._server.start_task.call_args
     assert call.args[0]['command'] == 'execute'
     assert call.args[0]['arguments']['pipeline'] == rec.pipeline
-    assert call.kwargs['user_id'] == rec.created_by
-    assert call.kwargs['client_id'] == rec.created_by
+    assert call.kwargs['user_id'] == rec.userId
+    assert call.kwargs['client_id'] == rec.userId
     assert call.kwargs['conn'] is None
 
 
@@ -272,10 +274,10 @@ async def test_overdue_task_triggers_start_task():
 async def test_future_task_not_dispatched():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
         await _run_loop_once(s)
 
     s._server.start_task.assert_not_called()
@@ -285,10 +287,10 @@ async def test_future_task_not_dispatched():
 async def test_loop_skips_when_previous_run_still_active():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
     s._server._task_control['tk_old'] = SimpleNamespace(task=SimpleNamespace(is_task_complete=lambda: False))
@@ -304,10 +306,10 @@ async def test_loop_skips_when_previous_run_still_active():
 async def test_loop_dispatches_when_previous_run_complete():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
     s._server._task_control['tk_old'] = SimpleNamespace(task=SimpleNamespace(is_task_complete=lambda: True))
@@ -323,10 +325,10 @@ async def test_loop_dispatches_when_previous_run_complete():
 async def test_loop_dispatches_when_previous_token_cleaned_up():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     # token present but not in _task_control — already cleaned up
     s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
@@ -342,11 +344,11 @@ async def test_loop_dispatches_when_previous_token_cleaned_up():
 async def test_dispatch_stores_token_from_start_task():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
     s._server.start_task = AsyncMock(return_value={'token': 'tk_abc'})
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
         await _run_loop_once(s)
@@ -359,11 +361,11 @@ async def test_dispatch_stores_token_from_start_task():
 async def test_dispatch_survives_start_task_failure():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
     s._server.start_task = AsyncMock(side_effect=RuntimeError('boom'))
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
         await _run_loop_once(s)  # must not raise
@@ -386,10 +388,10 @@ async def test_dispatch_noop_for_missing_deployment():
 async def test_future_task_not_dispatched_before_due_time():
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)  # next_run = 12:15:00, still future
+        s.schedule(rec.userId, rec)  # next_run = 12:15:00, still future
         await _run_loop_once(s)
 
     s._server.start_task.assert_not_called()
@@ -400,10 +402,10 @@ async def test_task_dispatched_after_time_advances():
     """The main value of time-machine: future task → advance clock → now due."""
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec.created_by, rec)  # next_run = 12:15:00
+        s.schedule(rec.userId, rec)  # next_run = 12:15:00
         await _run_loop_once(s)
     s._server.start_task.assert_not_called()
 
@@ -418,13 +420,13 @@ async def test_sleep_delay_matches_time_until_next_task():
     """_loop must request a sleep of ~10 s when the next task is 10 s away."""
     s = _make_scheduler()
     rec = make_record()
-    await s._server.deployments.save(rec.created_by, rec)
+    await s._server.deployments.save(rec.userId, rec)
 
     sleep_calls: list[float] = []
 
     # Frozen at :14:50 — next */15 tick is :15:00, exactly 10 s away.
     with time_machine.travel(datetime(2026, 1, 1, 12, 14, 50), tick=False):
-        s.schedule(rec.created_by, rec)
+        s.schedule(rec.userId, rec)
 
         async def _capture(delay: float) -> None:
             sleep_calls.append(delay)

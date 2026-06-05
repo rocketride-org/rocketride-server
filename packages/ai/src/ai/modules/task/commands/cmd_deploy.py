@@ -91,6 +91,9 @@ class DeployCommands(DAPConn):
 
     async def on_rrext_deploy_add(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Accept a pipeline definition, persist it as a deployment, and activate it."""
+        if not self._account_info.userToken:
+            raise ValueError('Cannot deploy: no user token available for scheduled runs')
+
         self.verify_permission('task.control')
 
         args = request.get('arguments') or {}
@@ -111,9 +114,10 @@ class DeployCommands(DAPConn):
             pipeline=pipeline,
             schedule=schedule,
             state='active',
-            created_by=self._account_info.userId,
-            created_at=time.time(),
-            updated_at=time.time(),
+            userId=self._account_info.userId,
+            userToken=self._account_info.userToken,
+            createdAt=time.time(),
+            updatedAt=time.time(),
         )
         await self._server.deployments.save(self._account_info.userId, record, mode='create')
         self._server.scheduler.schedule(self._account_info.userId, record)
@@ -166,6 +170,9 @@ class DeployCommands(DAPConn):
 
     async def on_rrext_deploy_update(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Modify schedule or pipeline config for an existing deployment."""
+        if not self._account_info.userToken:
+            raise ValueError('Cannot deploy: no user token available for scheduled runs')
+
         self.verify_permission('task.control')
 
         args = request.get('arguments') or {}
@@ -173,8 +180,8 @@ class DeployCommands(DAPConn):
         if not project_id:
             raise ValueError('projectId is required')
 
-        client_id = self._account_info.userId
-        record = await self._server.deployments.get(client_id, project_id)
+        userId = self._account_info.userId
+        record = await self._server.deployments.get(userId, project_id)
 
         if 'pipeline' in args:
             if not isinstance(args['pipeline'], dict):
@@ -186,7 +193,10 @@ class DeployCommands(DAPConn):
             _validate_schedule(args['schedule'])
             record.schedule = args['schedule']
 
-        record.updated_at = time.time()
-        await self._server.deployments.save(client_id, record)
+        record.userId = self._account_info.userId
+        record.userToken = self._account_info.userToken
+        record.updatedAt = time.time()
+
+        await self._server.deployments.save(userId, record)
         self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
         return self.build_response(request, body={})

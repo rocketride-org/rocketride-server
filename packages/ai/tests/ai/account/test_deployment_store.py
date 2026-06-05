@@ -46,7 +46,7 @@ def store(istore):
 
 
 def make_record(project_id: str = 'proj-1', **kwargs) -> DeploymentRecord:
-    return DeploymentRecord(pipeline={'project_id': project_id}, created_by=CLIENT_1, **kwargs)
+    return DeploymentRecord(pipeline={'project_id': project_id}, userId=CLIENT_1, userToken='rr_test', **kwargs)
 
 
 class TestDeploymentStore:
@@ -57,7 +57,7 @@ class TestDeploymentStore:
         result = await store.get(CLIENT_1, 'proj-1')
         assert result.pipeline['project_id'] == 'proj-1'
         assert result.schedule == '0 * * * *'
-        assert result.created_by == CLIENT_1
+        assert result.userId == CLIENT_1
 
     @pytest.mark.asyncio
     async def test_save_overwrites(self, store):

@@ -139,15 +139,20 @@ class DeploymentRecord(BaseModel):
     """Persistent deployment control record — single source of truth on disk."""
 
     pipeline: dict
+
     # Cron expression (e.g. "*/15 * * * *") or "manual" for on-demand only.
     schedule: str = 'manual'
 
-    # 'active' | 'paused' | 'errored'
     state: Literal['active', 'paused', 'errored'] = 'active'
 
-    created_by: str  # client_id of the user who deployed
-    created_at: float = Field(default_factory=time.time)
-    updated_at: float = Field(default_factory=time.time)
+    userId: str
+    userToken: str
+
+    createdAt: float = Field(default_factory=time.time)
+    updatedAt: float = Field(default_factory=time.time)
+
+    def to_client_record(self) -> dict:
+        return self.model_dump(exclude={'userToken'})
 
 
 # =============================================================================
