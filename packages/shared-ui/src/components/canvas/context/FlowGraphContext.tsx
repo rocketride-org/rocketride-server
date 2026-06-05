@@ -362,11 +362,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		patchToolchainState({ isUpdated: true, isSaved: false });
 
 		if (!onContentChanged || isLoadingRef.current) {
-			console.log('[FlowGraph] onContentUpdated: SKIPPED (isLoading=%s, hasCallback=%s)', isLoadingRef.current, !!onContentChanged);
-			return;
+				return;
 		}
 
-		console.log('[FlowGraph] onContentUpdated: scheduling 50ms deferred notify');
 		setTimeout(() => {
 			const currentNodes = nodesRef.current;
 			const currentEdges = edgesRef.current;
@@ -385,7 +383,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
-			console.log('[FlowGraph] onContentUpdated: SENDING docRevision=%d, nodes=%d, edges=%d, components=%d', nextVersion, currentNodes.length, currentEdges.length, components.length);
 			onContentChanged(project);
 		}, 50);
 	}, [onContentChanged, patchToolchainState]);
@@ -408,7 +405,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const types = changes.map((c) => c.type);
 			const structural = changes.some((c) => c.type === 'add' || c.type === 'remove');
 			if (structural) {
-				console.log('[FlowGraph] onNodesChange: STRUCTURAL changes:', types, '→ calling onContentUpdated');
 				onContentUpdated();
 			}
 
@@ -568,15 +564,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			const removes = changes.filter((c) => c.type === 'remove');
 			if (removes.length > 0) {
-				const removeIds = removes.map((c) => (c as any).id);
-				const currentEdges = edgesRef.current;
-				const removedEdges = removeIds.map((id: string) => currentEdges.find((e) => e.id === id));
-				console.log('[FlowGraph] onEdgesChange: REMOVING', removeIds, 'details:', removedEdges.map((e: any) => e ? `${e.source}[${e.sourceHandle}]→${e.target}[${e.targetHandle}]` : 'NOT_FOUND'));
-				console.trace('[FlowGraph] onEdgesChange remove stack');
-			}
-			const nonRemoves = changes.filter((c) => c.type !== 'remove');
-			if (nonRemoves.length > 0) {
-				console.log('[FlowGraph] onEdgesChange: non-remove types:', nonRemoves.map((c) => c.type));
 			}
 
 			// ReactFlow owns edges — pass all changes through directly
@@ -600,7 +587,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				: (params.sourceHandle?.split('-')?.at(1) ?? '');
 			const edgeId = `${params.source}::${params.target}::${laneOrClass}`;
 
-			console.log('[FlowGraph] onEdgeConnect: %s[%s] → %s[%s], edgeId=%s', params.source, params.sourceHandle, params.target, params.targetHandle, edgeId);
 
 			// Add edge directly — ReactFlow owns edges at runtime
 			const newEdge: Edge = {
@@ -638,7 +624,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				y: event.clientY,
 			});
 
-			console.log('[FlowGraph] onDrop: provider=%s, position=%j', tempNode.provider, position);
 			// Route to the appropriate add function based on provider type
 			addNode(tempNode, position);
 			setTempNode(undefined);
@@ -680,7 +665,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 */
 	const loadCanvas = useCallback(
 		(newNodes: FlowNode[], newEdges: Edge[]) => {
-			console.log('[FlowGraph] loadCanvas: nodes=%d, edges=%d, edgeIds=%j', newNodes.length, newEdges.length, newEdges.map((e) => e.id));
 			isLoadingRef.current = true;
 			setFlowReady(false);
 			setNodes(newNodes);
@@ -692,12 +676,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const addNode = useCallback(
 		(data: INodeData, position?: { x: number; y: number }, type: INodeType = INodeType.Default): string => {
 			if (isLocked) return '';
-			console.log('[FlowGraph] addNode: provider=%s, existingNodes=%d, existingEdges(ref)=%d', data.provider, nodes.length, edgesRef.current.length);
 			// Log connection data on existing nodes to verify it's preserved
 			for (const n of nodes) {
 				const nd = n.data as any;
 				if (nd.input?.length || nd.control?.length) {
-					console.log('[FlowGraph] addNode: existing node %s has input=%j, control=%j', n.id, nd.input, nd.control);
 				}
 			}
 			const id = generateNodeId(nodes, data.provider);
@@ -783,7 +765,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				selectable: true,
 			};
 
-			console.log('[FlowGraph] addNode: id=%s, existingNodes=%d, existingEdges=%d', id, nodes.length, edgesRef.current.length);
 
 			// Append node — ReactFlow owns nodes and edges; no edge rebuild needed
 			setNodes((nds) => [...nds, node]);
@@ -797,7 +778,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const updateNode = useCallback(
 		(nodeId: string, data: Partial<INodeData>): FlowNode | undefined => {
 			if (isLocked) return undefined;
-			console.log('[FlowGraph] updateNode: nodeId=%s, keys=%j', nodeId, Object.keys(data));
 			let updatedNode: FlowNode | undefined;
 
 			setNodes((nds: FlowNode[]) =>
@@ -816,7 +796,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const deleteNode = useCallback(
 		(nodeIds: string[], deleteChildren: boolean = false) => {
 			if (isLocked) return;
-			console.log('[FlowGraph] deleteNode: ids=%j, deleteChildren=%s', nodeIds, deleteChildren);
 			const ids = new Set(nodeIds);
 			const nodesToRemove = nodes.filter((n: FlowNode) => ids.has(n.id));
 			const parentMap = Object.fromEntries(nodesToRemove.map((n) => [n.id, n]));
@@ -859,7 +838,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const connected = getConnectedEdges(deletedNodes, edges);
 			const connectedSet = new Set(connected.map((e) => e.id));
 			const remaining = edges.filter((e) => !connectedSet.has(e.id));
-			console.log('[FlowGraph] onNodesDelete: deleted:', deletedNodes.map((n) => n.id), 'connectedEdges:', connected.map((e) => e.id), 'remaining:', remaining.length);
 			setEdges(remaining);
 		},
 		[edges, setEdges]
@@ -903,7 +881,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 */
 	const loadData = useCallback(
 		(project: IProject): number => {
-			console.log('[FlowGraph] loadData: projectId=%s, docRevision=%d, components=%d', project.project_id, project.docRevision, project.components?.length ?? 0);
 			const newNodes = getNodesFromProject(project);
 
 			// Re-validate formDataValid for every node against current schemas.
@@ -926,7 +903,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
 			const newEdges = getEdgesFromNodes(sortedNodes);
-			console.log('[FlowGraph] loadData: sortedNodes=%d, newEdges=%d, unconfigured=%d', sortedNodes.length, newEdges.length, unconfigured);
 
 			loadCanvas(sortedNodes, newEdges);
 
@@ -961,10 +937,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		const unmeasured = nodes.filter((n) => n.measured?.width == null);
 		const allMeasured = nodes.length === 0 || unmeasured.length === 0;
 		if (allMeasured && !isFlowReady) {
-			console.log('[FlowGraph] isFlowReady: false→true (all %d nodes measured)', nodes.length);
 			setFlowReady(true);
 		} else if (!allMeasured && isFlowReady) {
-			console.log('[FlowGraph] isFlowReady: true→false (%d/%d unmeasured: %j)', unmeasured.length, nodes.length, unmeasured.map((n) => n.id));
 			setFlowReady(false);
 		}
 	}, [nodes, isFlowReady]);
@@ -985,11 +959,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 		// Skip if this is an echo of our own change — but always load when project identity changes
 		if (!projectChanged && incomingVersion === lastSentVersion.current) {
-			console.log('[FlowGraph] projectLoad: SKIPPED echo (version=%d, lastSent=%d)', incomingVersion, lastSentVersion.current);
 			return;
 		}
 
-		console.log('[FlowGraph] projectLoad: LOADING projectChanged=%s, incomingVersion=%d, lastSent=%d, projectId=%s', projectChanged, incomingVersion, lastSentVersion.current, incomingProjectId);
 		lastSentVersion.current = incomingVersion;
 		lastLoadedProjectId.current = incomingProjectId;
 		const unconfigured = loadData(currentProject);
@@ -1006,7 +978,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		if (!servicesJson || Object.keys(servicesJson).length === 0) return;
 		if (nodes.length === 0) return;
 
-		console.log('[FlowGraph] servicesJson revalidation: services=%d, nodes=%d', Object.keys(servicesJson).length, nodes.length);
 
 		let unconfigured = 0;
 		let changed = false;
@@ -1029,12 +1000,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		});
 
 		if (changed) {
-			console.log('[FlowGraph] servicesJson revalidation: CHANGED, calling setNodes with %d nodes', updated.length);
 			setNodes(updated as FlowNode[]);
 			// Recount after update
 			unconfigured = updated.filter((n) => (n.data as any)?.formDataValid === false).length;
 		} else {
-			console.log('[FlowGraph] servicesJson revalidation: no changes');
 		}
 
 		if (unconfigured > 0) {
@@ -1047,7 +1016,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// servicesJson (classType) and may not exist when flowReady fires.
 		const nodeIds = nodes.map((n) => n.id);
 		if (nodeIds.length > 0) {
-			console.log('[FlowGraph] servicesJson revalidation: updating internals for %d nodes', nodeIds.length);
 			updateNodeInternals(nodeIds);
 		}
 
@@ -1066,11 +1034,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// before handles were registered can now find their connection points.
 		const nodeIds = nodesRef.current.map((n) => n.id);
 		if (nodeIds.length > 0) {
-			console.log('[FlowGraph] flowReady: updating internals for %d nodes', nodeIds.length);
 			updateNodeInternals(nodeIds);
 		}
 
-		console.log('[FlowGraph] flowReady: restoring viewport=%s, clearing isLoadingRef', pending === 'fitView' ? 'fitView' : pending ? 'saved' : 'none');
 
 		if (pending === 'fitView') {
 			fitView({ padding: 0.15, duration: 0 });

@@ -242,7 +242,6 @@ export const getNodesFromProject = (project: IProject): INode[] => {
 export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 	const edges: Edge[] = [];
 	const nodesWithConnections = nodes.filter((n) => n.data.control?.length || n.data.input?.length);
-	console.log('[getEdgesFromNodes] nodes=%d, nodesWithConnections=%d (%j)', nodes.length, nodesWithConnections.length, nodesWithConnections.map((n) => ({ id: n.id, input: n.data.input?.length ?? 0, control: n.data.control?.length ?? 0 })));
 
 	for (const node of nodes) {
 		const { data } = node;

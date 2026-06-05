@@ -70,9 +70,6 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 	};
 	const [edgePath, labelX, labelY] = getBezierPath(pathInput);
 
-	// Debug: log every edge render to identify which edges ReactFlow skips
-	console.log('[FlowEdge] RENDER id=' + id);
-
 	/** Removes this edge from the canvas. */
 	const onDelete = () => setEdges((edges) => edges.filter((e) => e.id !== id));
 

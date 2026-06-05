@@ -220,9 +220,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				if (result) {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
+					// Gate on waitlist — authenticated but not yet granted access
+					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
+				} else {
+					// No auth — render unauthenticated shell with the default app
+					setRenderPhase('shell');
 				}
-				// Gate on waitlist — authenticated but not yet granted access
-				setRenderPhase(result?.result?.waitlisted ? 'waitlisted' : 'shell');
 			} catch (err) {
 				console.error('[Shell] Bootstrap failed:', err);
 				if (mountedRef.current) setRenderPhase('error');
@@ -271,12 +274,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	const handleLogout = useCallback(() => {
 		setIdentity(null);
+		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
+		// the auth transition screen when it mounts after logout.
+		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		if (sessionAppId) {
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('goodbye');
 			});
 		} else {
-			cm.logout().finally(() => { window.location.href = '/'; });
+			cm.logout().finally(() => {
+				if (mountedRef.current) setRenderPhase('shell');
+			});
 		}
 	}, [cm, sessionAppId]);
 
@@ -370,20 +378,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// Waitlisted — authenticated but not yet granted access
 	if (renderPhase === 'waitlisted') {
+		const displayName = identity?.displayName || identity?.email || '';
 		return (
 			<div style={styles.statusScreen}>
 				<div style={{
 					display: 'flex', flexDirection: 'column', alignItems: 'center',
-					gap: 16, textAlign: 'center', maxWidth: 400,
+					gap: 20, textAlign: 'center', maxWidth: 440, padding: '0 24px',
 				}}>
-					<div style={{ fontSize: 18, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
-						You&apos;re on the waitlist
+					<div style={{ fontSize: 28, lineHeight: 1.2 }}>
+						&#x1F389;
 					</div>
-					<div style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>
-						Your account has been created, but access has not been granted yet.
-						We&apos;ll notify you when your account is activated.
+					<div style={{ fontSize: 20, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
+						Thanks for signing up{displayName ? `, ${displayName}` : ''}!
 					</div>
-					<button onClick={handleLogout} style={styles.signInButton}>Sign Out</button>
+					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>
+						Your account is all set. We&apos;re rolling out access in waves and
+						you&apos;re in the queue. We&apos;ll send you an email as soon as
+						your account is activated &mdash; it shouldn&apos;t be long!
+					</div>
+					<button onClick={handleLogout} style={styles.signInButton}>Back to Home</button>
 				</div>
 			</div>
 		);
