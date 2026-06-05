@@ -972,7 +972,15 @@ function makeTestAction() {
 			'server:build',
 			whenNot({
 				name: 'downloaded',
-				condition: (ctx) => ctx.serverDownloaded,
+				// `ctx.serverDownloaded` only reflects a download that happened in THIS
+				// process. In CI the engine is downloaded during the `build` step and
+				// the `test` step is a separate invocation where `server:build` is
+				// skipped, so the flag is lost and we'd fall through to compiling tests
+				// against a downloaded engine that has no configured CMake build dir
+				// (server:compile-tests -> "not a CMake build directory"). Fall back to
+				// the persisted download marker so a downloaded (non-compiled) engine
+				// still skips the test-compile block across step boundaries.
+				condition: async (ctx) => ctx.serverDownloaded || Boolean(await getState('server.downloadHash')),
 				then: [
 					// Build modules needed for tests
 					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
