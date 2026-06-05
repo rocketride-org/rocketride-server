@@ -45,9 +45,6 @@ from ai.account.models import DeploymentRecord
 from ai.account.store_providers.memory import MemoryStore
 from ai.modules.task.task_scheduler import TaskScheduler
 
-# todo: feat/deploy2 - enable TaskScheduler
-pytestmark = pytest.mark.skip(reason='TaskScheduler disabled')
-
 
 # =============================================================================
 # Helpers
