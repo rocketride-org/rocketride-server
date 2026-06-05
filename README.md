@@ -5,8 +5,8 @@
 </a>
 
 <p>
-  Open-source, developer-native AI pipeline tool.<br/>
-  Build, debug, and deploy production AI workflows - without leaving your IDE.
+  <strong>RocketRide is the open source AIDE — the AI Development Environment.</strong><br/>
+  Build, deploy and harness production-ready AI solutions at light speed — all within your IDE or using the CLI in your terminal.
 </p>
 
 <p>
@@ -16,7 +16,11 @@
 </p>
 
 <p>
- RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+ Your code editor just became the AIDE. RocketRide turns the classic IDE you already use into a full <strong>AI Development Environment</strong> — one place to compose, debug, observe, and deploy AI runtimes using any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It's the harness for everything behind your AI applications — not just the agents, but the whole stack beneath them.</strong>
+</p>
+
+<p>
+ Under the hood, RocketRide is an open source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
 </p>
 
 <p>
