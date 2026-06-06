@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — since 2026-03-29
+## [Unreleased] — since 2026-06-05
+
+## [3.2.0] - 2026-06-05
+
+_RocketRide 1.2.0 release train — Server **3.2.0**; Python / TypeScript / MCP clients and VS Code extension **1.2.0**. Consolidates everything since 1.0.3, including the 1.1.0 → 1.2.0 client SDK migration._
 
 ### ⚠ Breaking Changes — Client SDKs (`rocketride` / `rocketride-python`)
 

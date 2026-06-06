@@ -345,12 +345,42 @@ jobs:
 
       - name: Set release body
         id: release_body
+        env:
+          SERVER_VERSION: ${{ inputs.server_version }}
         run: |
-          # Pull the top CHANGELOG section (everything from the first "## ["
-          # header to the next one) so the GitHub Release shows the real,
-          # human-written change list instead of just the batched stage->main
+          # Source GitHub Release notes from CHANGELOG.md so releases show the
+          # curated, human-written change list — not the squashed stage->main
           # merge PR that generate_release_notes would otherwise emit.
-          NOTES="$(awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md | sed '1d')"
+          #
+          #   Prerelease (nightly): emit the current [Unreleased] section — the
+          #     "what's cooking on stage" view a prerelease should expose.
+          #   Stable: emit the most recent *released* section (the first "## ["
+          #     that is NOT [Unreleased]). The version-bump PR archives
+          #     [Unreleased] into that dated, versioned section via
+          #     scripts/release/cut-changelog.mjs, so the notes are scoped to
+          #     this release instead of re-emitting the whole growing
+          #     [Unreleased] blob on every release. See RELEASE.md.
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            NOTES="$(awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md | sed '1d')"
+          else
+            NOTES="$(awk '
+              /^## \[/ {
+                if (cap) exit                       # next header after capture -> done
+                if ($0 ~ /^## \[Unreleased/) next   # skip the [Unreleased] header and its body
+                cap = 1; next                        # first released header -> capture its body
+              }
+              cap { print }
+            ' CHANGELOG.md)"
+            # Warn (do NOT fail) if the top released section is not this
+            # release — the usual cause is a version bump that forgot to run
+            # scripts/release/cut-changelog.mjs. A stale-but-real body beats
+            # bricking the release, so this is a warning, not an error.
+            TOP="$(awk '/^## \[Unreleased/{next} /^## \[/{print; exit}' CHANGELOG.md)"
+            case "$TOP" in
+              *"$SERVER_VERSION"*) : ;;
+              *) echo "::warning::Top released CHANGELOG section ($TOP) does not mention v$SERVER_VERSION — did the version-bump PR run scripts/release/cut-changelog.mjs?" ;;
+            esac
+          fi
           {
             echo 'body<<RELEASE_BODY'
             if [ "${{ inputs.prerelease }}" = "true" ]; then
