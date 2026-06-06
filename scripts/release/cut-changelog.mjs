@@ -83,8 +83,17 @@ if (typeof version !== 'string' || !/^\d+\.\d+\.\d+([-+].+)?$/.test(version)) {
 }
 
 const date = argv[1] ?? new Date().toISOString().slice(0, 10);
-if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-  fail(2, `Invalid date "${date}" — expected ISO YYYY-MM-DD.`);
+// Shape AND validity: reject impossible dates like 2026-13-40 or 2026-02-30.
+// For ISO-8601 strings JS yields an Invalid Date (NaN) on out-of-range parts;
+// the round-trip also catches any silent normalization. `||` short-circuits,
+// so toISOString() never runs on a NaN date.
+const parsedDate = new Date(`${date}T00:00:00Z`);
+if (
+  !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+  Number.isNaN(parsedDate.getTime()) ||
+  parsedDate.toISOString().slice(0, 10) !== date
+) {
+  fail(2, `Invalid date "${date}" — expected a real ISO date (YYYY-MM-DD).`);
 }
 
 const original = readFileSync(changelogPath, 'utf8');

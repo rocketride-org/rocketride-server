@@ -215,7 +215,7 @@ Because each package is versioned independently, you can release a single packag
 
 ## Release Notes
 
-GitHub Release bodies are sourced from `CHANGELOG.md` by the **Set release body** step in `.github/workflows/_release.yaml` — not from GitHub's `generate_release_notes`, which under the squash-merge `stage → main` flow would only show the single batched merge PR. The same notes are used for all five packages, because they ship as one synchronized release train sharing this changelog.
+GitHub Release bodies are sourced from `CHANGELOG.md` by the **Set release body** step in `.github/workflows/_release.yaml`. The **Create GitHub release** step keeps `generate_release_notes: false`, so the curated CHANGELOG section is the *entire* published body — GitHub's auto-generated notes (under squash-merge `stage → main` that is just the single batched merge PR) are **not** appended. The same notes are used for all five packages, because they ship as one synchronized release train sharing this changelog.
 
 | Build | Notes shown |
 |-------|-------------|
@@ -224,9 +224,9 @@ GitHub Release bodies are sourced from `CHANGELOG.md` by the **Set release body*
 
 This is why the changelog must be **cut at version-bump time** (step 2 of [How to release a new version](#how-to-release-a-new-version)):
 
-- `scripts/release/cut-changelog.mjs` archives `[Unreleased]` into a dated, versioned section (labelled with the **server** version, e.g. `## [3.2.0] - 2026-06-05`) and opens a fresh, empty `[Unreleased]`.
+- `scripts/release/cut-changelog.mjs` archives `[Unreleased]` into a dated, versioned section (labelled with the **server** version, e.g. `## [3.2.2] - 2026-06-10`) and opens a fresh, empty `[Unreleased]`.
 - At release time the stable build emits that newly-cut section, so the notes are scoped to the release instead of re-emitting the entire growing `[Unreleased]` blob on every release.
-- If a version bump forgets to cut, the release does **not** fail — it emits the previous section and logs a `::warning::` that the top section does not mention the release version. Fix it by running the cut and re-running the release.
+- If a version bump forgets to cut, the release does **not** fail — it emits the previous released section and logs a `::warning::` that the top section does not mention `[<release-version>]`. **Re-running the workflow will NOT fix the already-published body**: once the tag exists, the tag-skip idempotency skips the "Create GitHub release" step (see [Idempotency](#idempotency)). To correct it, either edit the GitHub Release body by hand, or run the cut and then delete the stale tag **and** its GitHub Release before re-running (see ["A git tag exists but there is no GitHub Release"](#a-git-tag-exists-but-there-is-no-github-release)).
 
 Keep `CHANGELOG.md` in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form (`### Added` / `### Changed` / `### Fixed` / etc. under `[Unreleased]`) so each cut section reads as clean release notes.
 

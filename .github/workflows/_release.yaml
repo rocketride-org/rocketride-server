@@ -349,8 +349,10 @@ jobs:
           SERVER_VERSION: ${{ inputs.server_version }}
         run: |
           # Source GitHub Release notes from CHANGELOG.md so releases show the
-          # curated, human-written change list — not the squashed stage->main
-          # merge PR that generate_release_notes would otherwise emit.
+          # curated, human-written change list. The "Create GitHub release"
+          # step below keeps generate_release_notes OFF, so this body is the
+          # ENTIRE published notes — no appended, squashed stage->main merge-PR
+          # list (which is all GitHub's auto-notes would add under squash-merge).
           #
           #   Prerelease (nightly): emit the current [Unreleased] section — the
           #     "what's cooking on stage" view a prerelease should expose.
@@ -360,11 +362,21 @@ jobs:
           #     scripts/release/cut-changelog.mjs, so the notes are scoped to
           #     this release instead of re-emitting the whole growing
           #     [Unreleased] blob on every release. See RELEASE.md.
+          #
+          # Both extractors are fenced-code aware: a "## [" line inside a ```
+          # (or ~~~) block is body text, not a section header, so it must not
+          # split sections.
           if [ "${{ inputs.prerelease }}" = "true" ]; then
-            NOTES="$(awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md | sed '1d')"
+            NOTES="$(awk '
+              /^(```|~~~)/        { fence = !fence }
+              !fence && /^## \[/  { c++ }
+              c == 1              { print }
+              c == 2              { exit }
+            ' CHANGELOG.md | sed '1d')"
           else
             NOTES="$(awk '
-              /^## \[/ {
+              /^(```|~~~)/ { fence = !fence }
+              !fence && /^## \[/ {
                 if (cap) exit                       # next header after capture -> done
                 if ($0 ~ /^## \[Unreleased/) next   # skip the [Unreleased] header and its body
                 cap = 1; next                        # first released header -> capture its body
@@ -374,15 +386,19 @@ jobs:
             # Warn (do NOT fail) if the top released section is not this
             # release — the usual cause is a version bump that forgot to run
             # scripts/release/cut-changelog.mjs. A stale-but-real body beats
-            # bricking the release, so this is a warning, not an error.
-            TOP="$(awk '/^## \[Unreleased/{next} /^## \[/{print; exit}' CHANGELOG.md)"
+            # bricking the release, so this is a warning, not an error. Match
+            # the bracketed "[x.y.z]" form so 3.2.0 does not match [13.2.0].
+            TOP="$(awk '/^(```|~~~)/{fence=!fence; next} fence{next} /^## \[Unreleased/{next} /^## \[/{print; exit}' CHANGELOG.md)"
             case "$TOP" in
-              *"$SERVER_VERSION"*) : ;;
-              *) echo "::warning::Top released CHANGELOG section ($TOP) does not mention v$SERVER_VERSION — did the version-bump PR run scripts/release/cut-changelog.mjs?" ;;
+              *"[$SERVER_VERSION]"*) : ;;
+              *) echo "::warning::Top released CHANGELOG section ($TOP) does not mention [$SERVER_VERSION] — did the version-bump PR run scripts/release/cut-changelog.mjs?" ;;
             esac
           fi
+          # Run-unique heredoc delimiter so free-form CHANGELOG content can
+          # never collide with it and truncate/corrupt $GITHUB_OUTPUT.
+          DELIM="RR_RELEASE_BODY_${GITHUB_RUN_ID:-0}_${GITHUB_RUN_ATTEMPT:-0}_${RANDOM}${RANDOM}"
           {
-            echo 'body<<RELEASE_BODY'
+            echo "body<<${DELIM}"
             if [ "${{ inputs.prerelease }}" = "true" ]; then
               echo "_Automated nightly prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
               echo ""
@@ -392,7 +408,7 @@ jobs:
             else
               echo "**${{ matrix.name }}** v${{ matrix.version }}"
             fi
-            echo 'RELEASE_BODY'
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
@@ -402,7 +418,11 @@ jobs:
           tag_name: ${{ matrix.tag_name }}
           name: RocketRide ${{ matrix.name }} v${{ matrix.version }}${{ inputs.prerelease && ' (prerelease)' || '' }}
           prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: ${{ inputs.prerelease == false }}
+          # Keep OFF. softprops/action-gh-release APPENDS GitHub's auto-notes
+          # to `body` when this is true — under squash-merge stage->main that
+          # is just the one batched merge PR, which is exactly the noise the
+          # curated CHANGELOG body (Set release body step) replaces.
+          generate_release_notes: false
           body: ${{ steps.release_body.outputs.body }}
           files: release-assets/*
         env:
