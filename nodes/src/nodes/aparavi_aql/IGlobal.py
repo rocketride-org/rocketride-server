@@ -1,0 +1,69 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+Aparavi AQL tool node — global (shared) state.
+
+Reads configuration, creates AqlClient, and constructs AqlDriver.
+"""
+
+from __future__ import annotations
+
+
+from ai.common.config import Config
+from rocketlib import IGlobalBase, OPEN_MODE, warning
+
+from .aql_client import AqlClient
+from .aql_driver import AqlDriver
+
+
+class IGlobal(IGlobalBase):
+    """Global state for aparavi_aql."""
+
+    client: AqlClient | None = None
+    driver: AqlDriver | None = None
+    db_description: str = ''
+
+    def beginGlobal(self) -> None:
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+
+        url = (cfg.get('url') or '').strip()
+        if not url:
+            warning('aparavi_aql: url is required')
+            return
+
+        self.db_description = str(cfg.get('db_description') or '')
+
+        self.client = AqlClient(
+            url=url,
+            user=str(cfg.get('user') or ''),
+            password=str(cfg.get('password') or ''),
+        )
+        self.driver = AqlDriver(iglobal=self)
+
+    def endGlobal(self) -> None:
+        self.client = None
+        self.driver = None
