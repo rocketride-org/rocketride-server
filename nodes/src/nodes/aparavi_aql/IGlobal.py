@@ -24,46 +24,51 @@
 """
 Aparavi AQL tool node — global (shared) state.
 
-Reads configuration, creates AqlClient, and constructs AqlDriver.
+Reads configuration and creates the AqlClient HTTP client for Aparavi REST API access.
 """
 
 from __future__ import annotations
-
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from .aql_client import AqlClient
-from .aql_driver import AqlDriver
 
 
 class IGlobal(IGlobalBase):
-    """Global state for aparavi_aql."""
+    """Global state for aparavi_aql.
+
+    Manages the shared AqlClient instance and configuration values
+    that are shared across all pipeline instances.
+    """
 
     client: AqlClient | None = None
-    driver: AqlDriver | None = None
     db_description: str = ''
 
     def beginGlobal(self) -> None:
+        """Initialize the Aparavi HTTP client from node configuration."""
+        # Skip initialization during config-only mode
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
+        # Validate required URL
         url = (cfg.get('url') or '').strip()
         if not url:
             warning('aparavi_aql: url is required')
             return
 
+        # Store data description for LLM prompt injection
         self.db_description = str(cfg.get('db_description') or '')
 
+        # Create the HTTP client
         self.client = AqlClient(
             url=url,
             user=str(cfg.get('user') or ''),
             password=str(cfg.get('password') or ''),
         )
-        self.driver = AqlDriver(iglobal=self)
 
     def endGlobal(self) -> None:
+        """Release the HTTP client."""
         self.client = None
-        self.driver = None

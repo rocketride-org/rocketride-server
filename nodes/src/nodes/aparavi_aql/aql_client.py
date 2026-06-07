@@ -42,11 +42,18 @@ import requests
 
 
 class AqlClient:
+    """HTTP client for the Aparavi REST API.
+
+    Executes and validates AQL queries via the Aparavi database endpoint.
+    Handles Basic Auth, timestamp normalization, and error wrapping.
+    """
+
     BASE_PATH = '/server/api/v3/database/query'
     DEFAULT_LIMIT = 250
     TIMEOUT = 30
 
     def __init__(self, *, url: str, user: str, password: str) -> None:
+        """Initialize the client with server URL and credentials."""
         self._base = url.rstrip('/')
         self._auth = (user, password)
 
@@ -96,13 +103,20 @@ class AqlClient:
     _MS_THRESHOLD = 10_000_000_000
 
     # frozenset — immutable constant; a mutable set could be accidentally modified at class level
-    _DATE_FIELDS: frozenset = frozenset({
-        'createTime', 'modifyTime', 'accessTime',
-        'docCreateTime', 'docModifyTime',
-        'instanceMessageTime', 'objectMessageTime',
-    })
+    _DATE_FIELDS: frozenset = frozenset(
+        {
+            'createTime',
+            'modifyTime',
+            'accessTime',
+            'docCreateTime',
+            'docModifyTime',
+            'instanceMessageTime',
+            'objectMessageTime',
+        }
+    )
 
     def _normalize_row(self, row: Any) -> Any:
+        """Normalize timestamp fields from milliseconds to seconds where needed."""
         if not isinstance(row, dict):
             return row
         for field in self._DATE_FIELDS:
@@ -130,4 +144,3 @@ class AqlClient:
             return bool((envelope.get('data') or {}).get('valid', False))
         except Exception:
             return False
-
