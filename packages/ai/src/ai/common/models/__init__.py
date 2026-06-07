@@ -37,15 +37,24 @@ from .ocr import TrOCR, TrOCRLoader
 from .transformers import SentenceTransformer, SentenceTransformerLoader
 from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
 
-# Vision family: CLIP / ViT image embedding + depth estimation (Depth-Anything V2)
-from .vision import VisionLoader, CLIPModel, ViTModel, DepthEstimatorLoader, DepthEstimator
+# Vision family: CLIP / ViT image embedding, depth estimation, object detection
+from .vision import (
+    VisionLoader,
+    CLIPModel,
+    ViTModel,
+    DepthEstimatorLoader,
+    DepthEstimator,
+    DetectorLoader,
+    Detector,
+)
 
-# Detection / segmentation (RF-DETR, MM-Grounding-DINO, Mask2Former)
-from .detection import (
+# Detection / segmentation backends (relocated under vision/)
+from .vision.detection import MmGDinoLoader, RFDetrLoader
+from .vision.segmentation import (
     Mask2FormerInstanceLoader,
     Mask2FormerSemanticLoader,
-    MmGDinoLoader,
-    RFDetrLoader,
+    SegmenterLoader,
+    Segmenter,
 )
 
 __all__ = [
@@ -81,7 +90,13 @@ __all__ = [
     # Depth
     'DepthEstimatorLoader',
     'DepthEstimator',
-    # Detection / segmentation
+    # Detection (served)
+    'DetectorLoader',
+    'Detector',
+    # Segmentation (served)
+    'SegmenterLoader',
+    'Segmenter',
+    # Detection / segmentation (plain backends)
     'Mask2FormerInstanceLoader',
     'Mask2FormerSemanticLoader',
     'MmGDinoLoader',

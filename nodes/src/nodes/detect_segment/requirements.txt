@@ -1,11 +1,4 @@
-# Segmentation node requirements.
-#
-# Engines load from HuggingFace via transformers. Default is Mask2Former-instance (MIT).
-
-transformers==4.53.3
-accelerate
+# pycocotools is needed CLIENT-SIDE (this node process) to decode/rescale RLE
+# masks for restore + overlay rendering — the node restores/renders even when
+# inference is proxied to the model server, so it can't rely on the loader's deps.
 pycocotools
-scipy
-Pillow
-numpy
-huggingface-hub

@@ -174,17 +174,46 @@
 	],
 	"test": {
 		"profiles": ["mask2former-instance"],
-		"outputs": ["documents", "text"],
+		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
 			{
-				"name": "Segment image with Mask2Former-instance",
-				"image": "images/ocr_test_text.png",
+				"name": "Instance-segment a person",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true },
-					"text": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "person" }
 				}
 			}
 		]
-	}
+	},
+	"fulltest": [
+		{
+			"profiles": ["mask2former-instance"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Instance-segment a person",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "person" }
+					}
+				}
+			]
+		},
+		{
+			"profiles": ["mask2former-semantic"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Semantic-segment a scene",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "semantic_map" }
+					}
+				}
+			]
+		}
+	]
 }

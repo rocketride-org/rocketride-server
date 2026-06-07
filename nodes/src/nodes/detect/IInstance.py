@@ -1,9 +1,29 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
 import json
+
 from rocketlib import IInstanceBase, AVI_ACTION
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
@@ -11,9 +31,9 @@ from .IGlobal import IGlobal
 
 class IInstance(IInstanceBase):
     """
-    IInstance handles per-frame detection for the detect node.
+    Per-frame object detection for the detect node.
 
-    Accepts image lane (AVI stream). Emits per frame:
+    Accepts an image lane (AVI stream). Emits per frame:
       - text lane: JSON array of detections [{label, score, box, centroid}].
       - image lane: annotated frame with bounding boxes + labels.
     """
@@ -21,12 +41,20 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def __init__(self, *args, **kwargs):
+        """Initialize per-instance image-accumulation state."""
         super().__init__(*args, **kwargs)
-        self._chunk_id = 0
         self._image_data = None
 
     def _annotate(self, image, detections):
-        """Draw bounding boxes and labels onto a copy of the image."""
+        """Draw boxes + labels onto a copy of the image.
+
+        Args:
+            image: Source PIL image.
+            detections: Canonical detection dicts.
+
+        Returns:
+            Annotated PIL image copy.
+        """
         from PIL import ImageDraw
 
         annotated = image.copy()
@@ -37,33 +65,41 @@ class IInstance(IInstanceBase):
             draw.text((b['x1'], b['y1'] - 10), f'{det["label"]} {det["score"]:.2f}', fill='lime')
         return annotated
 
-    def _emit(self, image, detections, chunk_id):
-        annotated = self._annotate(image, detections)
+    def _emit(self, image, detections):
+        """Write detections (text lane) and the annotated frame (image lane).
 
+        Args:
+            image: Source PIL image for this frame.
+            detections: Canonical detection dicts.
+        """
         if self.instance.hasListener('text'):
             self.instance.writeText(json.dumps(detections))
 
         if self.instance.hasListener('image'):
-            image_bytes = ImageProcessor.get_bytes(annotated)
+            image_bytes = ImageProcessor.get_bytes(self._annotate(image, detections))
             self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
             self.instance.writeImage(AVI_ACTION.END, 'image/png')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        """Accumulate an inbound image stream and run detection on END.
+
+        Args:
+            action: AVI stream action (BEGIN/WRITE/END).
+            mimeType: MIME type of the image chunk.
+            buffer: Raw bytes for a WRITE action.
+
+        Returns:
+            preventDefault() on END to suppress default forwarding; None otherwise.
+        """
         if action == AVI_ACTION.BEGIN:
             self._image_data = bytearray()
-
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer
-
         elif action == AVI_ACTION.END:
             image = ImageProcessor.load_image_from_bytes(self._image_data)
-
             with self.IGlobal.device_lock:
                 detections = self.IGlobal.detector.detect(image)
-
-            self._emit(image, detections, self._chunk_id)
-
+            self._emit(image, detections)
             self._image_data = None
-            self._chunk_id += 1
             return self.preventDefault()

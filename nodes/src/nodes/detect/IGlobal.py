@@ -1,40 +1,77 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
-import os
 import threading
-from rocketlib import IGlobalBase, OPEN_MODE
+
+from rocketlib import IGlobalBase, OPEN_MODE, warning
+from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
-    """
-    IGlobal manages global lifecycle for the detect node.
-
-    Loads the configured detection engine (RF-DETR closed-set or MM-Grounding-DINO open-vocab)
-    once at pipeline start. Provides a device lock for thread-safe inference
-    across concurrent IInstance handlers.
-    """
+    detector = None
+    device_lock = None
 
     def beginGlobal(self):
+        """Build the shared Detector facade from node config; validate the open-vocab prompt."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        from depends import depends
+        from ai.common.models.vision.detection import (
+            Detector,
+            DEFAULT_BACKEND,
+            BACKENDS,
+            OPEN_VOCAB_BACKENDS,
+            DEFAULT_THRESHOLD,
+        )
 
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
+        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        conn = self.glb.connConfig
 
-        import ai.common.torch  # noqa: F401
+        backend = str(config.get('engine', DEFAULT_BACKEND)).lower().strip()
+        if backend not in BACKENDS:
+            warning(f'detect: unknown engine "{backend}", defaulting to {DEFAULT_BACKEND}')
+            backend = DEFAULT_BACKEND
 
-        from .detect import Detector
+        prompt = (config.get('prompt') or conn.get('detect.prompt') or conn.get('prompt') or '').strip()
+        try:
+            threshold = float(config.get('threshold', DEFAULT_THRESHOLD))
+        except (TypeError, ValueError):
+            threshold = DEFAULT_THRESHOLD
 
-        bag = self.IEndpoint.endpoint.bag
+        classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
+        if backend in OPEN_VOCAB_BACKENDS and not classes:
+            raise ValueError(
+                f'detect: engine "{backend}" requires a non-empty prompt (detect.prompt). '
+                'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
+            )
 
-        self.detector = Detector(self.glb.logicalType, self.glb.connConfig, bag)
+        self.detector = Detector(backend=backend, device=None, threshold=threshold, prompt=prompt or None)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):
+        """Disconnect the facade and release shared state on teardown."""
+        if self.detector is not None:
+            self.detector.disconnect()
         self.detector = None
         self.device_lock = None

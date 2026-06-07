@@ -86,15 +86,28 @@
 	],
 	"test": {
 		"profiles": ["rfdetr"],
-		"outputs": ["documents", "text"],
+		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
 			{
-				"name": "Detect objects in image",
-				"image": "images/ocr_test_text.png",
+				"name": "Detect a person in a portrait",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true },
-					"text": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "person" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["rfdetr"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Detect a person in a portrait",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "person" }
 				}
 			}
 		]

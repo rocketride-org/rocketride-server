@@ -1,5 +1,6 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,44 +22,60 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
 import threading
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE, warning
+from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
-    """
-    IGlobal manages global lifecycle for the Segmentation (``detect_segment``) node.
-
-    Constructs the configured Segmenter (mode + engine) once at pipeline
-    start and provides a device lock for thread-safe inference across
-    concurrent IInstance handlers.
-
-    Mode/engine defaults:
-      - mode = ``instance`` (default) or ``semantic``.
-      - Engine is Mask2Former (MIT, HuggingFace, CPU/MPS/CUDA).
-    """
+    segmenter = None
+    device_lock = None
 
     def beginGlobal(self):
+        """Build the shared Segmenter facade from node config (mode/model/threshold/maxEdge)."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        from depends import depends
+        # pycocotools is needed client-side for RLE restore + overlay rendering,
+        # even when inference is proxied to the model server.
+        from depends import load_depends
 
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
+        load_depends(__file__)
 
-        import ai.common.torch  # noqa: F401
+        from ai.common.models.vision.segmentation import (
+            Segmenter,
+            DEFAULT_MODE,
+            MODES,
+            DEFAULT_THRESHOLD,
+            DEFAULT_MAX_EDGE,
+        )
 
-        from .detect_segment import Segmenter
+        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        bag = self.IEndpoint.endpoint.bag
+        mode = str(config.get('mode', DEFAULT_MODE)).lower().strip()
+        if mode not in MODES:
+            warning(f'detect_segment: unknown mode "{mode}", falling back to {DEFAULT_MODE}.')
+            mode = DEFAULT_MODE
 
-        self.segmenter = Segmenter(self.glb.logicalType, self.glb.connConfig, bag)
+        model_name = (config.get('model') or '').strip() or None
+        try:
+            threshold = float(config.get('threshold', DEFAULT_THRESHOLD))
+        except (TypeError, ValueError):
+            threshold = DEFAULT_THRESHOLD
+        try:
+            max_edge = int(config.get('maxEdge', DEFAULT_MAX_EDGE))
+        except (TypeError, ValueError):
+            max_edge = DEFAULT_MAX_EDGE
 
+        self.segmenter = Segmenter(
+            mode=mode, model_name=model_name, device=None, threshold=threshold, max_edge=max_edge
+        )
         self.device_lock = threading.Lock()
 
     def endGlobal(self):
+        """Disconnect the facade and release shared state on teardown."""
+        if self.segmenter is not None:
+            self.segmenter.disconnect()
         self.segmenter = None
         self.device_lock = None

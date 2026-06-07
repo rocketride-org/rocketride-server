@@ -1,6 +1,25 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 #
 # Face Detection node — MediaPipe BlazeFace (Apache-2.0).
@@ -12,10 +31,9 @@
 # =============================================================================
 
 import os
-from depends import depends
+from depends import load_depends, model_cache_dir
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
+load_depends(__file__)
 
 from typing import Any, Dict, List
 
@@ -25,8 +43,8 @@ from ai.common.config import Config
 # -----------------------------------------------------------------------------
 # Profile keys -> .task model bundle URLs (Google CDN, Apache-2.0).
 #
-# MediaPipe Tasks Python auto-downloads from these URLs on first use and
-# caches under ~/.cache/mediapipe/. Pinning here so the engine cannot be
+# MediaPipe Tasks Python auto-downloads from these URLs on first use; we cache
+# the bundle under the engine cache dir. Pinning here so the engine cannot be
 # silently re-routed at runtime.
 #
 # Note: MediaPipe Tasks Vision currently ships only short-range as a Tasks
@@ -93,8 +111,7 @@ class FaceDetector:
         import tempfile
         import urllib.request
 
-        cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'mediapipe', 'face_detector')
-        os.makedirs(cache_dir, exist_ok=True)
+        cache_dir = model_cache_dir('face_detector')
 
         digest = hashlib.sha1(self.model_url.encode('utf-8')).hexdigest()[:16]
         fname = f'{digest}_{os.path.basename(self.model_url) or "model.tflite"}'
