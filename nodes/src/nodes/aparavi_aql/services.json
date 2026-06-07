@@ -1,0 +1,163 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Aparavi AQL",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "aparavi_aql://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"database",
+		"tool"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"noremote",
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.aparavi_aql",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "aparavi",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"Queries the Aparavi data governance platform using AQL (Aparavi Query Language). ",
+		"Accepts natural-language questions, generates AQL SELECT statements via the ",
+		"connected LLM, and returns file metadata rows from the Aparavi STORE table. ",
+		"Schema is fixed — no dynamic introspection required."
+	],
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM used to generate AQL queries from natural language",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		Pure tool node — no pipeline lanes
+	//
+	"lanes": {},
+	//
+	//	Optional:
+	//		Preconfig profiles
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"url": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Field definitions
+	//
+	"fields": {
+		"aparavi.url": {
+			"type": "string",
+			"title": "Aparavi Server URL",
+			"default": "",
+			"description": "Base URL of the Aparavi server, e.g. https://aparavi.example.com"
+		},
+		"aparavi.user": {
+			"type": "string",
+			"title": "Username",
+			"default": "",
+			"description": "Aparavi login username"
+		},
+		"aparavi.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Aparavi login password",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"aparavi.db_description": {
+			"type": "string",
+			"title": "Data description",
+			"default": "",
+			"description": "What is this data used for? Describe its content and purpose — this helps the LLM generate more accurate AQL queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"aparavi.default": {
+			"object": "default",
+			"properties": [
+				"aparavi.db_description",
+				"aparavi.url",
+				"aparavi.user",
+				"aparavi.password"
+			]
+		},
+		"aparavi.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				[
+					"default",
+					"Default"
+				]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": [
+						"aparavi.default"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the shape of the service in the UI
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Aparavi AQL",
+			"properties": [
+				"aparavi.profile"
+			]
+		}
+	]
+}
