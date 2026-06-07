@@ -114,9 +114,47 @@ def _get_executable_dir() -> str:
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
-def _get_cache_dir() -> str:
-    """Get the cache directory path."""
-    return os.path.join(_get_executable_dir(), 'cache')
+def engine_cache_dir(create: bool = False) -> str:
+    """Return (and create if needed) the engine cache directory (``<executable dir>/cache``).
+
+    Single source of truth for the cache location.
+
+    Args:
+        create: Create directory if indicated.
+
+    Returns:
+        Absolute path to the engine cache directory.
+    """
+    path = os.path.join(_get_executable_dir(), 'cache')
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def model_cache_dir(name: str, create: bool = True) -> str:
+    """Return (and create if required) a per-model cache directory under the engine cache.
+
+    Args:
+        name: Subdirectory name for this model's weights/assets.
+        create: Create directory if indicated
+
+    Returns:
+        Absolute path to the created ``<engine cache>/models/<name>`` directory.
+    """
+    path = os.path.join(engine_cache_dir(), 'models', name)
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _get_combined_path() -> str:
+    """Path to the concatenated requirements file (the constraints-compile input)."""
+    return os.path.join(engine_cache_dir(), 'combined.txt')
+
+
+def _get_constraints_path() -> str:
+    """Path to the compiled constraints file applied (``-c``) to every install."""
+    return os.path.join(engine_cache_dir(), 'constraints.txt')
 
 
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -479,9 +517,9 @@ def _compile_constraints(constraints_path: str):
         _uv_abs_path(),
         'pip',
         'compile',
-        './cache/combined.txt',
+        _get_combined_path(),
         '--output-file',
-        './cache/constraints.txt',
+        _get_constraints_path(),
         '--python',
         sys.executable,  # Explicitly specify Python version to avoid mismatch
         '--index-strategy',
@@ -514,12 +552,12 @@ def ensure_constraints() -> str:
 
     Returns the path to the constraints file.
     """
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
 
     hash_file = os.path.join(cache_dir, 'requirements.hash')
-    combined_path = os.path.join(cache_dir, 'combined.txt')
-    constraints_path = os.path.join(cache_dir, 'constraints.txt')
+    combined_path = _get_combined_path()
+    constraints_path = _get_constraints_path()
 
     # Find all requirement files
     req_files = _find_requirement_files()
@@ -711,7 +749,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     # Only add constraints if the file exists and has content
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', './cache/constraints.txt'])
+        args.extend(['-c', _get_constraints_path()])
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -799,7 +837,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         '--no-cache',
     ]
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        uv_args.extend(['-c', './cache/constraints.txt'])
+        uv_args.extend(['-c', _get_constraints_path()])
 
     # Run uv and stream output
     debug(f'Install: {uv_args}')
@@ -868,7 +906,7 @@ def depends(requirements: Optional[str] = None):
             debug('  Already processed, skipping')
             return
 
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     lock_path = os.path.join(cache_dir, 'install.lock')
 
     with FileLock(lock_path):
@@ -922,7 +960,7 @@ def main():
     through to 'uv pip'. Falls back to standard pip if uv can't build
     source distributions due to virtualenv creation issues.
     """
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     lock_path = os.path.join(cache_dir, 'install.lock')
 
     with FileLock(lock_path):
@@ -948,10 +986,10 @@ def main():
                 uv_args += ['--index-strategy', 'unsafe-best-match']
 
             # For install/sync commands, add constraints file if available
-            constraints_path = os.path.join(cache_dir, 'constraints.txt')
+            constraints_path = _get_constraints_path()
             if sys.argv[1] in ('install', 'sync'):
                 if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-                    uv_args.extend(['-c', './cache/constraints.txt'])
+                    uv_args.extend(['-c', _get_constraints_path()])
 
             # Run uv
             result = subprocess.run(uv_args, cwd=exe_dir)
