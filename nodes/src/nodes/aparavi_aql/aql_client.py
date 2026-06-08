@@ -85,6 +85,9 @@ class AqlClient:
         except (ValueError, KeyError) as exc:
             raise RuntimeError(f'Aparavi API returned unexpected response: {exc}') from exc
 
+        if not isinstance(envelope, dict):
+            raise RuntimeError(f'Aparavi API returned non-object response: {type(envelope).__name__}')
+
         if envelope.get('status') != 'OK':
             msg = envelope.get('message') or envelope.get('error') or envelope.get('status') or 'unknown error'
             raise RuntimeError(f'Aparavi API error: {msg}')

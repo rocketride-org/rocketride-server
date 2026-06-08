@@ -58,8 +58,16 @@ _MAX_AQL_RETRIES = 3
 
 
 def _aql_safe(aql: str) -> bool:
-    """Return True if the AQL contains no unsafe mutation keywords."""
-    return not _UNSAFE_PATTERN.search(aql)
+    """
+    Return True if the AQL is a single SELECT statement with no unsafe keywords.
+
+    Enforces SELECT-only semantics: the trimmed query must begin with SELECT
+    and must not contain mutation keywords anywhere.
+    """
+    normalised = aql.strip().rstrip(';').strip()
+    if not normalised.upper().startswith('SELECT'):
+        return False
+    return not _UNSAFE_PATTERN.search(normalised)
 
 
 def _get_description(self: Any) -> str:
@@ -144,9 +152,15 @@ class IInstance(IInstanceBase):
         last_error: str | None = None
 
         for _ in range(_MAX_AQL_RETRIES):
-            aql = self._generate_aql(question_text, previous_aql=previous_aql, error=last_error)
+            # Generate AQL — include in retry loop so LLM failures also retry
+            try:
+                aql = self._generate_aql(question_text, previous_aql=previous_aql, error=last_error)
+            except Exception as exc:
+                last_error = str(exc)
+                previous_aql = None
+                continue
 
-            # Safety check — block mutation queries
+            # Safety check — block non-SELECT / mutation queries
             if not _aql_safe(aql):
                 return {'error': 'Generated AQL contains unsafe operations', 'aql': aql, 'rows': []}
 

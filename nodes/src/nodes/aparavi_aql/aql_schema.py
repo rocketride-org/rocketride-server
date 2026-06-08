@@ -222,7 +222,7 @@ COLUMNS: List[Dict[str, Any]] = [
 
 def get_schema_dict() -> Dict[str, Any]:
     """Return the structured schema dict for the get_schema tool response."""
-    return {'store': 'STORE', 'columns': COLUMNS}
+    return {'store': 'STORE', 'columns': list(COLUMNS)}
 
 
 def get_schema_prompt_text() -> str:
