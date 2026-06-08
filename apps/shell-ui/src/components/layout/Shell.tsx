@@ -48,6 +48,7 @@ import type { ShellConfig } from '../../workspace/types';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
+import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID } from '../../constants';
 
 // =============================================================================
@@ -71,6 +72,24 @@ const styles = {
 		color: 'var(--rr-fg-button)',
 		fontSize: 13,
 		cursor: 'pointer',
+	} as CSSProperties,
+	// Matches the landing page's "elevated" 3D button — brand fill with a colored
+	// bottom shadow that presses down on hover (see LandingNav.tsx).
+	elevatedButton: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: '7px 18px',
+		borderRadius: 6,
+		border: 'none',
+		backgroundColor: '#00b9ec',
+		color: '#ffffff',
+		fontSize: 14,
+		fontWeight: 600,
+		cursor: 'pointer',
+		boxShadow: '0 3px 0 0 #00708f',
+		transform: 'translateY(0)',
+		transition: 'background-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
 	} as CSSProperties,
 	goodbyeContainer: {
 		display: 'flex',
@@ -292,6 +311,22 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		return cm.on('shell:logoutRequest', () => handleLogout());
 	}, [cm, handleLogout]);
 
+	// "Back to Home" on the waitlist screen must LEAVE the session-locked app —
+	// not just sign out in place. A session-locked app (e.g. Canvas) is launched
+	// via the ?appId= URL param, which Shell reads on mount. logout() clears the
+	// token and SS_APP_ID but does NOT strip the URL, so a state-only logout
+	// leaves ?appId= in place; any re-init re-seeds the session lock and bootstrap
+	// fires OAuth again, dropping a still-waitlisted user right back on this screen
+	// (the infinite re-auth loop). Hard-navigate to the clean origin so ?appId= is
+	// gone and the next load starts fresh on the home experience. logout() clears
+	// the token + session app ids synchronously before its async disconnect, so
+	// those are wiped before the navigation unloads the page.
+	const handleBackToHome = useCallback(() => {
+		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+		cm.logout();
+		window.location.href = window.location.origin + window.location.pathname;
+	}, [cm]);
+
 	// =====================================================================
 	// SIGN-IN HELPERS
 	// =====================================================================
@@ -396,7 +431,22 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 						you&apos;re in the queue. We&apos;ll send you an email as soon as
 						your account is activated &mdash; it shouldn&apos;t be long!
 					</div>
-					<button onClick={handleLogout} style={styles.signInButton}>Back to Home</button>
+					<button
+						onClick={handleBackToHome}
+						style={styles.elevatedButton}
+						onMouseEnter={(e) => {
+							e.currentTarget.style.backgroundColor = '#0099cc';
+							e.currentTarget.style.transform       = 'translateY(3px)';
+							e.currentTarget.style.boxShadow        = '0 1px 0 0 #00708f';
+						}}
+						onMouseLeave={(e) => {
+							e.currentTarget.style.backgroundColor = '#00b9ec';
+							e.currentTarget.style.transform       = 'translateY(0)';
+							e.currentTarget.style.boxShadow        = '0 3px 0 0 #00708f';
+						}}
+					>
+						Back to Home
+					</button>
 				</div>
 			</div>
 		);
@@ -404,7 +454,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// Loading
 	if (renderPhase === 'loading') {
-		return <div style={styles.statusScreen}>Loading...</div>;
+		return <LoadingScreen />;
 	}
 
 	// =====================================================================

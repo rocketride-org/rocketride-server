@@ -301,6 +301,11 @@ export class ConnectionManager implements IConnectionManager {
 	/** Module-level flag to prevent double bootstrap under React StrictMode. */
 	private bootStarted = false;
 
+	/** One-shot guard: startOAuth always ends in a full-page redirect, so it must
+	 *  never run twice in one page load (double authorize → Zitadel invalidates the
+	 *  first code → PKCE 400 → re-auth loop). */
+	private oauthStarted = false;
+
 	/**
 	 * Redirect the browser to the OAuth provider for authorization.
 	 *
@@ -308,6 +313,10 @@ export class ConnectionManager implements IConnectionManager {
 	 * the legacy PKCE flow if no auth provider is configured.
 	 */
 	public async startOAuth(): Promise<void> {
+		// One-shot: a redirect is coming; never start a second authorize in the
+		// same page load (that invalidates the first code and 400s the exchange).
+		if (this.oauthStarted) return;
+		this.oauthStarted = true;
 		if (this.authProvider) {
 			await this.authProvider.signIn();
 			return;
