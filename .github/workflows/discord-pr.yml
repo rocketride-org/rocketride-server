@@ -195,8 +195,8 @@ jobs:
             --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
 
           DISCORD_MSG_ID=$(echo "$COMMENTS" | \
-            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->"))) | .body' | \
-            grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
+            jq -r --arg re "$DISCORD_MARKER_PATTERN" '.[] | select(.author == "github-actions[bot]" and (.body | test($re))) | .body' | \
+            extract_discord_marker)
 
           WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
           WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
@@ -212,7 +212,7 @@ jobs:
 
             if [ "$PATCH_STATUS" = "404" ]; then
               STALE_COMMENT_ID=$(echo "$COMMENTS" | \
-                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->"))) | .id' | head -1)
+                jq -r --arg re "$DISCORD_MARKER_PATTERN" '.[] | select(.author == "github-actions[bot]" and (.body | test($re))) | .id' | head -1)
               gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
               DISCORD_MSG_ID=""
             elif [ "$PATCH_STATUS" != "200" ]; then
@@ -232,26 +232,19 @@ jobs:
             NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
 
             # ── Race guard: re-check for a comment created by a concurrent run ──
-            EXISTING=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
-              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("<!-- discord-msg-id:[0-9]+ -->")))] | first // empty' 2>/dev/null)
+            EXISTING=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" 2>/dev/null \
+              | jq -c --arg re "$DISCORD_MARKER_PATTERN" '[.[] | select(.user.login == "github-actions[bot]" and (.body | test($re)))] | first // empty')
 
             if [ -n "$EXISTING" ]; then
               # Another run won the race — delete our duplicate message, use theirs
               discord_curl -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" > /dev/null || true
-              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | extract_discord_marker)
               # Patch the existing message with our payload
               discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
                 "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
-              COMMENT_BODY=$(printf '%s\n' \
-                '<details>' \
-                '<summary>🤖 Internal: Discord sync marker</summary>' \
-                '' \
-                'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID. Do not edit or delete.' \
-                '' \
-                "<!-- discord-msg-id:${DISCORD_MSG_ID} -->" \
-                '</details>')
+              COMMENT_BODY=$(render_discord_marker "$DISCORD_MSG_ID")
               gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
                 -X POST \
                 -f body="$COMMENT_BODY"
