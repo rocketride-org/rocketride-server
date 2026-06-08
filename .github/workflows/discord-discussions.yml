@@ -188,7 +188,7 @@ jobs:
               m=$(echo "$page" | jq -c '
                 [.data.repository.discussion.comments.nodes[]
                   | select((.author.login == "github-actions" or .author.login == "github-actions[bot]")
-                    and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
+                    and (.body | test("<!-- discord-msg-id:[0-9]+ -->")))
                 ] | first // empty')
 
               if [ -n "$m" ] && [ "$m" != "null" ]; then
@@ -262,9 +262,17 @@ jobs:
                 "$BASE/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
+              COMMENT_BODY=$(printf '%s\n' \
+                '<details>' \
+                '<summary>🤖 Internal: Discord sync marker</summary>' \
+                '' \
+                'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID. Do not edit or delete.' \
+                '' \
+                "<!-- discord-msg-id:${DISCORD_MSG_ID} -->" \
+                '</details>')
               gh api graphql \
                 -f query='mutation($id:ID!,$body:String!){ addDiscussionComment(input:{discussionId:$id,body:$body}){ clientMutationId } }' \
                 -f id="$NODE_ID" \
-                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+                -f body="$COMMENT_BODY"
             fi
           fi
