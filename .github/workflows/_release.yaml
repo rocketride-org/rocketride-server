@@ -400,7 +400,7 @@ jobs:
           {
             echo "body<<${DELIM}"
             if [ "${{ inputs.prerelease }}" = "true" ]; then
-              echo "_Automated nightly prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo "_Automated prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
               echo ""
             fi
             if [ -n "$NOTES" ]; then

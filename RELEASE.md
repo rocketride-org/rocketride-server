@@ -7,7 +7,7 @@ This document describes the automated release pipeline for the RocketRide Engine
 - [Overview](#overview)
 - [Packages](#packages)
 - [Branching Strategy](#branching-strategy)
-- [Nightly Prereleases](#nightly-prereleases)
+- [Prereleases](#prereleases)
 - [Stable Releases](#stable-releases)
 - [Version Management](#version-management)
 - [Release Notes](#release-notes)
@@ -22,7 +22,7 @@ The release pipeline consists of two workflows:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `stage` |
+| **Prerelease** (`.github/workflows/prerelease.yaml`) | On successful `develop` CI (`workflow_run`) or manual dispatch | Build and publish GitHub prereleases (one per package) |
 | **Release** (`.github/workflows/release.yaml`) | Push to `main` | Build, publish to registries, and create stable GitHub Releases |
 
 Both workflows build the full project across three platforms (Linux, Windows, macOS), run tests, and package artifacts. The key difference is that nightly creates prereleases on GitHub only, while the release workflow publishes to external registries (npm, PyPI, VS Code Marketplace) and creates stable GitHub Releases.
@@ -82,11 +82,11 @@ hotfix/*  ──┘                  │         │
 - **`main`** — Stable release branch. When `stage` is merged into `main`, the release workflow triggers automatically.
 - **`feature/*`**, **`bugfix/*`**, **`hotfix/*`** — Short-lived branches that merge into `develop` via pull request.
 
-## Nightly Prereleases
+## Prereleases
 
-**Workflow:** `.github/workflows/nightly.yaml`
+**Workflow:** `.github/workflows/prerelease.yaml`
 
-**Trigger:** Runs automatically every day at 02:00 UTC, or can be triggered manually via GitHub Actions UI (`workflow_dispatch`).
+**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`). (Formerly named "Nightly"; it is not a daily cron — it fires per green develop commit.)
 
 ### What happens
 

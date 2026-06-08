@@ -1,12 +1,12 @@
-name: Nightly prerelease
-run-name: Nightly ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(auto)' }}
+name: Prerelease
+run-name: Prerelease ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(auto)' }}
 
 # `cancel-in-progress` is what makes the "every green develop commit"
 # cadence safe under load: if 5 PRs land in 30 minutes, only the last
 # one's nightly run completes — the previous 4 are cancelled mid-build.
 # Without this we'd burn ~25 min × 5 = 2 hours of CI minutes per burst.
 concurrency:
-  group: nightly
+  group: prerelease
   cancel-in-progress: true
 
 # Top-level least-privilege. Individual jobs below raise to write only
