@@ -14,4 +14,26 @@ if torch.cuda.is_available():
 else:
     debug('    GPU processing disabled. Recommend using GPU for better performance.')
 
-__all__ = ['torch']
+
+def probe_cuda(device_index: int = 0) -> bool:
+    """Return True if CUDA compute kernels work on device_index, False otherwise.
+
+    Catches cudaErrorNoKernelImageForDevice that surfaces when the PyTorch build
+    does not include a kernel binary for the device's compute capability (e.g.
+    Pascal sm_61 on a Quadro P620).  The probe executes a tiny GEMM and then
+    calls synchronize() so any async CUDA error is raised here rather than
+    silently deferred to the first real inference call.
+    """
+    if not torch.cuda.is_available():
+        return False
+    try:
+        d = f'cuda:{device_index}'
+        a = torch.randn(2, 2, device=d)
+        _ = a @ a  # GEMM forces a compute kernel onto the device
+        torch.cuda.synchronize(d)
+        return True
+    except Exception:
+        return False
+
+
+__all__ = ['torch', 'probe_cuda']

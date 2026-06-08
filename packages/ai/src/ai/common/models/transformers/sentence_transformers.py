@@ -98,11 +98,16 @@ class SentenceTransformerLoader(BaseLoader):
             model.eval()
         else:
             # === LOCAL MODE: Load directly to specified device ===
-            if device is None:
-                # Auto-detect
-                from ai.common.torch import torch
+            from ai.common.torch import torch, probe_cuda
 
+            if device is None:
                 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+            if 'cuda' in str(device):
+                dev_idx = int(device.split(':')[1]) if ':' in str(device) else 0
+                if not probe_cuda(dev_idx):
+                    logger.warning(f'CUDA device {dev_idx} kernel probe failed, falling back to CPU')
+                    device = 'cpu'
 
             logger.info(f'Loading SentenceTransformer {model_name} to {device}')
             model = ST(model_name_or_path=model_name, device=device, **kwargs)

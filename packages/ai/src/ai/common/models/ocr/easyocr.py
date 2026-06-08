@@ -98,7 +98,7 @@ class EasyOCRLoader(BaseLoader):
         from ai.common.opencv import cv2  # noqa: F401
 
         import easyocr
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         languages = languages or ['en']
         exclude_gpus = exclude_gpus or []
@@ -127,6 +127,12 @@ class EasyOCRLoader(BaseLoader):
                 torch_device = 'cuda:0'
                 use_gpu = True
 
+        if use_gpu and not probe_cuda(gpu_index):
+            logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU for EasyOCR')
+            use_gpu = False
+            gpu_index = -1
+            torch_device = 'cpu'
+
         logger.info(f'Loading EasyOCR with languages {languages} on {torch_device}')
 
         try:
@@ -136,8 +142,18 @@ class EasyOCRLoader(BaseLoader):
                 verbose=False,
             )
         except Exception as e:
-            logger.error(f'Failed to load EasyOCR: {e}')
-            raise Exception(f'Failed to load EasyOCR: {e}')
+            if use_gpu:
+                logger.warning(f'EasyOCR GPU load failed ({e}), falling back to CPU')
+                gpu_index = -1
+                torch_device = 'cpu'
+                try:
+                    reader = easyocr.Reader(languages, gpu=False, verbose=False)
+                except Exception as cpu_e:
+                    logger.error(f'Failed to load EasyOCR: {cpu_e}')
+                    raise Exception(f'Failed to load EasyOCR: {cpu_e}')
+            else:
+                logger.error(f'Failed to load EasyOCR: {e}')
+                raise Exception(f'Failed to load EasyOCR: {e}')
 
         # EasyOCR wraps its detector and recognizer in DataParallel, which
         # scatters every batch across ALL visible GPUs via parallel_apply().

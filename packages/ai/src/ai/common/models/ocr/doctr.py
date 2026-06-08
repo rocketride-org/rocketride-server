@@ -65,7 +65,7 @@ class DocTRLoader(BaseLoader):
         from ai.common.opencv import cv2  # noqa: F401
 
         from doctr.models import ocr_predictor
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         exclude_gpus = exclude_gpus or []
         memory_gb = 2.0
@@ -86,6 +86,11 @@ class DocTRLoader(BaseLoader):
             else:
                 gpu_index = 0
                 torch_device = 'cuda:0'
+
+            if torch_device != 'cpu' and not probe_cuda(gpu_index):
+                logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU')
+                torch_device = 'cpu'
+                gpu_index = -1
 
         logger.info(f'Loading docTR with det={detection_model}, rec={recognition_model}')
 

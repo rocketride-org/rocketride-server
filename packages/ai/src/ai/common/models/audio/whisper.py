@@ -268,8 +268,20 @@ class WhisperLoader(BaseLoader):
                     compute_type=compute_type,
                 )
         except Exception as e:
-            logger.error(f'Failed to load whisper model: {e}')
-            raise Exception(f'Failed to load whisper model {model_name}: {e}')
+            if torch_device != 'cpu':
+                logger.warning(f'Whisper GPU load failed ({e}), falling back to CPU')
+                torch_device = 'cpu'
+                gpu_index = -1
+                if compute_type == 'float16':
+                    compute_type = 'int8'
+                try:
+                    model = WhisperModel(model_name, device='cpu', compute_type=compute_type)
+                except Exception as cpu_e:
+                    logger.error(f'Failed to load whisper model on CPU: {cpu_e}')
+                    raise Exception(f'Failed to load whisper model {model_name}: {cpu_e}')
+            else:
+                logger.error(f'Failed to load whisper model: {e}')
+                raise Exception(f'Failed to load whisper model {model_name}: {e}')
 
         # Bundle model
         model_bundle = {
