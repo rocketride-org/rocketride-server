@@ -35,7 +35,7 @@ JSON, not user-uploaded binary data.
 
 from typing import AsyncGenerator, Literal
 
-from rocketlib import debug
+from rocketlib import error
 
 from .models import DeploymentRecord
 from .store import IStore, StorageError
@@ -101,29 +101,31 @@ class DeploymentStore:
 
     async def list(self, client_id: str) -> list[DeploymentRecord]:
         """Return all deployment records for the given client, in no particular order."""
-        paths = await self._store.list_files(self._prefix(client_id))
+        paths = await self._store.list_entries(
+            self._prefix(client_id), recursive=False, include_dirs=False, name_pattern='*.json'
+        )
         records = []
         for path in paths:
             try:
                 data = await self._store.read_file(path)
                 records.append(DeploymentRecord.model_validate_json(data))
             except (StorageError, Exception) as e:
-                debug(f'DeploymentStore.list: skipping {path}: {e}')
+                error(f'DeploymentStore.list: skipping {path}: {e}')
         return records
 
-    async def iter_all(self) -> 'AsyncGenerator[tuple[str, DeploymentRecord], None]':
-        """Async-generate (client_id, DeploymentRecord) for every deployment in store."""
-        paths = await self._store.list_files('users/')
-        for path in paths:
-            if '/deployments/' not in path:
-                continue
-            try:
-                # path format: users/<client_id>/deployments/<project_id>.json
-                client_id = path.split('/')[1]
-                data = await self._store.read_file(path)
-                yield client_id, DeploymentRecord.model_validate_json(data)
-            except Exception as e:
-                debug(f'DeploymentStore.iter_all: skipping {path}: {e}')
+    async def iter_all(self) -> 'AsyncGenerator[DeploymentRecord, None]':
+        """Async-generate every DeploymentRecord in the store, across all users."""
+        users = await self._store.list_entries('users/', recursive=False, include_files=False)
+        for user in users:
+            for dep in await self._store.list_entries(
+                f'{user}deployments/', recursive=False, include_dirs=False, name_pattern='*.json'
+            ):
+                try:
+                    data = await self._store.read_file(dep)
+                    rec = DeploymentRecord.model_validate_json(data)
+                    yield rec
+                except Exception as e:
+                    error(f'DeploymentStore.iter_all: skipping {dep}: {e}')
 
     def _path(self, client_id: str, project_id: str) -> str:
         return f'users/{client_id}/deployments/{project_id}.json'
