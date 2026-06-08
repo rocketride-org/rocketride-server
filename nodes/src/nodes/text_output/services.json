@@ -89,7 +89,6 @@
 			"title": "Text Output",
 			"properties": [
 				"type",
-				"name",
 				"text_output.target.parameters",
 				"target.mode"
 			]
