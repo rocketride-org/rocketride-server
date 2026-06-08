@@ -376,6 +376,21 @@ export interface ConnectResult {
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
 	capabilities: string[];
+
+	/**
+	 * Platform-level permission strings (e.g. ``['sys.admin']``).
+	 * Set manually in the database, never via API.
+	 */
+	sysPermissions?: string[];
+
+	/** Credit wallet balance snapshot — resource→balance pairs. */
+	credits?: Record<string, unknown>;
+
+	/**
+	 * True when the user is authenticated but not yet granted full app access.
+	 * The shell should show a waitlist page instead of the main workspace.
+	 */
+	waitlisted?: boolean;
 }
 
 /**

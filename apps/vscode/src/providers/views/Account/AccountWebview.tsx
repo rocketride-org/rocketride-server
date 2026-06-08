@@ -261,6 +261,11 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'billing:buyCredits', packId: pack.id } as any);
 	}, []);
 
+	/** Opens the checkout flow for Pipe Builder subscription. */
+	const handleSubscribe = useCallback((): void => {
+		sendMessageRef.current({ type: 'billing:subscribe' } as any);
+	}, []);
+
 	// =========================================================================
 	// RENDER
 	// =========================================================================
@@ -289,6 +294,7 @@ const AccountWebview: React.FC = () => {
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
 			onBuyCredits={handleBuyCredits}
+			onSubscribe={handleSubscribe}
 			section={section}
 			onSectionChange={(s) => {
 				setSection(s);

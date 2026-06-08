@@ -39,6 +39,8 @@ import { getConnectionManager, getEngineRegistry } from '../extension';
 import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { isSubscribed } from '../shared/util/subscriptionGate';
+import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 export class SettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -153,6 +155,11 @@ export class SettingsProvider {
 						await this.clearCredentials(panel.webview);
 						break;
 
+					case 'openSubscribe':
+						// Open the Account page billing tab to start the subscribe flow
+						vscode.commands.executeCommand('rocketride.page.account.open', 'billing');
+						break;
+
 					default: {
 						// Delegate connection messages (cloud, docker, service, test, engine versions, sudo)
 						const handled = await this.connHandler.handleMessage(message, panel.webview);
@@ -257,6 +264,14 @@ export class SettingsProvider {
 		webview.postMessage({
 			type: 'settingsLoaded',
 			settings: allSettings,
+		});
+
+		// Send subscription status so the subscribe banner can render
+		const cm = getConnectionManager();
+		const client = cm?.getClient();
+		webview.postMessage({
+			type: 'subscriptionStatus',
+			isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 		});
 
 		// Teams are fetched by CloudPanel after it confirms the server is SaaS

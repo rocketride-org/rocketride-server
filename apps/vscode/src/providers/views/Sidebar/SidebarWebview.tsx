@@ -27,7 +27,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxLock } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
@@ -430,9 +430,14 @@ const SidebarViewWebview: React.FC = () => {
 			});
 		}
 
-		// ── Account / Environment / Settings / Log out ──────────────────────
+		// ── Account / Subscribe / Environment / Settings / Log out ──────────
 		if (cloudConnected) {
 			items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open' }) });
+		}
+
+		// Subscribe CTA — only when cloud-signed-in but not subscribed
+		if (cloudConnected && !subscribed) {
+			items.push({ id: 'subscribe', label: 'Subscribe', icon: BxRocket, onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.account.open', args: ['billing'] }) });
 		}
 
 		// Environment is visible whenever at least one connection is active,
@@ -450,7 +455,7 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		return items;
-	}, [sendMessage, cloudConnected, useFlatFooter, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage]);
+	}, [sendMessage, cloudConnected, useFlatFooter, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage, subscribed]);
 
 	// ── Flat-mode connection status ─────────────────────────────────────────
 	const flatConnectionStatus = useMemo(() => {

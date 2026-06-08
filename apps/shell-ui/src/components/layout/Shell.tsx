@@ -48,6 +48,7 @@ import type { ShellConfig } from '../../workspace/types';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
+import { SS_PENDING_APP_ID } from '../../constants';
 
 // =============================================================================
 // STYLES
@@ -103,12 +104,13 @@ const styles = {
 /**
  * What the component should render during the auth bootstrap sequence.
  *
- * - 'loading'  — bootstrap in progress; show spinner.
- * - 'shell'    — show Shell (identity may be null for marketplace).
- * - 'error'    — unrecoverable auth failure.
- * - 'goodbye'  — post-logout screen for session-locked apps.
+ * - 'loading'    — bootstrap in progress; show spinner.
+ * - 'shell'      — show Shell (identity may be null for marketplace).
+ * - 'error'      — unrecoverable auth failure.
+ * - 'goodbye'    — post-logout screen for session-locked apps.
+ * - 'waitlisted' — authenticated but not yet granted access.
  */
-type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye';
+type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
 
 // =============================================================================
 // SHELL COMPONENT
@@ -218,8 +220,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				if (result) {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
+					// Gate on waitlist — authenticated but not yet granted access
+					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
+				} else {
+					// No auth — render unauthenticated shell with the default app
+					setRenderPhase('shell');
 				}
-				setRenderPhase('shell');
 			} catch (err) {
 				console.error('[Shell] Bootstrap failed:', err);
 				if (mountedRef.current) setRenderPhase('error');
@@ -237,9 +243,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	useEffect(() => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
 			if (result.userToken) cm.saveToken(result.userToken);
-			if (mountedRef.current) setIdentity(result);
+			if (mountedRef.current) {
+				setIdentity(result);
+				// Auto-transition off waitlist when an admin grants access
+				if (renderPhase === 'waitlisted' && !result.waitlisted) {
+					setRenderPhase('shell');
+				}
+			}
 		});
-	}, [cm]);
+	}, [cm, renderPhase]);
 
 	// Sign-in request from marketplace
 	useEffect(() => {
@@ -262,12 +274,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	const handleLogout = useCallback(() => {
 		setIdentity(null);
+		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
+		// the auth transition screen when it mounts after logout.
+		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		if (sessionAppId) {
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('goodbye');
 			});
 		} else {
-			cm.logout().finally(() => { window.location.href = '/'; });
+			cm.logout().finally(() => {
+				if (mountedRef.current) setRenderPhase('shell');
+			});
 		}
 	}, [cm, sessionAppId]);
 
@@ -359,6 +376,32 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		);
 	}
 
+	// Waitlisted — authenticated but not yet granted access
+	if (renderPhase === 'waitlisted') {
+		const displayName = identity?.displayName || identity?.email || '';
+		return (
+			<div style={styles.statusScreen}>
+				<div style={{
+					display: 'flex', flexDirection: 'column', alignItems: 'center',
+					gap: 20, textAlign: 'center', maxWidth: 440, padding: '0 24px',
+				}}>
+					<div style={{ fontSize: 28, lineHeight: 1.2 }}>
+						&#x1F389;
+					</div>
+					<div style={{ fontSize: 20, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
+						Thanks for signing up{displayName ? `, ${displayName}` : ''}!
+					</div>
+					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>
+						Your account is all set. We&apos;re rolling out access in waves and
+						you&apos;re in the queue. We&apos;ll send you an email as soon as
+						your account is activated &mdash; it shouldn&apos;t be long!
+					</div>
+					<button onClick={handleLogout} style={styles.signInButton}>Back to Home</button>
+				</div>
+			</div>
+		);
+	}
+
 	// Loading
 	if (renderPhase === 'loading') {
 		return <div style={styles.statusScreen}>Loading...</div>;
@@ -389,7 +432,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || defaultAppId}
+					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}

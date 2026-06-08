@@ -298,6 +298,7 @@ class ConnectResult(TypedDict, total=False):
         defaultTeam (str): ID of the team selected as the default context.
         organizations (list[OrgInfo]): All organisations the user belongs to.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
+        waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
     userToken: str
@@ -314,7 +315,10 @@ class ConnectResult(TypedDict, total=False):
     defaultTeam: str
     organizations: list[OrgInfo]
     capabilities: list[str]
+    sysPermissions: list[str]
+    credits: dict
     apps: list[AppManifestEntry]
+    waitlisted: bool
 
 
 class ServerInfoResult(TypedDict, total=False):
