@@ -100,7 +100,7 @@
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
-		"@types/node": "^20.19.41",
+		"@types/node": "^20.19.42",
 		"adm-zip": "^0.5.17",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
@@ -118,8 +118,8 @@
 		"prettier": "^3.8.3",
 		"rimraf": "^5.0.5",
 		"tar": "^7.5.15",
-		"lefthook": "^2.1.8",
+		"lefthook": "^2.1.9",
 		"typescript": "^5.3.3",
-		"typescript-eslint": "^8.60.0"
+		"typescript-eslint": "^8.60.1"
 	}
 }
