@@ -1,2 +1,2 @@
 # Cohere Rerank
-cohere>=6.1.0,<7.0.0
+cohere>=7.0.3,<8.0.0
