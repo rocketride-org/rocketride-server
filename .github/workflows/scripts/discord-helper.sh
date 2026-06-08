@@ -107,5 +107,5 @@ render_discord_marker() {
 # extract_discord_marker — read a comment body (or marker line) on stdin and
 # print the stored Discord message ID, or nothing if absent.
 extract_discord_marker() {
-  grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -n1
+  grep -oE 'discord-msg-id:[0-9]+' | cut -d':' -f2 | head -n1
 }
