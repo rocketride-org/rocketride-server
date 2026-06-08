@@ -67,6 +67,7 @@ CPackSourceConfig.cmake
 install_manifest.txt
 Makefile
 *.cmake.in
+!packages/server/cmake/ports/**/*.cmake.in
 
 # -----------------------------------------------------------------------------
 # Visual Studio Artifacts
