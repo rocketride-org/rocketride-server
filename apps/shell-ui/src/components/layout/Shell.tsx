@@ -218,7 +218,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// Initialise the client singleton (idempotent)
 			cm.init({
 				uri: RR_APIKEY ? undefined : ROCKETRIDE_URI,
-				clientName: config.apps[0]?.id ?? 'shell-ui',
+				clientName: 'Cloud Shell-UI',
 				authProvider,
 				zitadelUrl: RR_ZITADEL_URL,
 				zitadelClientId: RR_ZITADEL_CLIENT_ID,

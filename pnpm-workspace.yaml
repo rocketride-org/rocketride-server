@@ -29,6 +29,7 @@ packages:
   - 'packages/client-typescript'
 
   # Applications
+  - 'apps/aparavi-ui'
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
   - 'apps/hello-ui'
