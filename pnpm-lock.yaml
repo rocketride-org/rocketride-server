@@ -794,6 +794,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      rocketride:
+        specifier: workspace:*
+        version: link:../client-typescript
     devDependencies:
       '@rollup/plugin-commonjs':
         specifier: ~28.0.9

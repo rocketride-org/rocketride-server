@@ -1731,6 +1731,41 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Remove all monitor subscriptions from this client.
+	 *
+	 * Sends an empty types list for each active monitor key to unsubscribe
+	 * on the server, then clears the local ref-count map.  Called by the
+	 * shell when an app unmounts so the next app starts with a clean slate.
+	 */
+	async clearAllMonitors(): Promise<void> {
+		const emptyMap = new Map<string, number>();
+		for (const [keyStr] of this._monitorKeys) {
+			const key = this._monitorStringToKey(keyStr);
+			if (key) {
+				try {
+					await this._syncMonitor(key, emptyMap);
+				} catch {
+					// Best-effort — server may have already cleared
+				}
+			}
+		}
+		this._monitorKeys.clear();
+	}
+
+	/**
+	 * Update this connection's display name on the server.
+	 *
+	 * Useful when an app plugin loads and wants the server monitor to show
+	 * a more descriptive name (e.g. "Cloud Shell-UI — rocketride.pipeBuilder")
+	 * instead of the generic client name sent at auth time.
+	 *
+	 * @param clientName - The new display name for this connection.
+	 */
+	async identify(clientName: string): Promise<void> {
+		await this.call('rrext_identify', { clientName });
+	}
+
+	/**
 	 * Send the merged type list for a monitor key to the server.
 	 */
 	private async _syncMonitor(key: MonitorKey, refCounts: Map<string, number>): Promise<void> {

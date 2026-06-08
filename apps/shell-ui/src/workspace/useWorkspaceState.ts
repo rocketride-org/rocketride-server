@@ -410,6 +410,16 @@ export function useWorkspaceState(
 		const currentState = appsRef.current[activeAppIdRef.current];
 		if (currentState) writeAppStateNow(activeAppIdRef.current, currentState);
 
+		// 1b. Clear all server-side monitor subscriptions from the outgoing app
+		// so the next app starts with a clean slate, and update the connection
+		// display name so the server monitor shows which app is active
+		if (client) {
+			client.clearAllMonitors().catch((err) => {
+				console.error('[Workspace] Failed to clear monitors on app switch:', err);
+			});
+			client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
+		}
+
 		// 2. Load new app state if not already in memory
 		let newState = appsRef.current[newAppId];
 		if (!newState && client && isConnected && hasStoreApi(client)) {

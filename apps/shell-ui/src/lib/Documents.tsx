@@ -498,6 +498,19 @@ export class Documents {
 		return this._state.documents[uri];
 	}
 
+	// --- Subscription --------------------------------------------------------
+
+	/**
+	 * Register a listener that fires on every state change.
+	 *
+	 * @param listener - Callback invoked after each state update.
+	 * @returns An unsubscribe function.
+	 */
+	subscribe(listener: () => void): () => void {
+		this._listeners.add(listener);
+		return () => this._listeners.delete(listener);
+	}
+
 	// --- React hook ----------------------------------------------------------
 
 	/**
