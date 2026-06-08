@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -294,6 +295,7 @@ class SentenceTransformer:
         self.output_fields = output_fields or ['$embeddings']
         self.device = device
         self.kwargs = kwargs
+        self._encode_lock = threading.Lock()
 
         # Check if we should proxy to server
         server_addr = get_model_server_address()
@@ -376,29 +378,30 @@ class SentenceTransformer:
         t_gpu = 0.0
         t_post = 0.0
 
-        # Process in batches
-        for i in range(0, len(sentences), batch_size):
-            batch = sentences[i : i + batch_size]
+        with self._encode_lock:
+            # Process in batches
+            for i in range(0, len(sentences), batch_size):
+                batch = sentences[i : i + batch_size]
 
-            # Preprocess phase
-            t0 = time.perf_counter()
-            preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
-            t_pre += (time.perf_counter() - t0) * 1000
+                # Preprocess phase
+                t0 = time.perf_counter()
+                preprocessed = SentenceTransformerLoader.preprocess(self._model, batch, self._metadata)
+                t_pre += (time.perf_counter() - t0) * 1000
 
-            # GPU inference phase
-            t0 = time.perf_counter()
-            raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
-            t_gpu += (time.perf_counter() - t0) * 1000
+                # GPU inference phase
+                t0 = time.perf_counter()
+                raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
+                t_gpu += (time.perf_counter() - t0) * 1000
 
-            # Postprocess phase
-            t0 = time.perf_counter()
-            results = SentenceTransformerLoader.postprocess(self._model, raw_output, len(batch), self.output_fields)
-            t_post += (time.perf_counter() - t0) * 1000
+                # Postprocess phase
+                t0 = time.perf_counter()
+                results = SentenceTransformerLoader.postprocess(self._model, raw_output, len(batch), self.output_fields)
+                t_post += (time.perf_counter() - t0) * 1000
 
-            # Extract embeddings from results (handles both 'embeddings' and '$embeddings')
-            for result in results:
-                emb = result.get('$embeddings') or result.get('embeddings') or result
-                all_embeddings.append(emb)
+                # Extract embeddings from results (handles both 'embeddings' and '$embeddings')
+                for result in results:
+                    emb = result.get('$embeddings') or result.get('embeddings') or result
+                    all_embeddings.append(emb)
 
         # Report all perf counters — same keys as model server response
         inference_sec = (t_pre + t_gpu + t_post) / 1000.0
