@@ -490,7 +490,11 @@ function makeDownloadAction(options = {}) {
 
 			task.output = `Downloading ${distFilename} from ${matchedTag}...`;
 			const distPath = await downloadGitHubFile(matchedTag, distFilename, task);
-			if (!distPath) throw new Error(`Dist file ${distFilename} not found`);
+			if (!distPath) {
+				task.output = `Dist file ${distFilename} not found in ${matchedTag} — will compile`;
+				await setState('server.downloadHash', null);
+				return;
+			}
 			task.output = `Downloaded ${distFilename}`;
 
 			let symDistPath = null;

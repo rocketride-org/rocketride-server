@@ -55,6 +55,9 @@ import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 
+// Extension context — set once in activate(), available via getExtensionContext()
+let extensionContext: vscode.ExtensionContext;
+
 // Core managers
 let connectionManager: ConnectionManager | undefined;
 let engineRegistry: EngineRegistry | undefined;
@@ -178,6 +181,7 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
  * @param context VS Code extension context
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+	extensionContext = context;
 	const logger = getLogger();
 	logger.output(`${icons.begin} Activating RocketRide extension...`);
 
@@ -608,6 +612,7 @@ export let cachedDockerTags: string[] = [];
 export const setCachedDockerTags = (t: string[]) => { cachedDockerTags = t; };
 
 // Export getters for provider access
+export const getExtensionContext = () => extensionContext;
 export const getConnectionManager = () => connectionManager;
 export const getEngineRegistry = () => engineRegistry;
 export const getSettingsProvider = () => settings;

@@ -63,6 +63,15 @@ export interface ReleaseListItem {
 	prerelease: boolean;
 }
 
+/**
+ * Result of a conditional GitHub API call using ETags.
+ * - `data`: fresh data returned (HTTP 200); includes the new ETag for future requests.
+ * - `notModified`: server confirmed cached version is still current (HTTP 304, free — no rate limit hit).
+ */
+export type ConditionalResult<T> =
+	| { status: 'data'; data: T; etag: string | undefined }
+	| { status: 'notModified' };
+
 /** Platform-specific archive naming. */
 interface PlatformInfo {
 	name: string;
@@ -419,24 +428,49 @@ export class EngineInstaller {
 	/**
 	 * Fetches all available releases for the version dropdown.
 	 * Returns server-tagged releases with assets, sorted newest first.
+	 *
+	 * Supports ETag-based conditional requests: pass the ETag from a previous
+	 * response to get a free HTTP 304 (not counted against GitHub rate limit)
+	 * when releases haven't changed.
 	 */
 	public async getReleases(
 		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<ReleaseListItem[]> {
+		githubToken?: string,
+		etag?: string
+	): Promise<ConditionalResult<ReleaseListItem[]>> {
 		this.throwIfCancelled(token);
 		const octokit = await this.createOctokit(githubToken);
-		const { data } = await octokit.repos.listReleases({
-			owner: EngineInstaller.GITHUB_OWNER,
-			repo: EngineInstaller.GITHUB_REPO,
-			per_page: 100
-		});
-		return data
-			.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
-			.map(r => ({
-				tag_name: r.tag_name,
-				prerelease: r.prerelease
-			}));
+
+		// Build conditional request headers
+		const headers: Record<string, string> = {};
+		if (etag) {
+			headers['if-none-match'] = etag;
+		}
+
+		try {
+			const response = await octokit.repos.listReleases({
+				owner: EngineInstaller.GITHUB_OWNER,
+				repo: EngineInstaller.GITHUB_REPO,
+				per_page: 100,
+				headers,
+			});
+
+			// HTTP 200 — fresh data
+			const data = response.data
+				.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
+				.map(r => ({
+					tag_name: r.tag_name,
+					prerelease: r.prerelease
+				}));
+
+			return { status: 'data', data, etag: response.headers.etag };
+		} catch (error: unknown) {
+			// Octokit throws RequestError with status 304 for Not Modified
+			if (this.isNotModifiedError(error)) {
+				return { status: 'notModified' };
+			}
+			throw error;
+		}
 	}
 
 	/** Creates an authenticated (or anonymous) Octokit instance. */
@@ -446,6 +480,19 @@ export class EngineInstaller {
 			auth: githubToken,
 			userAgent: 'RocketRide-VSCode'
 		});
+	}
+
+	/**
+	 * Checks if an error is an Octokit RequestError with HTTP 304 status.
+	 * Octokit throws rather than returning a response for 304s.
+	 * Duck-types the check to avoid importing @octokit/request-error.
+	 */
+	private isNotModifiedError(error: unknown): boolean {
+		return (
+			error instanceof Error &&
+			'status' in error &&
+			(error as { status: number }).status === 304
+		);
 	}
 
 	/**

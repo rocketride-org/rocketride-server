@@ -21,7 +21,9 @@ import { IMAGE_BASE } from '../../engine/docker/docker-manager';
 import { ConnectionManager } from '../../connection/connection';
 import { type ConnectionMode } from '../../config';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
-import { setCachedEngineVersions, setCachedDockerTags } from '../../extension';
+import { setCachedEngineVersions, setCachedDockerTags, getExtensionContext } from '../../extension';
+import { getLogger } from '../../shared/util/output';
+import { icons } from '../../shared/util/icons';
 
 // =============================================================================
 // TYPES
@@ -55,6 +57,8 @@ interface VersionCache {
 	versions: Array<{ tag_name: string; prerelease: boolean }>;
 	/** When the cache was populated (Date.now()). */
 	fetchedAt: number;
+	/** ETag from the last successful GitHub API response (persisted to globalState). */
+	etag?: string;
 	/** True if the fetch is currently in flight (dedup concurrent callers). */
 	fetching: boolean;
 	/** Promise that concurrent callers can await while a fetch is in flight. */
@@ -85,6 +89,17 @@ export class ConnectionMessageHandler {
 
 	constructor(private readonly opts: ConnectionMessageHandlerOptions) {
 		this.engineInstaller = new EngineInstaller(opts.extensionFsPath);
+
+		// Hydrate version cache from persistent storage so the first fetch after
+		// a restart can send the saved ETag and get a free 304 (no rate limit hit).
+		const persisted = getExtensionContext().globalState
+			.get<{ etag: string; versions: Array<{ tag_name: string; prerelease: boolean }> }>('versionCache');
+		if (persisted) {
+			this.versionCache.etag = persisted.etag;
+			this.versionCache.versions = persisted.versions;
+			// fetchedAt stays 0 — TTL check still triggers a fetch, but with the
+			// saved ETag the response is a free 304 when releases haven't changed.
+		}
 	}
 
 
@@ -374,6 +389,8 @@ export class ConnectionMessageHandler {
 	 * Populates the version cache on success or failure.
 	 */
 	private async doFetchVersions(): Promise<void> {
+		const logger = getLogger();
+
 		// Get GitHub token if available (raises rate limit from 60/hr to 5000/hr)
 		let githubToken: string | undefined;
 		try {
@@ -383,20 +400,61 @@ export class ConnectionMessageHandler {
 			/* proceed without token */
 		}
 
+		const authMode = githubToken ? 'authenticated' : 'unauthenticated';
+		const hasEtag = !!this.versionCache.etag;
+		logger.output(`${icons.info} Fetching engine versions (${authMode}, etag=${hasEtag ? 'cached' : 'none'})...`);
+
 		for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
 			try {
-				const versions = await this.engineInstaller.getReleases(undefined, githubToken);
-				this.versionCache.versions = versions;
+				const result = await this.engineInstaller.getReleases(
+					undefined,
+					githubToken,
+					this.versionCache.etag
+				);
+
+				if (result.status === 'notModified') {
+					// Data hasn't changed — just refresh the TTL timestamp.
+					// Versions are already correct (hydrated from globalState or previous fetch).
+					logger.output(`${icons.success} Engine versions unchanged (304 Not Modified, no rate limit used)`);
+					this.versionCache.fetchedAt = Date.now();
+					return;
+				}
+
+				// Fresh data received — update cache, global state, and persistent storage
+				logger.output(`${icons.success} Engine versions fetched: ${result.data.length} releases found`);
+				this.versionCache.versions = result.data;
 				this.versionCache.fetchedAt = Date.now();
-				setCachedEngineVersions(versions);
+				this.versionCache.etag = result.etag;
+				setCachedEngineVersions(result.data);
+				getExtensionContext().globalState.update('versionCache', {
+					etag: result.etag,
+					versions: result.data
+				});
 				return;
 			} catch (error) {
-				console.error(`[ConnectionMessageHandler] Version fetch attempt ${attempt}/${MAX_FETCH_ATTEMPTS} failed:`, error);
+				logger.output(`${icons.warning} Version fetch attempt ${attempt}/${MAX_FETCH_ATTEMPTS} failed: ${error}`);
+
+				// If rate-limited, extract reset time from GitHub response headers
+				const rateLimitReset = (error as { response?: { headers?: Record<string, string> } })
+					?.response?.headers?.['x-ratelimit-reset'];
+				if (rateLimitReset) {
+					const resetDate = new Date(Number(rateLimitReset) * 1000);
+					const minutesLeft = Math.max(1, Math.ceil((resetDate.getTime() - Date.now()) / 60000));
+					logger.output(`${icons.info} GitHub rate limit resets in ~${minutesLeft} minute${minutesLeft === 1 ? '' : 's'} (${resetDate.toLocaleTimeString()})`);
+				}
+
 				if (attempt === MAX_FETCH_ATTEMPTS) {
-					// Cache the failure so we don't retry immediately
-					this.versionCache.versions = [];
+					// All attempts failed. If we have cached versions (from
+					// globalState or a prior fetch), serve those instead of
+					// clearing the list — the data is still valid.
 					this.versionCache.fetchedAt = Date.now();
-					setCachedEngineVersions([]);
+					if (this.versionCache.versions.length > 0) {
+						logger.output(`${icons.info} Serving ${this.versionCache.versions.length} cached versions`);
+						setCachedEngineVersions(this.versionCache.versions);
+					} else {
+						logger.output(`${icons.error} All version fetch attempts failed — no cached data available`);
+						setCachedEngineVersions([]);
+					}
 				}
 			}
 		}
