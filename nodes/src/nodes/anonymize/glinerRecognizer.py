@@ -32,6 +32,27 @@ from .Ruleparser import RuleParser
 from .anonymize import anonymize as _anonymize
 
 
+# Default PII labels for zero-shot detection when the user has not configured
+# their own. Kept in sync with the `entityTypes` field default in services.json.
+DEFAULT_PII_LABELS = [
+    'person',
+    'name',
+    'email',
+    'phone number',
+    'address',
+    'social security number',
+    'credit card number',
+    'date of birth',
+    'organization',
+    'company',
+    'location',
+    'ip address',
+    'bank account',
+    'passport number',
+    'driver license',
+]
+
+
 class GliNERRecognizer:
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -46,6 +67,15 @@ class GliNERRecognizer:
         self.model_name = config.get('model', 'xomad/gliner-model-merge-large-v1.0')
         self.anonymize = config.get('anonymize', True)
         self.anonymize_char = config.get('anonymizeChar', '\u2588')
+
+        # Entity types to detect. Configurable per pipeline via the `entityTypes`
+        # field; falls back to the common defaults when unset or empty. Blank
+        # entries are dropped so an empty value never disables detection.
+        configured = config.get('entityTypes')
+        cleaned = (
+            [label.strip() for label in configured if isinstance(label, str) and label.strip()] if configured else []
+        )
+        self.labels = cleaned or DEFAULT_PII_LABELS
 
         enginePath = expand('%execPath%')
         rule_file_path = os.path.join(enginePath, 'nucleuz', 'rulePack.dat')

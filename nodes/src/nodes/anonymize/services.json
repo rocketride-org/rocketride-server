@@ -228,6 +228,31 @@
 			"title": "Character to use for anonymization",
 			"description": "Character"
 		},
+		"entityTypes": {
+			"type": "array",
+			"title": "Entity types to anonymize",
+			"description": "PII / entity types to detect and mask. Pre-filled with common types; remove any you don't want, or add your own (the model is zero-shot, so any label works).",
+			"items": {
+				"type": "string"
+			},
+			"default": [
+				"person",
+				"name",
+				"email",
+				"phone number",
+				"address",
+				"social security number",
+				"credit card number",
+				"date of birth",
+				"organization",
+				"company",
+				"location",
+				"ip address",
+				"bank account",
+				"passport number",
+				"driver license"
+			]
+		},
 		"anonymize.model": {
 			"type": "string",
 			"title": "Model name",
@@ -237,75 +262,75 @@
 		},
 		"anonymize.custom": {
 			"object": "custom",
-			"properties": ["anonymize.model", "anonymizeChar"]
+			"properties": ["anonymize.model", "anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerMergedLarge": {
 			"object": "glinerMergedLarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerMultiPII": {
 			"object": "glinerMultiPII",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerPIILarge": {
 			"object": "glinerPIILarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerSmall": {
 			"object": "glinerSmall",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerMedium": {
 			"object": "glinerMedium",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerLarge": {
 			"object": "glinerLarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerMulti": {
 			"object": "glinerMulti",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.gretelSmall": {
 			"object": "gretelSmall",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.gretelLarge": {
 			"object": "gretelLarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerKo": {
 			"object": "glinerKo",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerIt": {
 			"object": "glinerIt",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerAr": {
 			"object": "glinerAr",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerCommunitySmall": {
 			"object": "glinerCommunitySmall",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerCommunityMedium": {
 			"object": "glinerCommunityMedium",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerCommunityLarge": {
 			"object": "glinerCommunityLarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerBiomedSmall": {
 			"object": "glinerBiomedSmall",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.glinerBiomedLarge": {
 			"object": "glinerBiomedLarge",
-			"properties": ["anonymizeChar"]
+			"properties": ["anonymizeChar", "entityTypes"]
 		},
 		"anonymize.profile": {
 			"title": "Model",
