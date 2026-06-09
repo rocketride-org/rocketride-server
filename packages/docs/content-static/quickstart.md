@@ -1,0 +1,72 @@
+---
+sidebar_position: 2
+sidebar_label: Quickstart
+---
+
+<head>
+  <title>Quickstart - RocketRide Documentation</title>
+</head>
+
+# Quickstart
+
+Go from zero to a running pipeline in under 10 minutes. This guide walks you through installing RocketRide, deploying a server, and building your first pipeline.
+
+## 1. Install the VS Code Extension
+
+Search for **RocketRide** in the VS Code extension marketplace and install it.
+
+> Not using VS Code? RocketRide is also available on the [Open VSX Registry](https://open-vsx.org/extension/RocketRide/rocketride) for compatible editors.
+
+## 2. Deploy a Server
+
+Click the RocketRide (🚀) icon in your IDE sidebar. You'll be prompted to choose how to run the server:
+
+- **Local (Recommended)** — Pulls the server directly into your IDE with no additional setup.
+- **On-Premises** — Run the server on your own hardware via Docker or build from source.
+- **RocketRide Cloud** — Managed hosting (coming soon).
+
+For most users, **Local** is the fastest way to get started.
+
+## 3. Create a Pipeline File
+
+Create a new file with the `.pipe` extension (e.g., `my-first-pipeline.pipe`). The IDE extension will automatically open it in the visual builder canvas.
+
+All `.pipe` files are JSON under the hood, but you'll interact with them visually through the canvas.
+
+## 4. Build a Simple Chat Pipeline
+
+Every pipeline starts with a **source node**. For a simple chat pipeline:
+
+1. Add a **Chat** source node — this provides an interactive conversational interface.
+2. Add an **LLM** node — choose your preferred provider (OpenAI, Anthropic, Google, etc.) and configure your API key.
+3. Connect the Chat source's output lane to the LLM's input lane.
+4. The LLM's response will be routed back through the chat interface automatically.
+
+Your pipeline should look like this: `Chat → LLM`.
+
+## 5. Run Your Pipeline
+
+Press the **▶️ button** on the source node in the canvas, or launch it from the **Connection Manager** panel.
+
+Once running, open the chat interface to send a message. You'll see the LLM respond in real time.
+
+Use the Connection Manager to view analytics — trace call trees, token usage, memory consumption, and more.
+
+## 6. Next Steps
+
+Now that you have a working pipeline, explore what else RocketRide can do:
+
+- **[Nodes Overview](/nodes)** — Browse all available nodes.
+- **[SDK](/develop/python)** — Integrate pipelines into your TypeScript or Python applications.
+- **[MCP Server](/protocols/mcp)** — Expose pipelines as tools for AI assistants like Claude and Cursor.
+
+### Deploying to Production
+
+When you're ready to move beyond local development:
+
+```bash
+docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+```
+
+See the [VS Code Extension docs](/ide-extensions/vscode/usage) for more on managing deployments.

@@ -1,0 +1,208 @@
+/**
+ * RocketRide documentation theme.
+ *
+ * Primary accent: Horizon Blue (#41b6e6). RocketRide red (#F93822) is reserved
+ * for the logo and occasional highlights. Layout models the Devdocs X reference:
+ * a floating, rounded content panel on a deep background. Dark is the default;
+ * light mode mirrors the surfaces.
+ */
+
+:root {
+	/* Brand tokens */
+	--rr-red: #f93822;
+	--rr-offwhite: #fafbf8;
+	--rr-abyss: #1e1a34;
+	--rr-graphite: #222223;
+	--rr-amethyst: #5f2167;
+	--rr-indigo: #370b7a;
+	--rr-horizon: #41b6e6;
+
+	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	--ifm-heading-font-family: var(--ifm-font-family-base);
+	--ifm-code-font-size: 92%;
+	--ifm-heading-font-weight: 650;
+
+	/* Light mode: Horizon darkened for contrast on white */
+	--ifm-color-primary: #1f9fd0;
+	--ifm-color-primary-dark: #1c8ebb;
+	--ifm-color-primary-darker: #1a86b1;
+	--ifm-color-primary-darkest: #156e92;
+	--ifm-color-primary-light: #34a8d6;
+	--ifm-color-primary-lighter: #41aed8;
+	--ifm-color-primary-lightest: #67c0e1;
+
+	--rr-outer-bg: linear-gradient(135deg, #eef1f6 0%, #e6ebf3 100%);
+	--ifm-background-color: #ffffff;
+	--ifm-background-surface-color: #f5f7fb;
+	--rr-panel-border: rgba(30, 26, 52, 0.08);
+	--ifm-toc-border-color: transparent;
+	--ifm-navbar-background-color: var(--ifm-background-color);
+	--ifm-footer-background-color: var(--ifm-background-color);
+
+	--docusaurus-highlighted-code-line-bg: rgba(65, 182, 230, 0.12);
+}
+
+[data-theme='dark'] {
+	/* Horizon Blue accent ramp */
+	--ifm-color-primary: #41b6e6;
+	--ifm-color-primary-dark: #2aa9de;
+	--ifm-color-primary-darker: #1f9fd0;
+	--ifm-color-primary-darkest: #1982ac;
+	--ifm-color-primary-light: #5cc0ea;
+	--ifm-color-primary-lighter: #6ac6ec;
+	--ifm-color-primary-lightest: #8fd4f1;
+
+	/* Deep outer background; Abyss-blue floating panel */
+	--rr-outer-bg: radial-gradient(1200px 600px at 50% -10%, #241b3f 0%, #15111e 55%, #110e18 100%);
+	--ifm-background-color: #1e1a34;
+	--ifm-background-surface-color: #262146;
+	--rr-panel-border: rgba(255, 255, 255, 0.07);
+
+	--ifm-font-color-base: #e7e6f0;
+	--ifm-heading-color: var(--rr-offwhite);
+	--ifm-navbar-background-color: var(--ifm-background-color);
+	--ifm-footer-background-color: var(--ifm-background-color);
+	--ifm-menu-color: rgba(250, 251, 248, 0.72);
+	--ifm-menu-color-background-active: rgba(65, 182, 230, 0.12);
+	--ifm-menu-color-background-hover: rgba(255, 255, 255, 0.05);
+	--ifm-toc-border-color: transparent;
+	--ifm-hr-background-color: rgba(255, 255, 255, 0.08);
+
+	--docusaurus-highlighted-code-line-bg: rgba(65, 182, 230, 0.16);
+}
+
+/* ----------------------------------------------------------------------------
+ * Floating rounded panel on a deep background (Devdocs X look)
+ * ------------------------------------------------------------------------- */
+html,
+body {
+	background: var(--rr-outer-bg);
+	background-attachment: fixed;
+}
+
+#__docusaurus {
+	max-width: 1340px;
+	margin: 0 auto 1.5rem;
+	min-height: calc(100vh - 1.5rem);
+	background: var(--ifm-background-color);
+	border: 1px solid var(--rr-panel-border);
+	border-top: none;
+	border-radius: 0 0 16px 16px;
+	overflow: clip;
+	box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+@media (max-width: 996px) {
+	#__docusaurus {
+		margin: 0;
+		border-radius: 0;
+		border: none;
+		min-height: 100vh;
+	}
+}
+
+/* Navbar sits inside the panel (sticky can't work under overflow: clip). */
+.navbar {
+	position: static;
+	box-shadow: none;
+	border-bottom: 1px solid var(--rr-panel-border);
+	background: var(--ifm-navbar-background-color);
+	backdrop-filter: none;
+	/* No hide/reveal-on-scroll animation. */
+	transform: none !important;
+	transition: none !important;
+}
+
+.navbar__title {
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: var(--ifm-heading-color);
+}
+
+.navbar__logo {
+	height: 1.75rem;
+}
+
+/* ----------------------------------------------------------------------------
+ * Sidebar
+ * ------------------------------------------------------------------------- */
+.menu {
+	padding: 1rem 0.75rem;
+	font-size: 0.92rem;
+}
+
+.menu__link {
+	border-radius: 8px;
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+	color: var(--ifm-color-primary);
+	font-weight: 600;
+}
+
+.theme-doc-sidebar-container {
+	border-right: none !important;
+}
+
+/* No divider between the right table-of-contents and the content. */
+.theme-doc-toc-desktop,
+.table-of-contents {
+	border-left: none !important;
+}
+
+/* ----------------------------------------------------------------------------
+ * Content: cards, callouts, tables, code
+ * ------------------------------------------------------------------------- */
+.theme-admonition {
+	border-radius: 12px;
+	border: 1px solid var(--rr-panel-border);
+}
+
+.markdown table {
+	border-radius: 12px;
+	overflow: hidden;
+	border: 1px solid var(--rr-panel-border);
+}
+
+.markdown table thead {
+	background: var(--ifm-background-surface-color);
+}
+
+div[class^='codeBlockContainer'],
+.theme-code-block {
+	border-radius: 12px;
+	border: 1px solid var(--rr-panel-border);
+}
+
+article a {
+	font-weight: 500;
+}
+
+/* ----------------------------------------------------------------------------
+ * Footer (dark, inside the panel)
+ * ------------------------------------------------------------------------- */
+.footer {
+	border-top: 1px solid var(--rr-panel-border);
+}
+
+/* ----------------------------------------------------------------------------
+ * Copy / View as Markdown controls (DocItem swizzle)
+ * ------------------------------------------------------------------------- */
+.docs-md-actions {
+	display: flex;
+	gap: 0.5rem;
+	justify-content: flex-end;
+	margin-bottom: 1rem;
+}
+
+.docs-md-actions .button {
+	--ifm-button-border-color: var(--ifm-color-primary);
+	border-color: var(--ifm-color-primary);
+	color: var(--ifm-color-primary);
+	background: transparent;
+}
+
+.docs-md-actions .button:hover {
+	background: var(--ifm-color-primary);
+	color: #fff;
+}
