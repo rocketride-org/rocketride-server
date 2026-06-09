@@ -213,7 +213,7 @@ class FileLock:
 
     def __enter__(self):
         """Acquire the file lock, blocking until it is available."""
-        global _progress_path
+        global _progress_path, _sidecar_start_time, _last_sidecar_message
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
 
         while True:
@@ -223,8 +223,10 @@ class FileLock:
                     msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     fcntl.flock(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # Lock acquired — enable progress sidecar writes
+                # Lock acquired — initialize sidecar state and enable writes
                 _progress_path = self._sidecar_path
+                _sidecar_start_time = time.time()
+                _last_sidecar_message = None
                 return self
             except (OSError, BlockingIOError):
                 if self._file:

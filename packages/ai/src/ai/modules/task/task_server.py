@@ -1196,7 +1196,9 @@ class TaskServer(DAPBase):
                 # consuming resources and reporting stale metrics.
                 if control.task:
                     try:
-                        await control.task.stop_task()
+                        await asyncio.wait_for(control.task.stop_task(), timeout=30)
+                    except asyncio.TimeoutError:
+                        self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
                     except Exception:
                         self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             self._task_control.pop(control.token, None)
