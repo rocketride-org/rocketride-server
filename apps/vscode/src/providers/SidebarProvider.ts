@@ -400,11 +400,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				connectionMode: config.development.connectionMode,
 				developmentTeamId: config.development.teamId,
 				devProgressMessage: status.progressMessage,
+				devProgressLogLine: status.progressLogLine,
 				// Deploy connection
 				deployConnectionState: deployStatus.state,
 				deployConnectionMode: config.deployment.connectionMode,
 				deployTargetTeamId: config.deployment.teamId,
 				deployProgressMessage: deployStatus.progressMessage,
+				deployProgressLogLine: deployStatus.progressLogLine,
 				// Teams (from respective servers)
 				teams: this.getTeamsFromClient(this.connectionManager.getClient()),
 				deployTeams: this.getTeamsFromClient(this.deployManager.getClient()),

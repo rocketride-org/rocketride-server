@@ -162,6 +162,7 @@ export class ConnectionManager extends EventEmitter {
 					this.updateConnectionStatus({
 						state: ConnectionState.CONNECTING,
 						progressMessage: event.message,
+						progressLogLine: event.logLine,
 					});
 				}
 				break;
