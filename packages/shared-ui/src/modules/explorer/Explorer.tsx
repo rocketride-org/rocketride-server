@@ -725,9 +725,11 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 						<button style={{ ...S.headerAction, ...actionHoverBg('newFile') }} title={`New ${config.title.replace(/s$/, '')}`} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
 							<BxFilePlus size={16} />
 						</button>
-						<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} title="New Folder" onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
-							<BxFolderPlus size={16} />
-						</button>
+						{config.allowFolders !== false && (
+							<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} title="New Folder" onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
+								<BxFolderPlus size={16} />
+							</button>
+						)}
 					</>
 				)}
 				<button style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>

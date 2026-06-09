@@ -165,6 +165,8 @@ export interface ExplorerConfig {
 	createPlaceholder?: string;
 	/** Empty state message. Default: 'No files'. */
 	emptyMessage?: string;
+	/** Whether to show the "New Folder" action. Default: true. */
+	allowFolders?: boolean;
 }
 
 // =============================================================================

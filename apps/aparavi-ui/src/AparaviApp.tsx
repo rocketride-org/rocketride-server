@@ -298,15 +298,24 @@ const ChatTab: React.FC<{
 		initialMessages: savedMessages,
 	});
 
-	// Persist messages back to Documents whenever they change
+	// Persist messages back to Documents + disk whenever they change
+	const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 	useEffect(() => {
 		if (!docs || messages.length === 0) return;
 		// Only persist user and bot messages (not status/system ephemeral ones)
 		const persistable = messages.filter((m) => m.sender === 'user' || m.sender === 'bot');
-		if (persistable.length > 0) {
-			docs.updateContent(uri, { messages: persistable });
-		}
-	}, [messages, uri, docs]);
+		if (persistable.length === 0) return;
+		const content = { messages: persistable };
+		docs.updateContent(uri, content);
+		// Debounce the disk write to avoid excessive I/O on rapid message updates
+		clearTimeout(saveTimer.current);
+		saveTimer.current = setTimeout(() => {
+			if (client) saveChat(client, uri, content).catch((err) =>
+				console.error('[AparaviApp] Failed to persist chat to disk:', err)
+			);
+		}, 500);
+	}, [messages, uri, docs, client]);
+	useEffect(() => () => clearTimeout(saveTimer.current), []);
 
 	/** Send a message through the shared pipeline. */
 	const handleSend = useCallback(

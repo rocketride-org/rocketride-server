@@ -28,7 +28,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { ShellSidebarProps } from 'shell-ui';
 import { useShellConnection, NavButton, BxPlus } from 'shell-ui';
 import { Explorer } from 'shared';
-import type { ExplorerEntry, ExplorerConfig } from 'shared';
+import type { ExplorerEntry, ExplorerConfig, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';
 
@@ -43,6 +43,23 @@ const CHAT_CONFIG: ExplorerConfig = {
 	displayName: (name: string) => name.replace(/\.chat$/, '') || name,
 	createPlaceholder: 'chat name',
 	emptyMessage: 'No saved chats',
+	allowFolders: false,
+};
+
+/**
+ * No-op VFS for the chat Explorer.
+ *
+ * The Aparavi sidebar manages file operations via onFileManage callbacks
+ * (which use the chatStore helpers) rather than through the VFS interface.
+ * This stub satisfies the Explorer contract without exposing raw VFS access.
+ */
+const NOOP_VFS: IVirtualFileSystem = {
+	list: async () => [],
+	read: async () => null,
+	write: async () => {},
+	rename: async () => {},
+	delete: async () => {},
+	mkdir: async () => {},
 };
 
 // =============================================================================
@@ -192,7 +209,7 @@ const AparaviSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 
 			{/* Chat file tree (shared Explorer component) */}
 			<Explorer
-				vfs={null as any}
+				vfs={NOOP_VFS}
 				config={CHAT_CONFIG}
 				entries={entries}
 				isConnected={isConnected}

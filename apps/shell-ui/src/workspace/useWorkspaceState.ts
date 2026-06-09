@@ -414,9 +414,11 @@ export function useWorkspaceState(
 		// so the next app starts with a clean slate, and update the connection
 		// display name so the server monitor shows which app is active
 		if (client) {
-			client.clearAllMonitors().catch((err) => {
+			try {
+				await client.clearAllMonitors();
+			} catch (err) {
 				console.error('[Workspace] Failed to clear monitors on app switch:', err);
-			});
+			}
 			client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
 		}
 
