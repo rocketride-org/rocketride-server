@@ -69,17 +69,108 @@ _processed: set[str] = set()
 # ---------------------------------------------------------------------------
 
 
+# Path to the progress sidecar file, set when the lock is acquired.
+# The lock holder writes status updates here so waiting processes can
+# display what is happening instead of a generic "Waiting..." message.
+_progress_path: Optional[str] = None
+
+# Track packages currently being downloaded so we can show a combined
+# status like "Downloading torch (2.7GiB), transformers (11.4MiB)"
+# instead of only the last line uv emitted.
+# Each entry is (name, display) where display includes the size suffix.
+_downloading: list[tuple[str, str]] = []
+
+
+def _write_sidecar(message: str):
+    """Write a progress update to the sidecar file (if lock is held)."""
+    if _progress_path:
+        try:
+            with open(_progress_path, 'w', encoding='utf-8') as f:
+                f.write(f'{time.time()}\n{message}\n')
+        except OSError:
+            pass
+
+
+def updateProgress(message: str):
+    """
+    Send a status update to the engine monitor and write the progress sidecar.
+
+    Tracks uv "Downloading <pkg>" / "Downloaded <pkg>" lines to build a
+    combined status of all in-flight downloads, e.g. "Downloading torch,
+    transformers".  Non-download lines are passed through as-is.
+    """
+    debug(f'  [uv] {message}')
+    stripped = message.strip()
+
+    # uv emits "Downloading <name> (<size>)" when a download starts
+    if stripped.startswith('Downloading '):
+        display = stripped[len('Downloading ') :]
+        # Extract bare name for matching, e.g. "stripe (1.4MiB)" -> "stripe"
+        name = display[: display.index(' (')] if ' (' in display else display
+        if name and not any(n == name for n, _ in _downloading):
+            _downloading.append((name, display))
+        # Emit combined status with sizes, e.g. "Downloading torch (2.7GiB), stripe (1.4MiB)"
+        combined = f'Downloading {", ".join(d for _, d in _downloading)}'
+        monitorStatus(combined)
+        _write_sidecar(combined)
+        return
+
+    # uv emits "Downloaded <name>" when a download finishes
+    if stripped.startswith('Downloaded '):
+        name = stripped[len('Downloaded ') :]
+        if ' (' in name:
+            name = name[: name.index(' (')]
+        _downloading[:] = [(n, d) for n, d in _downloading if n != name]
+        # If other downloads are still in flight, show them
+        if _downloading:
+            combined = f'Downloading {", ".join(d for _, d in _downloading)}'
+            monitorStatus(combined)
+            _write_sidecar(combined)
+        else:
+            monitorStatus(message)
+            _write_sidecar(message)
+        return
+
+    # Any non-download line clears the tracking (new phase)
+    _downloading.clear()
+    monitorStatus(message)
+    _write_sidecar(message)
+
+
+def _read_progress(path: str) -> str:
+    """Read the progress sidecar written by the lock holder."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.read().strip().splitlines()
+        if len(lines) < 2:
+            return ''
+        # Line 0 = unix timestamp, line 1 = status message
+        started = float(lines[0])
+        elapsed = int(time.time() - started)
+        return f'{lines[1]} ({elapsed}s)'
+    except (OSError, ValueError):
+        return ''
+
+
 class FileLock:
-    """Simple cross-platform file lock using exclusive file access."""
+    """
+    Simple cross-platform file lock using exclusive file access.
+
+    While the lock is held, callers use ``updateProgress()`` instead of
+    ``monitorStatus()`` so that a sidecar file is kept up to date for
+    waiting processes to read.
+    """
 
     def __init__(self, lock_path: str, poll_interval: float = 1.0):
         """Initialize the file lock with path and polling interval."""
         self.lock_path = lock_path
         self.poll_interval = poll_interval
         self._file = None
+        self._sidecar_path = lock_path.replace('.lock', '.progress')
 
     def __enter__(self):
         """Acquire the file lock, blocking until it is available."""
+        global _progress_path
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
 
         while True:
@@ -89,16 +180,29 @@ class FileLock:
                     msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     fcntl.flock(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Lock acquired — enable progress sidecar writes
+                _progress_path = self._sidecar_path
                 return self
             except (OSError, BlockingIOError):
                 if self._file:
                     self._file.close()
                     self._file = None
-                monitorStatus('Waiting for another installation to complete...')
+                # Read what the lock holder is doing and include it in our status
+                detail = _read_progress(self._sidecar_path)
+                if detail:
+                    monitorStatus(f'Waiting — {detail}')
+                else:
+                    monitorStatus('Waiting for another installation to complete...')
                 time.sleep(self.poll_interval)
 
     def __exit__(self, *args):
-        """Release the file lock."""
+        """Release the file lock and clean up progress sidecar."""
+        global _progress_path
+        _progress_path = None
+        try:
+            os.remove(self._sidecar_path)
+        except OSError:
+            pass
         if self._file:
             self._file.close()
             self._file = None
@@ -199,7 +303,7 @@ def _ensure_pip():
         debug('pip is available')
         return
 
-    monitorStatus('Bootstrapping pip...')
+    updateProgress('Bootstrapping pip...')
 
     # Use _run which keeps stdin open until process exits
     try:
@@ -244,7 +348,7 @@ def _ensure_wheel():
         debug('wheel is available')
         return
 
-    monitorStatus('Installing wheel...')
+    updateProgress('Installing wheel...')
     result = _run(
         [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
     )
@@ -280,7 +384,7 @@ def _ensure_setuptools():
         debug('setuptools is available')
         return
 
-    monitorStatus('Installing setuptools...')
+    updateProgress('Installing setuptools...')
     result = _run(
         [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
     )
@@ -302,7 +406,7 @@ def _ensure_uv():
         debug('uv is available')
         return
 
-    monitorStatus('Installing uv...')
+    updateProgress('Installing uv...')
     result = _run([sys.executable, '-m', 'pip', 'install', 'uv', '--quiet', '--disable-pip-version-check'], check=False)
 
     if result.returncode != 0:
@@ -473,7 +577,7 @@ def _compile_constraints(constraints_path: str):
         raise RuntimeError('uv executable not found')
 
     exe_dir = _get_executable_dir()
-    monitorStatus('Compiling constraints...')
+    updateProgress('Compiling constraints...')
 
     args = [
         _uv_abs_path(),
@@ -537,7 +641,7 @@ def ensure_constraints() -> str:
         return constraints_path
 
     debug('Requirements changed, rebuilding constraints...')
-    monitorStatus('Rebuilding constraints...')
+    updateProgress('Rebuilding constraints...')
 
     # Combine all requirements
     _combine_requirements(req_files, combined_path)
@@ -556,232 +660,26 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _parse_dependency_error(output: str) -> tuple[str | None, str | None]:
-    """
-    Parse uv/pip dependency resolution errors into user-friendly messages.
-
-    Returns (friendly_message, context) where context is additional raw info.
-    Both may be None if parsing completely failed.
-    """
-    import re
-
-    messages = []
-
-    # --- UV-style errors ---
-
-    # Pattern: "X==version depends on Y"
-    # Example: "accelerate==1.12.0 depends on torch==2.8.0+cu126"
-    depends_matches = re.findall(r'(\S+)==(\S+)\s+depends on\s+(\S+)', output)
-
-    # Pattern: "there is no version of X"
-    no_version_matches = re.findall(r'there is no version of\s+(\S+)', output)
-
-    # Pattern: "X cannot be used"
-    cannot_use = re.search(r'we can conclude that\s+(\S+)==(\S+)\s+cannot be used', output)
-
-    # Pattern: "requirements are unsatisfiable"
-    unsatisfiable = 'requirements are unsatisfiable' in output.lower()
-
-    # --- Pip-style errors ---
-
-    # Pattern: "No matching distribution found for X"
-    no_dist = re.search(r'No matching distribution found for\s+(\S+)', output, re.IGNORECASE)
-
-    # Pattern: "Could not find a version that satisfies the requirement X"
-    no_satisfy = re.search(r'Could not find a version that satisfies the requirement\s+(\S+)', output, re.IGNORECASE)
-
-    # Pattern: "X requires Python >=Y"
-    python_req = re.search(r'(\S+)\s+requires\s+[Pp]ython\s*([<>=!]+\s*[\d.]+)', output)
-
-    # Pattern: "package X has requirement Y, but you have Z"
-    has_req = re.search(r'(\S+)\s+has requirement\s+(\S+),?\s+but you have\s+(\S+)', output, re.IGNORECASE)
-
-    # Pattern: "X is not available for" (platform issues)
-    not_available = re.search(r'(\S+)\s+is not available for', output, re.IGNORECASE)
-
-    # Pattern: version conflict "X and Y are incompatible"
-    incompatible = re.search(r'(\S+)\s+and\s+(\S+)\s+are incompatible', output, re.IGNORECASE)
-
-    # Pattern: "Conflicting dependencies"
-    conflicting = re.search(r'[Cc]onflicting dependencies', output)
-
-    # --- Build the message ---
-
-    # UV: depends + no_version = clear cause
-    if depends_matches and no_version_matches:
-        for req_pkg, req_ver, dep in depends_matches:
-            for missing in no_version_matches:
-                if missing in dep or dep in missing:
-                    messages.append(f"'{req_pkg}=={req_ver}' requires '{missing}' which is not available")
-        if not messages:
-            # Fallback: just report what we found
-            req_pkg, req_ver, dep = depends_matches[0]
-            missing = no_version_matches[0]
-            messages.append(f"'{req_pkg}=={req_ver}' requires '{dep}', but '{missing}' is not available")
-
-    # UV: cannot be used
-    if cannot_use:
-        pkg_name = cannot_use.group(1)
-        pkg_version = cannot_use.group(2)
-        messages.append(f"'{pkg_name}=={pkg_version}' cannot be used due to dependency conflicts")
-
-    # Pip: no matching distribution
-    if no_dist:
-        messages.append(f"No matching distribution found for '{no_dist.group(1)}'")
-
-    # Pip: no version satisfies
-    if no_satisfy:
-        messages.append(f"No version satisfies requirement '{no_satisfy.group(1)}'")
-
-    # Python version requirement
-    if python_req:
-        messages.append(f"'{python_req.group(1)}' requires Python {python_req.group(2)}")
-
-    # Has requirement conflict
-    if has_req:
-        messages.append(f"'{has_req.group(1)}' requires '{has_req.group(2)}' but '{has_req.group(3)}' is installed")
-
-    # Platform not available
-    if not_available:
-        messages.append(f"'{not_available.group(1)}' is not available for this platform")
-
-    # Incompatible packages
-    if incompatible:
-        messages.append(f"'{incompatible.group(1)}' and '{incompatible.group(2)}' are incompatible")
-
-    # Generic conflicting
-    if conflicting and not messages:
-        messages.append('Conflicting dependencies detected')
-
-    # Unsatisfiable as last resort
-    if unsatisfiable and not messages:
-        messages.append('Requirements are unsatisfiable')
-
-    # --- Format output ---
-
-    if not messages:
-        return None, None
-
-    # Combine messages
-    friendly = '. '.join(messages) + '.'
-
-    # Add actionable advice
-    if depends_matches:
-        pkg = depends_matches[0][0]
-        friendly += f" Consider removing or updating '{pkg}' in requirements.txt."
-
-    # Extract context: first few lines of actual error
-    context_lines = []
-    for line in output.splitlines():
-        line = line.strip()
-        if line and not line.startswith('hint:') and len(line) < 200:
-            context_lines.append(line)
-            if len(context_lines) >= 3:
-                break
-    context = ' | '.join(context_lines) if context_lines else None
-
-    return friendly, context
-
-
-def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
-    """
-    Run uv pip install --dry-run and return list of packages that would be installed.
-
-    Returns empty list if all requirements are already satisfied.
-    Raises RuntimeError if dependency resolution fails.
-    """
-    if not _uv_available():
-        raise RuntimeError('uv executable not found')
-
-    exe_dir = _get_executable_dir()
-    args = [
-        _uv_abs_path(),
-        'pip',
-        'install',
-        '--python',
-        sys.executable,
-        '-r',
-        requirements_path,
-        '--index-strategy',
-        'unsafe-best-match',
-        '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
-        '--dry-run',
-        '--no-color',
-    ]
-
-    # Only add constraints if the file exists and has content
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', './cache/constraints.txt'])
-
-    debug(f'Dry-run: {args}')
-    result = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        check=False,
-        stdin=subprocess.PIPE,
-        cwd=exe_dir,
-    )
-
-    # Check if dry-run failed (e.g., dependency resolution error)
-    if result.returncode != 0:
-        output = (result.stderr + result.stdout).strip()
-
-        # Try to parse a user-friendly error message
-        friendly_msg, context = _parse_dependency_error(output)
-        if friendly_msg:
-            debug(f'Dependency error: {friendly_msg}')
-            if context:
-                debug(f'  Context: {context}')
-            error(f'Dependency error in {requirements_path}: {friendly_msg}')
-            raise RuntimeError(f'Dependency error: {friendly_msg}')
-        else:
-            # Couldn't parse - show raw output
-            debug(f'Dry-run failed (rc={result.returncode}): {output[:500]}')
-            error(f'Dependency resolution failed for {requirements_path}: {output}')
-            raise RuntimeError(f'Dependency resolution failed: {output[:200]}')
-
-    # Parse packages from output - lines starting with "+ "
-    packages = []
-    for line in (result.stderr + result.stdout).splitlines():
-        line = line.strip()
-        if line.startswith('+ '):
-            # Line format: "+ package==version" or "+ package[extra]==version"
-            pkg = line[2:].strip()  # Remove "+ "
-            if '==' in pkg:
-                pkg = pkg.split('==')[0]
-            if '[' in pkg:
-                pkg = pkg.split('[')[0]
-            packages.append(pkg)
-
-    return packages
-
-
 def _install_requirements(requirements_path: str, constraints_path: str):
-    """Install requirements using uv with constraints. Only installs if needed."""
+    """
+    Install requirements using uv with constraints.
+
+    uv skips already-satisfied packages automatically. Download and
+    install progress is streamed line-by-line through updateProgress()
+    which tracks in-flight downloads for a combined status message.
+    """
     import importlib
 
     debug(f'Installing requirements from: {requirements_path}')
 
-    # Check what needs to be installed (raises on failure)
-    packages = _install_dry_run(requirements_path, constraints_path)
-    debug(f'Dry-run found {len(packages)} packages to install: {packages}')
-
-    # If dry-run returned empty list, all packages are satisfied
-    if len(packages) == 0:
-        debug(f'All requirements satisfied: {requirements_path}')
+    # Skip empty requirements files (comments/blanks only) to avoid uv warnings
+    with open(requirements_path, 'r', encoding='utf-8') as f:
+        has_deps = any(line.strip() and not line.strip().startswith('#') for line in f)
+    if not has_deps:
+        debug(f'  Empty requirements file, skipping: {requirements_path}')
         return
 
-    # Format status message: show up to 5 packages, or 4 + "..." if more than 5
-    if len(packages) <= 5:
-        pkg_list = ', '.join(packages)
-    else:
-        pkg_list = ', '.join(packages[:4]) + ', ...'
-    monitorStatus(f'Installing {pkg_list}')
-    debug(f'sys.executable: {sys.executable}')
-    debug(f'cwd: {os.getcwd()}')
+    updateProgress(f'Installing {os.path.basename(requirements_path)}')
 
     # Build uv command
     exe_dir = _get_executable_dir()
@@ -817,7 +715,7 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     for line in proc.stdout:
         line = line.rstrip()
         output_lines.append(line)
-        monitorStatus(line)
+        updateProgress(line)
     proc.wait()
 
     if proc.returncode != 0:
