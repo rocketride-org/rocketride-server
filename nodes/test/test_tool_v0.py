@@ -3,22 +3,29 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for tool_v0 IInstance pure-logic helpers."""
+"""Unit tests for tool_v0 IInstance (no network).
+
+Covers the v0 Platform API response parsing (_shape_chat) and the
+generate_ui / refine_ui tool methods against a mocked post_with_retry,
+including the success, API-error ({"error": {...}}), and empty-files cases.
+"""
 
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# rocketlib stub — must be installed before importing the module under test
+# Stubs — installed before importing the module under test. The new IInstance
+# imports `normalize_tool_input` and `post_with_retry` from `ai.common.utils`
+# and `requests`; provide lightweight stand-ins so the module imports and runs
+# without the engine runtime or network.
 # ---------------------------------------------------------------------------
 
 _WARNING_CALLS: list[str] = []
@@ -32,7 +39,26 @@ def _stub_warning(msg: str, *_a: object, **_k: object) -> None:
     _WARNING_CALLS.append(msg)
 
 
-def _install_rocketlib_stub() -> None:
+# Captures the args post_with_retry is called with, and what it should return/raise.
+_POST = SimpleNamespace(calls=[], return_body=None, side_effect=None)
+
+
+def _reset_post() -> None:
+    _POST.calls = []
+    _POST.return_body = None
+    _POST.side_effect = None
+
+
+def _stub_post_with_retry(url, *, headers=None, json=None, timeout=None, **_kw):
+    _POST.calls.append({'url': url, 'headers': headers, 'json': json, 'timeout': timeout})
+    if _POST.side_effect is not None:
+        raise _POST.side_effect
+    resp = MagicMock()
+    resp.json.return_value = _POST.return_body
+    return resp
+
+
+def _install_stubs() -> None:
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
@@ -41,21 +67,42 @@ def _install_rocketlib_stub() -> None:
     rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config')
     sys.modules.setdefault('rocketlib', rocketlib)
 
+    # requests stub with real exception classes so `except` clauses catch them.
+    requests = types.ModuleType('requests')
+    requests.exceptions = types.SimpleNamespace()
+    requests.exceptions.Timeout = TimeoutError
+    requests.exceptions.ConnectionError = ConnectionError
+
+    class _RequestException(Exception):
+        pass
+
+    class _InvalidJSONError(_RequestException):
+        pass
+
+    requests.exceptions.RequestException = _RequestException
+    requests.exceptions.InvalidJSONError = _InvalidJSONError
+    requests.RequestException = _RequestException
+    sys.modules.setdefault('requests', requests)
+
     ai_pkg = types.ModuleType('ai')
     ai_pkg.__path__ = []
     ai_common = types.ModuleType('ai.common')
     ai_common.__path__ = []
+    ai_utils = types.ModuleType('ai.common.utils')
+    ai_utils.normalize_tool_input = lambda args, **_kw: args if isinstance(args, dict) else {}
+    ai_utils.post_with_retry = _stub_post_with_retry
     ai_config = types.ModuleType('ai.common.config')
     ai_config.Config = MagicMock()
     sys.modules.setdefault('ai', ai_pkg)
     sys.modules.setdefault('ai.common', ai_common)
+    sys.modules.setdefault('ai.common.utils', ai_utils)
     sys.modules.setdefault('ai.common.config', ai_config)
 
 
-_install_rocketlib_stub()
+_install_stubs()
 
 # ---------------------------------------------------------------------------
-# Load the module under test via importlib so we avoid package __init__ chains
+# Load the module under test via importlib so we avoid the package __init__ chain.
 # ---------------------------------------------------------------------------
 
 _NODES_ROOT = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
@@ -63,9 +110,6 @@ _IINSTANCE_PATH = _NODES_ROOT / 'tool_v0' / 'IInstance.py'
 
 
 def _load_iinstance():
-    # The module uses `from .IGlobal import IGlobal` so it needs a parent package.
-    # Register a fake package 'tool_v0' and its IGlobal sub-module in sys.modules
-    # so the relative import resolves without a real filesystem package.
     pkg_name = 'tool_v0'
     pkg_stub = types.ModuleType(pkg_name)
     pkg_stub.__path__ = [str(_NODES_ROOT / 'tool_v0')]
@@ -91,213 +135,198 @@ def _load_iinstance():
 
 
 _mod = _load_iinstance()
-# Force the loaded module's `warning` reference to our stub. Required because
-# `from rocketlib import warning` binds the name at import time, so when the
-# real rocketlib is already in sys.modules (e.g. on CI inside the engine
-# pytest runner) our sys.modules stub is ignored and _mod.warning points at
-# the engine's logger. Overriding the attribute on the loaded module patches
-# the actual reference used by _normalize_tool_input.
+# Bind the module's `warning` reference to our stub (see tavily test rationale:
+# `from rocketlib import warning` binds at import time, so under the engine's
+# pytest runner the real logger would otherwise be used).
 _mod.warning = _stub_warning
 
-_normalize_tool_input = _mod._normalize_tool_input
-_extract_code = _mod._extract_code
+_shape_chat = _mod._shape_chat
 IInstance = _mod.IInstance
-
-
-# ---------------------------------------------------------------------------
-# Helper: build a minimal IInstance without calling __init__
-# ---------------------------------------------------------------------------
 
 
 def _make_instance() -> IInstance:
     inst = IInstance.__new__(IInstance)
-    iglobal = SimpleNamespace(apikey='test-key')
-    inst.IGlobal = iglobal
+    inst.IGlobal = SimpleNamespace(apikey='test-key')
     return inst
 
 
-# =============================================================================
-# (a) _normalize_tool_input
-# =============================================================================
-
-
-class TestNormalizeToolInput:
-    def setup_method(self):
-        _reset_warnings()
-
-    def test_none_returns_empty_dict(self):
-        assert _normalize_tool_input(None) == {}
-
-    def test_json_string_parsed_to_dict(self):
-        result = _normalize_tool_input(json.dumps({'prompt': 'hello'}))
-        assert result == {'prompt': 'hello'}
-
-    def test_object_with_model_dump_converted(self):
-        obj = SimpleNamespace()
-        obj.model_dump = lambda: {'prompt': 'from_pydantic'}
-        result = _normalize_tool_input(obj)
-        assert result == {'prompt': 'from_pydantic'}
-
-    def test_nested_input_key_flattened(self):
-        nested = {'input': {'prompt': 'hi', 'model': 'v0-1.0-md'}, 'extra': 'val'}
-        result = _normalize_tool_input(nested)
-        assert result['prompt'] == 'hi'
-        assert result['model'] == 'v0-1.0-md'
-        assert result['extra'] == 'val'
-        assert 'input' not in result
-
-    def test_security_context_stripped(self):
-        data = {'prompt': 'test', 'security_context': {'token': 'secret'}}
-        result = _normalize_tool_input(data)
-        assert 'security_context' not in result
-        assert result['prompt'] == 'test'
-
-    def test_does_not_mutate_caller_dict(self):
-        original = {'prompt': 'hi', 'security_context': {'token': 'secret'}}
-        _normalize_tool_input(original)
-        # the caller-owned dict must be untouched
-        assert original == {'prompt': 'hi', 'security_context': {'token': 'secret'}}
-
-    def test_non_dict_type_logs_type_name_only(self):
-        _normalize_tool_input(42)
-        assert len(_WARNING_CALLS) == 1
-        assert 'int' in _WARNING_CALLS[0]
-        # Must not contain the actual value
-        assert '42' not in _WARNING_CALLS[0]
-
-    def test_non_dict_list_logs_type_name_only(self):
-        _reset_warnings()
-        _normalize_tool_input(['secret_value_xyz', 'other_secret'])
-        assert len(_WARNING_CALLS) == 1
-        assert 'list' in _WARNING_CALLS[0]
-        # Raw list contents must not appear in the warning
-        assert 'secret_value_xyz' not in _WARNING_CALLS[0]
-        assert 'other_secret' not in _WARNING_CALLS[0]
-
-    def test_non_dict_returns_empty_dict(self):
-        result = _normalize_tool_input(12345)
-        assert result == {}
+# A canonical successful v0 Platform API chat object.
+def _chat_body(chat_id='chat-abc', demo='https://v0.dev/chat/abc', files=None):
+    if files is None:
+        files = [{'name': 'App.tsx', 'content': 'export default function App() {}'}]
+    return {'id': chat_id, 'latestVersion': {'demoUrl': demo, 'files': files}}
 
 
 # =============================================================================
-# (b) _extract_code
+# (a) _shape_chat — Platform API response parsing
 # =============================================================================
 
 
-class TestExtractCode:
-    def test_empty_choices_returns_empty_strings(self):
-        code, msg_id = _extract_code({})
-        assert code == ''
-        assert msg_id == ''
+class TestShapeChat:
+    def test_well_formed_chat_maps_all_fields(self):
+        out = _shape_chat(_chat_body())
+        assert out['success'] is True
+        assert out['chat_id'] == 'chat-abc'
+        assert out['demo_url'] == 'https://v0.dev/chat/abc'
+        assert out['code'] == 'export default function App() {}'
+        assert out['files'] == [{'name': 'App.tsx', 'content': 'export default function App() {}'}]
+        assert 'error' not in out
 
-    def test_empty_choices_list_returns_empty_strings(self):
-        code, msg_id = _extract_code({'choices': []})
-        assert code == ''
-        assert msg_id == ''
+    def test_first_file_used_as_code_with_multiple_files(self):
+        files = [
+            {'name': 'App.tsx', 'content': 'PRIMARY'},
+            {'name': 'styles.css', 'content': 'SECONDARY'},
+        ]
+        out = _shape_chat(_chat_body(files=files))
+        assert out['code'] == 'PRIMARY'
+        assert len(out['files']) == 2
 
-    def test_well_formed_response_extracts_code_and_id(self):
-        response = {
-            'id': 'msg-abc123',
-            'choices': [{'message': {'content': 'export default function App() {}', 'role': 'assistant'}}],
-        }
-        code, msg_id = _extract_code(response)
-        assert code == 'export default function App() {}'
-        assert msg_id == 'msg-abc123'
+    def test_empty_files_raises(self):
+        # Empty result → raise (firecrawl pattern); the framework converts the
+        # exception into a structured error payload.
+        with pytest.raises(RuntimeError, match='no files'):
+            _shape_chat(_chat_body(files=[]))
 
-    def test_missing_message_field_returns_empty_strings(self):
-        response = {
-            'id': 'msg-xyz',
-            'choices': [{'finish_reason': 'stop'}],
-        }
-        code, msg_id = _extract_code(response)
-        assert code == ''
-        assert msg_id == 'msg-xyz'
+    def test_missing_latest_version_raises(self):
+        with pytest.raises(RuntimeError, match='no files'):
+            _shape_chat({'id': 'chat-x'})
+
+    def test_null_latest_version_raises(self):
+        with pytest.raises(RuntimeError, match='no files'):
+            _shape_chat({'id': 'chat-x', 'latestVersion': None})
+
+    def test_non_dict_file_entries_skipped(self):
+        files = ['oops', None, 42, {'name': 'App.tsx', 'content': 'OK'}]
+        out = _shape_chat(_chat_body(files=files))
+        assert out['success'] is True
+        assert len(out['files']) == 1
+        assert out['code'] == 'OK'
+
+    def test_missing_demo_url_defaults_empty(self):
+        body = {'id': 'c', 'latestVersion': {'files': [{'name': 'A', 'content': 'x'}]}}
+        out = _shape_chat(body)
+        assert out['demo_url'] == ''
+        assert out['success'] is True
 
 
 # =============================================================================
-# (c) generate_ui
+# (b) generate_ui
 # =============================================================================
 
 
 class TestGenerateUi:
-    def test_missing_prompt_raises_valueerror(self):
+    def setup_method(self):
+        _reset_post()
+        _reset_warnings()
+
+    def test_missing_prompt_raises(self):
         inst = _make_instance()
         with pytest.raises(ValueError, match='prompt'):
             inst.generate_ui({})
+        # No network call attempted.
+        assert _POST.calls == []
 
-    def test_http_status_error_propagates(self):
-        import httpx
-
+    def test_success_returns_code_and_chat_id(self):
         inst = _make_instance()
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        err = httpx.HTTPStatusError('Unauthorized', request=MagicMock(), response=mock_response)
+        _POST.return_body = _chat_body()
+        out = inst.generate_ui({'prompt': 'make a button'})
+        assert out['success'] is True
+        assert out['chat_id'] == 'chat-abc'
+        assert out['code'] == 'export default function App() {}'
+        # POSTs to /v1/chats with {message: prompt}.
+        call = _POST.calls[0]
+        assert call['url'].endswith('/v1/chats')
+        assert call['json'] == {'message': 'make a button'}
+        assert call['timeout'] == 120
+        assert call['headers']['Authorization'] == 'Bearer test-key'
 
-        with patch.object(inst, '_call_v0_api', side_effect=err):
-            with pytest.raises(httpx.HTTPStatusError):
-                inst.generate_ui({'prompt': 'make a button'})
-
-    def test_empty_code_raises_runtimeerror(self):
+    def test_api_error_shape_raises(self):
         inst = _make_instance()
-        with patch.object(inst, '_call_v0_api', return_value={'choices': [], 'id': 'x'}):
-            with pytest.raises(RuntimeError, match='no code'):
-                inst.generate_ui({'prompt': 'make a button'})
+        _POST.return_body = {'error': {'message': 'monthly quota exceeded', 'code': 'quota'}}
+        with pytest.raises(RuntimeError, match='quota exceeded'):
+            inst.generate_ui({'prompt': 'make a button'})
 
-    def test_api_error_surfaced_when_no_code(self):
+    def test_empty_files_raises(self):
         inst = _make_instance()
-        resp = {'choices': [], 'error': 'monthly quota exceeded'}
-        with patch.object(inst, '_call_v0_api', return_value=resp):
-            with pytest.raises(RuntimeError, match='quota exceeded'):
+        _POST.return_body = _chat_body(files=[])
+        with pytest.raises(RuntimeError, match='no files'):
+            inst.generate_ui({'prompt': 'make a button'})
+
+    def test_request_exception_propagates(self):
+        # post_with_retry already retries; a final failure must propagate so the
+        # framework records a proper tool failure (no error-dict swallowing).
+        inst = _make_instance()
+        exc = RuntimeError('boom after retries')
+        _POST.side_effect = exc
+        with pytest.raises(RuntimeError, match='boom after retries'):
+            inst.generate_ui({'prompt': 'make a button'})
+
+    def test_non_json_body_raises_and_logs_status_only(self):
+        inst = _make_instance()
+
+        def _raising_post(url, *, headers=None, json=None, timeout=None, **_kw):
+            resp = MagicMock()
+            resp.status_code = 502
+            resp.json.side_effect = ValueError('bad')
+            return resp
+
+        _mod.post_with_retry = _raising_post
+        try:
+            with pytest.raises(RuntimeError, match='non-JSON'):
                 inst.generate_ui({'prompt': 'make a button'})
+        finally:
+            _mod.post_with_retry = _stub_post_with_retry
+        # Warning logs status only, never the prompt or response body.
+        assert any('status=502' in w for w in _WARNING_CALLS)
+        assert all('make a button' not in w for w in _WARNING_CALLS)
 
 
 # =============================================================================
-# (d) refine_ui
+# (c) refine_ui
 # =============================================================================
 
 
 class TestRefineUi:
-    def test_missing_message_id_raises_valueerror(self):
-        inst = _make_instance()
-        with pytest.raises(ValueError, match='message_id'):
-            inst.refine_ui({'prompt': 'change color to blue'})
+    def setup_method(self):
+        _reset_post()
+        _reset_warnings()
 
-    def test_missing_prompt_raises_valueerror(self):
+    def test_missing_prompt_raises(self):
         inst = _make_instance()
         with pytest.raises(ValueError, match='prompt'):
-            inst.refine_ui({'message_id': 'msg-old'})
+            inst.refine_ui({'chat_id': 'chat-abc'})
+        assert _POST.calls == []
 
-    def test_missing_prior_messages_raises_valueerror(self):
+    def test_missing_chat_id_raises(self):
         inst = _make_instance()
-        with pytest.raises(ValueError, match='prior_messages'):
-            inst.refine_ui({'prompt': 'change color', 'message_id': 'msg-old'})
+        with pytest.raises(ValueError, match='chat_id'):
+            inst.refine_ui({'prompt': 'make it blue'})
+        assert _POST.calls == []
 
-    def test_prior_messages_forwarded_into_call(self):
+    def test_success_posts_to_messages_endpoint(self):
         inst = _make_instance()
-        prior = [
-            {'role': 'user', 'content': 'make a button'},
-            {'role': 'assistant', 'content': 'export default function Btn() {}'},
-        ]
-        good_response = {
-            'id': 'msg-new',
-            'choices': [{'message': {'content': 'export default function Btn2() {}'}}],
-        }
+        _POST.return_body = _chat_body(chat_id='chat-abc')
+        out = inst.refine_ui({'prompt': 'make it blue', 'chat_id': 'chat-abc'})
+        assert out['success'] is True
+        assert out['chat_id'] == 'chat-abc'
+        call = _POST.calls[0]
+        assert call['url'].endswith('/v1/chats/chat-abc/messages')
+        assert call['json'] == {'message': 'make it blue'}
 
-        with patch.object(inst, '_call_v0_api', return_value=good_response) as mock_call:
-            result = inst.refine_ui(
-                {
-                    'prompt': 'change color to blue',
-                    'message_id': 'msg-old',
-                    'prior_messages': prior,
-                }
-            )
+    def test_chat_id_falls_back_when_response_omits_id(self):
+        inst = _make_instance()
+        body = {'latestVersion': {'demoUrl': '', 'files': [{'name': 'A', 'content': 'x'}]}}
+        _POST.return_body = body
+        out = inst.refine_ui({'prompt': 'tweak', 'chat_id': 'chat-known'})
+        assert out['success'] is True
+        assert out['chat_id'] == 'chat-known'
 
-        assert result['success'] is True
-        _args, _kwargs = mock_call.call_args
-        messages_sent = _args[0]
-        # prior messages must appear at the start
-        assert messages_sent[:2] == prior
-        # new user turn must be appended
-        assert messages_sent[-1] == {'role': 'user', 'content': 'change color to blue'}
-        # parent_message_id passed as kwarg
-        assert _kwargs.get('parent_message_id') == 'msg-old'
+    def test_api_error_shape_raises(self):
+        inst = _make_instance()
+        _POST.return_body = {'error': {'userMessage': 'chat not found'}}
+        with pytest.raises(RuntimeError, match='chat not found'):
+            inst.refine_ui({'prompt': 'tweak', 'chat_id': 'missing'})
+
+
+if __name__ == '__main__':
+    sys.exit(pytest.main([__file__, '-v']))

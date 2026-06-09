@@ -23,12 +23,6 @@
 # SOFTWARE.
 # =============================================================================
 
-from os.path import dirname, join, realpath
-from depends import depends
-
-requirements = join(dirname(realpath(__file__)), 'requirements.txt')
-depends(requirements)
-
 from .IGlobal import IGlobal
 from .IInstance import IInstance
 

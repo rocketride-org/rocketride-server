@@ -26,31 +26,33 @@
 """
 v0 by Vercel tool node instance.
 
-Exposes ``generate_ui`` and ``refine_ui`` tools for generating React UI
-components via Vercel's v0 generative UI API.
+Exposes ``generate_ui`` and ``refine_ui`` tools that drive Vercel's v0
+Platform API (server-side stateful chats) to generate React + Tailwind UI
+components from natural-language prompts.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
-import httpx
-
 from rocketlib import IInstanceBase, tool_function, warning
+
+from ai.common.utils import normalize_tool_input, post_with_retry
 
 from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
-# v0 API configuration
+# v0 Platform API configuration
 # ---------------------------------------------------------------------------
 
 V0_API_BASE = 'https://api.v0.dev/v1'
-V0_GENERATE_ENDPOINT = f'{V0_API_BASE}/chat'
+V0_CHATS_ENDPOINT = f'{V0_API_BASE}/chats'
 V0_REQUEST_TIMEOUT = 120  # seconds — generation can take a while
 
 
 class IInstance(IInstanceBase):
+    """Node instance exposing v0 generative UI as agent tools."""
+
     IGlobal: IGlobal
 
     @tool_function(
@@ -62,78 +64,43 @@ class IInstance(IInstanceBase):
                     'type': 'string',
                     'description': 'A natural-language description of the UI component to generate.',
                 },
-                'model': {
-                    'type': 'string',
-                    'description': 'The v0 model to use (default: "v0-1.0-md").',
-                    'default': 'v0-1.0-md',
-                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
                 'success': {'type': 'boolean'},
-                'code': {'type': 'string', 'description': 'Generated React component code.'},
-                'message_id': {'type': 'string', 'description': 'v0 message ID for follow-up refinements.'},
+                'chat_id': {'type': 'string', 'description': 'v0 chat ID — pass to refine_ui to iterate.'},
+                'code': {'type': 'string', 'description': 'Primary generated React component code.'},
+                'files': {'type': 'array', 'items': {'type': 'object'}, 'description': 'All generated files.'},
+                'demo_url': {'type': 'string', 'description': 'Live preview URL for the generated UI.'},
             },
         },
-        description='Generate a React UI component from a natural-language description. Provide a detailed prompt describing the desired UI and receive production-ready React + Tailwind CSS code.',
+        description='Generate a React UI component from a natural-language description. Provide a detailed prompt describing the desired UI and receive production-ready React + Tailwind CSS code, a live demo URL, and a chat_id for follow-up refinements via refine_ui.',
     )
     def generate_ui(self, args):
-        """Generate a React UI component from a text prompt."""
-        args = _normalize_tool_input(args)
+        """Generate a React UI component from a text prompt via the v0 Platform API."""
+        args = normalize_tool_input(args, tool_name='v0')
 
-        prompt = args.get('prompt')
+        prompt = (args.get('prompt') or '').strip()
         if not prompt:
-            raise ValueError('generate_ui requires a `prompt` parameter')
+            raise ValueError('prompt is required and must be a non-empty string')
 
-        model = args.get('model') or 'v0-1.0-md'
-
-        messages = [
-            {'role': 'user', 'content': prompt},
-        ]
-
-        response = self._call_v0_api(messages, model)
-        code, message_id = _extract_code(response)
-
-        if not code:
-            api_error = response.get('error')
-            raise RuntimeError(f'v0 returned no code: {api_error}' if api_error else 'v0 returned no code')
-
-        return {
-            'success': True,
-            'code': code,
-            'message_id': message_id,
-        }
+        body = self._call_v0(V0_CHATS_ENDPOINT, prompt)
+        return _shape_chat(body)
 
     @tool_function(
         input_schema={
             'type': 'object',
-            'required': ['prompt', 'message_id', 'prior_messages'],
+            'required': ['prompt', 'chat_id'],
             'properties': {
                 'prompt': {
                     'type': 'string',
                     'description': 'Follow-up instructions describing how to change the component.',
                 },
-                'message_id': {
+                'chat_id': {
                     'type': 'string',
-                    'description': 'The message_id returned from a previous generate_ui or refine_ui call.',
-                },
-                'prior_messages': {
-                    'type': 'array',
-                    'description': 'Prior conversation messages (user/assistant pairs) for stateless API fallback. Include the original prompt and response so the server has full context.',
-                    'items': {
-                        'type': 'object',
-                        'properties': {
-                            'role': {'type': 'string'},
-                            'content': {'type': 'string'},
-                        },
-                    },
-                },
-                'model': {
-                    'type': 'string',
-                    'description': 'The v0 model to use (default: "v0-1.0-md").',
-                    'default': 'v0-1.0-md',
+                    'description': 'The chat_id returned from a previous generate_ui or refine_ui call.',
                 },
             },
         },
@@ -141,135 +108,105 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'success': {'type': 'boolean'},
-                'code': {'type': 'string', 'description': 'Refined React component code.'},
-                'message_id': {'type': 'string', 'description': 'Updated message ID for further refinements.'},
+                'chat_id': {'type': 'string', 'description': 'v0 chat ID — reuse for further refinements.'},
+                'code': {'type': 'string', 'description': 'Primary refined React component code.'},
+                'files': {'type': 'array', 'items': {'type': 'object'}, 'description': 'All generated files.'},
+                'demo_url': {'type': 'string', 'description': 'Live preview URL for the refined UI.'},
             },
         },
-        description='Refine a previously generated UI component by providing follow-up instructions. Requires the message_id from a prior generate_ui call.',
+        description='Refine a previously generated UI component by sending follow-up instructions to an existing v0 chat. Requires the chat_id from a prior generate_ui call. The v0 chat is stateful server-side, so prior context need not be replayed.',
     )
     def refine_ui(self, args):
-        """Refine a previously generated UI component."""
-        args = _normalize_tool_input(args)
+        """Refine a previously generated UI component via the v0 Platform API."""
+        args = normalize_tool_input(args, tool_name='v0')
 
-        prompt = args.get('prompt')
+        prompt = (args.get('prompt') or '').strip()
         if not prompt:
-            raise ValueError('refine_ui requires a `prompt` parameter')
+            raise ValueError('prompt is required and must be a non-empty string')
 
-        message_id = args.get('message_id')
-        if not message_id:
-            raise ValueError('refine_ui requires a `message_id` from a prior generation')
+        chat_id = (args.get('chat_id') or '').strip()
+        if not chat_id:
+            raise ValueError('chat_id is required — pass the value returned by a prior generate_ui call')
 
-        model = args.get('model') or 'v0-1.0-md'
+        url = f'{V0_CHATS_ENDPOINT}/{chat_id}/messages'
+        body = self._call_v0(url, prompt)
+        shaped = _shape_chat(body)
+        # The follow-up response may omit the chat id; fall back to the known one.
+        if not shaped.get('chat_id'):
+            shaped['chat_id'] = chat_id
+        return shaped
 
-        # Replay the full prior conversation so refinement works regardless of
-        # whether the v0 /v1/chat endpoint is stateful (server-side history keyed
-        # by parent_message_id) or stateless (standard OpenAI-compatible). We
-        # require `prior_messages` rather than treating it as optional: without
-        # it, a stateless endpoint receives only the new instruction (e.g. "make
-        # it blue") with no component to refine and silently returns an unrelated
-        # fresh generation. `parent_message_id` is sent too as a stateful hint.
-        prior_messages: List[Dict[str, str]] = args.get('prior_messages')
-        if not prior_messages:
-            raise ValueError(
-                'refine_ui requires `prior_messages` — the prior user/assistant turns '
-                '(original prompt and generated component) — so the v0 API has the full '
-                'context to refine. Without it, refinement produces an unrelated component.'
-            )
-        messages = [*prior_messages, {'role': 'user', 'content': prompt}]
+    def _call_v0(self, url: str, prompt: str) -> Dict[str, Any]:
+        """POST a prompt to a v0 Platform API endpoint and return the parsed body.
 
-        response = self._call_v0_api(messages, model, parent_message_id=message_id)
-        code, new_message_id = _extract_code(response)
-
-        if not code:
-            api_error = response.get('error')
-            raise RuntimeError(f'v0 returned no code: {api_error}' if api_error else 'v0 returned no code')
-
-        return {
-            'success': True,
-            'code': code,
-            'message_id': new_message_id or message_id,
-        }
-
-    def _call_v0_api(self, messages: List[Dict[str, str]], model: str, **extra: Any) -> Dict[str, Any]:
-        """Send a chat-style request to the v0 API and return the parsed response."""
-        payload = {
-            'model': model,
-            'messages': messages,
-            'stream': False,
-            **extra,
-        }
-
+        Error handling is left to the framework: ``_dispatch_tool`` calls tool
+        methods with no try/except (exceptions propagate) and ``run_agent``
+        converts any raised exception into a structured error payload. So a
+        transport/HTTP failure, a non-JSON body, or an API-level error each
+        raise rather than returning an error dict. Never logs response bodies.
+        """
         headers = {
             'Authorization': f'Bearer {self.IGlobal.apikey}',
             'Content-Type': 'application/json',
         }
 
+        resp = post_with_retry(url, headers=headers, json={'message': prompt}, timeout=V0_REQUEST_TIMEOUT)
         try:
-            with httpx.Client(timeout=V0_REQUEST_TIMEOUT) as client:
-                resp = client.post(
-                    V0_GENERATE_ENDPOINT,
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                try:
-                    return resp.json()
-                except (json.JSONDecodeError, ValueError) as exc:
-                    warning(f'v0 API returned non-JSON response: {exc}')
-                    raise ValueError('v0 API returned non-JSON response') from exc
-        except httpx.HTTPStatusError as e:
-            warning(f'v0 API error: status={e.response.status_code}')
-            raise
-        except Exception as e:
-            warning(f'v0 API request failed: {e}')
-            raise
+            body = resp.json()
+        except ValueError as exc:
+            # resp.json() raises on a malformed/non-JSON body. Log status only
+            # (never the body, which may carry sensitive content) and re-raise.
+            status = getattr(resp, 'status_code', None)
+            warning(f'v0 API returned a non-JSON response body: status={status}')
+            raise RuntimeError('v0 returned a non-JSON response body') from exc
+
+        if not isinstance(body, dict):
+            raise RuntimeError(f'v0 returned an unexpected payload type: {type(body).__name__}')
+
+        # Platform API errors come back as {"error": {...}} — raise with a message.
+        api_error = body.get('error')
+        if isinstance(api_error, dict):
+            msg = api_error.get('message') or api_error.get('userMessage') or api_error.get('code') or 'unknown error'
+            raise RuntimeError(f'v0 API error: {msg}')
+        if api_error:
+            raise RuntimeError(f'v0 API error: {api_error}')
+
+        return body
 
 
-def _extract_code(response: Dict[str, Any]) -> tuple[str, str]:
-    """Extract generated code and message ID from the v0 API response."""
-    message_id = ''
-    code = ''
-
-    choices = response.get('choices') or []
-    if choices:
-        message = choices[0].get('message') or {}
-        code = message.get('content') or ''
-        message_id = response.get('id') or ''
-
-    return code, message_id
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
-    """Normalize whatever the engine/framework passes as tool input into a plain dict."""
-    if input_obj is None:
-        return {}
+def _shape_chat(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a v0 Platform API chat object into the tool's output schema.
 
-    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
-        input_obj = input_obj.model_dump()
-    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
-        input_obj = input_obj.dict()
+    The chat shape is ``{id, latestVersion: {demoUrl, files: [{name, content}]}}``.
+    ``latestVersion`` and ``files`` are nullable, so every level is guarded.
+    """
+    chat_id = body.get('id') or ''
+    latest = body.get('latestVersion')
+    if not isinstance(latest, dict):
+        latest = {}
 
-    if isinstance(input_obj, str):
-        try:
-            parsed = json.loads(input_obj)
-            if isinstance(parsed, dict):
-                input_obj = parsed
-        except Exception:
-            pass
+    demo_url = latest.get('demoUrl') or ''
 
-    if not isinstance(input_obj, dict):
-        warning(f'v0: unexpected input type {type(input_obj).__name__} (content redacted)')
-        return {}
+    raw_files = latest.get('files')
+    files: List[Dict[str, str]] = []
+    if isinstance(raw_files, list):
+        for item in raw_files:
+            if not isinstance(item, dict):
+                continue
+            files.append({'name': item.get('name', ''), 'content': item.get('content', '')})
 
-    # Shallow-copy so the envelope merge and the security_context pop below never
-    # mutate a caller-owned dict (the engine passes the live args dict through).
-    input_obj = dict(input_obj)
+    if not files:
+        raise RuntimeError('v0 returned no files')
 
-    if 'input' in input_obj and isinstance(input_obj['input'], dict):
-        inner = input_obj['input']
-        extras = {k: v for k, v in input_obj.items() if k != 'input'}
-        input_obj = {**inner, **extras}
-
-    input_obj.pop('security_context', None)
-
-    return input_obj
+    return {
+        'success': True,
+        'chat_id': chat_id,
+        'code': files[0]['content'],
+        'files': files,
+        'demo_url': demo_url,
+    }
