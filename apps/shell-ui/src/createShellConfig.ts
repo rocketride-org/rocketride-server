@@ -69,7 +69,6 @@ const THEME_OPTIONS = [
 	{ id: 'light', name: 'Light' },
 	{ id: 'dark', name: 'Dark' },
 	{ id: 'gray', name: 'Gray' },
-	{ id: 'vs', name: 'Visual Studio' },
 	{ id: 'rocketride', name: 'RocketRide Dark' },
 ];
 
