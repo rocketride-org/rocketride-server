@@ -114,9 +114,32 @@ updates:
       # constraint to a higher Y) take a different classification path from
       # `version-update:*` and slipped past the semver-major rule. Pin these
       # by name so the requirement-update path is also blocked.
-      # See #839 (elasticsearch 8→9) and #857 (google-genai 1→2).
+      #
+      # Each entry here represents a dep that has hit us with the
+      # requirement-update path:
+      #   - elasticsearch — #839 (8→9)
+      #   - google-genai  — #857 (1→2)
+      #   - openai        — #910 (1→2, audit in May; #981 was the re-roll;
+      #                     #1154 is the current 2.38→2.41 ask).
+      #                     Vision node usage at nodes/src/nodes/llm_vision_openai/
+      #                     needs a per-bump audit because v2 changed the chat
+      #                     completions / responses surface.
+      #   - cohere        — #948 (5→6 audit in May; #1156 is the 6.1→7 ask).
+      #                     Rerank node at nodes/src/nodes/rerank_cohere/
+      #                     needs ClientV2 + error class re-verification on
+      #                     each major; v7 may move further.
+      #   - redis         — #949 (5→6 audit in May; #1155 is the 6.4→7.4 ask).
+      #                     memory_persistent node uses the standard command
+      #                     surface; bumps are usually safe but warrant a
+      #                     5-min real-Redis smoke each time.
+      # Bring these in manually via an explicit PR per dep when the team is
+      # ready to do the audit. Same #921-style fix-on-Dependabot-branch
+      # pattern works if a bundled PR ever needs to ride one of these.
       - dependency-name: "elasticsearch"
       - dependency-name: "google-genai"
+      - dependency-name: "openai"
+      - dependency-name: "cohere"
+      - dependency-name: "redis"
 
   # ---------------------------------------------------------------------------
   # GitHub Actions — workflow file SHA pin updates
