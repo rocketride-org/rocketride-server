@@ -98,7 +98,8 @@ const config: Config = {
 				alt: 'RocketRide',
 				src: 'img/rocketride-icon-colored.svg',
 				srcDark: 'img/rocketride-icon-white.svg',
-				href: '/',
+				href: 'https://rocketride.ai',
+				target: '_self',
 			},
 			items: [
 				{ to: '/', label: 'Home', position: 'left', className: 'navbar__link--colored' },

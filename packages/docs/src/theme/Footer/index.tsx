@@ -8,39 +8,39 @@ type FooterLink = { label: string; href: string };
 type FooterColumn = { title: string; items: FooterLink[] };
 type SocialLink = { label: string; href: string; icon: React.ReactNode };
 
-// Placeholder navigation — labels mirror the eventual docs spine; hrefs are
-// stubs (#) until the real pages are wired up.
+// Footer navigation wired to the docs spine (routeBasePath is '/'). Category
+// labels with no landing page point at their first leaf.
 const COLUMNS: FooterColumn[] = [
 	{
 		title: 'Documentation',
 		items: [
-			{ label: 'Home', href: '#' },
-			{ label: 'Quickstart', href: '#' },
-			{ label: 'Concepts', href: '#' },
-			{ label: 'Components', href: '#' },
-			{ label: 'Pipeline reference', href: '#' },
-			{ label: 'Troubleshooting', href: '#' },
+			{ label: 'Home', href: '/' },
+			{ label: 'Quickstart', href: '/quickstart' },
+			{ label: 'Concepts', href: '/concepts/pipelines' },
+			{ label: 'Components', href: '/nodes' },
+			{ label: 'Pipeline reference', href: '/pipeline-reference' },
+			{ label: 'Troubleshooting', href: '/troubleshooting' },
 		],
 	},
 	{
 		title: 'SDKs & API',
 		items: [
-			{ label: 'TypeScript SDK', href: '#' },
-			{ label: 'Python SDK', href: '#' },
-			{ label: 'MCP', href: '#' },
-			{ label: 'Server protocol', href: '#' },
-			{ label: 'Nodes', href: '#' },
-			{ label: 'Glossary', href: '#' },
+			{ label: 'TypeScript SDK', href: '/develop/typescript' },
+			{ label: 'Python SDK', href: '/develop/python' },
+			{ label: 'MCP', href: '/protocols/mcp' },
+			{ label: 'Server protocol', href: '/protocols/websocket' },
+			{ label: 'Nodes', href: '/nodes' },
+			{ label: 'Glossary', href: '/glossary' },
 		],
 	},
 	{
 		title: 'Resources',
 		items: [
-			{ label: 'Changelog', href: '#' },
-			{ label: 'Cloud', href: '#' },
-			{ label: 'Cursor', href: '#' },
-			{ label: 'Windsurf', href: '#' },
-			{ label: 'Status', href: '#' },
+			{ label: 'Changelog', href: 'https://github.com/rocketride-org/rocketride-server/releases' },
+			{ label: 'Cloud', href: '/cloud' },
+			{ label: 'Cursor', href: '/ide-extensions/cursor' },
+			{ label: 'Windsurf', href: '/ide-extensions/windsurf' },
+			{ label: 'Self-hosting', href: '/self-hosting' },
 			{ label: 'GitHub', href: 'https://github.com/rocketride-org/rocketride-server' },
 		],
 	},
