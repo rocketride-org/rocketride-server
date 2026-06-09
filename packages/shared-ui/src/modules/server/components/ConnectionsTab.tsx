@@ -120,12 +120,12 @@ export const ConnectionDetailModal: React.FC<{
 
 	return (
 		<div style={commonStyles.modalOverlay} onClick={onClose}>
-			<div style={styles.modalDialog} onClick={(e) => e.stopPropagation()}>
+			<div role="dialog" aria-modal="true" aria-labelledby={`connection-detail-title-${connection.id}`} style={styles.modalDialog} onClick={(e) => e.stopPropagation()}>
 				<div style={commonStyles.cardHeader}>
-					<span>
+					<span id={`connection-detail-title-${connection.id}`}>
 						#{connection.id} &mdash; {connection.clientInfo?.name || connection.clientId || `Conn #${connection.id}`}
 					</span>
-					<button style={styles.detailClose} aria-label="Close details" onClick={onClose}>
+					<button type="button" style={styles.detailClose} aria-label="Close details" onClick={onClose}>
 						&times;
 					</button>
 				</div>

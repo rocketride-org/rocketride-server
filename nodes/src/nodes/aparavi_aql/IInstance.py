@@ -61,10 +61,14 @@ def _aql_safe(aql: str) -> bool:
     """
     Return True if the AQL is a single SELECT statement with no unsafe keywords.
 
-    Enforces SELECT-only semantics: the trimmed query must begin with SELECT
-    and must not contain mutation keywords anywhere.
+    Enforces SELECT-only semantics: strips a trailing semicolon, rejects
+    multi-statement input (embedded semicolons), requires the query to begin
+    with SELECT, and blocks mutation keywords anywhere in the text.
     """
     normalised = aql.strip().rstrip(';').strip()
+    # Reject multi-statement queries (semicolon inside the body)
+    if ';' in normalised:
+        return False
     if not normalised.upper().startswith('SELECT'):
         return False
     return not _UNSAFE_PATTERN.search(normalised)

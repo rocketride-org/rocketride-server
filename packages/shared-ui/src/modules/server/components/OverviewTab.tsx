@@ -448,7 +448,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					<tbody>
 						{/* Connection rows */}
 						{connections.map((conn: DashboardConnection) => (
-							<tr key={`conn-${conn.id}`} style={S.clickableRow} onClick={() => setSelectedConnId(conn.id)}>
+							<tr key={`conn-${conn.id}`} style={S.clickableRow} tabIndex={0} onClick={() => setSelectedConnId(conn.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedConnId(conn.id); } }}>
 								<td style={commonStyles.tableCell}>
 									<div style={S.taskName}>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</div>
 									<div style={S.taskSub}>
