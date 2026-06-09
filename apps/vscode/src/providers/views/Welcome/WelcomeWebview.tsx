@@ -471,7 +471,7 @@ export const Welcome: React.FC = () => {
 					<div style={{ display: 'flex', gap: 20, marginTop: 'auto' }}>
 						{[
 							{ key: 'docs', label: 'Documentation', url: 'https://docs.rocketride.org' },
-							{ key: 'discord', label: 'Discord', url: 'https://discord.gg/9hr3tdZmEG' },
+							{ key: 'discord', label: 'Discord', url: 'https://discord.gg/PMXrtenMsY' },
 						].map(({ key, label, url }) => (
 							<a
 								key={key}
