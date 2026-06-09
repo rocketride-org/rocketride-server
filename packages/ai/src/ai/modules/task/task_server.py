@@ -1192,6 +1192,13 @@ class TaskServer(DAPBase):
                 self.debug_message(f'Task stopped during startup: {control.id}...')
             else:
                 self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
+                # Kill the subprocess so it doesn't linger as an orphan
+                # consuming resources and reporting stale metrics.
+                if control.task:
+                    try:
+                        await control.task.stop_task()
+                    except Exception:
+                        self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             self._task_control.pop(control.token, None)
             raise
 

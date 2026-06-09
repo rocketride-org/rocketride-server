@@ -557,7 +557,8 @@ class TaskMetrics:
 
         # STUB: Log the report (will be replaced with actual API call)
         try:
-            debug('[TaskMetrics] Billing report:')
+            tag = f'[TaskMetrics:{self.task_id}]' if self.task_id else '[TaskMetrics]'
+            debug(f'{tag} Billing report:')
             debug(
                 f'  Incremental Tokens (this period): CPU={delta_tokens_cpu:.2f}, Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, GPU Inference={delta_tokens_gpu_inference:.2f}, Custom={delta_tokens_custom}, Total={delta_tokens_total:.2f}'
             )

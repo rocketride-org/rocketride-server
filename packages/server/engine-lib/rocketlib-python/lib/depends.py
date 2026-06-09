@@ -37,6 +37,7 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 from glob import glob
 from typing import Optional
@@ -80,15 +81,57 @@ _progress_path: Optional[str] = None
 # Each entry is (name, display) where display includes the size suffix.
 _downloading: list[tuple[str, str]] = []
 
+# Last message written to the sidecar, used by the heartbeat thread
+# to refresh the timestamp so waiting processes see it ticking.
+_last_sidecar_message: Optional[str] = None
+
+# Fixed start time written to the sidecar so waiters can compute
+# total elapsed time since the install began (not since last write).
+_sidecar_start_time: float = 0.0
+
+# Heartbeat thread that re-emits monitorStatus every 5 seconds to
+# keep the task startup timeout alive during long silent operations.
+_heartbeat_thread: Optional[threading.Thread] = None
+_heartbeat_stop: Optional[threading.Event] = None
+
 
 def _write_sidecar(message: str):
     """Write a progress update to the sidecar file (if lock is held)."""
+    global _last_sidecar_message
+    _last_sidecar_message = message
     if _progress_path:
         try:
             with open(_progress_path, 'w', encoding='utf-8') as f:
-                f.write(f'{time.time()}\n{message}\n')
+                f.write(f'{_sidecar_start_time}\n{message}\n')
         except OSError:
             pass
+
+
+def _start_heartbeat():
+    """Start the background heartbeat thread."""
+    global _heartbeat_thread, _heartbeat_stop, _sidecar_start_time
+    _sidecar_start_time = time.time()
+    _heartbeat_stop = threading.Event()
+
+    def _heartbeat_loop(stop_event: threading.Event):
+        """Re-emit monitorStatus every 5 seconds to reset the task startup timeout."""
+        while not stop_event.wait(5.0):
+            if _last_sidecar_message:
+                monitorStatus(_last_sidecar_message)
+
+    _heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(_heartbeat_stop,), daemon=True)
+    _heartbeat_thread.start()
+
+
+def _stop_heartbeat():
+    """Stop the background heartbeat thread."""
+    global _heartbeat_thread, _heartbeat_stop
+    if _heartbeat_stop:
+        _heartbeat_stop.set()
+    if _heartbeat_thread:
+        _heartbeat_thread.join(timeout=2.0)
+    _heartbeat_thread = None
+    _heartbeat_stop = None
 
 
 def updateProgress(message: str):
@@ -660,16 +703,86 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
+    """
+    Run uv pip install --dry-run and return list of packages that would be installed.
+
+    Returns empty list if all requirements are already satisfied.
+    Raises RuntimeError if dependency resolution fails.
+    """
+    if not _uv_available():
+        raise RuntimeError('uv executable not found')
+
+    exe_dir = _get_executable_dir()
+    args = [
+        _uv_abs_path(),
+        'pip',
+        'install',
+        '--python',
+        sys.executable,
+        '-r',
+        requirements_path,
+        '--index-strategy',
+        'unsafe-best-match',
+        '--no-build-isolation',
+        '--dry-run',
+        '--no-color',
+    ]
+
+    # Exclude uv from resolution — it's bootstrapped by depends.py and
+    # installing it as a pip package crashes on Windows (os error 32)
+    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
+    if not os.path.exists(excludes_path):
+        with open(excludes_path, 'w', encoding='utf-8') as f:
+            f.write('uv\n')
+    args.extend(['--excludes', excludes_path])
+
+    # Only add constraints if the file exists and has content
+    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
+        args.extend(['-c', './cache/constraints.txt'])
+
+    debug(f'Dry-run: {args}')
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
+        stdin=subprocess.PIPE,
+        cwd=exe_dir,
+    )
+
+    if result.returncode != 0:
+        output = (result.stderr + result.stdout).strip()
+        debug(f'Dry-run failed (rc={result.returncode}): {output[:500]}')
+        error(f'Dependency resolution failed for {requirements_path}: {output}')
+        raise RuntimeError(f'Dependency resolution failed: {output[:200]}')
+
+    # Parse packages from output — lines starting with "+ "
+    packages = []
+    for line in (result.stderr + result.stdout).splitlines():
+        line = line.strip()
+        if line.startswith('+ '):
+            # Line format: "+ package==version" or "+ package[extra]==version"
+            pkg = line[2:].strip()
+            if '==' in pkg:
+                pkg = pkg.split('==')[0]
+            if '[' in pkg:
+                pkg = pkg.split('[')[0]
+            packages.append(pkg)
+
+    return packages
+
+
 def _install_requirements(requirements_path: str, constraints_path: str):
     """
     Install requirements using uv with constraints.
 
-    uv skips already-satisfied packages automatically. Download and
-    install progress is streamed line-by-line through updateProgress()
-    which tracks in-flight downloads for a combined status message.
+    Runs a dry-run first to check if anything needs installing. If all
+    requirements are satisfied, skips the install entirely. Otherwise,
+    streams download and install progress through updateProgress().
     """
-    import importlib
-
     debug(f'Installing requirements from: {requirements_path}')
 
     # Skip empty requirements files (comments/blanks only) to avoid uv warnings
@@ -679,7 +792,36 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         debug(f'  Empty requirements file, skipping: {requirements_path}')
         return
 
+    # Start heartbeat early — the dry-run can block on uv's internal lock
+    # for minutes, and we need monitorStatus events to keep the task startup
+    # timeout alive during that time.
     updateProgress(f'Installing {os.path.basename(requirements_path)}')
+    _start_heartbeat()
+    try:
+        return _install_requirements_inner(requirements_path, constraints_path)
+    finally:
+        _stop_heartbeat()
+
+
+def _install_requirements_inner(requirements_path: str, constraints_path: str):
+    """Inner install logic, runs under the heartbeat thread."""
+    import importlib
+
+    # Check what needs to be installed (raises on failure)
+    packages = _install_dry_run(requirements_path, constraints_path)
+    debug(f'Dry-run found {len(packages)} packages to install: {packages}')
+
+    # If dry-run returned empty list, all packages are satisfied
+    if len(packages) == 0:
+        debug(f'All requirements satisfied: {requirements_path}')
+        return
+
+    # Format status message: show up to 5 packages, or 4 + "..." if more than 5
+    if len(packages) <= 5:
+        pkg_list = ', '.join(packages)
+    else:
+        pkg_list = ', '.join(packages[:4]) + ', ...'
+    updateProgress(f'Installing {pkg_list}')
 
     # Build uv command
     exe_dir = _get_executable_dir()
@@ -694,12 +836,19 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         '--index-strategy',
         'unsafe-best-match',
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
-        '--no-cache',
     ]
+
+    # Exclude uv from resolution (same excludes file as dry-run)
+    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
+    if not os.path.exists(excludes_path):
+        with open(excludes_path, 'w', encoding='utf-8') as f:
+            f.write('uv\n')
+    uv_args.extend(['--excludes', excludes_path])
+
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         uv_args.extend(['-c', './cache/constraints.txt'])
 
-    # Run uv and stream output
+    # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
     proc = subprocess.Popen(
         uv_args,

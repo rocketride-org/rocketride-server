@@ -1,5 +1,1 @@
 crewai>=1.14.1
-# Exclude crewai-cli (and its transitive dep on uv) — it's a scaffolding
-# tool not needed at runtime, and installing uv as a pip package crashes
-# because it tries to overwrite the running uv.exe binary (os error 32).
-crewai-cli==0.0.0a0 ; python_version == "0"
