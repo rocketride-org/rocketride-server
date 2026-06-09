@@ -17,7 +17,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { EnvironmentView } from 'shared/modules/environment';
-import type { EnvironmentSlotConfig } from 'shared/modules/environment';
+import type { EnvironmentSlotConfig, EnvironmentScope } from 'shared/modules/environment';
 import { useMessaging } from '../hooks/useMessaging';
 import type { EnvironmentHostToWebview, EnvironmentWebviewToHost, EnvironmentSlotState } from '../types';
 
@@ -54,6 +54,12 @@ const EnvironmentWebview: React.FC = () => {
 
 	/** Ref to the latest sendMessage so callbacks don't go stale. */
 	const sendMessageRef = useRef<(msg: EnvironmentWebviewToHost) => void>(() => {});
+
+	/**
+	 * Pending save resolvers keyed by `slot:scope:scopeId`.
+	 * Resolved when env:data arrives for that key, rejected on env:error.
+	 */
+	const pendingSavesRef = useRef<Map<string, { resolve: () => void; reject: (err: Error) => void }>>(new Map());
 
 	// ── Incoming messages ────────────────────────────────────────────────
 	const handleMessage = useCallback((message: EnvironmentHostToWebview) => {
@@ -95,11 +101,28 @@ const EnvironmentWebview: React.FC = () => {
 				}
 				setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 				setError(null);
+				// Resolve any pending save for this key (host confirmed persistence)
+				pendingSavesRef.current.get(cacheKey)?.resolve();
+				pendingSavesRef.current.delete(cacheKey);
 				break;
 			}
 
 			case 'env:error':
 				setError(message.error);
+				// If the error includes scope context, clear loading state for
+				// the specific cache key so the card doesn't stay stuck
+				if (message.slot && message.scope) {
+					const failedKey = `${message.slot}:${message.scope}:${message.scopeId ?? ''}`;
+					setEnvs((prev) => {
+						if (prev[failedKey] === undefined) {
+							return { ...prev, [failedKey]: {} };
+						}
+						return prev;
+					});
+					// Reject any pending save for this key
+					pendingSavesRef.current.get(failedKey)?.reject(new Error(message.error));
+					pendingSavesRef.current.delete(failedKey);
+				}
 				break;
 
 			case 'env:prefill': {
@@ -128,13 +151,24 @@ const EnvironmentWebview: React.FC = () => {
 	// ── Callbacks for EnvironmentView ────────────────────────────────────
 
 	/** Sends a getEnv request to the extension host. */
-	const handleLoadEnv = useCallback((slotId: string, scope: string, scopeId?: string) => {
+	const handleLoadEnv = useCallback((slotId: string, scope: EnvironmentScope, scopeId?: string) => {
 		sendMessageRef.current({ type: 'env:getEnv', slot: slotId as 'development' | 'deployment', scope, scopeId });
 	}, []);
 
-	/** Sends a saveEnv request to the extension host. */
-	const handleSaveEnv = useCallback(async (slotId: string, scope: string, env: Record<string, string>, scopeId?: string) => {
+	/**
+	 * Sends a saveEnv request and waits for the host to confirm persistence.
+	 *
+	 * Resolves when env:data arrives for the same key (host re-fetches and
+	 * sends canonical data after a successful save). Rejects on env:error.
+	 */
+	const handleSaveEnv = useCallback(async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
+		const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
+		// Create a promise that resolves when the host confirms
+		const confirmation = new Promise<void>((resolve, reject) => {
+			pendingSavesRef.current.set(cacheKey, { resolve, reject });
+		});
 		sendMessageRef.current({ type: 'env:saveEnv', slot: slotId as 'development' | 'deployment', scope, env, scopeId });
+		await confirmation;
 	}, []);
 
 	// ── Build slot configs for shared EnvironmentView ────────────────────

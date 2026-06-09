@@ -29,6 +29,9 @@ import { EnvScopeCard } from '../account/components/EnvironmentPanel';
 // TYPES
 // =============================================================================
 
+/** Possible environment scope levels. */
+export type EnvironmentScope = 'org' | 'team' | 'user';
+
 /** Connection state and permissions for a single connection slot. */
 export interface EnvironmentSlotConfig {
 	/** Slot identifier (e.g. 'development', 'deployment', 'default'). */
@@ -61,10 +64,10 @@ export interface EnvironmentViewProps {
 	envs: Record<string, Record<string, string> | undefined>;
 
 	/** Requests the host to load env data for a scope. */
-	onLoadEnv: (slotId: string, scope: string, scopeId?: string) => void;
+	onLoadEnv: (slotId: string, scope: EnvironmentScope, scopeId?: string) => void;
 
 	/** Saves env data for a scope. */
-	onSaveEnv: (slotId: string, scope: string, env: Record<string, string>, scopeId?: string) => Promise<void>;
+	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => Promise<void>;
 
 	/** Keys that must have non-empty values before save is allowed (user scope only). */
 	requiredKeys?: string[];
@@ -136,9 +139,9 @@ const SlotPanel: React.FC<{
 	/** Loaded env dicts keyed by `slotId:scope:scopeId`. */
 	envs: Record<string, Record<string, string> | undefined>;
 	/** Requests env data load. */
-	onLoadEnv: (slotId: string, scope: string, scopeId?: string) => void;
+	onLoadEnv: (slotId: string, scope: EnvironmentScope, scopeId?: string) => void;
 	/** Saves env data. */
-	onSaveEnv: (slotId: string, scope: string, env: Record<string, string>, scopeId?: string) => Promise<void>;
+	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => Promise<void>;
 	/** Required keys for user scope. */
 	requiredKeys?: string[];
 }> = ({ slot, single, envs, onLoadEnv, onSaveEnv, requiredKeys }) => {
@@ -254,6 +257,18 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 				/>
 			),
 		};
+	}
+
+	// ── Empty guard — nothing to render if no slots provided ──────────
+	if (slots.length === 0) {
+		return (
+			<div style={styles.container}>
+				{error && <div style={styles.errorBanner}>{error}</div>}
+				<div style={{ padding: 16, color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>
+					No connection slots available.
+				</div>
+			</div>
+		);
 	}
 
 	return (

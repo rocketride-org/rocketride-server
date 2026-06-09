@@ -14,7 +14,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { EnvironmentView } from 'shared/modules/environment';
-import type { EnvironmentSlotConfig } from 'shared/modules/environment';
+import type { EnvironmentSlotConfig, EnvironmentScope } from 'shared/modules/environment';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useAuthUser } from '../../hooks/useAuthUser';
 
@@ -67,15 +67,19 @@ const EnvironmentPage: React.FC = () => {
 	 * @param scope - Env scope: 'org', 'team', or 'user'.
 	 * @param scopeId - Required for 'org' and 'team' scopes.
 	 */
-	const handleLoadEnv = useCallback((slotId: string, scope: string, scopeId?: string) => {
+	const handleLoadEnv = useCallback((slotId: string, scope: EnvironmentScope, scopeId?: string) => {
 		if (!client) return;
 		const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-		client.account.getEnv(scope as 'org' | 'team' | 'user', scopeId)
+		client.account.getEnv(scope, scopeId)
 			.then((env: Record<string, string>) => {
 				setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 				setError(null);
 			})
-			.catch((err: Error) => setError(err.message));
+			.catch((err: Error) => {
+				// Store empty dict so the card exits the loading state
+				setEnvs((prev) => ({ ...prev, [cacheKey]: prev[cacheKey] ?? {} }));
+				setError(err.message);
+			});
 	}, [client]);
 
 	// ── Save callback ───────────────────────────────────────────────────
@@ -87,9 +91,9 @@ const EnvironmentPage: React.FC = () => {
 	 * @param env - The full env dict to save.
 	 * @param scopeId - Required for 'org' and 'team' scopes.
 	 */
-	const handleSaveEnv = useCallback(async (slotId: string, scope: string, env: Record<string, string>, scopeId?: string) => {
+	const handleSaveEnv = useCallback(async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
 		if (!client) return;
-		await client.account.setEnv(scope as 'org' | 'team' | 'user', env, scopeId);
+		await client.account.setEnv(scope, env, scopeId);
 		const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
 		setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 	}, [client]);

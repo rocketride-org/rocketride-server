@@ -4,4 +4,4 @@
 // =============================================================================
 
 export { default as EnvironmentView } from './EnvironmentView';
-export type { EnvironmentViewProps, EnvironmentSlotConfig } from './EnvironmentView';
+export type { EnvironmentViewProps, EnvironmentSlotConfig, EnvironmentScope } from './EnvironmentView';
