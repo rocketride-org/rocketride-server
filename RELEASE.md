@@ -86,7 +86,7 @@ hotfix/*  ──┘                  │         │
 
 **Workflow:** `.github/workflows/prerelease.yaml`
 
-**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`). (Formerly named "Nightly"; it is not a daily cron — it fires per green develop commit.)
+**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`).
 
 ### What happens
 
