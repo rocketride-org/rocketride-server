@@ -4,6 +4,8 @@ from .vision import VisionLoader, CLIPModel, ViTModel
 from .depth import DepthEstimatorLoader, DepthEstimator
 from .detection import DetectorLoader, Detector
 from .segmentation import SegmenterLoader, Segmenter
+from .caption import CaptionerLoader, Captioner
+from .background import BackgroundRemoverLoader, BackgroundRemover
 
 __all__ = [
     'VisionLoader',
@@ -15,4 +17,8 @@ __all__ = [
     'Detector',
     'SegmenterLoader',
     'Segmenter',
+    'CaptionerLoader',
+    'Captioner',
+    'BackgroundRemoverLoader',
+    'BackgroundRemover',
 ]

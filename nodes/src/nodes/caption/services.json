@@ -66,7 +66,21 @@
 		"cases": [
 			{
 				"name": "Caption image",
-				"image": "images/ocr_test_text.png",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["florence-base"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Caption image",
+				"image": "images/einstein.jpg",
 				"expect": {
 					"text": { "notEmpty": true }
 				}

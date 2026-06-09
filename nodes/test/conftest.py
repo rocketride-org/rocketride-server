@@ -244,10 +244,11 @@ def pytest_generate_tests(metafunc):
             'depth_estimate',
             'detect',
             'detect_segment',
+            'caption',
+            'background_removal',
             # PR 1081 vision nodes whose dynamic tests currently fail (unmasked once auth was
             # fixed). Each is excluded until converted/fixed in its phase, then removed here:
-            #   background_removal (P4: bfloat16 'deformable_im2col' bug), pose_estimation (P6).
-            'background_removal',
+            #   pose_estimation (P6).
             'pose_estimation',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',

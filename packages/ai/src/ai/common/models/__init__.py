@@ -46,6 +46,10 @@ from .vision import (
     DepthEstimator,
     DetectorLoader,
     Detector,
+    CaptionerLoader,
+    Captioner,
+    BackgroundRemoverLoader,
+    BackgroundRemover,
 )
 
 # Detection / segmentation backends (relocated under vision/)
@@ -96,6 +100,12 @@ __all__ = [
     # Segmentation (served)
     'SegmenterLoader',
     'Segmenter',
+    # Caption (served)
+    'CaptionerLoader',
+    'Captioner',
+    # Background removal (served)
+    'BackgroundRemoverLoader',
+    'BackgroundRemover',
     # Detection / segmentation (plain backends)
     'Mask2FormerInstanceLoader',
     'Mask2FormerSemanticLoader',

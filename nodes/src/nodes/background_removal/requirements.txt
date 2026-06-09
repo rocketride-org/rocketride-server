@@ -1,8 +1,0 @@
-transformers==4.53.3
-accelerate
-huggingface-hub
-timm
-einops
-kornia
-Pillow
-numpy

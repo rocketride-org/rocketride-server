@@ -82,14 +82,28 @@
 	],
 	"test": {
 		"profiles": ["birefnet-default"],
-		"outputs": ["documents"],
+		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
 			{
 				"name": "Remove background from image",
-				"image": "images/ocr_test_text.png",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "mean_alpha" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["birefnet-default"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Remove background from image",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "mean_alpha" }
 				}
 			}
 		]

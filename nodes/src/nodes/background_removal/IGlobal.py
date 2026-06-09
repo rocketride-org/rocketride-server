@@ -1,61 +1,68 @@
 # =============================================================================
 # MIT License
+#
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
-import os
 import threading
+
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
+# Bounds for the source long-edge cap (composite resolution).
+DEFAULT_MAX_EDGE = 1024
+MIN_MAX_EDGE = 256
+MAX_MAX_EDGE = 4096
+
 
 class IGlobal(IGlobalBase):
-    """
-    IGlobal manages global lifecycle for the background_removal node.
-
-    Loads BiRefNet once at pipeline start. Provides a device lock for thread-safe
-    inference across concurrent IInstance handlers.
-
-    Singleton model + threading.Lock() pattern mirrors the depth_estimate node
-    so that GPU-bound inference is serialized inside a single node instance.
-    """
+    remover = None
+    device_lock = None
+    max_edge = DEFAULT_MAX_EDGE
 
     def beginGlobal(self):
+        """Build the shared BackgroundRemover facade and parse the clamped maxEdge config."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        from depends import depends
+        from ai.common.models.vision.background import BackgroundRemover, DEFAULT_MODEL
 
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
-
-        import ai.common.torch  # noqa: F401
-
-        from .background_removal import BackgroundRemover
-
-        bag = self.IEndpoint.endpoint.bag
-
-        # Read the node config once; reuse for all derived knobs.
         node_cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        # Track the active profile so per-frame metadata can record the
-        # human-readable profile key rather than the raw HF model name.
-        self.profile = str(node_cfg.get('profile', 'birefnet-default'))
+        model_name = (node_cfg.get('model') or '').strip() or DEFAULT_MODEL
 
-        # Inference-shaping knobs. The remover also reads them from config
-        # (single source of truth) — stashing them here is useful for
-        # diagnostics and future re-init paths.
+        # max_edge: bound composite/source resolution so memory stays predictable.
         try:
-            self.max_edge = int(node_cfg.get('maxEdge', 1024))
+            self.max_edge = int(node_cfg.get('maxEdge', DEFAULT_MAX_EDGE))
         except (TypeError, ValueError):
-            self.max_edge = 1024
+            self.max_edge = DEFAULT_MAX_EDGE
+        self.max_edge = min(MAX_MAX_EDGE, max(MIN_MAX_EDGE, self.max_edge))
 
-        self.remover = BackgroundRemover(self.glb.logicalType, self.glb.connConfig, bag)
-
-        # Single device lock per node — serializes GPU calls across all
-        # IInstance handlers attached to this IGlobal.
+        # device=None -> model server when --modelserver is set, else local.
+        self.remover = BackgroundRemover(model_name=model_name, device=None)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):
+        """Disconnect the facade and release shared state on teardown."""
+        if self.remover is not None:
+            self.remover.disconnect()
         self.remover = None
         self.device_lock = None
