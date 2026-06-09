@@ -32,7 +32,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft,
 } from '../../icons/BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../../icons/BoxIcon';
@@ -238,6 +238,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 	const [width, setWidth] = useState(EXPANDED_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const [handleHover, setHandleHover] = useState(false);
+	const [headerHover, setHeaderHover] = useState(false);
 
 	const isResizingRef = useRef(false);
 	const startXRef = useRef(0);
@@ -387,22 +388,38 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div style={{ display: 'flex', alignItems: 'center', height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}>
-				<button
-					title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-					onClick={toggleCollapse}
-					style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', flex: 1 }}
-				>
-					<AppSwitcherButton collapsed={collapsed} />
-				</button>
-				{showAppSwitcher && !collapsed && (
-					<button
-						title="Home"
-						onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}
-						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
-					>
-						<BxHome size={18} />
-					</button>
+			<div
+				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}
+				onMouseEnter={() => setHeaderHover(true)}
+				onMouseLeave={() => setHeaderHover(false)}
+			>
+				{collapsed ? (
+					// Collapsed: show the rocket icon; on hover swap to the collapse-sidebar
+					// button (same 40×40 box, so no layout shift) which expands on click.
+					headerHover ? (
+						<button
+							title="Expand sidebar"
+							onClick={toggleCollapse}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+						>
+							<BxDockLeft size={20} />
+						</button>
+					) : (
+						<AppSwitcherButton collapsed={collapsed} />
+					)
+				) : (
+					<>
+						<div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+							<AppSwitcherButton collapsed={collapsed} />
+						</div>
+						<button
+							title="Collapse sidebar"
+							onClick={toggleCollapse}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+						>
+							<BxDockLeft size={18} />
+						</button>
+					</>
 				)}
 			</div>
 
