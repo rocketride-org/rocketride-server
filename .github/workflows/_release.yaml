@@ -324,17 +324,30 @@ jobs:
       # then all 5 prerelease creation jobs fail to push the new ones,
       # leaving the repo with zero prereleases until the next clean
       # commit.
+      # Mint a short-lived GitHub App installation token for the tag push. The
+      # tag points at a commit whose tree contains workflow files, so the
+      # pushing identity needs Workflows:write — GITHUB_TOKEN can't, and an App
+      # token removes the long-lived PAT that silently expires. The App
+      # (RELEASE_BOT_APP_ID) is installed on this repo with Contents:write +
+      # Workflows:write; the token lives only for this job.
+      - name: Generate release-bot token
+        id: bot_token
+        if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Create tag
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          BOT_TOKEN: ${{ steps.bot_token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Swap the remote URL to authenticate with WORKFLOW_PAT for the
-          # push. This affects only this step's git config and goes away
-          # when the runner tears down.
-          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          # Authenticate the push with the App installation token (this step's
+          # git config only; gone when the runner tears down).
+          git remote set-url origin "https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "${{ inputs.prerelease }}" = "true" ]; then
             git tag -f "${{ matrix.tag_name }}"
             git push -f origin "${{ matrix.tag_name }}"
