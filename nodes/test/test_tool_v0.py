@@ -58,14 +58,19 @@ def _stub_post_with_retry(url, *, headers=None, json=None, timeout=None, **_kw):
     return resp
 
 
-def _install_stubs() -> None:
+def _build_import_stubs() -> dict:
+    """Return {module_name: stub} for the deps needed only to import the module."""
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
     rocketlib.tool_function = lambda *_a, **_k: lambda fn: fn
     rocketlib.warning = _stub_warning
+    # Other nodes' IInstance modules import these from rocketlib; include them so
+    # a leaked stub (were one to leak) would not be missing attributes. We pop the
+    # stub after import regardless, so this is belt-and-suspenders.
+    rocketlib.debug = lambda *_a, **_k: None
+    rocketlib.error = lambda *_a, **_k: None
     rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config')
-    sys.modules.setdefault('rocketlib', rocketlib)
 
     # requests stub with real exception classes so `except` clauses catch them.
     requests = types.ModuleType('requests')
@@ -82,7 +87,6 @@ def _install_stubs() -> None:
     requests.exceptions.RequestException = _RequestException
     requests.exceptions.InvalidJSONError = _InvalidJSONError
     requests.RequestException = _RequestException
-    sys.modules.setdefault('requests', requests)
 
     ai_pkg = types.ModuleType('ai')
     ai_pkg.__path__ = []
@@ -93,16 +97,27 @@ def _install_stubs() -> None:
     ai_utils.post_with_retry = _stub_post_with_retry
     ai_config = types.ModuleType('ai.common.config')
     ai_config.Config = MagicMock()
-    sys.modules.setdefault('ai', ai_pkg)
-    sys.modules.setdefault('ai.common', ai_common)
-    sys.modules.setdefault('ai.common.utils', ai_utils)
-    sys.modules.setdefault('ai.common.config', ai_config)
 
+    return {
+        'rocketlib': rocketlib,
+        'requests': requests,
+        'ai': ai_pkg,
+        'ai.common': ai_common,
+        'ai.common.utils': ai_utils,
+        'ai.common.config': ai_config,
+    }
 
-_install_stubs()
 
 # ---------------------------------------------------------------------------
 # Load the module under test via importlib so we avoid the package __init__ chain.
+#
+# Inject stubs ONLY for modules not already present, import, then REMOVE exactly
+# the stubs we added (install-then-pop). Restoring is essential: under the full
+# `builder nodes:test-full` run these modules are real and shared across the whole
+# pytest session, so a leaked stub would break unrelated nodes' tests (e.g.
+# tool_tavily, whose collection imports the real rocketlib). The v0 module binds
+# `warning`/`normalize_tool_input`/`post_with_retry` into its own namespace at
+# import time, so dropping the sys.modules stubs afterwards is safe.
 # ---------------------------------------------------------------------------
 
 _NODES_ROOT = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
@@ -110,27 +125,45 @@ _IINSTANCE_PATH = _NODES_ROOT / 'tool_v0' / 'IInstance.py'
 
 
 def _load_iinstance():
+    added: list[str] = []
+    for name, stub in _build_import_stubs().items():
+        if name not in sys.modules:
+            sys.modules[name] = stub
+            added.append(name)
+
+    # The tool_v0 package + IGlobal/IInstance entries are this test's private
+    # scaffolding; always remove them afterwards so they never leak either.
+    scaffold: list[str] = []
     pkg_name = 'tool_v0'
     pkg_stub = types.ModuleType(pkg_name)
     pkg_stub.__path__ = [str(_NODES_ROOT / 'tool_v0')]
     pkg_stub.__package__ = pkg_name
     sys.modules[pkg_name] = pkg_stub
+    scaffold.append(pkg_name)
 
     iglobal_mod = types.ModuleType(f'{pkg_name}.IGlobal')
     iglobal_mod.IGlobal = type('IGlobal', (), {})
     sys.modules[f'{pkg_name}.IGlobal'] = iglobal_mod
+    scaffold.append(f'{pkg_name}.IGlobal')
     pkg_stub.IGlobal = iglobal_mod
 
-    spec = importlib.util.spec_from_file_location(
-        f'{pkg_name}.IInstance',
-        _IINSTANCE_PATH,
-        submodule_search_locations=[],
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    mod.__package__ = pkg_name
-    sys.modules[f'{pkg_name}.IInstance'] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            f'{pkg_name}.IInstance',
+            _IINSTANCE_PATH,
+            submodule_search_locations=[],
+        )
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = pkg_name
+        sys.modules[f'{pkg_name}.IInstance'] = mod
+        scaffold.append(f'{pkg_name}.IInstance')
+        spec.loader.exec_module(mod)
+    finally:
+        # Drop everything we injected so nothing leaks into the shared session.
+        for name in added + scaffold:
+            sys.modules.pop(name, None)
+
     return mod
 
 
@@ -246,6 +279,32 @@ class TestGenerateUi:
         with pytest.raises(RuntimeError, match='quota exceeded'):
             inst.generate_ui({'prompt': 'make a button'})
 
+    def test_api_error_prefers_message_over_user_message_and_code(self):
+        # When several keys are present, `message` wins (it is the precise,
+        # developer-facing string); userMessage/code are only fallbacks.
+        inst = _make_instance()
+        _POST.return_body = {'error': {'message': 'precise message', 'userMessage': 'friendly msg', 'code': 'err_code'}}
+        with pytest.raises(RuntimeError) as exc_info:
+            inst.generate_ui({'prompt': 'make a button'})
+        text = str(exc_info.value)
+        assert 'precise message' in text
+        assert 'friendly msg' not in text
+        assert 'err_code' not in text
+
+    def test_non_dict_json_payload_raises_unexpected_type(self):
+        # A top-level JSON array (or any non-dict) must raise rather than be
+        # treated as a chat object.
+        inst = _make_instance()
+        _POST.return_body = [{'id': 'chat-abc'}]
+        with pytest.raises(RuntimeError, match='unexpected payload type'):
+            inst.generate_ui({'prompt': 'make a button'})
+
+    def test_content_type_header_is_json(self):
+        inst = _make_instance()
+        _POST.return_body = _chat_body()
+        inst.generate_ui({'prompt': 'make a button'})
+        assert _POST.calls[0]['headers']['Content-Type'] == 'application/json'
+
     def test_empty_files_raises(self):
         inst = _make_instance()
         _POST.return_body = _chat_body(files=[])
@@ -312,6 +371,16 @@ class TestRefineUi:
         call = _POST.calls[0]
         assert call['url'].endswith('/v1/chats/chat-abc/messages')
         assert call['json'] == {'message': 'make it blue'}
+
+    def test_url_uses_input_chat_id_even_when_response_id_differs(self):
+        # The request URL must be built from the caller-supplied chat_id, not
+        # from whatever id the response happens to carry.
+        inst = _make_instance()
+        _POST.return_body = _chat_body(chat_id='server-side-other-id')
+        out = inst.refine_ui({'prompt': 'make it blue', 'chat_id': 'input-chat-id'})
+        assert _POST.calls[0]['url'].endswith('/v1/chats/input-chat-id/messages')
+        # The response's own id is still surfaced as the chat_id to reuse.
+        assert out['chat_id'] == 'server-side-other-id'
 
     def test_chat_id_falls_back_when_response_omits_id(self):
         inst = _make_instance()
