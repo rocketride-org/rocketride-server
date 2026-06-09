@@ -3,6 +3,8 @@ sidebar_position: 2
 sidebar_label: Quickstart
 ---
 
+import { LuPlay } from 'react-icons/lu';
+
 <head>
   <title>Quickstart - RocketRide Documentation</title>
 </head>
@@ -19,7 +21,7 @@ Search for **RocketRide** in the VS Code extension marketplace and install it.
 
 ## 2. Deploy a Server
 
-Click the RocketRide (🚀) icon in your IDE sidebar. You'll be prompted to choose how to run the server:
+Click the RocketRide (<img src="/img/rocketride-icon-colored.svg" alt="RocketRide" className="rr-inline-icon" />) icon in your IDE sidebar. You'll be prompted to choose how to run the server:
 
 - **Local (Recommended)** — Pulls the server directly into your IDE with no additional setup.
 - **On-Premises** — Run the server on your own hardware via Docker or build from source.
@@ -46,7 +48,7 @@ Your pipeline should look like this: `Chat → LLM`.
 
 ## 5. Run Your Pipeline
 
-Press the **▶️ button** on the source node in the canvas, or launch it from the **Connection Manager** panel.
+Press the **<LuPlay className="rr-inline-icon" /> Run button** on the source node in the canvas, or launch it from the **Connection Manager** panel.
 
 Once running, open the chat interface to send a message. You'll see the LLM respond in real time.
 

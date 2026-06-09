@@ -21,16 +21,14 @@ const config: Config = {
 	favicon: 'img/rocketride-icon-colored.svg',
 
 	future: {
-		v4: true
+		v4: true,
 	},
 
 	url: 'https://docs.rocketride.org/',
 	baseUrl: '/',
 
 	// Inter for body + headings (loaded from Google Fonts).
-	stylesheets: [
-		'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
-	],
+	stylesheets: ['https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'],
 
 	onBrokenLinks: 'throw',
 	onBrokenMarkdownLinks: 'warn',
@@ -39,12 +37,12 @@ const config: Config = {
 	// reserving MDX for .mdx) avoids JSX/expression pitfalls like `<128 GB` or
 	// bare `{` in hand-written node prose.
 	markdown: {
-		format: 'detect'
+		format: 'detect',
 	},
 
 	i18n: {
 		defaultLocale: 'en',
-		locales: ['en']
+		locales: ['en'],
 	},
 
 	// Build metadata threaded through from `builder docs:build --version/--hash/...`.
@@ -52,7 +50,7 @@ const config: Config = {
 		version: process.env.DOCS_VERSION || '',
 		hash: process.env.DOCS_HASH || '',
 		stamp: process.env.DOCS_STAMP || '',
-		saas: process.env.DOCS_SAAS === '1'
+		saas: process.env.DOCS_SAAS === '1',
 	},
 
 	presets: [
@@ -62,14 +60,14 @@ const config: Config = {
 				docs: {
 					path: contentPath,
 					routeBasePath: '/',
-					sidebarPath: './sidebars.ts'
+					sidebarPath: './sidebars.ts',
 				},
 				blog: false,
 				theme: {
-					customCss: './src/css/custom.css'
-				}
-			} satisfies Preset.Options
-		]
+					customCss: './src/css/custom.css',
+				},
+			} satisfies Preset.Options,
+		],
 	],
 
 	// Local search only when Algolia is not configured (they conflict).
@@ -80,9 +78,9 @@ const config: Config = {
 					'@easyops-cn/docusaurus-search-local',
 					{
 						hashed: true,
-						docsRouteBasePath: '/'
-					}
-				]
+						docsRouteBasePath: '/',
+					},
+				],
 			],
 
 	plugins: [['@docusaurus/plugin-client-redirects', { redirects }]],
@@ -91,7 +89,7 @@ const config: Config = {
 		...(algolia ? { algolia } : {}),
 		colorMode: {
 			defaultMode: 'dark',
-			respectPrefersColorScheme: true
+			respectPrefersColorScheme: true,
 		},
 		navbar: {
 			title: 'RocketRide',
@@ -100,21 +98,21 @@ const config: Config = {
 				alt: 'RocketRide',
 				src: 'img/rocketride-icon-colored.svg',
 				srcDark: 'img/rocketride-icon-white.svg',
-				href: '/'
+				href: '/',
 			},
 			items: [
-				{ to: '/', label: 'Docs', position: 'left' },
-				{ href: 'https://github.com/rocketride-org/rocketride-server', label: 'GitHub', position: 'right' }
-			]
+				{ to: '/', label: 'Home', position: 'left', className: 'navbar__link--colored' },
+				{ type: 'custom-githubStars', href: 'https://github.com/rocketride-org/rocketride-server', label: 'GitHub', position: 'right' },
+			],
 		},
 		footer: {
-			copyright: `© ${new Date().getFullYear()} RocketRide`
+			copyright: `© ${new Date().getFullYear()} RocketRide`,
 		},
 		prism: {
 			theme: prismThemes.github,
-			darkTheme: prismThemes.dracula
-		}
-	} satisfies Preset.ThemeConfig
+			darkTheme: prismThemes.dracula,
+		},
+	} satisfies Preset.ThemeConfig,
 };
 
 export default config;

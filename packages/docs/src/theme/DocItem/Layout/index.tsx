@@ -15,6 +15,8 @@ function markdownUrl(pathname: string): string {
 export default function DocItemLayout(props: Props): React.ReactNode {
 	const { pathname } = useLocation();
 	const mdUrl = markdownUrl(pathname);
+	// No raw-markdown controls on the landing page (it's a bespoke MDX layout).
+	const isHome = pathname === '/';
 
 	const copyMarkdown = async () => {
 		const res = await fetch(mdUrl);
@@ -25,14 +27,16 @@ export default function DocItemLayout(props: Props): React.ReactNode {
 
 	return (
 		<>
-			<div className="docs-md-actions">
-				<a className="button button--secondary button--sm" href={mdUrl} target="_blank" rel="noopener noreferrer">
-					View as Markdown
-				</a>
-				<button type="button" className="button button--secondary button--sm" onClick={copyMarkdown}>
-					Copy as Markdown
-				</button>
-			</div>
+			{!isHome && (
+				<div className="docs-md-actions">
+					<a className="button button--secondary button--sm" href={mdUrl} target="_blank" rel="noopener noreferrer">
+						View as Markdown
+					</a>
+					<button type="button" className="button button--secondary button--sm" onClick={copyMarkdown}>
+						Copy as Markdown
+					</button>
+				</div>
+			)}
 			<Layout {...props} />
 		</>
 	);

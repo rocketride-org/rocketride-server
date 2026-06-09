@@ -1,10 +1,11 @@
 /**
  * RocketRide documentation theme.
  *
- * Primary accent: Horizon Blue (#41b6e6). RocketRide red (#F93822) is reserved
- * for the logo and occasional highlights. Layout models the Devdocs X reference:
- * a floating, rounded content panel on a deep background. Dark is the default;
- * light mode mirrors the surfaces.
+ * Primary accent: Horizon Blue (#41b6e6). Imperial Indigo (#370b7a) lights the
+ * ambient background glow; Night Amethyst (#5f2167) tints highlights and text
+ * selection. RocketRide red (#F93822) is reserved for the logo. Layout models the
+ * Devdocs X reference: a floating, rounded Graphite panel on a deep Abyss
+ * background. Dark is the default; light mode mirrors the surfaces.
  */
 
 :root {
@@ -36,10 +37,14 @@
 	--ifm-background-surface-color: #f5f7fb;
 	--rr-panel-border: rgba(30, 26, 52, 0.08);
 	--ifm-toc-border-color: transparent;
-	--ifm-navbar-background-color: var(--ifm-background-color);
-	--ifm-footer-background-color: var(--ifm-background-color);
 
-	--docusaurus-highlighted-code-line-bg: rgba(65, 182, 230, 0.12);
+	/* Private surface token. Infima forces --ifm-background-color via a
+	 * build-injected :root:not(#\#):not(#\#) rule (specificity 2,0,1) that our
+	 * plain :root/[data-theme] can't beat — so navbar/footer/panel paint from
+	 * this --rr-* var, which nothing else competes for. */
+	--rr-surface: #ffffff;
+
+	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.1);
 }
 
 [data-theme='dark'] {
@@ -52,23 +57,50 @@
 	--ifm-color-primary-lighter: #6ac6ec;
 	--ifm-color-primary-lightest: #8fd4f1;
 
-	/* Deep outer background; Abyss-blue floating panel */
-	--rr-outer-bg: radial-gradient(1200px 600px at 50% -10%, #241b3f 0%, #15111e 55%, #110e18 100%);
-	--ifm-background-color: #1e1a34;
-	--ifm-background-surface-color: #262146;
+	/* Indigo glow fading into the Abyss field; Graphite panel floats on top. */
+	--rr-outer-bg: radial-gradient(1200px 600px at 50% -10%, var(--rr-indigo) 0%, var(--rr-abyss) 55%, var(--rr-abyss) 100%);
+	--ifm-background-color: var(--rr-abyss);
+	--ifm-background-surface-color: var(--rr-abyss);
 	--rr-panel-border: rgba(255, 255, 255, 0.07);
 
 	--ifm-font-color-base: #e7e6f0;
 	--ifm-heading-color: var(--rr-offwhite);
-	--ifm-navbar-background-color: var(--ifm-background-color);
-	--ifm-footer-background-color: var(--ifm-background-color);
+	--rr-surface: var(--rr-graphite);
 	--ifm-menu-color: rgba(250, 251, 248, 0.72);
-	--ifm-menu-color-background-active: rgba(65, 182, 230, 0.12);
 	--ifm-menu-color-background-hover: rgba(255, 255, 255, 0.05);
 	--ifm-toc-border-color: transparent;
 	--ifm-hr-background-color: rgba(255, 255, 255, 0.08);
 
-	--docusaurus-highlighted-code-line-bg: rgba(65, 182, 230, 0.16);
+	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.28);
+}
+
+/* Infima ships the surface tokens via build-injected :root:not(#\#):not(#\#) and
+ * html[data-theme=dark]:not(#\#):not(#\#) rules (specificity 2,0,1 / 2,1,1) that a
+ * plain :root/[data-theme] can't beat — leaving secondary chrome (cards, dropdowns,
+ * table headers, mobile sidebar, search modal) on Infima's off-palette #1b1b1d /
+ * #242526. Match the hack (and the `html` prefix for dark) to force them on-palette. */
+:root:not(#\#):not(#\#) {
+	--ifm-background-color: #ffffff;
+	--ifm-background-surface-color: #f5f7fb;
+	/* Infima also boosts its .navbar/.footer element rules to (2,1,0), so they
+	 * win over class overrides — feed their tokens the surface color instead, so
+	 * navbar and footer paint identically. */
+	--ifm-navbar-background-color: var(--rr-surface);
+	--ifm-footer-background-color: var(--rr-surface);
+	/* Imperial Indigo links on the light surfaces; Horizon Blue in dark (below). */
+	--ifm-link-color: var(--rr-indigo);
+	/* Active sidebar item follows the link color, not the primary ramp; no
+	 * background fill (Infima's default is a grey hover-overlay). */
+	--ifm-menu-color-active: var(--ifm-link-color);
+	--ifm-menu-color-background-active: transparent;
+}
+
+html[data-theme='dark']:not(#\#):not(#\#) {
+	--ifm-background-color: var(--rr-abyss);
+	--ifm-background-surface-color: var(--rr-abyss);
+	--ifm-navbar-background-color: var(--rr-surface);
+	--ifm-footer-background-color: var(--rr-surface);
+	--ifm-link-color: var(--rr-horizon);
 }
 
 /* ----------------------------------------------------------------------------
@@ -80,33 +112,26 @@ body {
 	background-attachment: fixed;
 }
 
-#__docusaurus {
-	max-width: 1340px;
-	margin: 0 auto 1.5rem;
-	min-height: calc(100vh - 1.5rem);
-	background: var(--ifm-background-color);
-	border: 1px solid var(--rr-panel-border);
-	border-top: none;
-	border-radius: 0 0 16px 16px;
-	overflow: clip;
-	box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+::selection {
+	background: rgba(95, 33, 103, 0.4); /* Night Amethyst */
 }
 
-@media (max-width: 996px) {
-	#__docusaurus {
-		margin: 0;
-		border-radius: 0;
-		border: none;
-		min-height: 100vh;
-	}
+#__docusaurus {
+	max-width: none;
+	margin: 0;
+	min-height: 100vh;
+	background: var(--rr-surface);
+	border: none;
+	border-radius: 0;
+	overflow: clip;
 }
 
 /* Navbar sits inside the panel (sticky can't work under overflow: clip). */
 .navbar {
 	position: static;
 	box-shadow: none;
-	border-bottom: 1px solid var(--rr-panel-border);
-	background: var(--ifm-navbar-background-color);
+	border-bottom: none;
+	background: var(--rr-surface);
 	backdrop-filter: none;
 	/* No hide/reveal-on-scroll animation. */
 	transform: none !important;
@@ -123,6 +148,42 @@ body {
 	height: 1.75rem;
 }
 
+/* Home link colored like content links (Infima boosts .navbar__link to (2,1,0),
+ * so match the hack to win). */
+.navbar__link--colored:not(#\#):not(#\#),
+.navbar__link--colored:not(#\#):not(#\#):hover {
+	color: var(--ifm-link-color);
+}
+
+/* GitHub link with live star count (custom-githubStars navbar item). */
+.github-stars {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.9rem;
+}
+
+.github-stars__mark {
+	flex-shrink: 0;
+}
+
+.github-stars__count {
+	font-variant-numeric: tabular-nums;
+	font-size: 0.8rem;
+	font-weight: 600;
+	line-height: 1;
+	padding: 0.15rem 0.4rem;
+	border-radius: 999px;
+	border: 1px solid var(--rr-panel-border);
+	background: var(--ifm-color-emphasis-200);
+	color: var(--ifm-font-color-base);
+}
+
+.github-stars__count::before {
+	content: '★';
+	margin-right: 0.2rem;
+	color: var(--ifm-color-primary);
+}
+
 /* ----------------------------------------------------------------------------
  * Sidebar
  * ------------------------------------------------------------------------- */
@@ -136,12 +197,22 @@ body {
 }
 
 .menu__link--active:not(.menu__link--sublist) {
-	color: var(--ifm-color-primary);
+	color: var(--ifm-link-color);
 	font-weight: 600;
 }
 
 .theme-doc-sidebar-container {
 	border-right: none !important;
+}
+
+/* Breadcrumbs: the active (current-page) crumb follows the link color
+ * (Imperial Indigo in light, Horizon Blue in dark) like the active sidebar
+ * item, instead of Infima's primary ramp + grey background fill. Match the
+ * #\# specificity hack so we beat Infima's (and its build-injected) rules. */
+.breadcrumbs__item--active .breadcrumbs__link:not(#\#):not(#\#) {
+	color: var(--ifm-link-color);
+	background: transparent;
+	font-weight: 600;
 }
 
 /* No divider between the right table-of-contents and the content. */
@@ -178,11 +249,252 @@ article a {
 	font-weight: 500;
 }
 
+/* react-icons used in place of emoji. Card heading icons tint with the accent;
+ * inline icons size to the surrounding text. */
+.rr-card-icon {
+	width: 1.2em;
+	height: 1.2em;
+	vertical-align: -0.2em;
+	margin-right: 0.45rem;
+	color: var(--ifm-color-primary);
+}
+
+.rr-inline-icon {
+	width: 1em;
+	height: 1em;
+	vertical-align: -0.15em;
+}
+
+/* SDK shortcut icons under the home-page header (Python / TypeScript). */
+.rr-sdk-icons {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+	margin: 0.5rem 0 1.75rem;
+}
+
+/* Brand-colored logos (set inline per icon); only lift on hover, never recolor. */
+.rr-sdk-icons a {
+	display: inline-flex;
+	transition: transform 0.15s ease;
+}
+
+.rr-sdk-icons a:hover {
+	transform: translateY(-2px);
+}
+
+.rr-sdk-icons svg {
+	width: 2.25rem;
+	height: 2.25rem;
+}
+
+/* Never underline the home card/feature links (beat Infima's link-hover rule). */
+.rr-side-card:not(#\#),
+.rr-side-card:not(#\#):hover,
+.rr-feature:not(#\#),
+.rr-feature:not(#\#):hover {
+	text-decoration: none;
+}
+
+/* Home: right-column guide cards (bordered, stacked beside the summary). */
+.rr-side-card {
+	display: block;
+	padding: 1.1rem 1.35rem;
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 12px;
+	margin-bottom: 1rem;
+	color: inherit;
+	transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.rr-side-card:hover {
+	border-color: var(--ifm-color-primary);
+	transform: translateY(-2px);
+	text-decoration: none;
+	color: inherit;
+}
+
+.rr-side-card__head {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	margin-bottom: 0.35rem;
+}
+
+.rr-side-card__title {
+	font-size: 1.15rem;
+	font-weight: 650;
+	color: var(--ifm-heading-color);
+}
+
+.rr-side-card__body {
+	display: block;
+	font-size: 0.92rem;
+	line-height: 1.5;
+	color: var(--ifm-color-emphasis-700);
+}
+
+/* Home: bottom feature trio (centered icon + title + blurb). */
+.rr-features {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 2.5rem;
+	margin: 4rem 0 1.5rem;
+}
+
+.rr-feature {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	color: inherit;
+	transition: transform 0.15s ease;
+}
+
+.rr-feature:hover {
+	text-decoration: none;
+	color: inherit;
+	transform: translateY(-2px);
+}
+
+.rr-feature svg {
+	width: 2rem;
+	height: 2rem;
+	margin-bottom: 0.7rem;
+	color: var(--ifm-color-primary);
+}
+
+.rr-feature__title {
+	font-size: 1.1rem;
+	font-weight: 650;
+	margin-bottom: 0.4rem;
+	color: var(--ifm-heading-color);
+}
+
+.rr-feature__body {
+	font-size: 0.9rem;
+	line-height: 1.5;
+	color: var(--ifm-color-emphasis-700);
+}
+
+@media (max-width: 768px) {
+	.rr-features {
+		grid-template-columns: 1fr;
+		gap: 2rem;
+	}
+}
+
 /* ----------------------------------------------------------------------------
- * Footer (dark, inside the panel)
+ * Footer (Devdocs X layout: brand block + link columns + copyright bar)
  * ------------------------------------------------------------------------- */
-.footer {
+.footer.rr-footer {
+	background-color: var(--rr-surface);
 	border-top: 1px solid var(--rr-panel-border);
+	padding: 3rem 2rem 0;
+}
+
+.rr-footer__inner {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) 2fr;
+	gap: 3rem;
+	max-width: 1100px;
+	margin: 0 auto;
+	padding-bottom: 2.5rem;
+}
+
+.rr-footer__logo {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__logo:hover {
+	text-decoration: none;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__tagline {
+	margin: 1rem 0 1.25rem;
+	font-size: 0.9rem;
+	line-height: 1.55;
+	color: var(--ifm-color-emphasis-600);
+	max-width: 22rem;
+}
+
+.rr-footer__socials {
+	display: flex;
+	gap: 0.6rem;
+}
+
+.rr-footer__social {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	border-radius: 50%;
+	border: 1px solid var(--rr-panel-border);
+	color: var(--ifm-color-emphasis-700);
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.rr-footer__social:hover {
+	color: var(--ifm-color-primary);
+	border-color: var(--ifm-color-primary);
+}
+
+.rr-footer__columns {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 2rem;
+}
+
+.rr-footer__title {
+	font-size: 0.95rem;
+	font-weight: 650;
+	margin-bottom: 1rem;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+}
+
+.rr-footer__link {
+	font-size: 0.88rem;
+	color: var(--ifm-color-emphasis-600);
+}
+
+.rr-footer__link:hover {
+	color: var(--ifm-color-primary);
+	text-decoration: none;
+}
+
+.rr-footer__bottom {
+	border-top: 1px solid var(--rr-panel-border);
+	padding: 1.25rem 0;
+	text-align: center;
+	font-size: 0.82rem;
+	color: var(--ifm-color-emphasis-500);
+}
+
+@media (max-width: 768px) {
+	.rr-footer__inner {
+		grid-template-columns: 1fr;
+		gap: 2rem;
+	}
+
+	.rr-footer__columns {
+		grid-template-columns: repeat(2, 1fr);
+	}
 }
 
 /* ----------------------------------------------------------------------------
