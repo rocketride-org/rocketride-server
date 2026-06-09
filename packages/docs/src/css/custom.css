@@ -159,29 +159,28 @@ body {
 .github-stars {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.9rem;
-}
-
-.github-stars__mark {
-	flex-shrink: 0;
 }
 
 .github-stars__count {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
 	font-variant-numeric: tabular-nums;
 	font-size: 0.8rem;
 	font-weight: 600;
 	line-height: 1;
-	padding: 0.15rem 0.4rem;
+	padding: 0.25rem 0.55rem;
 	border-radius: 999px;
 	border: 1px solid var(--rr-panel-border);
 	background: var(--ifm-color-emphasis-200);
 	color: var(--ifm-font-color-base);
 }
 
-.github-stars__count::before {
-	content: '★';
-	margin-right: 0.2rem;
-	color: var(--ifm-color-primary);
+.github-stars__icon {
+	width: 0.95rem;
+	height: 0.95rem;
+	flex-shrink: 0;
+	color: var(--ifm-font-color-base);
 }
 
 /* ----------------------------------------------------------------------------
@@ -256,7 +255,7 @@ article a {
 	height: 1.2em;
 	vertical-align: -0.2em;
 	margin-right: 0.45rem;
-	color: var(--ifm-color-primary);
+	color: var(--ifm-link-color);
 }
 
 .rr-inline-icon {
@@ -286,6 +285,31 @@ article a {
 .rr-sdk-icons svg {
 	width: 2.25rem;
 	height: 2.25rem;
+}
+
+/* Home Quickstart CTA: paint from the link color (indigo light / horizon dark)
+ * like the home icons, not Infima's primary ramp. The #\# hack beats Infima's
+ * .button--primary background rule. */
+.rr-quickstart-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.rr-quickstart-btn:not(#\#):not(#\#),
+.rr-quickstart-btn:not(#\#):not(#\#):hover {
+	background-color: var(--ifm-link-color);
+	border-color: var(--ifm-link-color);
+	color: #fff;
+}
+
+.rr-quickstart-btn:not(#\#):not(#\#):hover {
+	filter: brightness(1.12);
+}
+
+.rr-quickstart-btn__icon {
+	width: 1.15em;
+	height: 1.15em;
 }
 
 /* Never underline the home card/feature links (beat Infima's link-hover rule). */
@@ -361,7 +385,7 @@ article a {
 	width: 2rem;
 	height: 2rem;
 	margin-bottom: 0.7rem;
-	color: var(--ifm-color-primary);
+	color: var(--ifm-link-color);
 }
 
 .rr-feature__title {
