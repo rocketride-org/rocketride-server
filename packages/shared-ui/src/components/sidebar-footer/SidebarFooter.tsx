@@ -34,7 +34,7 @@ import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { useAnnouncements } from '../../hooks/useAnnouncements';
 import { PopupRow } from '../PopupRow';
-import { BxBookOpen, BxChevronRight, BxCheck } from '../BoxIcon';
+import { BxBookOpen, BxChevronRight, BxCheck, BxCog } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
 
 // =============================================================================
@@ -388,7 +388,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 					<>
 						<div style={S.avatarCircle}>{initials}</div>
 						{!collapsed && (
-							<div style={S.nameBlock}>
+							<div style={{ ...S.nameBlock, flex: 1 }}>
 								<div style={S.nameText}>{userName}</div>
 								{userEmail && <div style={S.emailText}>{userEmail}</div>}
 							</div>
@@ -398,12 +398,13 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 					<>
 						<div style={S.rocketCircle}><RocketRideMark size={18} /></div>
 						{!collapsed && (
-							<div style={S.nameBlock}>
+							<div style={{ ...S.nameBlock, flex: 1 }}>
 								<div style={S.nameText}>RocketRide</div>
 							</div>
 						)}
 					</>
 				)}
+				{!collapsed && <BxCog size={16} color="var(--rr-text-secondary)" />}
 			</div>
 
 			{/* ── Popup menu (portalled to document.body to escape overflow:hidden) */}
