@@ -724,13 +724,13 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 				{hasFileManage && (
 					<>
 						<Tooltip title={`New ${config.title.replace(/s$/, '')}`} arrow placement="top">
-							<button style={{ ...S.headerAction, ...actionHoverBg('newFile') }} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
+							<button aria-label={`New ${config.title.replace(/s$/, '')}`} style={{ ...S.headerAction, ...actionHoverBg('newFile') }} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
 								<BxFilePlus size={16} />
 							</button>
 						</Tooltip>
 						{config.allowFolders !== false && (
 							<Tooltip title="New folder" arrow placement="top">
-								<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
+								<button aria-label="New folder" style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
 									<BxFolderPlus size={16} />
 								</button>
 							</Tooltip>
@@ -738,17 +738,17 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 					</>
 				)}
 				<Tooltip title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} arrow placement="top">
-					<button style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
+					<button aria-label={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
 						{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
 					</button>
 				</Tooltip>
 				<Tooltip title="Collapse all" arrow placement="top">
-					<button style={{ ...S.headerAction, ...actionHoverBg('collapse') }} onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
+					<button aria-label="Collapse all" style={{ ...S.headerAction, ...actionHoverBg('collapse') }} onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
 						<BxCollapseAll size={16} />
 					</button>
 				</Tooltip>
 				<Tooltip title="Refresh" arrow placement="top">
-					<button style={{ ...S.headerAction, ...actionHoverBg('refresh') }} onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
+					<button aria-label="Refresh" style={{ ...S.headerAction, ...actionHoverBg('refresh') }} onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
 						<BxRefresh size={16} />
 					</button>
 				</Tooltip>

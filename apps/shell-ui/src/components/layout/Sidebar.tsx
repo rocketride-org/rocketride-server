@@ -394,19 +394,21 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 				onMouseLeave={() => setHeaderHover(false)}
 			>
 				{collapsed ? (
-					// Collapsed: show the rocket icon; on hover swap to the collapse-sidebar
-					// button (same 40×40 box, so no layout shift) which expands on click.
-					headerHover ? (
-						<button
-							title="Expand sidebar"
-							onClick={toggleCollapse}
-							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
-						>
-							<BxDockLeft size={20} />
-						</button>
-					) : (
-						<AppSwitcherButton collapsed={collapsed} />
-					)
+					// Collapsed: a single always-rendered, focusable button toggles
+					// expansion. It shows the brand mark by default and swaps to the
+					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
+					// shift). Always mounted — and focus-reveals the icon — so keyboard
+					// and touch users can expand without hovering.
+					<button
+						title="Expand sidebar"
+						aria-label="Expand sidebar"
+						onClick={toggleCollapse}
+						onFocus={() => setHeaderHover(true)}
+						onBlur={() => setHeaderHover(false)}
+						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
+					>
+						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={collapsed} />}
+					</button>
 				) : (
 					<>
 						<div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
@@ -414,6 +416,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 						</div>
 						<button
 							title="Collapse sidebar"
+							aria-label="Collapse sidebar"
 							onClick={toggleCollapse}
 							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
 						>
