@@ -101,7 +101,7 @@ export interface ISidebarViewProps {
 	unknownTasks?: UnknownTask[];
 
 	// ── Actions ─────────────────────────────────────────────────────────────
-	onNavigate: (target: 'new' | 'monitor' | 'deploy' | 'templates') => void;
+	onNavigate: (target: 'dashboard' | 'new' | 'monitor' | 'deploy' | 'templates') => void;
 	/** Open a file in the editor. */
 	onOpenFile: (path: string) => void;
 	/**
