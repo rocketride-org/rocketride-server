@@ -33,10 +33,21 @@ export function readTheme(): ThemeTokens {
  * @param themeId  Theme file name without extension (e.g. 'rocketride-light')
  * @param basePath URL prefix where theme files are hosted (default: '/themes')
  */
+/**
+ * Per-theme token cache. After the first fetch, repeated switches to the same
+ * theme apply from memory instead of re-fetching the JSON over the network —
+ * the round-trip jitter was what made the switch-to-light flash intermittent.
+ */
+const _themeFetchCache = new Map<string, ThemeTokens>();
+
 export async function fetchAndApplyTheme(themeId: string, basePath = '/themes'): Promise<ThemeTokens> {
+	const cacheKey = `${basePath}/${themeId}`;
+	const cached = _themeFetchCache.get(cacheKey);
+	if (cached) { applyTheme(cached); return cached; }
 	const response = await fetch(`${basePath}/${themeId}.json`);
 	if (!response.ok) throw new Error(`Theme '${themeId}' not found`);
 	const tokens: ThemeTokens = await response.json();
+	_themeFetchCache.set(cacheKey, tokens);
 	applyTheme(tokens);
 	return tokens;
 }
