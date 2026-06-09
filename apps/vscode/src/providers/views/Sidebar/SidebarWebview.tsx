@@ -480,7 +480,9 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	// showDashboard={false}: the VS Code host has no home-app destination, so the
+	// Dashboard nav action (onNavigate('dashboard')) is unhandled here. Hide it.
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} showDashboard={false} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;
