@@ -29,13 +29,14 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
 import AccountPage from '../../views/account/AccountPage';
 import SettingsPage from '../../views/settings/SettingsPage';
+import EnvironmentPage from '../../views/environment/EnvironmentPage';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 /** Shell overlay pages that render as modal dialogs over the client area. */
-export type ShellOverlay = 'account' | 'settings' | null;
+export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
 
 // =============================================================================
 // STYLES
@@ -124,6 +125,7 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 						<button style={styles.dialogClose} onClick={closeOverlay}>✕</button>
 						{overlay === 'account' && <AccountPage />}
 						{overlay === 'settings' && <SettingsPage />}
+						{overlay === 'environment' && <EnvironmentPage />}
 					</div>
 				</div>
 			)}
