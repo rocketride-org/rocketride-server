@@ -383,7 +383,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 			)}
 
 			{/* ── Trigger row — avatar (signed in) or rocket branding (anonymous) */}
-			<div ref={triggerRef} style={S.avatarRow(hovered, menuOpen, collapsed)} onClick={() => setMenuOpen((v) => !v)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+			<div ref={triggerRef} role="button" tabIndex={0} aria-haspopup="menu" aria-expanded={menuOpen} style={S.avatarRow(hovered, menuOpen, collapsed)} onClick={() => setMenuOpen((v) => !v)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMenuOpen((v) => !v); } }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
 				{userName ? (
 					<>
 						<div style={S.avatarCircle}>{initials}</div>
@@ -450,7 +450,10 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 													<div
 														key={i}
 														title={isProgressLine ? line : undefined}
+														role={isTeamLine ? 'button' : undefined}
+														tabIndex={isTeamLine ? 0 : undefined}
 														onClick={isTeamLine ? (e) => openFlyout(item.id, item.submenu!, (e.currentTarget.parentElement ?? e.currentTarget) as HTMLElement) : undefined}
+														onKeyDown={isTeamLine ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFlyout(item.id, item.submenu!, (e.currentTarget.parentElement ?? e.currentTarget) as HTMLElement); } } : undefined}
 														style={{
 															paddingLeft: 10,
 															fontSize: isProgressLine ? 10 : 11,

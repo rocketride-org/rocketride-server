@@ -183,10 +183,12 @@ export class ConnectionManager extends EventEmitter {
 					this.updateConnectionStatus({
 						state: ConnectionState.DISCONNECTED,
 						lastError: event.error ?? event.message,
+						progressLogLine: undefined,
 					});
 				} else {
 					this.updateConnectionStatus({
 						state: ConnectionState.DISCONNECTED,
+						progressLogLine: undefined,
 					});
 				}
 				break;
@@ -420,6 +422,7 @@ export class ConnectionManager extends EventEmitter {
 					lastError: undefined,
 					retryAttempt: 0,
 					progressMessage: undefined,
+					progressLogLine: undefined,
 				});
 				this.logger.output(`${icons.success} Connected to RocketRide server`);
 				this.emit('shell:connected');
@@ -462,6 +465,7 @@ export class ConnectionManager extends EventEmitter {
 						state: ConnectionState.AUTH_FAILED,
 						lastError: error.message,
 						progressMessage: undefined,
+						progressLogLine: undefined,
 					});
 
 					// Open the settings page focused on the failing group so the user can fix credentials
@@ -511,6 +515,7 @@ export class ConnectionManager extends EventEmitter {
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
 			progressMessage: undefined,
+			progressLogLine: undefined,
 		});
 	}
 
