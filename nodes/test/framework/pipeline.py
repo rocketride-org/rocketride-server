@@ -176,6 +176,9 @@ class PipelineBuilder:
         config = {}
         if profile:
             config['profile'] = profile
+
+        if provider == self.config.provider and self.config.config:
+            config.update(self.config.config)
         # Inject credentials into the pipeline config.
         #
         # `ROCKETRIDE_MOCK` (set by the test runner) and per-group

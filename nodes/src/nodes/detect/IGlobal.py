@@ -66,7 +66,11 @@ class IGlobal(IGlobalBase):
                 'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
             )
 
-        self.detector = Detector(backend=backend, device=None, threshold=threshold, prompt=prompt or None)
+        revision = (config.get('revision') or '').strip() or None
+
+        self.detector = Detector(
+            backend=backend, device=None, threshold=threshold, prompt=prompt or None, revision=revision
+        )
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

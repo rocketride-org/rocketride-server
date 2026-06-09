@@ -35,6 +35,7 @@ Caption: image captioning loader + facade (vision family).
 import io
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -58,6 +59,8 @@ TASKS = {
 }
 
 MAX_NEW_TOKENS = 256
+# Local-mode watchdog: Florence can hang on complex scenes; skip the frame past this.
+INFERENCE_TIMEOUT = 60
 
 
 def _resolve_token(task: Optional[str]) -> str:
@@ -283,6 +286,7 @@ class Captioner:
         metrics.counter('gpu_inference_count', 1)
 
         if self._proxy_mode:
+            # The model server enforces its own per-request timeout/retry.
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {'data': image_to_bytes(image), 'output_fields': ['caption'], 'task': task},
@@ -290,6 +294,46 @@ class Captioner:
             items = result.get('result', [])
             return items[0].get('caption', '') if items else ''
 
+        return self._caption_local(image, task)
+
+    def _caption_local(self, image: Any, task: str) -> str:
+        """Run local inference under a watchdog thread; raise TimeoutError if it hangs.
+
+        Args:
+            image: PIL Image or encoded image bytes.
+            task: Caption granularity key for this call.
+
+        Returns:
+            The caption string.
+        """
+        result: List[Optional[str]] = [None]
+        error: List[Optional[BaseException]] = [None]
+
+        def _work():
+            try:
+                result[0] = self._infer_local(image, task)
+            except BaseException as exc:  # propagated to the caller after join
+                error[0] = exc
+
+        worker = threading.Thread(target=_work, daemon=True)
+        worker.start()
+        worker.join(timeout=INFERENCE_TIMEOUT)
+        if worker.is_alive():
+            raise TimeoutError(f'caption inference timed out after {INFERENCE_TIMEOUT}s')
+        if error[0] is not None:
+            raise error[0]
+        return result[0] or ''
+
+    def _infer_local(self, image: Any, task: str) -> str:
+        """Run preprocess→inference→postprocess locally and record per-phase timing.
+
+        Args:
+            image: PIL Image or encoded image bytes.
+            task: Caption granularity key for this call.
+
+        Returns:
+            The caption string.
+        """
         t0 = time.perf_counter()
         pre = CaptionerLoader.preprocess(self._bundle, [image], self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000

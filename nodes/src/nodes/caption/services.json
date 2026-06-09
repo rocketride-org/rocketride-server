@@ -32,6 +32,7 @@
 			"florence-base": {
 				"title": "Florence-2 Base",
 				"model": "microsoft/Florence-2-base",
+				"revision": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
 				"task": "caption"
 			}
 		}

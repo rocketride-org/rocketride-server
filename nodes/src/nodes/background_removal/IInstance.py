@@ -24,7 +24,7 @@
 
 import json
 
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import Image, ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference
 from .IGlobal import IGlobal
@@ -98,7 +98,11 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-            self._emit(image)
-            self._image_data = None
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                self._emit(image)
+            except Exception as exc:
+                warning(f'background_removal: dropping frame due to inference error: {exc}')
+            finally:
+                self._image_data = None
             return self.preventDefault()

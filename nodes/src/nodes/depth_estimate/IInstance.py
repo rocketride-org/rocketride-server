@@ -24,7 +24,7 @@
 
 import json
 
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
 from ai.common.utils import colorize_depth
@@ -92,7 +92,11 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-            self._emit(image)
-            self._image_data = None
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                self._emit(image)
+            except Exception as exc:
+                warning(f'depth_estimate: dropping frame due to inference error: {exc}')
+            finally:
+                self._image_data = None
             return self.preventDefault()

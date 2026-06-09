@@ -35,7 +35,8 @@
 		"profiles": {
 			"v2-small": {
 				"title": "Depth Anything V2 Small",
-				"model": "depth-anything/Depth-Anything-V2-Small-hf"
+				"model": "depth-anything/Depth-Anything-V2-Small-hf",
+				"revision": "5426e4f0f36572d16453bbda7a8389317b1bef99"
 			}
 		}
 	},

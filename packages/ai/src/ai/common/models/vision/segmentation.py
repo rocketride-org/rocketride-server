@@ -100,6 +100,7 @@ class Mask2FormerInstanceLoader:
         model_name: Optional[str] = None,
         threshold: float = DEFAULT_THRESHOLD,
         device: Optional[str] = None,
+        revision: Optional[str] = None,
         **_kwargs,
     ):
         """Build the instance segmenter.
@@ -108,6 +109,7 @@ class Mask2FormerInstanceLoader:
             model_name: HF model id.
             threshold: Default minimum instance score.
             device: Torch device string, or None to auto-pick.
+            revision: Optional pinned model revision.
         """
         from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerImageProcessor
         from ai.common.torch import torch
@@ -116,8 +118,12 @@ class Mask2FormerInstanceLoader:
         self.threshold = float(threshold)
         self.device = device or pick_torch_device()
 
-        self._processor = Mask2FormerImageProcessor.from_pretrained(self.model_name)
-        self._model = Mask2FormerForUniversalSegmentation.from_pretrained(self.model_name).to(self.device).eval()
+        self._processor = Mask2FormerImageProcessor.from_pretrained(self.model_name, revision=revision)
+        self._model = (
+            Mask2FormerForUniversalSegmentation.from_pretrained(self.model_name, revision=revision)
+            .to(self.device)
+            .eval()
+        )
         self._id2label = getattr(self._model.config, 'id2label', {}) or {}
         self._torch = torch
 
@@ -189,7 +195,12 @@ class Mask2FormerSemanticLoader:
     DEFAULT_MODEL = 'facebook/mask2former-swin-tiny-ade-semantic'
 
     def __init__(
-        self, model_name: Optional[str] = None, threshold: float = 0.0, device: Optional[str] = None, **_kwargs
+        self,
+        model_name: Optional[str] = None,
+        threshold: float = 0.0,
+        device: Optional[str] = None,
+        revision: Optional[str] = None,
+        **_kwargs,
     ):
         """Build the semantic segmenter.
 
@@ -197,6 +208,7 @@ class Mask2FormerSemanticLoader:
             model_name: HF model id.
             threshold: Unused (semantic emits a full class map).
             device: Torch device string, or None to auto-pick.
+            revision: Optional pinned model revision.
         """
         from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerImageProcessor
         from ai.common.torch import torch
@@ -205,8 +217,12 @@ class Mask2FormerSemanticLoader:
         self.threshold = float(threshold)
         self.device = device or pick_torch_device()
 
-        self._processor = Mask2FormerImageProcessor.from_pretrained(self.model_name)
-        self._model = Mask2FormerForUniversalSegmentation.from_pretrained(self.model_name).to(self.device).eval()
+        self._processor = Mask2FormerImageProcessor.from_pretrained(self.model_name, revision=revision)
+        self._model = (
+            Mask2FormerForUniversalSegmentation.from_pretrained(self.model_name, revision=revision)
+            .to(self.device)
+            .eval()
+        )
         self._id2label = getattr(self._model.config, 'id2label', {}) or {}
         self._torch = torch
 
@@ -266,20 +282,21 @@ class Mask2FormerSemanticLoader:
         }
 
 
-def _build_backend(mode: str, model_name: str, device: Optional[str]):
+def _build_backend(mode: str, model_name: str, device: Optional[str], revision: Optional[str] = None):
     """Construct the underlying segmenter for a mode.
 
     Args:
         mode: 'instance' or 'semantic'.
         model_name: HF model id.
         device: Torch device string, or None to auto-pick.
+        revision: Optional pinned model revision.
 
     Returns:
         A backend exposing ``segment(image, prompts, threshold)``.
     """
     if mode == 'semantic':
-        return Mask2FormerSemanticLoader(model_name=model_name, device=device)
-    return Mask2FormerInstanceLoader(model_name=model_name, device=device)
+        return Mask2FormerSemanticLoader(model_name=model_name, device=device, revision=revision)
+    return Mask2FormerInstanceLoader(model_name=model_name, device=device, revision=revision)
 
 
 class SegmenterLoader(BaseLoader):
@@ -325,7 +342,7 @@ class SegmenterLoader(BaseLoader):
             device = device or pick_torch_device()
             gpu_index = int(device.split(':')[1]) if str(device).startswith('cuda:') else -1
 
-        segmenter = _build_backend(mode, model_name, device)
+        segmenter = _build_backend(mode, model_name, device, revision=revision)
         metadata = {'device': str(device), 'model_name': model_name, 'mode': mode, 'loader': 'segmentation'}
         return {'segmenter': segmenter, 'mode': mode}, metadata, gpu_index
 

@@ -56,8 +56,10 @@ class IGlobal(IGlobalBase):
             self.max_edge = DEFAULT_MAX_EDGE
         self.max_edge = min(MAX_MAX_EDGE, max(MIN_MAX_EDGE, self.max_edge))
 
+        revision = (node_cfg.get('revision') or '').strip() or None
+
         # device=None -> model server when --modelserver is set, else local.
-        self.remover = BackgroundRemover(model_name=model_name, device=None)
+        self.remover = BackgroundRemover(model_name=model_name, device=None, revision=revision)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

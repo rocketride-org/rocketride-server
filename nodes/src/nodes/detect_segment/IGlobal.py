@@ -68,8 +68,10 @@ class IGlobal(IGlobalBase):
         except (TypeError, ValueError):
             max_edge = DEFAULT_MAX_EDGE
 
+        revision = (config.get('revision') or '').strip() or None
+
         self.segmenter = Segmenter(
-            mode=mode, model_name=model_name, device=None, threshold=threshold, max_edge=max_edge
+            mode=mode, model_name=model_name, device=None, threshold=threshold, max_edge=max_edge, revision=revision
         )
         self.device_lock = threading.Lock()
 

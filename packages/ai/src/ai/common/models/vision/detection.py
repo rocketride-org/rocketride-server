@@ -82,7 +82,11 @@ class RFDetrLoader:
     DEFAULT_MODEL = 'PekingU/rtdetr_r50vd'
 
     def __init__(
-        self, model_name: Optional[str] = None, threshold: float = DEFAULT_THRESHOLD, device: Optional[str] = None
+        self,
+        model_name: Optional[str] = None,
+        threshold: float = DEFAULT_THRESHOLD,
+        device: Optional[str] = None,
+        revision: Optional[str] = None,
     ):
         """Build the RF-DETR (or RT-DETR fallback) model.
 
@@ -90,6 +94,8 @@ class RFDetrLoader:
             model_name: HF/package model id.
             threshold: Default confidence threshold.
             device: Torch device string, or None to auto-pick.
+            revision: Optional pinned model revision (RT-DETR fallback only; the rfdetr
+                package pins via its own version, not an HF revision).
         """
         from ai.common.torch import torch
 
@@ -118,8 +124,10 @@ class RFDetrLoader:
         except Exception:
             from transformers import AutoImageProcessor, RTDetrForObjectDetection
 
-            self._processor = AutoImageProcessor.from_pretrained(self.model_name)
-            self._model = RTDetrForObjectDetection.from_pretrained(self.model_name).to(self.device).eval()
+            self._processor = AutoImageProcessor.from_pretrained(self.model_name, revision=revision)
+            self._model = (
+                RTDetrForObjectDetection.from_pretrained(self.model_name, revision=revision).to(self.device).eval()
+            )
             self._labels = getattr(self._model.config, 'id2label', {}) or {}
             self._impl = 'rtdetr'
         self._torch = torch
@@ -195,6 +203,7 @@ class MmGDinoLoader:
         threshold: float = DEFAULT_THRESHOLD,
         text_threshold: float = 0.25,
         device: Optional[str] = None,
+        revision: Optional[str] = None,
     ):
         """Build the Grounding-DINO model.
 
@@ -203,6 +212,7 @@ class MmGDinoLoader:
             threshold: Default box confidence threshold.
             text_threshold: Text-match threshold.
             device: Torch device string, or None to auto-pick.
+            revision: Optional pinned model revision.
         """
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
@@ -211,8 +221,12 @@ class MmGDinoLoader:
         self.text_threshold = float(text_threshold)
         self.device = device or pick_torch_device()
 
-        self._processor = AutoProcessor.from_pretrained(self.model_name)
-        self._model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_name).to(self.device).eval()
+        self._processor = AutoProcessor.from_pretrained(self.model_name, revision=revision)
+        self._model = (
+            AutoModelForZeroShotObjectDetection.from_pretrained(self.model_name, revision=revision)
+            .to(self.device)
+            .eval()
+        )
 
     def detect(
         self, image: Any, prompt: Optional[str] = None, threshold: Optional[float] = None
@@ -259,20 +273,21 @@ class MmGDinoLoader:
         return out
 
 
-def _build_backend(backend: str, model_name: str, device: Optional[str]):
+def _build_backend(backend: str, model_name: str, device: Optional[str], revision: Optional[str] = None):
     """Construct the underlying detector for a backend.
 
     Args:
         backend: 'rfdetr' (closed-set) or 'mmgdino' (open-vocab).
         model_name: HF/package model id.
         device: Torch device string, or None to auto-pick.
+        revision: Optional pinned model revision (HF backends only).
 
     Returns:
         A loader exposing ``detect(image, prompt, threshold)``.
     """
     if backend == 'mmgdino':
-        return MmGDinoLoader(model_name=model_name, device=device)
-    return RFDetrLoader(model_name=model_name, device=device)
+        return MmGDinoLoader(model_name=model_name, device=device, revision=revision)
+    return RFDetrLoader(model_name=model_name, device=device, revision=revision)
 
 
 class DetectorLoader(BaseLoader):
@@ -318,7 +333,7 @@ class DetectorLoader(BaseLoader):
             device = device or pick_torch_device()
             gpu_index = int(device.split(':')[1]) if str(device).startswith('cuda:') else -1
 
-        detector = _build_backend(backend, model_name, device)
+        detector = _build_backend(backend, model_name, device, revision=revision)
         metadata = {'device': str(device), 'model_name': model_name, 'backend': backend, 'loader': 'detection'}
         return {'detector': detector, 'backend': backend}, metadata, gpu_index
 

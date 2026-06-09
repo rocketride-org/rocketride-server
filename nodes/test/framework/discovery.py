@@ -75,6 +75,7 @@ class NodeTestConfig:
     outputs: List[str] = field(default_factory=list)
     timeout: int = 60
     cases: List[TestCase] = field(default_factory=list)
+    config: Dict[str, Any] = field(default_factory=dict)
 
     # Node metadata
     preconfig: Dict[str, Any] = field(default_factory=dict)
@@ -308,6 +309,7 @@ def _parse_test_config(
                 outputs=outputs,
                 timeout=group.get('timeout', 60),
                 cases=cases,
+                config=group.get('config') if isinstance(group.get('config'), dict) else {},
                 preconfig=data.get('preconfig', {}),
                 lanes=data.get('lanes', {}),
                 config_id=config_id,

@@ -54,8 +54,10 @@ class IGlobal(IGlobalBase):
             self.max_edge = DEFAULT_MAX_EDGE
         self.max_edge = min(MAX_MAX_EDGE, max(MIN_MAX_EDGE, self.max_edge))
 
+        revision = (node_cfg.get('revision') or '').strip() or None
+
         # device=None -> model server when --modelserver is set, else local.
-        self.estimator = DepthEstimator(DEFAULT_MODEL, device=None)
+        self.estimator = DepthEstimator(DEFAULT_MODEL, device=None, revision=revision)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

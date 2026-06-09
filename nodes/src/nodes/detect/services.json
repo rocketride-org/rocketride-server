@@ -98,18 +98,35 @@
 			}
 		]
 	},
-	"fulltest": {
-		"profiles": ["rfdetr"],
-		"outputs": ["text"],
-		"timeout": 180,
-		"cases": [
-			{
-				"name": "Detect a person in a portrait",
-				"image": "images/einstein.jpg",
-				"expect": {
-					"text": { "notEmpty": true, "contains": "person" }
+	"fulltest": [
+		{
+			"profiles": ["rfdetr"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "RF-DETR detects a person in a portrait",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "person" }
+					}
 				}
-			}
-		]
-	}
+			]
+		},
+		{
+			"profiles": ["mmgdino"],
+			"config": { "detect.prompt": "person . face" },
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Grounding-DINO detects its prompt classes",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true }
+					}
+				}
+			]
+		}
+	]
 }

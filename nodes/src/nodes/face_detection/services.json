@@ -95,5 +95,19 @@
 				}
 			}
 		]
+	},
+	"fulltest": {
+		"profiles": ["short"],
+		"outputs": ["text"],
+		"timeout": 60,
+		"cases": [
+			{
+				"name": "Detect a face in a portrait photo",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "face" }
+				}
+			}
+		]
 	}
 }

@@ -43,9 +43,10 @@ class IGlobal(IGlobalBase):
 
         model_name = (config.get('model') or '').strip() or DEFAULT_MODEL
         task = str(config.get('task', DEFAULT_TASK)).strip() or DEFAULT_TASK
+        revision = (config.get('revision') or '').strip() or None
 
         # device=None -> model server when --modelserver is set, else local.
-        self.captioner = Captioner(model_name=model_name, device=None, task=task)
+        self.captioner = Captioner(model_name=model_name, device=None, task=task, revision=revision)
         self.device_lock = threading.Lock()
 
     def endGlobal(self):

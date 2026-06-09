@@ -24,7 +24,7 @@
 
 import json
 
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 
@@ -97,9 +97,13 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer
         elif action == AVI_ACTION.END:
-            image = ImageProcessor.load_image_from_bytes(self._image_data)
-            with self.IGlobal.device_lock:
-                detections = self.IGlobal.detector.detect(image)
-            self._emit(image, detections)
-            self._image_data = None
+            try:
+                image = ImageProcessor.load_image_from_bytes(self._image_data)
+                with self.IGlobal.device_lock:
+                    detections = self.IGlobal.detector.detect(image)
+                self._emit(image, detections)
+            except Exception as exc:
+                warning(f'detect: dropping frame due to inference error: {exc}')
+            finally:
+                self._image_data = None
             return self.preventDefault()
