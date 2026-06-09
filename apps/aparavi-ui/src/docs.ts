@@ -21,31 +21,47 @@
 // SOFTWARE.
 
 // =============================================================================
-// APP DESCRIPTOR — aparavi-ui MF remote entry point (Aparavi AQL Chat)
+// APARAVI-UI DOCUMENTS INSTANCE
+// =============================================================================
+//
+// App-owned Documents instance shared between AparaviApp and AparaviSidebar.
+// Chat sessions are persisted as .chat JSON files via the RocketRide client's
+// workspace file API.
 // =============================================================================
 
-import type { AppDescriptor } from 'shell-ui';
-import AparaviApp from './AparaviApp';
-import AparaviSidebar from './AparaviSidebar';
+import { Documents } from 'shell-ui';
+import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+
+/** The app's Documents instance. Set by AparaviApp on mount. */
+let _docs: Documents | null = null;
 
 /**
- * AppDescriptor for the Aparavi AQL Chat application.
- *
- * Chat interface for querying Aparavi data via natural language.
- * Multi-tab support via Documents library — each tab is an independent chat.
- * Sidebar with "New Chat" button; status bar enabled in manifest.
- * Requires authentication (authenticated: true in manifest).
+ * Returns the app's Documents instance, or null if not yet initialised.
  */
-const APARAVI_APP: AppDescriptor = {
-	id: 'rocketride.aparavi',
-	name: 'Aparavi AQL',
-	branding: {
-		appName: 'Aparavi AQL',
-	},
-	components: {
-		App: AparaviApp,
-		Sidebar: AparaviSidebar,
-	},
-};
+export function getDocs(): Documents | null {
+	return _docs;
+}
 
-export default APARAVI_APP;
+/**
+ * Creates and stores the app's Documents instance.
+ * Called once by AparaviApp on mount.
+ *
+ * @param vfs       - Virtual file system for reading/writing chat files.
+ * @param workspace - Optional workspace binding for tab layout persistence.
+ */
+export function createDocs(
+	vfs: IVirtualFileSystem,
+	workspace?: import('shell-ui').WorkspaceBinding,
+): Documents {
+	_docs = new Documents(vfs, workspace);
+	return _docs;
+}
+
+/**
+ * Destroys the app's Documents instance.
+ * Called by AparaviApp on unmount.
+ */
+export function destroyDocs(): void {
+	_docs?.destroy();
+	_docs = null;
+}

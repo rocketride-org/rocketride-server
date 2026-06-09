@@ -50,7 +50,7 @@ import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
 import { EnvironmentProvider } from './providers/EnvironmentProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
-import { AuthProvider } from './providers/AuthProvider';
+// AuthProvider removed — auth failures now open the Settings page directly
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
@@ -270,8 +270,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
-				const auth = new AuthProvider(context, context.extensionUri);
-				context.subscriptions.push(account, environment, auth);
+				context.subscriptions.push(account, environment);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);

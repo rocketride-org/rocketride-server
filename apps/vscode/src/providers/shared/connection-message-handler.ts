@@ -68,8 +68,8 @@ interface VersionCache {
  * engine version/Docker tag fetching (with caching), ioControl dispatch to
  * engine backends, sudo password relay, and engine status polling.
  *
- * Used by SettingsProvider, WelcomeProvider, and AuthProvider so that
- * connection management code is never duplicated across webview hosts.
+ * Used by SettingsProvider and WelcomeProvider so that connection
+ * management code is never duplicated across webview hosts.
  */
 export class ConnectionMessageHandler {
 	private readonly engineInstaller: EngineInstaller;

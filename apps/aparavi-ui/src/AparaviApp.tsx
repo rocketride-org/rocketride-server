@@ -21,32 +21,76 @@
 // SOFTWARE.
 
 // =============================================================================
-// APARAVI APP — Full-screen chat for Aparavi AQL queries
+// APARAVI APP — multi-tab persistent chat for Aparavi AQL queries
 // =============================================================================
 //
+// Uses the Documents library for multi-tab support. Each tab is an independent
+// chat session persisted as a .chat JSON file via the workspace VFS.
+//
 // On connect, starts the Aparavi pipeline via client.use() and obtains a
-// pipeline token. User questions are sent via client.chat() through the
-// shared ChatView component.
+// pipeline token shared across all chat tabs.
 //
 // Pipeline: Chat → CrewAI Agent → Aparavi AQL tool + LLM → Response
 // =============================================================================
 
-import React, { useCallback, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell-ui';
-import { useShellConnection, useAuthUser } from 'shell-ui';
+import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import { commonStyles } from 'shared/themes/styles';
+import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
+import type { Documents } from 'shell-ui';
 import { ChatView, useChatMessages } from 'shared';
+import type { ChatMessage } from 'shared';
+import { createDocs, destroyDocs, getDocs } from './docs';
+import { loadChat, saveChat, listChatDir, renameChat, deleteChat } from './chatStore';
 import pipeline from './aparavi.pipe';
 
 // =============================================================================
-// COMPONENT
+// STYLES
+// =============================================================================
+
+const styles = {
+	container: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		overflow: 'hidden',
+	} as CSSProperties,
+	groupPane: {
+		...commonStyles.columnFill,
+		minWidth: 0,
+		overflow: 'hidden',
+	} as CSSProperties,
+	content: {
+		flex: 1,
+		display: 'flex',
+		minHeight: 0,
+		overflow: 'hidden',
+	} as CSSProperties,
+	welcome: {
+		display: 'flex',
+		flex: 1,
+		alignItems: 'center',
+		justifyContent: 'center',
+		color: 'var(--rr-text-secondary)',
+		fontFamily: 'var(--rr-font-family)',
+		fontSize: 14,
+		flexDirection: 'column',
+		gap: 12,
+	} as CSSProperties,
+};
+
+// =============================================================================
+// MAIN COMPONENT
 // =============================================================================
 
 /**
- * Main application component for Aparavi AQL Chat.
+ * Top-level Aparavi AQL app component mounted by the shell.
  *
- * On first connection, calls client.use() with the embedded pipeline definition
- * to start the CrewAI agent + Aparavi AQL pipeline. The returned token is then
- * used for all subsequent client.chat() calls via the shared useChatMessages hook.
+ * Initialises Documents with a VFS backed by the .chats/ workspace directory,
+ * starts the Aparavi pipeline on connect, and creates an initial chat tab if
+ * no saved chats exist.
  */
 const AparaviApp: React.FC<ShellAppProps> = () => {
 	// Shell connection — provides the RocketRide WebSocket client
@@ -55,35 +99,216 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 	// Auth identity — needed to confirm user is authenticated
 	const identity = useAuthUser();
 
-	// Pipeline token from client.use() — required for client.chat()
-	const [pipelineToken, setPipelineToken] = useState<string | null>(null);
+	// Workspace binding — persists tab layout across sessions
+	const { loaded, appState, updateAppState } = useWorkspace();
 
-	// Chat state — messages, typing indicator, send/clear/system helpers
-	const { messages, isTyping, sendMessage, addSystemMessage } = useChatMessages();
+	// Pipeline token from client.use() — shared across all chat tabs
+	const [pipelineToken, setPipelineToken] = useState<string | null>(null);
 
 	// Track pipeline startup to avoid duplicate .use() calls
 	const startedRef = useRef(false);
 
-	// Start the pipeline when connected and authenticated
+	// Documents ready flag
+	const [ready, setReady] = useState(false);
+
+	// --- Initialise Documents on mount ---------------------------------------
+
+	useEffect(() => {
+		if (!client || !loaded) return;
+
+		/** VFS backed by the .chats/ workspace directory. */
+		const vfs: IVirtualFileSystem = {
+			list: async (dir: string) => {
+				try {
+					const result = await listChatDir(client, dir);
+					return (result.entries ?? []).map((e: any) => ({ name: e.name, type: e.type ?? 'file' }));
+				} catch { return []; }
+			},
+			read: async (uri: string) => {
+				try { return await loadChat(client, uri); }
+				catch { return null; }
+			},
+			write: async (uri: string, content: unknown) => {
+				if (!content) return;
+				try { await saveChat(client, uri, content); }
+				catch (err) { console.error('[AparaviApp] Failed to save chat:', err); }
+			},
+			rename: async (oldPath: string, newPath: string) => {
+				await renameChat(client, oldPath, newPath);
+			},
+			delete: async (path: string) => {
+				await deleteChat(client, path);
+			},
+		};
+
+		// Create the Documents instance — both App and Sidebar share it
+		createDocs(vfs, { appState, updateAppState });
+		setReady(true);
+
+		return () => { destroyDocs(); setReady(false); };
+	}, [client, loaded]);
+
+	// --- Start pipeline on connect -------------------------------------------
+
 	useEffect(() => {
 		if (!isConnected || !client || !identity || startedRef.current) return;
 		startedRef.current = true;
 
-		addSystemMessage('Starting Aparavi pipeline...');
-
 		client
-			.use({ pipeline, useExisting: true, name: 'Aparavi AQL Chat' })
+			.use({ pipeline, useExisting: true, name: 'Aparavi AQL Chat', pipelineTraceLevel: 'full' })
 			.then((result) => {
 				setPipelineToken(result.token);
-				addSystemMessage('Ready. Ask me anything about your Aparavi data.');
 			})
 			.catch((err) => {
-				startedRef.current = false; // Allow retry on next connect
-				addSystemMessage(`Failed to start pipeline: ${err instanceof Error ? err.message : String(err)}`);
+				startedRef.current = false;
+				console.error('[AparaviApp] Failed to start pipeline:', err);
 			});
-	}, [isConnected, client, identity, addSystemMessage]);
+	}, [isConnected, client, identity]);
 
-	// Send handler — passes client and pipeline token to the shared hook
+	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
+	return <AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />;
+};
+
+// =============================================================================
+// INNER COMPONENT — renders once Documents is ready
+// =============================================================================
+
+/**
+ * Inner component that renders the tab layout and editor panes.
+ * Separated so useStore() is called unconditionally.
+ */
+const AparaviAppReady: React.FC<{
+	docs: Documents;
+	pipelineToken: string | null;
+}> = ({ docs, pipelineToken }) => {
+	const state = docs.useStore();
+	const { client, isConnected } = useShellConnection();
+
+	// Whether there are multiple groups (controls close-group button visibility)
+	const canCloseGroups = state.rootNode.type === 'split';
+
+	// --- Ctrl+S handler -------------------------------------------------------
+
+	useEffect(() => {
+		/** Saves the active document on Ctrl+S. */
+		const handler = () => {
+			const s = docs.getState();
+			const group = s.groups[s.activeGroupId];
+			if (!group) return;
+			const editorId = group.editorIds[group.activeEditorIndex];
+			if (!editorId) return;
+			const editor = s.editors[editorId];
+			if (!editor) return;
+			docs.saveDocument(editor.documentUri);
+		};
+		window.addEventListener('tab:save', handler);
+		return () => window.removeEventListener('tab:save', handler);
+	}, []);
+
+	return (
+		<div style={styles.container}>
+			<DocSplitLayout
+				docs={docs}
+				renderPane={(groupId: string) => {
+					const group = state.groups[groupId];
+					if (!group) return null;
+
+					return (
+						<div
+							style={styles.groupPane}
+							onClick={() => docs.setActiveGroup(groupId)}
+						>
+							{/* Tab bar for this group */}
+							<DocTabs
+								docs={docs}
+								groupId={groupId}
+								isActive={state.activeGroupId === groupId}
+								canClose={canCloseGroups}
+								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
+								onCloseGroup={(gid) => docs.closeGroup(gid)}
+							/>
+
+							{/* Editor content — each chat tab is independently mounted
+							    so chat history is preserved across tab switches. */}
+							<div style={styles.content}>
+								{group.editorIds.length === 0 ? (
+									<div style={styles.welcome}>
+										<div style={{ fontSize: 16, fontWeight: 600 }}>Aparavi AQL</div>
+										<div>Create a new chat from the sidebar.</div>
+									</div>
+								) : (
+									group.editorIds.map((editorId, idx) => {
+										const editor = state.editors[editorId];
+										if (!editor) return null;
+										const isActive = idx === group.activeEditorIndex;
+										return (
+											<div
+												key={editorId}
+												style={{
+													display: isActive ? 'flex' : 'none',
+													flex: 1,
+													minHeight: 0,
+													flexDirection: 'column',
+												}}
+											>
+												<ChatTab
+													uri={editor.documentUri}
+													client={client}
+													isConnected={isConnected}
+													pipelineToken={pipelineToken}
+												/>
+											</div>
+										);
+									})
+								)}
+							</div>
+						</div>
+					);
+				}}
+			/>
+		</div>
+	);
+};
+
+// =============================================================================
+// CHAT TAB — independent persistent chat session per editor tab
+// =============================================================================
+
+/**
+ * A single chat tab. Loads initial messages from the Document's content,
+ * and persists messages back to Documents on every change so VFS auto-save
+ * keeps the .chat file up to date.
+ */
+const ChatTab: React.FC<{
+	uri: string;
+	client: any;
+	isConnected: boolean;
+	pipelineToken: string | null;
+}> = ({ uri, client, isConnected, pipelineToken }) => {
+	// Read initial messages from the document content (if loaded from disk)
+	const docs = getDocs();
+	const savedMessages = useMemo<ChatMessage[]>(() => {
+		if (!docs) return [];
+		const doc = docs.getState().documents[uri];
+		const content = doc?.content as { messages?: ChatMessage[] } | null;
+		return content?.messages ?? [];
+	}, [docs, uri]);
+
+	const { messages, isTyping, sendMessage } = useChatMessages({
+		initialMessages: savedMessages,
+	});
+
+	// Persist messages back to Documents whenever they change
+	useEffect(() => {
+		if (!docs || messages.length === 0) return;
+		// Only persist user and bot messages (not status/system ephemeral ones)
+		const persistable = messages.filter((m) => m.sender === 'user' || m.sender === 'bot');
+		if (persistable.length > 0) {
+			docs.updateContent(uri, { messages: persistable });
+		}
+	}, [messages, uri, docs]);
+
+	/** Send a message through the shared pipeline. */
 	const handleSend = useCallback(
 		(text: string) => {
 			if (!client || !pipelineToken) return;

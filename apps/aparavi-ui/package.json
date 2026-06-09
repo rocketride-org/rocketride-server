@@ -13,7 +13,30 @@
     "categories": ["tools"],
     "mode": "free",
     "authenticated": true,
-    "showStatusBar": false
+    "showStatusBar": true,
+    "settings": [
+      {
+        "key": "ROCKETRIDE_APARAVI_URL",
+        "label": "Aparavi Server URL",
+        "description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "ROCKETRIDE_APARAVI_USER",
+        "label": "Aparavi User ID",
+        "description": "User ID for authenticating with the Aparavi API",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "ROCKETRIDE_APARAVI_PASSWORD",
+        "label": "Aparavi Password",
+        "description": "Password for authenticating with the Aparavi API",
+        "type": "envkey",
+        "required": true
+      }
+    ]
   },
   "scripts": {
     "build": "pnpm rsbuild build"

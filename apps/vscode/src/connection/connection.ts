@@ -445,6 +445,12 @@ export class ConnectionManager extends EventEmitter {
 					this.logger.output(`${icons.error} Authentication failed: ${error.message}`);
 					const mode = this.connectionStatus.connectionMode;
 
+					// Stop the client's auto-reconnect loop so it doesn't keep
+					// retrying with stale credentials. The reconcile path will
+					// call connectToEngine() with fresh credentials after the
+					// user fixes them in Settings and saves.
+					this.client.disconnect().catch(() => { /* best effort */ });
+
 					// Only clear the cloud token — on-prem/docker/service keys
 					// live in config, not SecretStorage.
 					if (connectionModeUsesOAuth(mode)) {
@@ -457,8 +463,8 @@ export class ConnectionManager extends EventEmitter {
 						progressMessage: undefined,
 					});
 
-					// Open the auth page with the group and mode so it shows the right form
-					vscode.commands.executeCommand('rocketride.page.auth.open', this.group, mode, error.message);
+					// Open the settings page focused on the failing group so the user can fix credentials
+					vscode.commands.executeCommand('rocketride.page.settings.open', this.group, error.message);
 					return;
 				}
 				this.logger.output(`${icons.info} Reconnect attempt failed: ${error.message}`);
