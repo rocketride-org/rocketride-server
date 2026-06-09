@@ -18,8 +18,9 @@
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
+	//		"experimental" marks this node as not yet production-ready.
 	//
-	"capabilities": [],
+	"capabilities": ["experimental"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified
