@@ -34,7 +34,7 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
@@ -211,6 +211,16 @@ export default function Canvas(): ReactElement {
 		initialViewportRef.current = initialViewport;
 	}, [initialViewport]);
 
+	// Unique ReactFlow instance id. The shell keeps every open pipeline's editor
+	// mounted (inactive ones are display:none, not unmounted), so multiple ReactFlow
+	// instances are co-resident in the DOM. ReactFlow derives its SVG <pattern> id
+	// (the dotted Background) and edge marker ids from this id, defaulting to "1" for
+	// every instance — so without a unique id the patterns collide on `url(#pattern-1)`
+	// and only one canvas paints its grid at a time. useId is stable per instance and
+	// unique even if the same file is opened in two tabs. Colons are stripped to keep
+	// the id safe inside url(#...) references.
+	const rfInstanceId = useId().replace(/:/g, '');
+
 	// Restore saved viewport on initial ReactFlow mount.
 	const handleInit = useCallback(() => {
 		if (initialViewportRef.current) {
@@ -382,6 +392,7 @@ export default function Canvas(): ReactElement {
 				{canvasToolbar}
 			</FloatingToolbar>
 			<ReactFlow
+				id={rfInstanceId}
 				nodes={nodes}
 				edges={edges}
 				nodeTypes={nodeTypes}
