@@ -18,11 +18,11 @@
     "@stripe/react-stripe-js": "^3.1.0",
     "@stripe/stripe-js": "^5.5.0",
     "allotment": "^1.20.5",
-    "lucide-react": "~0.460.0",
+    "lucide-react": "~0.577.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "rocketride": "workspace:*",
-    "shaders": "2.5.109",
+    "shaders": "2.5.129",
     "shared": "workspace:*"
   },
   "engines": {
