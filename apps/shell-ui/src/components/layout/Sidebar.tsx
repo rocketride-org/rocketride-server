@@ -221,6 +221,52 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 // =============================================================================
 
 /**
+ * App-switcher icon: renders the app's logo when available, otherwise a
+ * two-letter monogram fallback (initials of the first two words, or the
+ * first two characters of a single-word name).
+ *
+ * Defined at module scope so it keeps a stable component identity across
+ * renders instead of being recreated inline per menu item.
+ */
+const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ name, iconUrl, size = 16 }) => {
+	if (iconUrl) {
+		return (
+			<img
+				src={iconUrl}
+				alt=""
+				width={size}
+				height={size}
+				style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }}
+			/>
+		);
+	}
+
+	const words = name.trim().split(/\s+/).filter(Boolean);
+	const monogram = (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join('') : name.slice(0, 2)).toUpperCase();
+
+	return (
+		<span
+			style={{
+				width: size,
+				height: size,
+				flexShrink: 0,
+				borderRadius: 4,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				background: 'var(--rr-bg-surface-alt)',
+				color: 'var(--rr-text-secondary)',
+				fontSize: Math.round(size * 0.5),
+				fontWeight: 700,
+				lineHeight: 1,
+			}}
+		>
+			{monogram}
+		</span>
+	);
+};
+
+/**
  * Collapsible, resizable sidebar that renders the active app's sidebar
  * component and a footer with theme picker, account/billing nav, app
  * switcher, and logout.
@@ -360,7 +406,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
 						id: app.id, label: app.name, checked: activeAppId === app.id,
-						icon: app.icon ? (({ size = 16 }) => <img src={app.icon} alt="" width={size} height={size} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }} />) : (({ size = 16 }) => { const w = app.name.trim().split(/\s+/).filter(Boolean); const mono = (w.length > 1 ? w.slice(0, 2).map((s) => s[0]).join('') : app.name.slice(0, 2)).toUpperCase(); return <span style={{ width: size, height: size, flexShrink: 0, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-text-secondary)', fontSize: Math.round(size * 0.5), fontWeight: 700, lineHeight: 1 }}>{mono}</span>; }), onClick: () => handleSwitchApp(app.id),
+						icon: ({ size }: { size?: number }) => <AppIcon name={app.name} iconUrl={app.icon} size={size} />,
+						onClick: () => handleSwitchApp(app.id),
 					})),
 			});
 		}
