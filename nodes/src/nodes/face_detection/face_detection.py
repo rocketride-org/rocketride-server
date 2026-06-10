@@ -62,6 +62,11 @@ MODEL_URLS: Dict[str, str] = {
     ),
 }
 
+# System sonames MediaPipe dlopens at runtime -> how to install them (Debian/Ubuntu).
+_LIB_INSTALL_HINTS: Dict[str, str] = {
+    'libGLESv2.so.2': "install it with 'apt-get install -y libgles2'",
+}
+
 # BlazeFace returns exactly 6 keypoints per face, in this order. These are
 # coarse alignment-grade points, suitable for cropping / rotating a face
 # thumbnail before downstream tasks.
@@ -134,17 +139,43 @@ class FaceDetector:
 
     def _build_detector(self):
         """Construct the MediaPipe Tasks FaceDetector."""
-        from mediapipe.tasks import python as mp_python
-        from mediapipe.tasks.python import vision as mp_vision
+        # MediaPipe's vision package imports drawing_utils -> matplotlib.pyplot at
+        # import time, which aborts the embedded engine (SIGABRT, pybind11 error on
+        # matplotlib.ft2font). pyplot is only used by a plotting helper we never
+        # call, so stub it before importing mediapipe.
+        import sys
+        import types
 
-        model_path = self._resolve_model_path()
-        base_options = mp_python.BaseOptions(model_asset_path=model_path)
-        options = mp_vision.FaceDetectorOptions(
-            base_options=base_options,
-            min_detection_confidence=self.threshold,
-            running_mode=mp_vision.RunningMode.IMAGE,
+        sys.modules.setdefault('matplotlib.pyplot', types.ModuleType('matplotlib.pyplot'))
+
+        try:
+            from mediapipe.tasks import python as mp_python
+            from mediapipe.tasks.python import vision as mp_vision
+
+            model_path = self._resolve_model_path()
+            base_options = mp_python.BaseOptions(model_asset_path=model_path)
+            options = mp_vision.FaceDetectorOptions(
+                base_options=base_options,
+                min_detection_confidence=self.threshold,
+                running_mode=mp_vision.RunningMode.IMAGE,
+            )
+            return mp_vision.FaceDetector.create_from_options(options)
+        except OSError as exc:
+            # MediaPipe's native lib dlopens system deps (e.g. libGLESv2.so.2);
+            # re-raise a missing-library failure with an install hint.
+            raise self._missing_lib_error(exc) from exc
+
+    @staticmethod
+    def _missing_lib_error(exc: OSError) -> Exception:
+        """Map a 'cannot open shared object file' load failure to actionable guidance."""
+        msg = str(exc)
+        if 'cannot open shared object file' not in msg:
+            return exc
+        soname = msg.split(':', 1)[0].strip()
+        hint = _LIB_INSTALL_HINTS.get(soname, f'install the system package that provides {soname}')
+        return RuntimeError(
+            f'Face detection could not load required system library {soname}. MediaPipe needs it at runtime; {hint}.'
         )
-        return mp_vision.FaceDetector.create_from_options(options)
 
     # -------------------------------------------------------------------------
     # Inference
