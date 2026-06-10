@@ -1048,7 +1048,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		}
 
 		isLoadingRef.current = false;
-	}, [isFlowReady, fitView, setViewport, updateNodeInternals]);
+		// Run only when the flow becomes ready. fitView/setViewport/updateNodeInternals
+		// come from useReactFlow()/useUpdateNodeInternals() and get a NEW identity on
+		// every render — including them here makes setViewport() → store update →
+		// re-render → new identities → effect re-runs → setViewport() … an infinite
+		// "Maximum update depth exceeded" loop. They are stable in behavior, so we
+		// intentionally exclude them and gate solely on isFlowReady.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isFlowReady]);
 
 	// =====================================================================
 	// Context value
