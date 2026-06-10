@@ -771,7 +771,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     # Exclude uv from resolution — it's bootstrapped by depends.py and
     # installing it as a pip package crashes on Windows (os error 32)
-    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     if not os.path.exists(excludes_path):
         with open(excludes_path, 'w', encoding='utf-8') as f:
             f.write('uv\n')
@@ -879,7 +879,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     ]
 
     # Exclude uv from resolution (same excludes file as dry-run)
-    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
     if not os.path.exists(excludes_path):
         with open(excludes_path, 'w', encoding='utf-8') as f:
             f.write('uv\n')
