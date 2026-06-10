@@ -18,6 +18,13 @@
 	--rr-indigo: #370b7a;
 	--rr-horizon: #41b6e6;
 
+	/* On-surface accent ramp. The saturated brand hexes read well on white, so
+	 * light mode uses them directly (Horizon darkened to match --ifm-color-primary);
+	 * dark mode lightens indigo/amethyst so they stay legible on the Abyss field. */
+	--rr-accent-horizon: #1f9fd0;
+	--rr-accent-indigo: #370b7a;
+	--rr-accent-amethyst: #5f2167;
+
 	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--ifm-heading-font-family: var(--ifm-font-family-base);
 	--ifm-code-font-size: 92%;
@@ -72,6 +79,11 @@
 	--ifm-hr-background-color: rgba(255, 255, 255, 0.08);
 
 	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.28);
+
+	/* Lightened accents so indigo/amethyst read on the dark Abyss field. */
+	--rr-accent-horizon: #41b6e6;
+	--rr-accent-indigo: #9d86f0; /* periwinkle */
+	--rr-accent-amethyst: #c77ad6; /* orchid */
 }
 
 /* Infima ships the surface tokens via build-injected :root:not(#\#):not(#\#) and
@@ -113,7 +125,11 @@ body {
 }
 
 ::selection {
-	background: rgba(95, 33, 103, 0.4); /* Night Amethyst */
+	background: rgba(95, 33, 103, 0.4); /* Night Amethyst (dark mode) */
+}
+
+[data-theme='light'] ::selection {
+	background: rgba(65, 182, 230, 0.4); /* Horizon Blue — matches dark-mode text accent */
 }
 
 #__docusaurus {
@@ -339,15 +355,15 @@ article a {
 	height: 1.15em;
 }
 
-/* Never underline the home card/feature links (beat Infima's link-hover rule). */
+/* Never underline the home side-card links (beat Infima's link-hover rule). */
 .rr-side-card:not(#\#),
-.rr-side-card:not(#\#):hover,
-.rr-feature:not(#\#),
-.rr-feature:not(#\#):hover {
+.rr-side-card:not(#\#):hover {
 	text-decoration: none;
 }
 
-/* Home: right-column guide cards (bordered, stacked beside the summary). */
+/* Home: right-column guide cards (bordered, stacked beside the summary). Each
+ * card cycles a palette accent (Horizon -> Indigo -> Amethyst) via --card-accent
+ * so the stack isn't uniformly blue; the icon and hover border follow it. */
 .rr-side-card {
 	display: block;
 	padding: 1.1rem 1.35rem;
@@ -358,8 +374,24 @@ article a {
 	transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
+.rr-side-card:nth-child(3n + 1) {
+	--card-accent: var(--rr-accent-horizon);
+}
+
+.rr-side-card:nth-child(3n + 2) {
+	--card-accent: var(--rr-accent-indigo);
+}
+
+.rr-side-card:nth-child(3n + 3) {
+	--card-accent: var(--rr-accent-amethyst);
+}
+
+.rr-side-card .rr-card-icon {
+	color: var(--card-accent);
+}
+
 .rr-side-card:hover {
-	border-color: var(--ifm-color-primary);
+	border-color: var(--card-accent);
 	transform: translateY(-2px);
 	text-decoration: none;
 	color: inherit;
@@ -399,20 +431,31 @@ article a {
 	align-items: center;
 	text-align: center;
 	color: inherit;
-	transition: transform 0.15s ease;
 }
 
-.rr-feature:hover {
-	text-decoration: none;
-	color: inherit;
-	transform: translateY(-2px);
+/* Each card's icon takes a distinct palette accent so the trio isn't all-blue.
+ * The body keyword stays a normal link (--ifm-link-color), per "like our links". */
+.rr-feature:nth-child(1) {
+	--card-accent: var(--rr-accent-horizon);
+}
+
+.rr-feature:nth-child(2) {
+	--card-accent: var(--rr-accent-indigo);
+}
+
+.rr-feature:nth-child(3) {
+	--card-accent: var(--rr-accent-amethyst);
 }
 
 .rr-feature svg {
 	width: 2rem;
 	height: 2rem;
 	margin-bottom: 0.7rem;
-	color: var(--ifm-link-color);
+	color: var(--card-accent);
+}
+
+.rr-feature__body a {
+	text-decoration: underline;
 }
 
 .rr-feature__title {
@@ -433,6 +476,27 @@ article a {
 		grid-template-columns: 1fr;
 		gap: 2rem;
 	}
+}
+
+/* ----------------------------------------------------------------------------
+ * Secondary palette accents in body chrome. Horizon stays the primary link/CTA
+ * color and Docusaurus admonition semantics (note/tip/warning/danger) are left
+ * alone; these surface Amethyst + Indigo so the page isn't uniformly blue.
+ * ------------------------------------------------------------------------- */
+.markdown blockquote {
+	border-left: 3px solid var(--rr-accent-amethyst);
+	background: rgba(95, 33, 103, 0.06);
+}
+
+[data-theme='dark'] .markdown blockquote {
+	background: rgba(199, 122, 214, 0.08);
+}
+
+/* Section divider: a thin Indigo -> Horizon gradient instead of a flat line. */
+.markdown hr {
+	height: 2px;
+	border: 0;
+	background: linear-gradient(90deg, var(--rr-accent-indigo), var(--rr-accent-horizon));
 }
 
 /* ----------------------------------------------------------------------------
