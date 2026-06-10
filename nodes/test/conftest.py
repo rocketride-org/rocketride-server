@@ -240,15 +240,12 @@ def pytest_generate_tests(metafunc):
             'frame_grabber',
             'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
             'audio_tts',
-            # Heavy vision models (transformers + model download); opt in via ROCKETRIDE_INCLUDE_SKIP.
+            # Heavy vision models (model download); opt in via ROCKETRIDE_INCLUDE_SKIP.
             'depth_estimate',
             'detect',
             'detect_segment',
             'caption',
             'background_removal',
-            # PR 1081 vision nodes whose dynamic tests currently fail (unmasked once auth was
-            # fixed). Each is excluded until converted/fixed in its phase, then removed here:
-            #   pose_estimation (P6).
             'pose_estimation',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',

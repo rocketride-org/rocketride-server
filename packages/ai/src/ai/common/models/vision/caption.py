@@ -144,7 +144,7 @@ class CaptionerLoader(BaseLoader):
         processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True, revision=revision)
 
         metadata = {'device': str(device), 'model_name': model_name, 'loader': 'caption'}
-        return {'model': model, 'processor': processor, 'device': device}, metadata, gpu_index
+        return {'model': model, 'processor': processor, 'device': device, 'dtype': dtype}, metadata, gpu_index
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
@@ -194,11 +194,15 @@ class CaptionerLoader(BaseLoader):
 
         bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
         mdl, processor, device = bundle['model'], bundle['processor'], bundle['device']
+        dtype = bundle.get('dtype')
         token = _resolve_token(task)
 
         captions: List[str] = []
         for image in preprocessed['images']:
             inputs = processor(text=token, images=image, return_tensors='pt').to(device)
+            # Match pixel_values to the model dtype (fp16 on CUDA); input_ids stay long.
+            if dtype is not None and 'pixel_values' in inputs:
+                inputs['pixel_values'] = inputs['pixel_values'].to(dtype)
             with torch.no_grad():
                 generated_ids = mdl.generate(
                     input_ids=inputs['input_ids'],

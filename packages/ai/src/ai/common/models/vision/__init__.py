@@ -6,6 +6,7 @@ from .detection import DetectorLoader, Detector
 from .segmentation import SegmenterLoader, Segmenter
 from .caption import CaptionerLoader, Captioner
 from .background import BackgroundRemoverLoader, BackgroundRemover
+from .pose import PoseEstimatorLoader, PoseEstimator
 
 __all__ = [
     'VisionLoader',
@@ -21,4 +22,6 @@ __all__ = [
     'Captioner',
     'BackgroundRemoverLoader',
     'BackgroundRemover',
+    'PoseEstimatorLoader',
+    'PoseEstimator',
 ]

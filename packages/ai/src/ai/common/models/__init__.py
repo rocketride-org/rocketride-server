@@ -50,6 +50,8 @@ from .vision import (
     Captioner,
     BackgroundRemoverLoader,
     BackgroundRemover,
+    PoseEstimatorLoader,
+    PoseEstimator,
 )
 
 # Detection / segmentation backends (relocated under vision/)
@@ -106,6 +108,9 @@ __all__ = [
     # Background removal (served)
     'BackgroundRemoverLoader',
     'BackgroundRemover',
+    # Pose estimation (served)
+    'PoseEstimatorLoader',
+    'PoseEstimator',
     # Detection / segmentation (plain backends)
     'Mask2FormerInstanceLoader',
     'Mask2FormerSemanticLoader',

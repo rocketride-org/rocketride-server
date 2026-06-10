@@ -86,14 +86,28 @@
 	],
 	"test": {
 		"profiles": ["rtmpose-medium"],
-		"outputs": ["documents"],
+		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [
 			{
-				"name": "Estimate human pose in image",
-				"image": "images/ocr_test_text.png",
+				"name": "Estimate human pose in a portrait",
+				"image": "images/einstein.jpg",
 				"expect": {
-					"documents": { "notEmpty": true }
+					"text": { "notEmpty": true, "contains": "keypoints" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["rtmpose-tiny", "rtmpose-medium", "rtmpose-large"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Estimate human pose in a portrait",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "keypoints" }
 				}
 			}
 		]
