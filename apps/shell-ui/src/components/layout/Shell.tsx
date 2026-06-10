@@ -274,13 +274,14 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// Sign-in request from marketplace
 	useEffect(() => {
-		return cm.on('shell:loginRequest', ({ appId }: { appId?: string }) => {
+		return cm.on('shell:loginRequest', ({ appId, register }: { appId?: string; register?: boolean }) => {
 			if (appId) {
 				cm.setPendingAppId(appId);
 				loginTargetRef.current = appId;
 			}
 			if (isSaas) {
-				cm.startOAuth();
+				// "Get Started" CTAs pass register:true → Zitadel sign-up form.
+				cm.startOAuth(register);
 			} else {
 				if (mountedRef.current) setShowApiKeyLogin(true);
 			}

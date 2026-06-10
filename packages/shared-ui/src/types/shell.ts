@@ -165,8 +165,10 @@ export interface ShellConnectionEventMap {
 	 * Sign-in request initiated by the UI (e.g. "Get Started" button).
 	 *
 	 * Optional `appId` specifies which app to navigate to after auth completes.
+	 * Optional `register` requests Zitadel's sign-up form instead of sign-in
+	 * (used by "Get Started" CTAs vs. "Sign In" controls).
 	 */
-	'shell:loginRequest': { appId?: string };
+	'shell:loginRequest': { appId?: string; register?: boolean };
 
 	/** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
 	'shell:logoutRequest': Record<string, never>;
