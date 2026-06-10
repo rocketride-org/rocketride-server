@@ -269,6 +269,37 @@ const subscribeBannerStyles = {
 };
 
 // ============================================================================
+// AUTH ERROR BANNER STYLES
+// ============================================================================
+
+const authErrorBannerStyles = {
+	container: {
+		background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))',
+		borderBottom: '1px solid var(--vscode-inputValidation-errorBorder, #be1100)',
+		padding: '10px 16px',
+	} as CSSProperties,
+	content: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+	} as CSSProperties,
+	text: {
+		fontSize: 13,
+		color: 'var(--vscode-errorForeground, #f44336)',
+		flex: 1,
+	} as CSSProperties,
+	dismiss: {
+		background: 'none',
+		border: 'none',
+		color: 'var(--vscode-errorForeground, #f44336)',
+		cursor: 'pointer',
+		fontSize: 14,
+		padding: '2px 6px',
+		flexShrink: 0,
+	} as CSSProperties,
+};
+
+// ============================================================================
 // SHARED CARD HEADER WITH SAVE BUTTON
 // ============================================================================
 
@@ -389,6 +420,9 @@ export const Settings: React.FC = () => {
 	const [sudoPromptVisible, setSudoPromptVisible] = useState(false);
 	const [sudoPasswordInput, setSudoPasswordInput] = useState('');
 
+	// Auth error banner — shown when the settings page opens due to an auth failure
+	const [authError, setAuthError] = useState<string | null>(null);
+
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
 
@@ -437,6 +471,10 @@ export const Settings: React.FC = () => {
 
 				case 'setFocus' as any:
 					if ((message as any).focus) setActiveTab((message as any).focus);
+					break;
+
+				case 'authError' as any:
+					setAuthError((message as any).message || 'Authentication failed');
 					break;
 
 				case 'serverInfo' as any: {
@@ -516,7 +554,11 @@ export const Settings: React.FC = () => {
 							? { level: 'success', message: 'Connection successful!' }
 							: { level: 'error', message: error || 'Connection failed' };
 						setTestMessage(msg);
-						if (success) setTimeout(() => setTestMessage(null), 5000);
+						// Clear the auth error banner on successful test connection
+						if (success) {
+							setAuthError(null);
+							setTimeout(() => setTestMessage(null), 5000);
+						}
 						break;
 					}
 
@@ -872,6 +914,22 @@ export const Settings: React.FC = () => {
 
 	return (
 		<div style={commonStyles.columnFill}>
+			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
+			{authError && (
+				<div style={authErrorBannerStyles.container}>
+					<div style={authErrorBannerStyles.content}>
+						<span style={{ fontSize: 18 }}>&#9888;</span>
+						<span style={authErrorBannerStyles.text}>{authError}</span>
+						<button
+							style={authErrorBannerStyles.dismiss}
+							onClick={() => setAuthError(null)}
+							title="Dismiss"
+						>
+							&#10005;
+						</button>
+					</div>
+				</div>
+			)}
 			{/* ── Subscribe banner (cloud-signed-in but not subscribed) ── */}
 			{cloudSignedIn && !subscribed && (
 				<div style={subscribeBannerStyles.container}>

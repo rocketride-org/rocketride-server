@@ -194,6 +194,15 @@ export default defineConfig(({ command }) => {
 			},
 		},
 		dev: {
+			// Disable lazy compilation. It's incompatible with this dev setup
+			// (custom assetPrefix '/shell/' + writeToDisk + Module Federation): the
+			// on-demand `*_lazy-compilation-proxy` chunk for the async bootstrap
+			// boundary (index.tsx -> import('./bootstrap')) fails to load after a
+			// full-page navigation such as the OAuth redirect round-trip, throwing
+			// ChunkLoadError and triggering an HMR reload loop. Compiling everything
+			// up front keeps the bootstrap chunk always available.
+			lazyCompilation: false,
+
 			// Write built assets to disk during development so that the static file
 			// server (and other processes) can read the latest MF remote entries.
 			writeToDisk: true,

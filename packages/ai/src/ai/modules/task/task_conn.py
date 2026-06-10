@@ -581,6 +581,39 @@ class TaskConn(
         # Call it
         return await self.request(request)
 
+    async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Update the client display name for this connection.
+
+        Allows clients to refine their identity after auth — e.g. when an
+        app plugin loads and wants to show "Cloud Shell-UI — rocketride.pipeBuilder"
+        instead of the generic "Cloud Shell-UI".
+
+        Args:
+            request: DAP request with ``arguments.clientName`` (str).
+
+        Returns:
+            Acknowledgement with the new name.
+        """
+        args = request.get('arguments', {})
+        new_name = args.get('clientName')
+        if new_name and isinstance(new_name, str):
+            self._client_info['name'] = new_name
+            # Notify dashboard so the monitor UI updates in real time
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DASHBOARD,
+                {
+                    'event': 'apaevt_dashboard',
+                    'body': {
+                        'action': 'connection_updated',
+                        'timestamp': time.time(),
+                        'connectionId': self.get_connection_id(),
+                        'clientName': new_name,
+                    },
+                },
+                user_id=self._account_info.userId if self._account_info else None,
+            )
+        return self.build_response(request, body={'clientName': self._client_info.get('name')})
+
     async def on_rrext_ping(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle DAP ping/ping.

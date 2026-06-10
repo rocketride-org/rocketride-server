@@ -68,7 +68,6 @@ class Chat(ChatBase):
         self._llm = ChatAnthropic(
             model=model,
             api_key=apikey,
-            temperature=0,
             max_tokens=self._modelOutputTokens,
             custom_get_token_ids=_estimate_token_ids,
         )

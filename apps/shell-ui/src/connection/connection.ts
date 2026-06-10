@@ -277,6 +277,17 @@ export class ConnectionManager implements IConnectionManager {
 		this._attachPromise = this.client.attach().catch((err) => {
 			console.error('[ConnectionManager] Failed to attach:', err);
 		});
+
+		// When the user presses Back from Zitadel, the browser restores this page
+		// from the back/forward cache — the singleton (and its `oauthStarted`
+		// one-shot guard) is frozen and restored as-is, so a fresh "Get Started"
+		// click would hit the guard and do nothing. Release it on bfcache restore
+		// so the button works again without a manual page refresh.
+		if (typeof window !== 'undefined') {
+			window.addEventListener('pageshow', (e) => {
+				if ((e as PageTransitionEvent).persisted) this.oauthStarted = false;
+			});
+		}
 	}
 
 	/**
@@ -301,27 +312,51 @@ export class ConnectionManager implements IConnectionManager {
 	/** Module-level flag to prevent double bootstrap under React StrictMode. */
 	private bootStarted = false;
 
+	/** One-shot guard: startOAuth always ends in a full-page redirect, so it must
+	 *  never run twice in one page load (double authorize → Zitadel invalidates the
+	 *  first code → PKCE 400 → re-auth loop). */
+	private oauthStarted = false;
+
 	/**
 	 * Redirect the browser to the OAuth provider for authorization.
 	 *
 	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
 	 * the legacy PKCE flow if no auth provider is configured.
+	 *
+	 * @param register - If true, requests Zitadel's sign-up form (prompt=create)
+	 *                   instead of the default sign-in form.
 	 */
-	public async startOAuth(): Promise<void> {
-		if (this.authProvider) {
-			await this.authProvider.signIn();
-			return;
+	public async startOAuth(register?: boolean): Promise<void> {
+		// One-shot: a redirect is coming; never start a second authorize in the
+		// same page load (that invalidates the first code and 400s the exchange).
+		// The guard is released on any path that does NOT actually navigate, so a
+		// failed initiation can still be retried within the same page load.
+		if (this.oauthStarted) return;
+		this.oauthStarted = true;
+		try {
+			if (this.authProvider) {
+				await this.authProvider.signIn(undefined, register);
+				return;
+			}
+			// Legacy fallback — remove once all callers pass authProvider
+			if (!this.zitadelUrl || !this.zitadelClientId) {
+				console.error('[ConnectionManager] Zitadel not configured');
+				this.emit('shell:error', { error: new Error('Zitadel not configured') });
+				this.oauthStarted = false; // no redirect happened — allow a retry
+				return;
+			}
+			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
+			const { challenge } = await generatePkce();
+			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register);
+			// assign() (not replace()) keeps the landing page reachable via the
+			// browser back button — matches CloudAuthProvider.signIn().
+			window.location.assign(url);
+		} catch (err) {
+			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
+			// failure, etc.) — release the guard so a later attempt can retry.
+			this.oauthStarted = false;
+			throw err;
 		}
-		// Legacy fallback — remove once all callers pass authProvider
-		if (!this.zitadelUrl || !this.zitadelClientId) {
-			console.error('[ConnectionManager] Zitadel not configured');
-			this.emit('shell:error', { error: new Error('Zitadel not configured') });
-			return;
-		}
-		const { generatePkce, buildAuthUrl } = await import('../util/pkce');
-		const { challenge } = await generatePkce();
-		const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
-		window.location.replace(url);
 	}
 
 	/**
@@ -361,7 +396,20 @@ export class ConnectionManager implements IConnectionManager {
 			window.history.replaceState({}, '', window.location.pathname);
 
 			if (!verifier) {
-				// Missing verifier — can't exchange. Restart auth for locked apps.
+				// Missing verifier — can't exchange this code. This is the
+				// back-button case: now that we use assign(), the auth chain
+				// stays in history, so a stale ?code entry can be revisited.
+				// Prefer the stored token over bouncing into another round-trip.
+				const staleToken = this.loadToken();
+				if (staleToken) {
+					try {
+						const result = await this.client.login(staleToken);
+						return await this.finishConnect(result, sessionAppId, config);
+					} catch {
+						this.clearToken();
+					}
+				}
+				// No usable token — restart auth only for session-locked apps.
 				if (sessionAppId) { await this.startOAuth(); return null; }
 				return null;
 			}

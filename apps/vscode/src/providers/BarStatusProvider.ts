@@ -126,7 +126,7 @@ export class BarStatus {
 	 */
 	private handleConnectionStatusChange(status: ConnectionStatus): void {
 		if (status.state === ConnectionState.CONNECTED) {
-			const modeLabel: Record<string, string> = { cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'On-prem', local: 'Local' };
+			const modeLabel: Record<string, string> = { cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'Direct', local: 'Local' };
 			this.statusBarItem.text = `$(debug-console) RocketRide: Connected (${modeLabel[status.connectionMode] || status.connectionMode})`;
 			this.statusBarItem.command = 'rocketride.sidebar.connection.disconnect';
 			this.statusBarItem.tooltip = 'Connected - Click to disconnect';
@@ -141,7 +141,7 @@ export class BarStatus {
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 		} else if (status.state === ConnectionState.AUTH_FAILED) {
 			this.statusBarItem.text = '$(key) RocketRide: Sign In Required';
-			this.statusBarItem.command = 'rocketride.page.auth.open';
+			this.statusBarItem.command = 'rocketride.page.settings.open';
 			this.statusBarItem.tooltip = status.lastError || 'Authentication failed — click to sign in';
 			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);

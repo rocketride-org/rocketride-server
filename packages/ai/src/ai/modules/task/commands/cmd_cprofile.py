@@ -284,7 +284,12 @@ class CProfileCommands(DAPConn):
         # Direct mode — build the tree from the local profiler's stored stats
         max_depth = args.get('max_depth', 50)
         min_pct = args.get('min_pct', 0.1)
-        result = profiler.report_tree(max_depth=max_depth, min_pct=min_pct)
+        include_system = args.get('include_system', True)
+        result = profiler.report_tree(
+            max_depth=max_depth,
+            min_pct=min_pct,
+            include_system=include_system,
+        )
         return self.build_response(request, body=result)
 
     def release_profiler(self) -> None:

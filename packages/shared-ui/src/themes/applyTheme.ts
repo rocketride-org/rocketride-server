@@ -33,10 +33,27 @@ export function readTheme(): ThemeTokens {
  * @param themeId  Theme file name without extension (e.g. 'rocketride-light')
  * @param basePath URL prefix where theme files are hosted (default: '/themes')
  */
+/**
+ * Per-theme token cache. After the first fetch, repeated switches to the same
+ * theme apply from memory instead of re-fetching the JSON over the network —
+ * the round-trip jitter was what made the switch-to-light flash intermittent.
+ */
+const _themeFetchCache = new Map<string, ThemeTokens>();
+
+// Tokens originate from JSON, so a JSON round-trip is a safe, complete deep
+// clone. We hand every caller its own copy and keep an independent copy in the
+// cache, so a caller mutating its tokens can never corrupt a future theme apply.
+const cloneTokens = (tokens: ThemeTokens): ThemeTokens => JSON.parse(JSON.stringify(tokens));
+
 export async function fetchAndApplyTheme(themeId: string, basePath = '/themes'): Promise<ThemeTokens> {
+	const cacheKey = `${basePath}/${themeId}`;
+	const cached = _themeFetchCache.get(cacheKey);
+	if (cached) { const copy = cloneTokens(cached); applyTheme(copy); return copy; }
 	const response = await fetch(`${basePath}/${themeId}.json`);
 	if (!response.ok) throw new Error(`Theme '${themeId}' not found`);
 	const tokens: ThemeTokens = await response.json();
+	// Cache a private clone; the fresh `tokens` object is returned to the caller.
+	_themeFetchCache.set(cacheKey, cloneTokens(tokens));
 	applyTheme(tokens);
 	return tokens;
 }

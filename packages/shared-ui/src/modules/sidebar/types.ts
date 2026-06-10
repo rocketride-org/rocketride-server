@@ -100,8 +100,17 @@ export interface ISidebarViewProps {
 	/** Server tasks with no matching local .pipe file. */
 	unknownTasks?: UnknownTask[];
 
+	// ── Capabilities ────────────────────────────────────────────────────────
+	/**
+	 * Show the Dashboard nav button. Only hosts that can switch to the home app
+	 * (the web shell) handle `onNavigate('dashboard')`; hosts without that
+	 * destination (e.g. the VS Code extension) should pass `false` to avoid a
+	 * dead button. Defaults to `true`.
+	 */
+	showDashboard?: boolean;
+
 	// ── Actions ─────────────────────────────────────────────────────────────
-	onNavigate: (target: 'new' | 'monitor' | 'deploy' | 'templates') => void;
+	onNavigate: (target: 'dashboard' | 'new' | 'monitor' | 'deploy' | 'templates') => void;
 	/** Open a file in the editor. */
 	onOpenFile: (path: string) => void;
 	/**

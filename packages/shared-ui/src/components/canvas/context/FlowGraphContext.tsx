@@ -562,10 +562,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(changes: EdgeChange[]) => {
 			if (isLocked) return;
 
-			const removes = changes.filter((c) => c.type === 'remove');
-			if (removes.length > 0) {
-			}
-
 			// ReactFlow owns edges — pass all changes through directly
 			onEdgesChangeInternal(changes);
 
@@ -686,12 +682,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const addNode = useCallback(
 		(data: INodeData, position?: { x: number; y: number }, type: INodeType = INodeType.Default): string => {
 			if (isLocked) return '';
-			// Log connection data on existing nodes to verify it's preserved
-			for (const n of nodes) {
-				const nd = n.data as any;
-				if (nd.input?.length || nd.control?.length) {
-				}
-			}
 			const id = generateNodeId(nodes, data.provider);
 
 			// Default to center of viewport if no position given, then search
@@ -849,8 +839,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const connectedSet = new Set(connected.map((e) => e.id));
 			const remaining = edges.filter((e) => !connectedSet.has(e.id));
 			setEdges(remaining);
+			// Notify host so project state stays in sync
+			if (connected.length > 0) {
+				onContentUpdated();
+			}
 		},
-		[edges, setEdges]
+		[edges, setEdges, onContentUpdated]
 	);
 
 	// =====================================================================
@@ -1013,7 +1007,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			setNodes(updated as FlowNode[]);
 			// Recount after update
 			unconfigured = updated.filter((n) => (n.data as any)?.formDataValid === false).length;
-		} else {
 		}
 
 		if (unconfigured > 0) {
@@ -1055,7 +1048,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		}
 
 		isLoadingRef.current = false;
-	}, [isFlowReady, fitView, setViewport, updateNodeInternals]);
+		// Run only when the flow becomes ready. fitView/setViewport/updateNodeInternals
+		// come from useReactFlow()/useUpdateNodeInternals() and get a NEW identity on
+		// every render — including them here makes setViewport() → store update →
+		// re-render → new identities → effect re-runs → setViewport() … an infinite
+		// "Maximum update depth exceeded" loop. They are stable in behavior, so we
+		// intentionally exclude them and gate solely on isFlowReady.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isFlowReady]);
 
 	// =====================================================================
 	// Context value
@@ -1093,12 +1093,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		configSnackbar,
 		setConfigSnackbar,
 	}), [
-		canvasRef, nodes, edges, nodeMap, setNodes, setEdges,
+		nodes, edges, nodeMap, setNodes, setEdges,
 		onNodesChange, onEdgesChange, onEdgeConnect, isValidConnection,
 		onDragOver, onDrop, onNodeDragStop, addNode, updateNode, deleteNode,
-		onNodesDelete, tempNode, setTempNode, focusOnNode, editingNodeId,
-		setEditingNodeId, onContentUpdated, loadData, loadCanvas, isFlowReady,
-		quickAddState, setQuickAddState, configSnackbar, setConfigSnackbar,
+		onNodesDelete, tempNode, focusOnNode, editingNodeId,
+		onContentUpdated, loadData, loadCanvas, isFlowReady,
+		quickAddState, configSnackbar,
 	]);
 
 	return <FlowGraphContext.Provider value={value}>{children}</FlowGraphContext.Provider>;

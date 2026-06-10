@@ -72,6 +72,10 @@ export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sid
 export { default as AccountView } from './modules/account/AccountView';
 export type { IAccountViewProps } from './modules/account/AccountView';
 
+// --- Environment module (pipeline secrets / env vars) -------------------------
+export { EnvironmentView } from './modules/environment';
+export type { EnvironmentViewProps, EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
+
 // --- Billing module (subscription management) --------------------------------
 // Types: import directly from 'rocketride' (BillingDetail, CreditBalance, etc.)
 export { BillingView } from './modules/billing';

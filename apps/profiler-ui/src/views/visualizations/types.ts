@@ -24,8 +24,8 @@
 // PROFILER VISUALIZATION — Shared Types
 // =============================================================================
 //
-// Types used across all profiler visualization components (FlameGraph,
-// SunburstChart, StatsTable, ReportText).
+// Types used across all profiler visualization components (SunburstChart,
+// FlameGraph/Icicle, StatsTable, ReportText).
 // =============================================================================
 
 // =============================================================================
@@ -75,8 +75,8 @@ export interface ProfileTreeResponse {
 // UI STATE
 // =============================================================================
 
-/** Active visualisation tab. */
-export type ProfilerTab = 'flame' | 'sunburst' | 'table' | 'text';
+/** Visualisation style — sunburst (radial) or icicle (rectangular). */
+export type VizStyle = 'sunburst' | 'icicle';
 
 /**
  * Breadcrumb entry for flame graph / sunburst drill-down navigation.
@@ -91,6 +91,12 @@ export interface BreadcrumbEntry {
 
 /**
  * Callback signature for when the user selects a node in any visualisation.
- * Used for cross-highlighting between flame graph, sunburst, and table.
+ * Used for cross-highlighting between visualisations.
  */
 export type OnNodeSelect = (node: ProfileTreeNode | null) => void;
+
+/**
+ * Callback signature for when a viz or table re-roots the visualisation
+ * (e.g. clicking a table row makes that function the sunburst center).
+ */
+export type OnRootChange = (node: ProfileTreeNode) => void;

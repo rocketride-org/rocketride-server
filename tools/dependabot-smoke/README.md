@@ -8,7 +8,7 @@ These scripts exist to give a reviewer a 30-second answer to "does this dep bump
 
 | Script | Use when Dependabot bumps anything in… |
 | --- | --- |
-| `smoke-litellm.sh` | `tools/requirements.txt` (litellm consumer) |
+| `smoke-litellm.sh` | `tools/sync_models/requirements.txt` (litellm consumer) |
 | `smoke-nodes.sh` | `nodes/src/nodes/<node>/*.txt` (Python pipeline node deps) |
 
 ## Manual invocation (from a Dependabot PR branch)

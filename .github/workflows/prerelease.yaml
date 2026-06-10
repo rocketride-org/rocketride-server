@@ -1,0 +1,169 @@
+name: Prerelease
+run-name: Prerelease ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(auto)' }}
+
+# `cancel-in-progress` is what makes the "every green develop commit"
+# cadence safe under load: if 5 PRs land in 30 minutes, only the last
+# one's nightly run completes — the previous 4 are cancelled mid-build.
+# Without this we'd burn ~25 min × 5 = 2 hours of CI minutes per burst.
+concurrency:
+  group: prerelease
+  cancel-in-progress: true
+
+# Top-level least-privilege. Individual jobs below raise to write only
+# where they actually need it (image push, tag/release publish, prerelease
+# cleanup). Closes Scorecard TokenPermissionsID #566 and #567.
+permissions:
+  contents: read
+
+# Triggered when develop's CI run completes successfully — this is the
+# gate. A red CI on develop (whether from a bad merge, a flaky test, or
+# a PR that slipped through) leaves `workflow_run.conclusion=failure`
+# and the `if:` below skips the run, so a broken develop commit never
+# becomes a published prerelease.
+#
+# `workflow_dispatch` is the manual escape hatch for hot-fix flows
+# or for re-publishing a known-good ref out of cycle. Allowed from
+# develop, stage, or main — the long-lived release branches — so a
+# release manager can promote any of those branches into the current
+# nightly slot (e.g. publishing stage as the prerelease ahead of a
+# stable cut). Feature branches are intentionally not allowed: see
+# the trust-boundary discussion in the init job's `if:` comment.
+#
+# NB: per GitHub's rules, `workflow_run` triggers always execute the
+# version of this file from the repo's *default* branch (develop),
+# not from the branch that produced the triggering CI run. So edits
+# here only take effect after they land on develop — keep that in
+# mind if iterating.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [develop]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  init:
+    name: Initialize
+    # Skip when CI failed; manual dispatch runs for any of the allowed
+    # release branches (develop, stage, main).
+    #
+    # The `head_branch == 'develop'` guard on the workflow_run side
+    # makes explicit what the `branches: [develop]` filter on the
+    # trigger already enforces: this workflow runs privileged jobs
+    # (secrets: inherit, contents: write) on the head_sha of the
+    # triggering CI run. Static analyzers (e.g. OSSF Scorecard's
+    # DangerousWorkflow rule) flag workflow_run patterns that
+    # checkout `head_sha` without a branch check, since in principle
+    # workflow_run can be triggered by CI runs on any branch and a
+    # checkout of an untrusted ref with secrets is the canonical
+    # supply-chain attack vector. The explicit branch check below ties
+    # the trust boundary to develop's branch protection (PR +
+    # code-owner review + required checks), which is the actual safety
+    # guarantee.
+    #
+    # On the workflow_dispatch side the dispatcher already needs
+    # `Actions: write` on the repo, so the branch allowlist is more
+    # about preventing accidents (someone dispatching from a stale
+    # personal branch and publishing a broken prerelease) than a true
+    # privilege boundary.
+    if: >
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/develop' ||
+        github.ref == 'refs/heads/stage' ||
+        github.ref == 'refs/heads/main')) ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'develop')
+    uses: ./.github/workflows/_init.yaml
+    with:
+      # `head_sha` pins the build to the exact commit whose CI passed,
+      # rather than `develop` HEAD which might have moved on by the time
+      # this nightly job acquires a runner. For workflow_dispatch we use
+      # the ref the user picked when dispatching.
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+  build:
+    name: Build
+    needs: init
+    uses: ./.github/workflows/_build.yaml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
+      package: true
+      # retention_days inherits _build.yaml's default (1 day) — see comment there.
+    secrets: inherit
+
+  cleanup-prereleases:
+    name: Clean up prereleases
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+
+      - name: Delete existing prerelease tags and releases
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TAGS=$(git tag -l '*-prerelease')
+          if [ -z "$TAGS" ]; then
+            echo "No prerelease tags found"
+            exit 0
+          fi
+
+          for TAG in $TAGS; do
+            echo "Deleting release for ${TAG}..."
+            gh release delete "${TAG}" --yes 2>/dev/null || echo "  No release for ${TAG}"
+            echo "Deleting remote tag ${TAG}..."
+            git push origin --delete "${TAG}" 2>/dev/null || echo "  Remote tag ${TAG} not found"
+            echo "Deleting local tag ${TAG}..."
+            git tag -d "${TAG}" 2>/dev/null || echo "  Local tag ${TAG} not found"
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  prerelease:
+    name: Prerelease
+    needs: [init, build, cleanup-prereleases]
+    uses: ./.github/workflows/_release.yaml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      prerelease: true
+      server_version: ${{ needs.init.outputs.server_version }}
+      vscode_version: ${{ needs.init.outputs.vscode_version }}
+      client_mcp_version: ${{ needs.init.outputs.client_mcp_version }}
+      client_python_version: ${{ needs.init.outputs.client_python_version }}
+      client_typescript_version: ${{ needs.init.outputs.client_typescript_version }}
+    secrets: inherit
+
+  docker:
+    name: Docker
+    needs: [init, build]
+    uses: ./.github/workflows/_docker.yaml
+    permissions:
+      contents: read
+      packages: write
+      # _docker.yaml's docker job declares id-token: write for cosign
+      # keyless Sigstore signing. GitHub validates at workflow-start that
+      # the caller covers every permission the reusable job declares;
+      # omitting id-token: write here is what produced the workflow-level
+      # `startup_failure` on every nightly run after PR #929 merged.
+      id-token: write
+    with:
+      ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      server_version: ${{ needs.init.outputs.server_version }}
+      prerelease: true
+    secrets: inherit

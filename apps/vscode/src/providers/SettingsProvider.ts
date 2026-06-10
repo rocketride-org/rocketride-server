@@ -71,8 +71,8 @@ export class SettingsProvider {
 	 */
 	private registerCommands(): void {
 		const commands = [
-			vscode.commands.registerCommand('rocketride.page.settings.open', async (focus?: string) => {
-				await this.openSettings(focus);
+			vscode.commands.registerCommand('rocketride.page.settings.open', async (focus?: string, authError?: string) => {
+				await this.openSettings(focus, authError);
 			}),
 
 			vscode.commands.registerCommand('rocketride.page.settings.setupCredentials', async () => {
@@ -105,18 +105,25 @@ export class SettingsProvider {
 	 */
 	/** Pending focus section — sent to webview after view:ready. */
 	private pendingFocus?: string;
+	/** Pending auth error — shown as a banner when the page opens due to auth failure. */
+	private pendingAuthError?: string;
 
 	/**
 	 * Opens the settings page, optionally focused on a single section.
 	 * @param focus - If set ('development' or 'deployment'), shows only that section.
+	 * @param authError - If set, displays an auth-failure banner that clears on successful test.
 	 */
-	public async openSettings(focus?: string): Promise<void> {
+	public async openSettings(focus?: string, authError?: string): Promise<void> {
 		this.pendingFocus = focus;
+		this.pendingAuthError = authError;
 		if (this.panel) {
 			this.panel.reveal(vscode.ViewColumn.One);
 			// Panel already open — send focus update directly
 			if (focus) {
 				this.panel.webview.postMessage({ type: 'setFocus', focus });
+			}
+			if (authError) {
+				this.panel.webview.postMessage({ type: 'authError', message: authError });
 			}
 			return;
 		}
@@ -144,6 +151,10 @@ export class SettingsProvider {
 							panel.webview.postMessage({ type: 'setFocus', focus: this.pendingFocus });
 							this.pendingFocus = undefined;
 						}
+						if (this.pendingAuthError) {
+							panel.webview.postMessage({ type: 'authError', message: this.pendingAuthError });
+							this.pendingAuthError = undefined;
+						}
 						await this.connHandler.startStatusPolling();
 						break;
 
@@ -157,7 +168,7 @@ export class SettingsProvider {
 
 					case 'openSubscribe':
 						// Open the Account page billing tab to start the subscribe flow
-						vscode.commands.executeCommand('rocketride.page.account.open', 'billing');
+						await vscode.commands.executeCommand('rocketride.page.account.open', 'billing');
 						break;
 
 					default: {
@@ -355,9 +366,7 @@ export class SettingsProvider {
 
 			// Verify it was actually cleared
 			const hasApiKey = this.configManager.hasApiKey();
-			if (!hasApiKey) {
-				this.showMessage(webview, 'success', 'API Key cleared successfully and removed from secure storage');
-			} else {
+			if (hasApiKey) {
 				this.showMessage(webview, 'error', 'API Key may not have been fully cleared - please try again');
 			}
 

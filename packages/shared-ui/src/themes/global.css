@@ -27,6 +27,11 @@ body,
 	font-size: var(--rr-font-size-widget);
 	color: var(--rr-text-primary);
 	background: var(--rr-bg-default);
+	/* Fade the root background in lockstep with app containers (which transition
+	   background-color over the same 0.35s). Without this the root snaps instantly
+	   when the palette var changes while the container fades, exposing the bare
+	   near-white body for a frame on switch-to-light — the "white flash". */
+	transition: background-color 0.35s ease;
 	overflow: hidden;
 }
 

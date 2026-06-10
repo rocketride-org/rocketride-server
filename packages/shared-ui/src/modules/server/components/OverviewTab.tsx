@@ -3,9 +3,10 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-import React, { CSSProperties } from 'react';
+import React, { useState, CSSProperties } from 'react';
 import type { DashboardResponse, DashboardTask, DashboardConnection, ActivityEvent, DashboardEvent, TaskEvent } from '../types';
 import { StatusPill } from './StatusPill';
+import { ConnectionDetailModal } from './ConnectionsTab';
 import { formatUptime, formatTime, formatTimeAgo, formatNumber } from '../util';
 import { commonStyles } from '../../../themes/styles';
 
@@ -365,6 +366,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 	const agg = aggregateMetrics(tasks);
 	const recentEvents = events.slice(0, 5);
 	const tickerEvents = events.slice(0, 4);
+	const [selectedConnId, setSelectedConnId] = useState<number | null>(null);
+	const selectedConn = connections.find((c) => c.id === selectedConnId);
 
 	return (
 		<div>
@@ -445,7 +448,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					<tbody>
 						{/* Connection rows */}
 						{connections.map((conn: DashboardConnection) => (
-							<tr key={`conn-${conn.id}`} style={S.clickableRow}>
+							<tr key={`conn-${conn.id}`} style={S.clickableRow} tabIndex={0} onClick={() => setSelectedConnId(conn.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedConnId(conn.id); } }}>
 								<td style={commonStyles.tableCell}>
 									<div style={S.taskName}>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</div>
 									<div style={S.taskSub}>
@@ -611,6 +614,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					</div>
 				</div>
 			</div>
+			{selectedConn && <ConnectionDetailModal connection={selectedConn} onClose={() => setSelectedConnId(null)} />}
 		</div>
 	);
 };

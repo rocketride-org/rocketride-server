@@ -53,6 +53,8 @@ export interface IChatViewProps {
 export interface UseChatMessagesOptions {
 	/** System message shown after clearMessages(). */
 	welcomeMessage?: string;
+	/** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
+	initialMessages?: ChatMessage[];
 }
 
 // =============================================================================

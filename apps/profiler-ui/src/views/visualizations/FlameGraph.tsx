@@ -21,15 +21,21 @@
 // SOFTWARE.
 
 // =============================================================================
-// FLAME GRAPH — Interactive icicle chart with d3.partition
+// FLAME GRAPH (ICICLE) — SnakeViz-style rectangular partition visualisation
+// =============================================================================
+//
+// SnakeViz icicle mode: top-down stacked rectangles.
+// Width = cumulative time.  Color = D3 ordinal scale by function name.
+// Hover = magenta highlight + all same-name rects highlighted.
+// Click rect = re-root to that function.
 // =============================================================================
 
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import * as d3 from 'd3';
 import type { HierarchyRectangularNode } from 'd3';
 import { commonStyles } from 'shared/themes/styles';
-import type { ProfileTreeNode, ProfileTreeResponse, BreadcrumbEntry, OnNodeSelect } from './types';
+import type { ProfileTreeNode, OnRootChange } from './types';
 
 // =============================================================================
 // CONSTANTS
@@ -47,66 +53,20 @@ const MIN_RENDER_WIDTH = 2;
 /** Padding inside each rect for the label text. */
 const TEXT_PADDING = 4;
 
-// =============================================================================
-// COLOUR PALETTE
-// =============================================================================
+/** Magenta highlight colour for hovered nodes (same as sunburst). */
+const HOVER_COLOR = '#ff00ff';
 
 /**
- * CSS variable names for the chart colour palette.
- * Resolved at render time via getComputedStyle because d3 `.attr('fill')`
- * uses setAttribute which cannot resolve CSS `var()` references.
+ * D3 category20c palette — same 20-colour ordinal scale as snakeviz.
+ * Hardcoded to avoid dependency on d3-scale-chromatic type exports.
  */
-const PALETTE_VARS = [
-	'--rr-chart-blue',
-	'--rr-chart-purple',
-	'--rr-chart-green',
-	'--rr-chart-yellow',
-	'--rr-chart-orange',
-	'--rr-chart-red',
+const CATEGORY20C = [
+	'#3182bd', '#6baed6', '#9ecae1', '#c6dbef',
+	'#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2',
+	'#31a354', '#74c476', '#a1d99b', '#c7e9c0',
+	'#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb',
+	'#636363', '#969696', '#bdbdbd', '#d9d9d9',
 ];
-
-/** Fallback hex values if CSS variables cannot be resolved. */
-const PALETTE_FALLBACK = ['#4263eb', '#7048e8', '#2b8a3e', '#e67700', '#e67a2e', '#c92a2a'];
-
-/**
- * Resolve the chart palette from CSS custom properties on a DOM element.
- *
- * @param el - DOM element to read computed styles from.
- * @returns Array of resolved hex colour strings.
- */
-function resolvePalette(el: Element): string[] {
-	const cs = getComputedStyle(el);
-	return PALETTE_VARS.map((v, i) => cs.getPropertyValue(v).trim() || PALETTE_FALLBACK[i]);
-}
-
-/**
- * Simple string hash for distributing colours across function names.
- *
- * @param s - String to hash.
- * @returns Positive integer hash.
- */
-function hashStr(s: string): number {
-	let h = 0;
-	for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-	return Math.abs(h);
-}
-
-/**
- * Map a node to a resolved colour string.
- *
- * @param palette - Resolved colour array from resolvePalette().
- * @param name    - Function name (for hash distribution).
- * @param tottime - Self-time.
- * @param cumtime - Cumulative time.
- * @returns Resolved hex colour string.
- */
-function nodeColour(palette: string[], name: string, tottime: number, cumtime: number): string {
-	const base = hashStr(name) % palette.length;
-	const ratio = cumtime > 0 ? tottime / cumtime : 0;
-	const shift = Math.floor(ratio * 2);
-	const idx = Math.min(base + shift, palette.length - 1);
-	return palette[idx];
-}
 
 // =============================================================================
 // STYLES
@@ -117,52 +77,6 @@ const styles = {
 	container: {
 		...commonStyles.columnFill,
 		overflow: 'hidden',
-	} as CSSProperties,
-
-	/** Toolbar row with search and breadcrumbs. */
-	toolbar: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '6px 8px',
-		borderBottom: '1px solid var(--rr-border)',
-		flexWrap: 'wrap',
-	} as CSSProperties,
-
-	/** Search input. */
-	searchInput: {
-		...commonStyles.inputField,
-		width: 220,
-		padding: '4px 8px',
-		fontSize: 12,
-	} as CSSProperties,
-
-	/** Breadcrumb trail container. */
-	breadcrumbs: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 4,
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		overflow: 'hidden',
-	} as CSSProperties,
-
-	/** Clickable breadcrumb link. */
-	breadcrumbLink: {
-		color: 'var(--rr-text-link)',
-		cursor: 'pointer',
-		textDecoration: 'none',
-		whiteSpace: 'nowrap',
-		background: 'none',
-		border: 'none',
-		padding: 0,
-		fontFamily: 'inherit',
-		fontSize: 12,
-	} as CSSProperties,
-
-	/** Breadcrumb separator. */
-	breadcrumbSep: {
-		color: 'var(--rr-text-disabled)',
 	} as CSSProperties,
 
 	/** Scrollable SVG container. */
@@ -192,16 +106,48 @@ const styles = {
 };
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Apply cutoff pruning to a tree node.
+ * Children whose cumtime is less than cutoff * parent.cumtime are removed.
+ */
+function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
+	if (cutoff <= 0 || !node.children.length) return node;
+	const threshold = cutoff * node.cumtime;
+	const prunedChildren = node.children
+		.filter((c) => c.cumtime >= threshold)
+		.map((c) => pruneTree(c, cutoff));
+	return { ...node, children: prunedChildren };
+}
+
+/**
+ * Limit tree depth to maxDepth levels.
+ */
+function limitDepth(node: ProfileTreeNode, maxDepth: number, depth: number = 0): ProfileTreeNode {
+	if (depth >= maxDepth) return { ...node, children: [] };
+	return {
+		...node,
+		children: node.children.map((c) => limitDepth(c, maxDepth, depth + 1)),
+	};
+}
+
+// =============================================================================
 // PROPS
 // =============================================================================
 
 interface FlameGraphProps {
-	/** Structured call tree from the server. */
-	treeData: ProfileTreeResponse | null;
-	/** Currently selected node for cross-highlighting. */
-	selectedNode: ProfileTreeNode | null;
-	/** Callback when a node is selected. */
-	onNodeSelect: OnNodeSelect;
+	/** Root node to visualise (the current viz root). */
+	root: ProfileTreeNode | null;
+	/** Total cumulative time of the full profile (for percentage display). */
+	totalTime: number;
+	/** Maximum depth levels to render. */
+	maxDepth: number;
+	/** Cutoff fraction — prune children with cumtime < cutoff * parent.cumtime. */
+	cutoff: number;
+	/** Callback when user clicks a rect to re-root the visualisation. */
+	onRootChange: OnRootChange;
 }
 
 // =============================================================================
@@ -209,23 +155,22 @@ interface FlameGraphProps {
 // =============================================================================
 
 /**
- * Interactive icicle / flame graph visualisation.
+ * SnakeViz-style icicle chart visualisation.
  *
- * Renders a top-down icicle chart using d3.hierarchy + d3.partition in SVG.
- * Click any block to zoom into that subtree; breadcrumbs at top for
- * navigating back. Hover shows a tooltip with function details. Search
- * input highlights matching nodes and dims the rest.
- *
- * @param props.treeData     - Tree data from the server.
- * @param props.selectedNode - Currently highlighted node (cross-vis).
- * @param props.onNodeSelect - Callback for node selection.
+ * Renders a top-down rectangular partition layout using d3.partition.
+ * Width = cumulative time.  Same colour scheme and hover behaviour as
+ * the sunburst chart.
  */
-const FlameGraph: React.FC<FlameGraphProps> = ({ treeData, selectedNode, onNodeSelect }) => {
+const FlameGraph: React.FC<FlameGraphProps> = ({
+	root: vizRoot,
+	totalTime,
+	maxDepth: maxDepthProp,
+	cutoff,
+	onRootChange,
+}) => {
 	const svgRef = useRef<SVGSVGElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(800);
-	const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbEntry[]>([]);
-	const [search, setSearch] = useState('');
 	const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
 	// =========================================================================
@@ -248,28 +193,26 @@ const FlameGraph: React.FC<FlameGraphProps> = ({ treeData, selectedNode, onNodeS
 
 	useEffect(() => {
 		const svg = svgRef.current;
-		if (!svg || !treeData?.tree) return;
+		if (!svg || !vizRoot) return;
 
-		// Determine the zoom root
-		const zoomRoot = breadcrumbs.length > 0
-			? breadcrumbs[breadcrumbs.length - 1].node
-			: treeData.tree;
+		// Apply client-side depth limiting and cutoff pruning
+		const processedRoot = pruneTree(limitDepth(vizRoot, maxDepthProp), cutoff);
 
-		// Build d3 hierarchy — use self-time for partition widths
-		const root = d3.hierarchy(zoomRoot, (d) => d.children)
+		// D3 ordinal colour scale by function name (matches sunburst)
+		const color = d3.scaleOrdinal(CATEGORY20C);
+
+		// Build d3 hierarchy — partition value = cumtime (snakeviz icicle mode)
+		const root = d3.hierarchy(processedRoot, (d) => d.children)
 			.sum((d) => {
 				if (!d.children || d.children.length === 0) return Math.max(d.cumtime, 0.000001);
 				const childCum = d.children.reduce((s, c) => s + c.cumtime, 0);
-				return Math.max(d.cumtime - childCum, 0);
+				return Math.max(d.cumtime - childCum, 0.000001);
 			})
 			.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 
-		// Resolve theme colours from CSS custom properties (d3 .attr() can't use var())
-		const palette = resolvePalette(svg);
-
 		// Compute partition layout
-		const maxDepth = Math.min(root.height + 1, MAX_VISIBLE_DEPTH);
-		const height = maxDepth * ROW_HEIGHT;
+		const depthLimit = Math.min(root.height + 1, MAX_VISIBLE_DEPTH);
+		const height = depthLimit * ROW_HEIGHT;
 		const partition = d3.partition<ProfileTreeNode>()
 			.size([width, height])
 			.padding(1);
@@ -280,45 +223,28 @@ const FlameGraph: React.FC<FlameGraphProps> = ({ treeData, selectedNode, onNodeS
 		d3.select(svg).selectAll('*').remove();
 
 		// Flatten visible nodes
-		const nodes = root.descendants() as HierarchyRectangularNode<ProfileTreeNode>[];
-		const searchLower = search.toLowerCase().trim();
-
-		// Resolve theme colours from CSS custom properties
-		const computedStyle = getComputedStyle(svg);
-		const brandColor = computedStyle.getPropertyValue('--rr-brand').trim() || '#f7901f';
+		const nodes = (root.descendants() as HierarchyRectangularNode<ProfileTreeNode>[])
+			.filter((d) => (d.x1 - d.x0) >= MIN_RENDER_WIDTH);
 
 		// Create node groups
 		const g = d3.select(svg)
 			.selectAll<SVGGElement, HierarchyRectangularNode<ProfileTreeNode>>('g.node')
-			.data(nodes.filter((d) => (d.x1 - d.x0) >= MIN_RENDER_WIDTH))
+			.data(nodes)
 			.join('g')
 			.attr('class', 'node')
 			.attr('transform', (d) => `translate(${d.x0},${d.y0})`);
 
 		// Rectangles
-		g.append('rect')
+		const rects = g.append('rect')
 			.attr('width', (d) => Math.max(0, d.x1 - d.x0))
 			.attr('height', (d) => Math.max(0, d.y1 - d.y0 - 1))
 			.attr('rx', 2)
-			.attr('fill', (d) => nodeColour(palette, d.data.name, d.data.tottime, d.data.cumtime))
-			.attr('opacity', (d) => {
-				if (!searchLower) return 0.85;
-				const matches = d.data.name.toLowerCase().includes(searchLower)
-					|| d.data.file.toLowerCase().includes(searchLower);
-				return matches ? 1 : 0.2;
-			})
-			.attr('stroke', (d) => {
-				if (selectedNode && d.data.name === selectedNode.name
-					&& d.data.file === selectedNode.file
-					&& d.data.line === selectedNode.line) {
-					return brandColor;
-				}
-				return 'none';
-			})
-			.attr('stroke-width', 2)
+			.attr('fill', (d) => color(d.data.name))
+			.attr('opacity', 0.85)
+			.attr('stroke', 'none')
 			.style('cursor', 'pointer');
 
-		// Labels — use theme text colour for readability
+		// Labels
 		g.append('text')
 			.attr('x', TEXT_PADDING)
 			.attr('y', ROW_HEIGHT / 2 + 1)
@@ -336,90 +262,68 @@ const FlameGraph: React.FC<FlameGraphProps> = ({ treeData, selectedNode, onNodeS
 			});
 
 		// =====================================================================
-		// INTERACTION
+		// CLICK — Re-root to that function
 		// =====================================================================
 
-		// Click to zoom
+		// Click any block to re-root the visualisation to that function
+		// (no children guard — ProfilerView resolves the full subtree from the original tree)
 		g.on('click', (_event, d) => {
 			if (d.depth === 0) return;
-			const ancestors: BreadcrumbEntry[] = [];
-			let current: HierarchyRectangularNode<ProfileTreeNode> | null = d;
-			while (current && current.depth > 0) {
-				ancestors.unshift({ label: current.data.name, node: current.data });
-				current = current.parent;
-			}
-			setBreadcrumbs([...breadcrumbs, ...ancestors]);
-			onNodeSelect(d.data);
+			onRootChange(d.data);
 		});
 
-		// Tooltip
+		// =====================================================================
+		// HOVER — Magenta highlight + same-function highlighting (snakeviz)
+		// =====================================================================
+
 		g.on('mouseenter', (event, d) => {
+			const hoveredName = d.data.name;
+
+			// Highlight all rects with the same function name
+			rects.each(function (dd) {
+				const el = d3.select(this);
+				if (dd.data.name === hoveredName) {
+					el.attr('fill', HOVER_COLOR).attr('opacity', 1);
+				} else {
+					el.attr('opacity', 0.4);
+				}
+			});
+
+			// Tooltip with cumtime percentage
+			const pct = totalTime > 0 ? (d.data.cumtime / totalTime * 100).toFixed(1) : '0.0';
 			const lines = [
 				d.data.name,
+				`${d.data.cumtime.toFixed(4)}s (${pct}%)`,
 				`${d.data.file}:${d.data.line}`,
-				`Calls: ${d.data.ncalls}`,
-				`Total: ${d.data.tottime.toFixed(4)}s`,
-				`Cumulative: ${d.data.cumtime.toFixed(4)}s`,
 			];
 			setTooltip({ x: event.clientX + 12, y: event.clientY + 12, text: lines.join('\n') });
 		});
+
 		g.on('mousemove', (event) => {
 			setTooltip((prev) => prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null);
 		});
-		g.on('mouseleave', () => setTooltip(null));
 
-	}, [treeData, width, breadcrumbs, search, selectedNode, onNodeSelect]);
+		g.on('mouseleave', () => {
+			// Restore original colours
+			rects.attr('fill', (d) => color(d.data.name)).attr('opacity', 0.85);
+			setTooltip(null);
+		});
 
-	// =========================================================================
-	// BREADCRUMB NAVIGATION
-	// =========================================================================
-
-	const handleBreadcrumbClick = useCallback((index: number) => {
-		if (index < 0) {
-			setBreadcrumbs([]);
-			onNodeSelect(null);
-		} else {
-			setBreadcrumbs((prev) => prev.slice(0, index + 1));
-			onNodeSelect(null);
-		}
-	}, [onNodeSelect]);
+	}, [vizRoot, width, maxDepthProp, cutoff, onRootChange, totalTime]);
 
 	// =========================================================================
 	// RENDER
 	// =========================================================================
 
-	if (!treeData?.tree) {
+	if (!vizRoot) {
 		return <div style={commonStyles.empty}>No profiling data available. Start and stop a session to generate a flame graph.</div>;
 	}
 
 	return (
 		<div style={styles.container}>
-			{/* Toolbar */}
-			<div style={styles.toolbar}>
-				<input
-					type="text"
-					placeholder="Search functions..."
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					style={styles.searchInput}
-				/>
-				<div style={styles.breadcrumbs}>
-					<button style={styles.breadcrumbLink} onClick={() => handleBreadcrumbClick(-1)}>root</button>
-					{breadcrumbs.map((crumb, i) => (
-						<React.Fragment key={i}>
-							<span style={styles.breadcrumbSep}>&gt;</span>
-							<button style={styles.breadcrumbLink} onClick={() => handleBreadcrumbClick(i)}>{crumb.label}</button>
-						</React.Fragment>
-					))}
-				</div>
-			</div>
-
-			{/* SVG */}
 			<div ref={containerRef} style={styles.svgContainer}>
 				<svg ref={svgRef} />
 			</div>
-
-			{/* Tooltip */}
 			{tooltip && (
 				<div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>
 			)}

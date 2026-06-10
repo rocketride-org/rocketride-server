@@ -811,3 +811,29 @@ class DataConn(DAPConn):
         """
         result = profiler.report()
         return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get a structured call tree from the last completed profiling session.
+
+        Returns a hierarchical JSON tree suitable for flame graph, sunburst,
+        and icicle visualisations.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.max_depth (int, optional): Max tree depth (default 50)
+                - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
+
+        Returns:
+            Dict[str, Any]: DAP response with tree, total_time, total_calls
+        """
+        args = request.get('arguments', {})
+        max_depth = args.get('max_depth', 50)
+        min_pct = args.get('min_pct', 0.1)
+        include_system = args.get('include_system', True)
+        result = profiler.report_tree(
+            max_depth=max_depth,
+            min_pct=min_pct,
+            include_system=include_system,
+        )
+        return self.build_response(request, body=result)

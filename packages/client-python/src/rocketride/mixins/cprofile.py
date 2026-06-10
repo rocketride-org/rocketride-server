@@ -157,6 +157,7 @@ class CProfileMixin(DAPClient):
         target: Optional[str] = None,
         max_depth: int = 50,
         min_pct: float = 0.1,
+        include_system: bool = True,
     ) -> Dict[str, Any]:
         """
         Get a structured call tree from the last completed profiling session.
@@ -169,6 +170,9 @@ class CProfileMixin(DAPClient):
             target: Task token if querying a pipeline, or None for server.
             max_depth: Maximum tree depth before pruning (default 50).
             min_pct: Minimum cumtime percentage threshold for inclusion (default 0.1).
+            include_system: Include stdlib/system functions in the tree (default True).
+                When False, the server filters out system nodes and promotes
+                project-code children.
 
         Returns:
             Dict with 'tree' (root node), 'total_time', and 'total_calls'.
@@ -182,6 +186,7 @@ class CProfileMixin(DAPClient):
         args: Dict[str, Any] = {
             'max_depth': max_depth,
             'min_pct': min_pct,
+            'include_system': include_system,
         }
         if target:
             args['target'] = target

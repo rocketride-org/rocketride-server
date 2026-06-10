@@ -243,7 +243,7 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 	const edges: Edge[] = [];
 	const nodesWithConnections = nodes.filter((n) => n.data.control?.length || n.data.input?.length);
 
-	for (const node of nodes) {
+	for (const node of nodesWithConnections) {
 		const { data } = node;
 
 		// -----------------------------------------------------------------
@@ -327,11 +327,11 @@ export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectCompo
 		for (const edge of incomingEdges) {
 			if (edge.sourceHandle?.startsWith('invoke-source')) {
 				// Invoke edge — classType is the part after "invoke-source."
-				const classType = edge.sourceHandle.split('.').at(1) ?? '';
+				const classType = edge.sourceHandle.replace(/^invoke-source\./, '');
 				control.push({ classType, from: edge.source });
 			} else {
 				// Lane edge — lane is the part after "source-"
-				const lane = edge.sourceHandle?.split('-')?.at(1) ?? '';
+				const lane = edge.sourceHandle?.substring(edge.sourceHandle.indexOf('-') + 1) ?? '';
 				input.push({ lane, from: edge.source });
 			}
 		}

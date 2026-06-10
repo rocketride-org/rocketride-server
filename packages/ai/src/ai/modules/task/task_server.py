@@ -1192,6 +1192,15 @@ class TaskServer(DAPBase):
                 self.debug_message(f'Task stopped during startup: {control.id}...')
             else:
                 self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
+                # Kill the subprocess so it doesn't linger as an orphan
+                # consuming resources and reporting stale metrics.
+                if control.task:
+                    try:
+                        await asyncio.wait_for(control.task.stop_task(), timeout=30)
+                    except asyncio.TimeoutError:
+                        self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
+                    except Exception:
+                        self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             self._task_control.pop(control.token, None)
             raise
 

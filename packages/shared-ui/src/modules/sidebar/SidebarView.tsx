@@ -16,7 +16,7 @@
 
 import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
-import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
+import { BxHome, BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
 import { Explorer } from '../explorer';
 import type { ISidebarViewProps } from './types';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
@@ -121,7 +121,7 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, showDashboard = true, onNavigate, onOpenFile, onFileManage, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
 	const [hoveredNav, setHoveredNav] = useState<string | null>(null);
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
@@ -162,6 +162,11 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 		<div style={S.container}>
 			{/* ── Navigation ──────────────────────────────────────────── */}
 			<div style={S.navSection}>
+				{showDashboard && (
+						<button style={{ ...S.navBtn, ...navHoverBg('dashboard') }} onMouseEnter={() => setHoveredNav('dashboard')} onMouseLeave={() => setHoveredNav(null)} onClick={() => onNavigate('dashboard')}>
+							<BxHome size={16} /> Dashboard
+						</button>
+					)}
 				<button style={{ ...S.navBtn, ...navHoverBg('new') }} onMouseEnter={() => setHoveredNav('new')} onMouseLeave={() => setHoveredNav(null)} onClick={() => onNavigate('new')}>
 					<BxPlus size={16} /> New pipeline
 				</button>

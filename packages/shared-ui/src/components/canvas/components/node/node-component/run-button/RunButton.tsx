@@ -73,7 +73,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const handleRun = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
-			console.log(`[RunButton] clicked nodeId=${nodeId} isRunning=${isRunning} isSubscribed=${isSubscribed} onRunPipeline=${!!onRunPipeline}`);
 			if (isRunning || !onRunPipeline) return;
 
 			const components = getProjectComponents(nodes as INode[], edges);
@@ -83,7 +82,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				version: PIPELINE_SCHEMA_VERSION,
 			};
 
-			console.log('[RunButton] calling onRunPipeline');
 			onRunPipeline(nodeId, project);
 		},
 		[isRunning, onRunPipeline, nodeId, nodes, edges, currentProject, isSubscribed]

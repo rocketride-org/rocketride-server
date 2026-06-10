@@ -32,7 +32,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft,
 } from '../../icons/BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../../icons/BoxIcon';
@@ -71,8 +71,8 @@ export interface SidebarProps {
 	account: ShellAccountConfig;
 	/** When true, the app switcher submenu in the footer is hidden. */
 	hideAppSwitcher?: boolean;
-	/** Callback to open a shell overlay (account, billing, settings). */
-	onOverlay: (overlay: 'account' | 'settings') => void;
+	/** Callback to open a shell overlay (account, settings, environment). */
+	onOverlay: (overlay: 'account' | 'settings' | 'environment') => void;
 }
 
 // =============================================================================
@@ -238,6 +238,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 	const [width, setWidth] = useState(EXPANDED_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const [handleHover, setHandleHover] = useState(false);
+	const [headerHover, setHeaderHover] = useState(false);
 
 	const isResizingRef = useRef(false);
 	const startXRef = useRef(0);
@@ -327,15 +328,16 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
+			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
+			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
+			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
-				id: 'theme', label: 'Theme', icon: BxPalette,
+				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
 					id: t.id, label: t.name, checked: prefs.theme === t.id,
 					onClick: () => handleThemeSelect(t.id),
 				})),
 			},
-			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 		];
 
 		if (showAppSwitcher) {
@@ -350,7 +352,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			};
 
 			items.push({
-				id: 'apps', label: 'Switch App', icon: BxGridAlt, dividerBefore: true,
+				id: 'apps', label: 'Switch App', icon: BxGridAlt,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
 					.filter((a) => isOnDesktop(a.id))
@@ -362,7 +364,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			});
 		}
 
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: !showAppSwitcher, onClick: () => account.onLogout?.() });
+		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
 	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
@@ -386,22 +388,41 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div style={{ display: 'flex', alignItems: 'center', height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}>
-				<button
-					title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-					onClick={toggleCollapse}
-					style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', flex: 1 }}
-				>
-					<AppSwitcherButton collapsed={collapsed} />
-				</button>
-				{showAppSwitcher && !collapsed && (
+			<div
+				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}
+				onMouseEnter={() => setHeaderHover(true)}
+				onMouseLeave={() => setHeaderHover(false)}
+			>
+				{collapsed ? (
+					// Collapsed: a single always-rendered, focusable button toggles
+					// expansion. It shows the brand mark by default and swaps to the
+					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
+					// shift). Always mounted — and focus-reveals the icon — so keyboard
+					// and touch users can expand without hovering.
 					<button
-						title="Home"
-						onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}
-						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+						title="Expand sidebar"
+						aria-label="Expand sidebar"
+						onClick={toggleCollapse}
+						onFocus={() => setHeaderHover(true)}
+						onBlur={() => setHeaderHover(false)}
+						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
 					>
-						<BxHome size={18} />
+						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={collapsed} />}
 					</button>
+				) : (
+					<>
+						<div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+							<AppSwitcherButton collapsed={collapsed} />
+						</div>
+						<button
+							title="Collapse sidebar"
+							aria-label="Collapse sidebar"
+							onClick={toggleCollapse}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+						>
+							<BxDockLeft size={18} />
+						</button>
+					</>
 				)}
 			</div>
 
