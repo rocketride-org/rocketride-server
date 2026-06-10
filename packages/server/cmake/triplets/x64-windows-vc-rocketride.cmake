@@ -40,11 +40,14 @@ set(CMAKE_CXX_COMPILER "cl" CACHE STRING "" FORCE)
 # Relocatable code in static lib generation
 set(CMAKE_POSITION_INDEPENDENT_CODE YES)
 
-# Release: optimized for runtime performance, stripped pdbs for crash triage.
-# /O2 (max speed) + /Ob2 inlining + /Oi intrinsics; /Gy + /Gw let the linker
-# dead-strip unused functions and global data (see RELEASE_LINKER_FLAGS).
+# Release: optimized for runtime performance
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_RELEASE
 	"/O2 /Ob2 /Oi /Gy /Gw -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /DNDEBUG=1 /std:c++20"
+)
+
+# RelWithDebInfo: links the release vcpkg deps, but unoptimized + full pdbs for debugging
+set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_RELWITHDEBINFO
+	"/Od -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /Ob2 /DNDEBUG=1 /std:c++20"
 )
 
 # Debug, pdb's, iterator debug level 2
@@ -68,18 +71,21 @@ set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS "${ROCKETRIDE_TOOLCHAIN_DEFINITIONS} /we470
 # Enable errors for 'not all control paths return a value', which can cause crashes if the function returns an ErrorOr
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS "${ROCKETRIDE_TOOLCHAIN_DEFINITIONS} /we4715")
 
-# Release link flags: emit (stripped) debug info, no incremental linking, and
-# re-enable dead-strip + COMDAT folding. NOTE: /DEBUG defaults the linker to
-# /OPT:NOREF,NOICF, so /OPT:REF,ICF must be set explicitly to keep them on.
+# Release: stripped debug info, no incremental linking
+# NOTE: /DEBUG is retained for production crash analysis and /OPT:REF,ICF override debug defaults impacting performance
 set(RELEASE_LINKER_FLAGS "/DEBUG /PDBSTRIPPED /INCREMENTAL:NO /OPT:REF /OPT:ICF")
+
+# RelWithDebInfo: full (non-stripped) pdbs, incremental linking
+set(RELWITHDEBINFO_LINKER_FLAGS "/DEBUG:FULL /INCREMENTAL:NO")
 
 # Debug link flags, full debug info
 set(DEBUG_LINKER_FLAGS "/DEBUG:FULL")
 
-# We define rel with deb info just for vcpkg's sake, but we don't use it internally
+# Release: stripped pdbs (shipping). RelWithDebInfo: full pdbs (C++ debugging).
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} ${RELEASE_LINKER_FLAGS}" CACHE STRING "" FORCE)
-set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} ${RELEASE_LINKER_FLAGS}" CACHE STRING "" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} ${RELEASE_LINKER_FLAGS}" CACHE STRING "" FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} ${RELWITHDEBINFO_LINKER_FLAGS}" CACHE STRING "" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} ${RELWITHDEBINFO_LINKER_FLAGS}" CACHE STRING "" FORCE)
 
 set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} ${DEBUG_LINKER_FLAGS}" CACHE STRING "" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} ${DEBUG_LINKER_FLAGS}" CACHE STRING "" FORCE)
