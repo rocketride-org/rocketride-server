@@ -10,7 +10,7 @@
 // Theme-aware via the same CSS custom properties the rest of the shell uses.
 // =============================================================================
 
-import React, { type CSSProperties } from 'react';
+import React, { useState, type CSSProperties } from 'react';
 import RocketRideMark from '../../icons/RocketRideMark';
 
 const container: CSSProperties = {
@@ -29,13 +29,19 @@ const KEYFRAMES = `@keyframes rr-loading-float {
 	50%       { transform: translateY(-8px); }
 }`;
 
-const LoadingScreen: React.FC = () => (
-	<div style={container}>
-		<style>{KEYFRAMES}</style>
-		<div style={logoWrapper}>
-			<RocketRideMark size={56} color="var(--rr-text-primary)" />
+const LoadingScreen: React.FC = () => {
+	// Phase-anchor the float bob to a shared clock (epoch, realm-independent) so home-ui's
+	// AuthTransitionPage picks up exactly where this leaves off — both use the same 2.4s
+	// cycle. Computed once on mount so re-renders don't restart the animation.
+	const [floatDelay] = useState(() => `${-(Date.now() % 2400)}ms`);
+	return (
+		<div style={container}>
+			<style>{KEYFRAMES}</style>
+			<div style={{ ...logoWrapper, animationDelay: floatDelay }}>
+				<RocketRideMark size={56} color="var(--rr-text-primary)" />
+			</div>
 		</div>
-	</div>
-);
+	);
+};
 
 export default LoadingScreen;
