@@ -47,7 +47,7 @@ export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTa
 
 // --- Explorer module (generic file tree panel) -------------------------------
 export { Explorer } from './modules/explorer';
-export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerFileAction, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
 
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
