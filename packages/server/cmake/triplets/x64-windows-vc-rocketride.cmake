@@ -40,9 +40,11 @@ set(CMAKE_CXX_COMPILER "cl" CACHE STRING "" FORCE)
 # Relocatable code in static lib generation
 set(CMAKE_POSITION_INDEPENDENT_CODE YES)
 
-# Release + pdb's
+# Release: optimized for runtime performance, stripped pdbs for crash triage.
+# /O2 (max speed) + /Ob2 inlining + /Oi intrinsics; /Gy + /Gw let the linker
+# dead-strip unused functions and global data (see RELEASE_LINKER_FLAGS).
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_RELEASE
-	"/Od -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /Ob2 /DNDEBUG=1 /std:c++20"
+	"/O2 /Ob2 /Oi /Gy /Gw -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /DNDEBUG=1 /std:c++20"
 )
 
 # Debug, pdb's, iterator debug level 2
@@ -66,8 +68,10 @@ set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS "${ROCKETRIDE_TOOLCHAIN_DEFINITIONS} /we470
 # Enable errors for 'not all control paths return a value', which can cause crashes if the function returns an ErrorOr
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS "${ROCKETRIDE_TOOLCHAIN_DEFINITIONS} /we4715")
 
-# Release link flags, link time optimization, debug info, stripped pdbs
-set(RELEASE_LINKER_FLAGS "/DEBUG /PDBSTRIPPED /INCREMENTAL:NO")
+# Release link flags: emit (stripped) debug info, no incremental linking, and
+# re-enable dead-strip + COMDAT folding. NOTE: /DEBUG defaults the linker to
+# /OPT:NOREF,NOICF, so /OPT:REF,ICF must be set explicitly to keep them on.
+set(RELEASE_LINKER_FLAGS "/DEBUG /PDBSTRIPPED /INCREMENTAL:NO /OPT:REF /OPT:ICF")
 
 # Debug link flags, full debug info
 set(DEBUG_LINKER_FLAGS "/DEBUG:FULL")
