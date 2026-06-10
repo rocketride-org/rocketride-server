@@ -41,7 +41,11 @@ declare module '*.css' {}
  */
 declare module '*.svg' {
 	import type * as React from 'react';
-	const Component: React.FC<React.SVGProps<SVGSVGElement>>;
+	// SVGR is configured with `ref: true` (see scripts/rsbuild-plugin-icons.mjs),
+	// so the generated components forward a ref to the underlying <svg>.
+	const Component: React.ForwardRefExoticComponent<
+		React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>
+	>;
 	export default Component;
 }
 
