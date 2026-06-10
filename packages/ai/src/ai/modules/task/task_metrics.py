@@ -439,152 +439,66 @@ class TaskMetrics:
         if self._on_update_callback:
             self._on_update_callback()
 
-    def _report_to_billing_system(self) -> None:
+    async def _report_to_billing_system(self) -> None:
         """
-        Send periodic billing report to the billing system.
+        Write cumulative token usage to the credit ledger via ``account.apply_debit()``.
 
-        This method is called every 5 minutes to report INCREMENTAL usage
-        since the last report. Only the delta (new usage in this period) is
-        sent to the billing system.
+        Called every ``CONST_BILLING_REPORT_INTERVAL`` seconds and once on
+        task completion.  Each resource gets its own UPSERT row keyed on
+        ``task:{task_id}:{resource}`` — the amount is the cumulative total
+        (not an incremental delta), so repeated calls update the row in-place.
 
-        STUB: Implementation pending - will send HTTP POST to billing API.
-
-        The report includes:
-        - Task identification (task_id, customer_id, etc. from status)
-        - INCREMENTAL resource usage since last report:
-            * CPU usage delta (vCPU-seconds)
-            * Memory usage delta (MB-seconds)
-            * GPU memory usage delta (MB-seconds)
-        - INCREMENTAL token charges since last report (cpu, memory, gpu, total)
-        - Current metrics snapshot (cpu_percent, memory_mb, gpu_memory_mb)
-        - Peak and average metrics (lifetime cumulative)
+        In OSS mode (no SaaS extension), ``account.apply_debit()`` is a no-op.
         """
-        # Calculate incremental usage since last report
-        delta_cpu_seconds = self._cpu_seconds - self._last_report_cpu_seconds
-        delta_memory_mb_seconds = self._memory_mb_seconds - self._last_report_memory_mb_seconds
-        delta_gpu_memory_mb_seconds = self._gpu_memory_mb_seconds - self._last_report_gpu_memory_mb_seconds
-
-        # Calculate incremental token charges since last report
-        delta_tokens_cpu = self._status.tokens.cpu_utilization - self._last_report_tokens_cpu
-        delta_tokens_memory = self._status.tokens.cpu_memory - self._last_report_tokens_memory
-        delta_tokens_gpu = self._status.tokens.gpu_memory - self._last_report_tokens_gpu
-        delta_tokens_gpu_inference = self._status.tokens.gpu_inference - self._last_report_tokens_gpu_inference
-        delta_tokens_custom = {
-            k: round(v - self._last_report_tokens_custom.get(k, 0.0), 1) for k, v in self._status.tokens.custom.items()
+        # ── Build cumulative token totals ────────────────────────────────
+        # All values are already converted to tokens by _update_tokens().
+        # OS-level metrics (cpu, memory, gpu) and subprocess-reported custom
+        # counters are treated identically — one ledger row per resource.
+        token_totals: dict[str, float] = {
+            'cpu_utilization': self._status.tokens.cpu_utilization,
+            'cpu_memory': self._status.tokens.cpu_memory,
+            'gpu_memory': self._status.tokens.gpu_memory,
+            'gpu_inference': self._status.tokens.gpu_inference,
+            **self._status.tokens.custom,
         }
-        delta_tokens_total = (
-            delta_tokens_cpu
-            + delta_tokens_memory
-            + delta_tokens_gpu
-            + delta_tokens_gpu_inference
-            + sum(delta_tokens_custom.values())
-        )
-
-        # GPU inference stats for monitoring
-        gpu_inference_count = self._subprocess_counters.get('gpu_inference_count', 0)
-        gpu_inference_seconds = self._subprocess_timers.get('gpu', 0.0) / 1000.0
-        gpu_inference_avg = (gpu_inference_seconds / gpu_inference_count) if gpu_inference_count > 0 else 0.0
-
-        # Prepare incremental report data structure (will be sent to billing API)
-        report_data = {
-            'report_timestamp': time.time(),
-            'report_period_seconds': self._report_interval_seconds,
-            'task_id': self.task_id,
-            'client_id': self.client_id,
-            'user_id': self.user_id,
-            'team_id': self.team_id,
-            'org_id': self.org_id,
-            # INCREMENTAL usage for this 5-minute period only
-            'incremental_usage': {
-                'cpu_seconds': round(delta_cpu_seconds, 2),
-                'memory_mb_seconds': round(delta_memory_mb_seconds, 2),
-                'gpu_memory_mb_seconds': round(delta_gpu_memory_mb_seconds, 2),
-            },
-            # INCREMENTAL token charges for this 5-minute period only
-            'incremental_tokens': {
-                'cpu_utilization': round(delta_tokens_cpu, 1),
-                'cpu_memory': round(delta_tokens_memory, 1),
-                'gpu_memory': round(delta_tokens_gpu, 1),
-                'gpu_inference': round(delta_tokens_gpu_inference, 1),
-                'custom': delta_tokens_custom,
-                'total': round(delta_tokens_total, 2),
-            },
-            # Cumulative values (for reference/validation)
-            'cumulative_total': {
-                'duration_seconds': self._duration_seconds,
-                'tokens_total': self._status.tokens.total,
-            },
-            # Current state snapshot
-            'current_metrics': {
-                'cpu_percent': self._status.metrics.cpu_percent,
-                'cpu_memory_mb': self._status.metrics.cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.gpu_memory_mb,
-            },
-            # Lifetime peaks and averages
-            'peak_metrics': {
-                'cpu_percent': self._status.metrics.peak_cpu_percent,
-                'cpu_memory_mb': self._status.metrics.peak_cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.peak_gpu_memory_mb,
-            },
-            'average_metrics': {
-                'cpu_percent': self._status.metrics.avg_cpu_percent,
-                'cpu_memory_mb': self._status.metrics.avg_cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.avg_gpu_memory_mb,
-            },
-            # Subprocess-reported metrics (raw data for audit)
-            'subprocess_metrics': {
-                'timers': dict(self._subprocess_timers),
-                'counters': dict(self._subprocess_counters),
-            },
-            # GPU inference stats (for monitoring)
-            'gpu_inference_stats': {
-                'total_seconds': round(gpu_inference_seconds, 3),
-                'call_count': int(gpu_inference_count),
-                'avg_seconds': round(gpu_inference_avg, 4),
-            },
-        }
-
-        # Update "last report" tracking FIRST (before any potential failures)
-        # This ensures we don't double-report the same period if logging fails
-        self._last_report_cpu_seconds = self._cpu_seconds
-        self._last_report_memory_mb_seconds = self._memory_mb_seconds
-        self._last_report_gpu_memory_mb_seconds = self._gpu_memory_mb_seconds
-        self._last_report_tokens_cpu = self._status.tokens.cpu_utilization
-        self._last_report_tokens_memory = self._status.tokens.cpu_memory
-        self._last_report_tokens_gpu = self._status.tokens.gpu_memory
-        self._last_report_tokens_gpu_inference = self._status.tokens.gpu_inference
-        self._last_report_tokens_custom = dict(self._status.tokens.custom)
-
-        # STUB: Log the report (will be replaced with actual API call)
+        # ── Debug logging ────────────────────────────────────────────────
         try:
-            tag = f'[TaskMetrics:{self.task_id}]' if self.task_id else '[TaskMetrics]'
-            debug(f'{tag} Billing report:')
             debug(
-                f'  Incremental Tokens (this period): CPU={delta_tokens_cpu:.2f}, Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, GPU Inference={delta_tokens_gpu_inference:.2f}, Custom={delta_tokens_custom}, Total={delta_tokens_total:.2f}'
-            )
-            debug(f'  Cumulative Tokens (lifetime): Total={self._status.tokens.total}')
-            debug(
-                f'  GPU Inference Stats: {gpu_inference_count} calls, {gpu_inference_seconds:.3f}s total, {gpu_inference_avg:.4f}s avg'
+                f'[TaskMetrics] Billing report: task={self.task_id} total={self._status.tokens.total:.2f} resources={token_totals}'
             )
         except Exception:
-            # Don't let print failures break billing tracking
             pass
 
-        # TODO: Implement actual billing API call
-        # When billing system is ready:
-        # 1. Add CONST_BILLING_API_TIMEOUT to imports at top of file
-        # 2. Send report_data via HTTP POST:
-        #
-        # import requests
-        # response = requests.post(
-        #     f'{billing_system_url}/api/v1/billing/report',
-        #     json=report_data,
-        #     timeout=CONST_BILLING_API_TIMEOUT
-        # )
-        # response.raise_for_status()
-        #
-        # For now, report_data is prepared but only logged above
-        _ = report_data  # Suppress unused variable warning
+        # ── Write to ledger via account.apply_debit() ────────────────────
+        # The account singleton dispatches to the SaaS implementation (UPSERT
+        # into credit_ledger) or the OSS no-op depending on the active edition.
+        if not self.org_id or not token_totals:
+            return
+
+        try:
+            from ai.account import account
+
+            context = {
+                'task_id': self.task_id,
+                'client_id': self.client_id,
+                'duration_seconds': round(self._duration_seconds, 1),
+                'tokens_total': round(self._status.tokens.total, 2),
+            }
+            for resource, amount in token_totals.items():
+                if amount <= 0:
+                    continue
+                idem_key = f'task:{self.task_id}:{resource}'
+                await account.apply_debit(
+                    org_id=self.org_id,
+                    user_id=self.user_id,
+                    team_id=self.team_id,
+                    resource=resource,
+                    amount=amount,
+                    idempotency_key=idem_key,
+                    context=context,
+                )
+        except Exception as e:
+            debug(f'[TaskMetrics] Error writing to billing ledger: {e}')
 
     async def _monitoring_loop(self) -> None:
         """
@@ -622,7 +536,7 @@ class TaskMetrics:
                     time_since_last_report = current_time - self._last_report_time
                     if time_since_last_report >= self._report_interval_seconds:
                         try:
-                            self._report_to_billing_system()
+                            await self._report_to_billing_system()
                             self._last_report_time = current_time
                         except Exception as e:
                             # Log error but don't crash monitoring loop
@@ -704,4 +618,4 @@ class TaskMetrics:
 
         # Send final billing report on shutdown (captures any remaining incremental usage)
         async with self._metrics_lock:
-            self._report_to_billing_system()
+            await self._report_to_billing_system()
