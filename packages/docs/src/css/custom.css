@@ -307,6 +307,18 @@ article a {
 	vertical-align: -0.15em;
 }
 
+/* Home left column: lift the section heading to the hero h1 size and enlarge
+ * the summary paragraphs to fill the space above the feature trio. */
+.rr-hero-summary h2 {
+	font-size: var(--ifm-h1-font-size);
+	line-height: 1.15;
+}
+
+.rr-hero-summary p {
+	font-size: 1.2rem;
+	line-height: 1.7;
+}
+
 /* SDK shortcut icons under the home-page header (Python / TypeScript). */
 .rr-sdk-icons {
 	display: flex;
