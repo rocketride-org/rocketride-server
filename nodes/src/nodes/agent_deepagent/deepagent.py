@@ -56,7 +56,8 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
     the LLM produces malformed JSON.
     """
     from langchain_core.language_models import BaseChatModel
-    from langchain_core.messages import AIMessage
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.messages.utils import count_tokens_approximately
     from langchain_core.outputs import ChatGeneration, ChatResult
 
     class RocketRideToolCallingChatModel(BaseChatModel):
@@ -82,6 +83,21 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
             except Exception:
                 self._bound_tools = []
             return self
+
+        # deepagents' middleware asks the model to count tokens; BaseChatModel's
+        # fallback needs `transformers` (not bundled) and only knows GPT-2 anyway.
+        # The host LLM is opaque to us, so approximate counting is both sufficient
+        # and dependency-free.
+        def get_num_tokens(self, text: str) -> int:
+            return count_tokens_approximately([HumanMessage(content=safe_str(text))])
+
+        def get_token_ids(self, text: str) -> List[int]:
+            # No real tokenizer; synthesize an id list of the right length so
+            # len(get_token_ids(text)) == get_num_tokens(text) still holds.
+            return list(range(self.get_num_tokens(text)))
+
+        def get_num_tokens_from_messages(self, messages: Any, tools: Any = None) -> int:
+            return count_tokens_approximately(messages)
 
         def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
             transcript = langchain_messages_to_transcript(messages)
