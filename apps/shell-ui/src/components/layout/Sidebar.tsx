@@ -32,7 +32,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome,
 } from '../../icons/BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../../icons/BoxIcon';
@@ -328,7 +328,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
-			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
+			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
+			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
 			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
 			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
@@ -359,7 +360,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
 						id: app.id, label: app.name, checked: activeAppId === app.id,
-						onClick: () => handleSwitchApp(app.id),
+						icon: app.icon ? (({ size = 16 }) => <img src={app.icon} alt="" width={size} height={size} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }} />) : (({ size = 16 }) => { const w = app.name.trim().split(/\s+/).filter(Boolean); const mono = (w.length > 1 ? w.slice(0, 2).map((s) => s[0]).join('') : app.name.slice(0, 2)).toUpperCase(); return <span style={{ width: size, height: size, flexShrink: 0, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-text-secondary)', fontSize: Math.round(size * 0.5), fontWeight: 700, lineHeight: 1 }}>{mono}</span>; }), onClick: () => handleSwitchApp(app.id),
 					})),
 			});
 		}
