@@ -42,6 +42,7 @@ result = await client.send(token, data, objinfo=None, mimetype=None)
 ```
 
 **TypeScript:**
+
 ```typescript
 const result = await client.send(token, data, objinfo?, mimetype?);
 ```
@@ -118,6 +119,7 @@ results = await client.send_files(files, token)
 ```
 
 **TypeScript:**
+
 ```typescript
 const results = await client.sendFiles(files, token);
 ```
@@ -223,6 +225,7 @@ pipe = await client.pipe(token, objinfo=None, mime_type=None, provider=None)
 ```
 
 **TypeScript:**
+
 ```typescript
 const pipe = await client.pipe(token, objinfo?, mimeType?, provider?);
 ```

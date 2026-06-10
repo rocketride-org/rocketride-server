@@ -16,15 +16,26 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — keep the count fresh without 
 type CacheEntry = { count: number; at: number };
 
 function readCachedStars(): number | null {
-	const raw = localStorage.getItem(CACHE_KEY);
-	if (!raw) return null;
-	const entry = JSON.parse(raw) as CacheEntry;
-	if (typeof entry?.count !== 'number' || Date.now() - entry.at > CACHE_TTL_MS) return null;
-	return entry.count;
+	// localStorage may be unavailable (private mode) and a stale entry may be
+	// malformed JSON — treat any failure as a cache miss rather than throwing.
+	try {
+		const raw = localStorage.getItem(CACHE_KEY);
+		if (!raw) return null;
+		const entry = JSON.parse(raw) as CacheEntry;
+		if (typeof entry?.count !== 'number' || Date.now() - entry.at > CACHE_TTL_MS) return null;
+		return entry.count;
+	} catch {
+		return null;
+	}
 }
 
 function writeCachedStars(count: number): void {
-	localStorage.setItem(CACHE_KEY, JSON.stringify({ count, at: Date.now() } satisfies CacheEntry));
+	// Best-effort cache write; ignore unavailable storage or quota errors.
+	try {
+		localStorage.setItem(CACHE_KEY, JSON.stringify({ count, at: Date.now() } satisfies CacheEntry));
+	} catch {
+		/* no-op */
+	}
 }
 
 function formatStars(count: number): string {

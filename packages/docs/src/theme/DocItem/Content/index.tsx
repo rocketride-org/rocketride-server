@@ -31,10 +31,16 @@ export default function DocItemContent({ children }: Props): ReactNode {
 	const mdUrl = markdownUrl(pathname);
 
 	const copyMarkdown = async () => {
-		const res = await fetch(mdUrl);
-		if (!res.ok) return;
-		const text = await res.text();
-		await navigator.clipboard.writeText(text);
+		// Best-effort: a failed fetch or a denied clipboard write should be a
+		// silent no-op, not an unhandled rejection.
+		try {
+			const res = await fetch(mdUrl);
+			if (!res.ok) return;
+			const text = await res.text();
+			await navigator.clipboard.writeText(text);
+		} catch {
+			/* clipboard unavailable or fetch failed — ignore */
+		}
 	};
 
 	return (

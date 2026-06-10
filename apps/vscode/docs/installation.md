@@ -58,5 +58,5 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.copilotIntegration` | — | Enable GitHub Copilot integration for pipeline development |
-| `rocketride.cursorIntegration` | — | Enable Cursor IDE integration |
+| `rocketride.integrations.copilot` | — | Enable GitHub Copilot integration for pipeline development |
+| `rocketride.integrations.cursor` | — | Enable Cursor IDE integration |

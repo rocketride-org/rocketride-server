@@ -37,7 +37,7 @@ Configure your MCP client to use the server (see examples below), then ask your 
 
 The MCP server connects to a running RocketRide engine and dynamically exposes your pipelines as MCP tools. When an AI assistant calls a tool, the server sends the file to the corresponding pipeline and returns the result.
 
-```
+```text
 AI Assistant (Claude, Cursor, ...)
         |
    MCP Protocol

@@ -167,7 +167,7 @@ console.log('Pipeline complete!');
 
 ### State Transitions
 
-```
+```text
 NONE → STARTING → INITIALIZING → RUNNING → STOPPING → COMPLETED
                                           → STOPPING → CANCELLED
 ```

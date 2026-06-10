@@ -37,7 +37,7 @@ All models use a 1M token context window. Requires a **Google AI API key** from 
 
 ## Default output structure
 
-```
+```text
 1. ENVIRONMENT  — type of place
 2. HAZARDS      — obstacles, stairs, vehicles (with positions)
 3. KEY OBJECTS  — notable items with clock positions and distances

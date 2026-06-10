@@ -73,4 +73,4 @@ When enabled, the Copilot and Cursor integrations provide:
 - Error diagnosis and fix suggestions.
 - Pipeline optimization tips.
 
-Enable these in settings under `rocketride.copilotIntegration` and `rocketride.cursorIntegration`.
+Enable these in settings under `rocketride.integrations.copilot` and `rocketride.integrations.cursor`.

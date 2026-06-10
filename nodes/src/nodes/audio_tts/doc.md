@@ -1,4 +1,4 @@
-# Audio TTS Node (`audio_tts`) — Kokoro (RR-411 phase 1)
+# Audio TTS Node (`audio_tts`) — Kokoro
 
 Text-to-speech node using **Kokoro-82M** only. Additional engines (Piper, Bark, cloud) land in follow-up PRs.
 
