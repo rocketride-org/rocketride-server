@@ -47,11 +47,11 @@ else()
     message(FATAL_ERROR "Failed to find vcpkg installed directory")
 endif()
 
-# Include triplet for compiler/flags (ROCKETRIDE_* definitions)
-set(TRIPLET_PATH "${CMAKE_CURRENT_LIST_DIR}/triplets/${VCPKG_TARGET_TRIPLET}.cmake")
-include(${TRIPLET_PATH} RESULT_VARIABLE RES)
+# Include compiler flags
+set(FLAGS_PATH "${CMAKE_CURRENT_LIST_DIR}/flags/${VCPKG_TARGET_TRIPLET}.cmake")
+include(${FLAGS_PATH} RESULT_VARIABLE RES)
 if(RES STREQUAL "NOTFOUND")
-    message(FATAL_ERROR "Failed to include triplet: ${TRIPLET_PATH}")
+    message(FATAL_ERROR "Failed to include flags: ${FLAGS_PATH}")
 endif()
 
 # Binary cache
