@@ -84,7 +84,7 @@
 	],
 	"test": {
 		"profiles": ["short"],
-		"requiresLibs": { "Linux": ["libGLESv2.so.2"] },
+		"requiresLibs": { "Linux": ["libGLESv2.so.2", "libEGL.so.1"] },
 		"outputs": ["text"],
 		"timeout": 60,
 		"cases": [
@@ -99,7 +99,7 @@
 	},
 	"fulltest": {
 		"profiles": ["short"],
-		"requiresLibs": { "Linux": ["libGLESv2.so.2"] },
+		"requiresLibs": { "Linux": ["libGLESv2.so.2", "libEGL.so.1"] },
 		"outputs": ["text"],
 		"timeout": 60,
 		"cases": [

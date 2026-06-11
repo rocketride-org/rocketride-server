@@ -353,10 +353,11 @@ check_linux_dependencies() {
         "libc++1"
         "libc++abi1"
         "libgomp1"
-        # libGLESv2.so.2 — NEEDED by MediaPipe's libmediapipe.so (GPU delegate;
-        # unused by CPU face detection, but the soname must resolve at dlopen).
-        # libgles2 is the libglvnd dispatcher that provides it.
+        # libGLESv2.so.2 / libEGL.so.1 — NEEDED by MediaPipe's libmediapipe.so
+        # (GPU delegate; unused by CPU face detection, but the sonames must
+        # resolve at dlopen). libgles2 / libegl1 are the libglvnd dispatchers.
         "libgles2"
+        "libegl1"
     )
 
     for package in "${REQUIRES[@]}"; do
@@ -400,7 +401,7 @@ check_linux_dependencies() {
                     echo "✓ ncurses"
                 fi
                 ;;
-            libc++1 | libc++abi1 | libgomp1 | libgles2)
+            libc++1 | libc++abi1 | libgomp1 | libgles2 | libegl1)
                 # Runtime libraries (no CLI command), so check via dpkg
                 # rather than command_exists. Required to execute the
                 # downloaded prebuilt engine during pip bootstrap.

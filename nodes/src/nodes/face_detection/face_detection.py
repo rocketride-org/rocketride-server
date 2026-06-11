@@ -65,6 +65,7 @@ MODEL_URLS: Dict[str, str] = {
 # System sonames MediaPipe dlopens at runtime -> how to install them (Debian/Ubuntu).
 _LIB_INSTALL_HINTS: Dict[str, str] = {
     'libGLESv2.so.2': "install it with 'apt-get install -y libgles2'",
+    'libEGL.so.1': "install it with 'apt-get install -y libegl1'",
 }
 
 # BlazeFace returns exactly 6 keypoints per face, in this order. These are
@@ -149,8 +150,10 @@ class FaceDetector:
         sys.modules.setdefault('matplotlib.pyplot', types.ModuleType('matplotlib.pyplot'))
 
         try:
-            from mediapipe.tasks import python as mp_python
-            from mediapipe.tasks.python import vision as mp_vision
+            # mediapipe pulls matplotlib, which aborts the engine's FreeType when the
+            # contract-check env imports it directly (no pyplot stub there) — so ignore.
+            from mediapipe.tasks import python as mp_python  # contract-check: ignore
+            from mediapipe.tasks.python import vision as mp_vision  # contract-check: ignore
 
             model_path = self._resolve_model_path()
             base_options = mp_python.BaseOptions(model_asset_path=model_path)
@@ -203,7 +206,7 @@ class FaceDetector:
             raise ValueError('Image must not be None')
 
         import numpy as np
-        import mediapipe as mp
+        import mediapipe as mp  # contract-check: ignore — see _build_detector
 
         rgb = np.array(image.convert('RGB'))
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
