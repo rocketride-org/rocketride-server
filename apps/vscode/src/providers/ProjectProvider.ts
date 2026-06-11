@@ -858,6 +858,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				panel.webview.postMessage({ type: 'pasteContent', text });
 			} else if (msg?.type === 'copyText' && typeof msg.text === 'string') {
 				await vscode.env.clipboard.writeText(msg.text);
+			} else if (msg?.type === 'requestFileDialog') {
+				// The embedded app's "Browse" button can't open an OS file picker from
+				// inside the sandboxed iframe, so it posts {type:'requestFileDialog'} up to
+				// the bridge, which forwards it here. Open the native dialog on the host,
+				// read the chosen files, and post them back as {type:'nativeFilesSelected'};
+				// the bridge relays that into the iframe. Buffers go as number[] so they
+				// survive webview message serialization.
+				try {
+					const uris = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Select' });
+					if (!uris || uris.length === 0) return;
+					const files = await Promise.all(
+						uris.map(async (uri) => ({
+							name: uri.path.split('/').pop() || 'file',
+							type: '',
+							lastModified: Date.now(),
+							buffer: Array.from(await vscode.workspace.fs.readFile(uri)),
+						}))
+					);
+					panel.webview.postMessage({ type: 'nativeFilesSelected', files });
+				} catch (error) {
+					this.logger.error(`[ProjectProvider] Native file dialog failed: ${error}`);
+				}
 			}
 		});
 	}
