@@ -3,12 +3,11 @@ import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import ThemedImage from '@theme/ThemedImage';
+import { isExternal } from '../../lib/format.mjs';
 
 type FooterLink = { label: string; href: string };
 type FooterColumn = { title: string; items: FooterLink[] };
 type SocialLink = { label: string; href: string; icon: React.ReactNode };
-
-const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
 
 // Footer navigation wired to the docs spine (routeBasePath is '/'). Category
 // labels with no landing page point at their first leaf.
@@ -78,6 +77,7 @@ const SOCIALS: SocialLink[] = [
 	},
 ];
 
+/** Site footer: brand, social links, and the docs navigation spine. */
 export default function Footer(): React.ReactNode {
 	const { siteConfig } = useDocusaurusContext();
 	const logoLight = useBaseUrl('img/rocketride-icon-colored.svg');

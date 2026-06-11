@@ -1,4 +1,4 @@
-import React, { useState, type ReactNode } from 'react';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { ThemeClassNames } from '@docusaurus/theme-common';
 import { useDoc } from '@docusaurus/plugin-content-docs/client';
@@ -8,12 +8,7 @@ import MDXContent from '@theme/MDXContent';
 import type { Props } from '@theme/DocItem/Content';
 import { LuClipboard } from 'react-icons/lu';
 import { SiMarkdown } from 'react-icons/si';
-
-// Map the current route to its raw .md sibling emitted by docs:gather.
-function markdownUrl(pathname: string): string {
-	if (pathname === '/') return '/index.md';
-	return `${pathname.replace(/\/$/, '')}.md`;
-}
+import { markdownUrl } from '../../../lib/format.mjs';
 
 /**
  * Renders the doc title ourselves so the View/Copy-as-Markdown controls can sit
@@ -30,6 +25,16 @@ export default function DocItemContent({ children }: Props): ReactNode {
 	const showActions = pathname !== '/';
 	const mdUrl = markdownUrl(pathname);
 	const [copied, setCopied] = useState(false);
+	const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	// Clear a pending "Copied" reset if the component unmounts mid-window, so the
+	// timer never fires against an unmounted component.
+	useEffect(
+		() => () => {
+			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+		},
+		[]
+	);
 
 	const copyMarkdown = async () => {
 		// Best-effort: a failed fetch or a denied clipboard write should be a
@@ -39,8 +44,10 @@ export default function DocItemContent({ children }: Props): ReactNode {
 			if (!res.ok) return;
 			const text = await res.text();
 			await navigator.clipboard.writeText(text);
+			// Reset any in-flight timer so rapid clicks don't stack timeouts.
+			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
 			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
 		} catch {
 			/* clipboard unavailable or fetch failed — ignore */
 		}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { SiGithub } from 'react-icons/si';
+import { formatStars } from '../lib/format.mjs';
 
 type Props = {
 	href: string;
@@ -46,11 +47,6 @@ function writeCachedStars(count: number | null): void {
 	}
 }
 
-function formatStars(count: number): string {
-	if (count < 1000) return String(count);
-	return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-}
-
 /**
  * Navbar GitHub link that appends the repository's live star count.
  *
@@ -78,7 +74,7 @@ export default function GitHubStarsNavbarItem({ href, label = 'GitHub', classNam
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-		fetch(REPO_API, { signal: controller.signal })
+		fetch(REPO_API, { signal: controller.signal, headers: { Accept: 'application/vnd.github+json' } })
 			.then((res) => (res.ok ? res.json() : null))
 			.then((data) => {
 				if (cancelled) return;
@@ -98,8 +94,12 @@ export default function GitHubStarsNavbarItem({ href, label = 'GitHub', classNam
 		};
 	}, []);
 
+	// The icon is aria-hidden, so fold the count into the accessible name once it
+	// loads — otherwise screen readers announce only "GitHub".
+	const ariaLabel = stars !== null ? `${label}, ${formatStars(stars)} stars` : label;
+
 	return (
-		<a className={clsx('navbar__item', 'navbar__link', 'github-stars', mobile && 'menu__link', className)} href={href} target="_blank" rel="noopener noreferrer" aria-label={label}>
+		<a className={clsx('navbar__item', 'navbar__link', 'github-stars', mobile && 'menu__link', className)} href={href} target="_blank" rel="noopener noreferrer" aria-label={ariaLabel}>
 			<span className="github-stars__count">
 				<SiGithub className="github-stars__icon" aria-hidden="true" />
 				{stars !== null && formatStars(stars)}
