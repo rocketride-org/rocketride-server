@@ -19,7 +19,10 @@ const NODES_DIR = 'nodes';
 const SPINE = [
 	{ id: 'index', label: 'Home' },
 	{ id: 'quickstart', label: 'Quickstart' },
-	{ id: 'evaluate', label: 'Evaluate' },
+	{
+		label: 'Evaluate',
+		items: [{ id: 'evaluate/use-cases', label: 'Use cases' }]
+	},
 	{
 		label: 'Concepts',
 		items: [

@@ -429,6 +429,27 @@ article a {
 	color: var(--ifm-color-emphasis-700);
 }
 
+/* Quickstart: hub of linked cards in a responsive 2-column grid. Reuses the
+ * .rr-side-card styling; the grid owns the spacing so the cards' own
+ * margin-bottom is dropped here. Accent cycling still works because the cards
+ * are direct children of the grid. */
+.rr-card-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	margin: 1.75rem 0;
+}
+
+.rr-card-grid .rr-side-card {
+	margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+	.rr-card-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* Home: bottom feature trio (centered icon + title + blurb). */
 .rr-features {
 	display: grid;
