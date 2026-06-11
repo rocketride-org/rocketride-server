@@ -782,7 +782,18 @@ export class AccountProvider {
 			}
 		});
 
-		this.disposables.push(connectionStateListener, accountEventListener);
+		// Subscribe to billing monitor and re-fetch on billing ledger events
+		const client = this.connectionManager.getClient();
+		if (client) {
+			client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+		}
+		const billingEventListener = this.connectionManager.on('shell:event' as any, ({ event }: any) => {
+			if (event?.event === 'apaext_billing_update' && AccountProvider.panel) {
+				this.fetchBillingData(AccountProvider.panel).catch(() => {});
+			}
+		});
+
+		this.disposables.push(connectionStateListener, accountEventListener, billingEventListener);
 	}
 
 	/**

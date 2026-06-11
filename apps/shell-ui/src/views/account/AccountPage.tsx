@@ -203,8 +203,6 @@ const AccountPage: React.FC = () => {
 			setBillingLoading(false);
 			return;
 		}
-		setBillingLoading(true);
-		setDashboardLoading(true);
 		setBillingError(null);
 		try {
 			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
@@ -239,17 +237,45 @@ const AccountPage: React.FC = () => {
 		if (tx) { setTransactions(tx); setTxPage(page); }
 	}, [client, orgId]);
 
-	// ── Load non-env data on section change ─────────────────────────────────
+	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
-		setSectionError(null);
 		if (!isConnected || !client) return;
+		loadProfile();
+		loadKeys();
+		loadOrg();
+		loadMembers();
+		loadTeams();
+		loadBilling();
+	}, [isConnected, client]);
+
+	// ── Subscribe to billing events when billing tab is active ──────────────
+	useEffect(() => {
+		if (!client || !isConnected || section !== 'billing') return;
+		// Subscribe to billing ledger events via the wildcard monitor
+		client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+		// Listen for billing update events via ConnectionManager and re-fetch
+		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: any) => {
+			if (event?.event === 'apaext_billing_update') {
+				loadBilling();
+			}
+		});
+		return () => {
+			client.removeMonitor({ token: '*' }, ['billing']).catch(() => {});
+			unsub();
+		};
+	}, [section, client, isConnected]);
+
+	// ── Reload current section on refresh signal ─────────────────────────────
+	useEffect(() => {
+		if (!reloadCounter || !isConnected || !client) return;
+		setSectionError(null);
 		if (section === 'profile') loadProfile();
 		else if (section === 'billing') loadBilling();
 		else if (section === 'api-keys') { loadProfile(); loadKeys(); }
 		else if (section === 'organization') loadOrg();
 		else if (section === 'members') { loadOrg(); loadMembers(); }
 		else if (section === 'teams') { loadOrg(); loadTeams(); }
-	}, [section, isConnected, client, reloadCounter]);
+	}, [reloadCounter]);
 
 	// ── Load team detail when a team is selected or data changes ────────────
 	useEffect(() => {

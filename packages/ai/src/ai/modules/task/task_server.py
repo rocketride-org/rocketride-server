@@ -737,7 +737,13 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
+    async def broadcast_server_event(
+        self,
+        type: EVENT_TYPE,
+        event: Dict[str, Any],
+        user_id: str = None,
+        org_id: str = None,
+    ) -> None:
         """
         Broadcast a server-level event to all connections subscribed via the '*' wildcard.
 
@@ -752,14 +758,13 @@ class TaskServer(DAPBase):
                 Expected keys: 'event' (str) and 'body' (Any).
             user_id (str, optional): When provided, restricts delivery to connections
                 whose authenticated userId matches this value (tenant scoping).
-                Pass None to broadcast to all '*'-subscribed connections regardless of tenant.
+            org_id (str, optional): When provided, restricts delivery to connections
+                whose primary org matches this value (org scoping for billing events).
         """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event, user_id=user_id)
+                await conn.send_server_event(type, event=event, user_id=user_id, org_id=org_id)
             except Exception as e:
-                # Log individual delivery failures so dashboard-event drops leave
-                # a trace; match the pattern used by broadcast_task_event below.
                 self.debug_message(f'Failed to broadcast server event to connection: {e}')
 
     async def push_account_update(self, user_id: str) -> None:
