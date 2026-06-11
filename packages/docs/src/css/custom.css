@@ -340,12 +340,13 @@ article a {
 	height: 1.15em;
 }
 
-/* Never underline the side-card links or their inner text (beat Infima's
- * link-hover rule). The descendant selector also covers the title/body/code
- * spans, which otherwise pick up the propagated underline on hover. */
-.rr-side-card:not(#\#),
-.rr-side-card:not(#\#):hover,
-.rr-side-card:not(#\#):hover * {
+/* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`
+ * has specificity (2,0,1); match its double `:not(#\#)` to reach (2,2,0) so we
+ * win on the anchor itself. Killing it on the <a> stops the underline from
+ * propagating to the inner title/body/code spans (a descendant text-decoration
+ * cannot remove a line drawn by an ancestor). */
+.rr-side-card:not(#\#):not(#\#),
+.rr-side-card:not(#\#):not(#\#):hover {
 	text-decoration: none;
 }
 
