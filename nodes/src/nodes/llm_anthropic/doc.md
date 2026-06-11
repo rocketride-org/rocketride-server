@@ -29,12 +29,12 @@ Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm` 
 
 | Profile                       | Model ID            | Context                          |
 | ----------------------------- | ------------------- | -------------------------------- |
-| Claude Sonnet 4.6 _(default)_ | `claude-sonnet-4-6` | 200K tokens                      |
-| Claude Opus 4.7               | `claude-opus-4-7`   | 200K tokens                      |
-| Claude Opus 4.6               | `claude-opus-4-6`   | 200K tokens                      |
-| Claude Sonnet 4.5             | `claude-sonnet-4-5` | 200K tokens                      |
-| Claude Opus 4.5               | `claude-opus-4-5`   | 200K tokens                      |
-| Claude Haiku 4.5              | `claude-haiku-4-5`  | 200K tokens                      |
+| Claude Sonnet 4.6 _(default)_ | `claude-sonnet-4-6` | 1M context, 128K output          |
+| Claude Opus 4.7               | `claude-opus-4-7`   | 1M context, 128K output          |
+| Claude Opus 4.6               | `claude-opus-4-6`   | 1M context, 128K output          |
+| Claude Sonnet 4.5             | `claude-sonnet-4-5` | 1M context, 64K output           |
+| Claude Opus 4.5               | `claude-opus-4-5`   | 200K context, 64K output         |
+| Claude Haiku 4.5              | `claude-haiku-4-5`  | 200K context, 64K output         |
 | Custom                        | _(user-specified)_  | Specify model ID and token limit |
 
 ## Upstream docs
