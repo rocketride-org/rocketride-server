@@ -2,7 +2,7 @@
 
 ## Read ALL Documentation First
 
-**Before ANY Rocket Ride code, read ALL 6 files at `apps/vscode/docs/api/`:**
+**Before ANY Rocket Ride code, read ALL 6 files at `docs/agents/`:**
 
 1. **`ROCKETRIDE_QUICKSTART.md`** ← Start here, copy working examples
 2. `ROCKETRIDE_README.md`
@@ -37,7 +37,7 @@
 | Components | ROCKETRIDE_COMPONENT_REFERENCE.md |
 | Troubleshooting | ROCKETRIDE_COMMON_MISTAKES.md |
 
-**Documentation at `apps/vscode/docs/api/` is the source of truth.**
+**The co-located per-package docs — assembled into the docs site by `builder docs:build` — are the source of truth. The agent integration docs at `docs/agents/` are the assistant-facing integration reference within it; read them first before writing any RocketRide integration code.**
 
 
 ## Co-located documentation rule
