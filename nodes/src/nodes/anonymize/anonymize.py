@@ -55,3 +55,36 @@ def anonymize(text: str, matches, anonymize_char: str = '*') -> str:
         text_list[offset:end] = [anonymize_char] * length
 
     return ''.join(text_list)
+
+
+def anonymize_tokens(text: str, matches) -> str:
+    """Replace specified segments with labelled placeholder tokens.
+
+    Args:
+        text (str): Input text to replace the segments.
+        matches (any): A list of (offset, length, token) tuples. The span
+            [offset, offset + length) is replaced by the token string.
+
+    Note:
+        Offsets may be in any order. Overlapping and adjacent matches are
+        merged; on a merge the first (lowest-offset) token is kept.
+    """
+    if not matches:
+        return text  # Return the original text if no matches exist
+
+    # Merge overlapping and adjacent matches, keeping the first token.
+    merged_matches = []
+    for offset, length, token in sorted(matches, key=lambda m: m[0]):
+        if merged_matches and offset <= merged_matches[-1][0] + merged_matches[-1][1]:
+            prev_offset, prev_length, prev_token = merged_matches.pop()
+            new_length = max(prev_offset + prev_length, offset + length) - prev_offset
+            merged_matches.append((prev_offset, new_length, prev_token))
+        else:
+            merged_matches.append((offset, length, token))
+
+    # Replace right-to-left so earlier offsets stay valid as span lengths change.
+    result = text
+    for offset, length, token in reversed(merged_matches):
+        result = result[:offset] + token + result[offset + length :]
+
+    return result
