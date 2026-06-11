@@ -1,4 +1,10 @@
-# FalkorDB Tool
+---
+title: FalkorDB
+date: 2026-06-11
+sidebar_position: 1
+---
+
+## What it does
 
 Lets agents query a [FalkorDB](https://www.falkordb.com) graph database with Cypher. Queries are **read-only by default** — they run via `GRAPH.RO_QUERY`, so the server itself rejects write clauses; flip *Allow Writes* to let the agent mutate the graph. Values always go through Cypher parameters (`$name`), which FalkorDB treats as data, never as query text.
 

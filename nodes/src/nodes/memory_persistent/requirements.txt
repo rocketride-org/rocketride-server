@@ -1,5 +1,4 @@
-# falkordb (any version) needs redis>=7.1 or <6; the previous >=6.4,<7 pin made
-# the engine-wide constraints solve unsatisfiable. The redis-py surface this
-# node uses (get/exists/hget/incrby/lrange/pexpire/pipeline/pttl/rpush/sadd/
-# scard/sismember/smembers/srem) is identical across 6.x and 7.x.
+# falkordb requires redis>=7.1. The redis-py surface this node uses
+# (get/exists/hget/hset/delete/incrby/lrange/pexpire/pipeline/pttl/rpush/sadd/
+# scard/sismember/smembers/srem) is identical across redis-py 6.x and 7.x.
 redis>=7.1,<8

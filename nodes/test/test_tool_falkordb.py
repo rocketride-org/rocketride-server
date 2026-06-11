@@ -246,7 +246,10 @@ def test_query_rejects_bad_params_without_touching_client():
 
 
 def test_query_returns_error_dict_on_redis_error():
-    graph = _FakeGraph(raise_error=_StubRedisError('bad cypher'))
+    # Raise the class the module actually bound — under `builder nodes:test-full`
+    # the real redis may already be imported, and the file-local stub would
+    # then not be caught by IInstance's `except RedisError`.
+    graph = _FakeGraph(raise_error=mod.RedisError('bad cypher'))
     inst = _instance(_FakeGlobal(graph))
     out = inst.query({'cypher': 'MATCH (n) RETURN n'})
     assert out['error'] == 'bad cypher'
