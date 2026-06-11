@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-06-08
 
+### Added
+
+#### New Nodes
+- **Steadwing RCA** — agent tool exposing Steadwing's AI root-cause analysis (`run_rca`). Given an error or stack trace (and optional source files), it opens a Steadwing investigation that correlates logs, metrics, traces, and code across the stack, and returns the investigation URL. REST-backed (`POST /api/mcp/analyze`, `X-API-Key`) with a secure API key (env fallback `ROCKETRIDE_STEADWING_KEY`). Experimental V0. (#1248)
+
 ## [3.3.0] - 2026-06-08
 
 ### ⚠ Breaking Changes — Client SDKs (`rocketride` / `rocketride-python`)

@@ -1,0 +1,52 @@
+{
+	//
+	// Steadwing — AI root-cause-analysis tool node
+	//
+	// Exposes a single tool, run_rca: given an error / stack trace (and optional
+	// source files), it opens a Steadwing investigation that correlates logs,
+	// metrics, traces, and code across the stack, and returns the investigation URL.
+	//
+	"title": "Steadwing RCA",
+	"protocol": "tool_steadwing://",
+	"classType": ["tool"],
+	//
+	// "experimental" marks this node as not yet production-ready (V0).
+	//
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_steadwing",
+	"prefix": "steadwing",
+	"icon": "steadwing.svg",
+	"description": ["Exposes Steadwing's AI root-cause analysis as an agent tool.", "Given an error or stack trace (and optional source files), opens a Steadwing investigation that correlates logs, metrics, traces, and code, and returns the investigation URL. Experimental V0: API and behavior may change."],
+	"tile": ["Tool: steadwing.run_rca"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Steadwing RCA",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tool_steadwing.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Steadwing API key (from app.steadwing.com/organization). Env fallback: ROCKETRIDE_STEADWING_KEY",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Steadwing RCA",
+			"properties": ["type", "tool_steadwing.apikey"]
+		}
+	]
+}
