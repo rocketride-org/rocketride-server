@@ -171,6 +171,31 @@ class BillingApi:
         )
 
     # =========================================================================
+    # TOP-UP PURCHASE
+    # =========================================================================
+
+    async def purchase_topup(self, org_id: str, price_id: str) -> dict:
+        """
+        Purchase a top-up pack by charging the customer's card on file.
+
+        On success, credits are applied to the ledger immediately.
+
+        Args:
+            org_id: Organisation UUID.
+            price_id: Stripe price_* identifier for the top-up plan.
+
+        Returns:
+            Dict with ``status`` ('succeeded' or 'requires_action') and
+            optionally ``clientSecret`` for 3DS.
+        """
+        return await self._client.call(
+            'rrext_account_billing',
+            subcommand='purchase_topup',
+            orgId=org_id,
+            priceId=price_id,
+        )
+
+    # =========================================================================
     # COMPUTE CREDITS WALLET
     # =========================================================================
 

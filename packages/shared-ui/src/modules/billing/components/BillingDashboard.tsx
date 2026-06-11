@@ -306,6 +306,8 @@ export interface BillingDashboardProps {
 	onTransactionPage: (page: number) => void;
 	/** Callback when user clicks a top-up pack to purchase. */
 	onBuyTopup?: (plan: TopupPlan) => void;
+	/** Called when the user clicks "Add more capacity" in the velocity card. */
+	onAddCapacity?: () => void;
 	/** Member lookup: userId -> display name. */
 	memberNames?: Record<string, string>;
 	/** Team lookup: teamId -> display name. */
@@ -372,9 +374,8 @@ const BalanceBreakdown: React.FC<{ balance: CreditBalance | null; transactions: 
 const SpendingVelocity: React.FC<{
 	balance: CreditBalance | null;
 	transactions: TransactionsResult | null;
-	topupPlans: TopupPlan[];
-	onBuyTopup?: (plan: TopupPlan) => void;
-}> = ({ balance, transactions, topupPlans, onBuyTopup }) => {
+	onAddCapacity?: () => void;
+}> = ({ balance, transactions, onAddCapacity }) => {
 	const stats = useMemo(() => {
 		if (!transactions?.transactions?.length) return null;
 
@@ -432,18 +433,19 @@ const SpendingVelocity: React.FC<{
 						<div style={S.statLabel}>days remaining</div>
 					</div>
 				</div>
-				{/* Top-up buttons — primary when urgent (<7 days), secondary otherwise */}
-				{topupPlans.length > 0 && onBuyTopup && (
-					<div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-						{topupPlans.map((plan) => (
-							<button
-								key={plan.id}
-								style={(isUrgent ? commonStyles.buttonPrimary : commonStyles.buttonSecondary) as CSSProperties}
-								onClick={() => onBuyTopup(plan)}
-							>
-								{plan.nickname} — ${(plan.amountCents / 100).toFixed(0)}
-							</button>
-						))}
+				{/* Low-capacity warning + top-up CTA — only shown when running low (<7 days) */}
+				{isUrgent && (
+					<div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+						<div style={{ flex: 1, fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>
+							Based on your current usage velocity, you will be running out of capacity soon.
+							We suggest you upgrade your current plan or purchase more capacity to ensure uninterrupted service.
+						</div>
+						<button
+							style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton, flexShrink: 0 } as CSSProperties}
+							onClick={() => onAddCapacity?.()}
+						>
+							Add more capacity...
+						</button>
 					</div>
 				)}
 			</div>
@@ -544,7 +546,7 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 										<td style={S.td}>{tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '--'}</td>
 										<td style={S.td}>{tx.userId ? (memberNames?.[tx.userId] ?? tx.userId.slice(0, 8)) : '--'}</td>
 										<td style={S.td}><span style={S.typeBadge(tx.type)}>{tx.type}</span></td>
-										<td style={S.td}>{tx.resource}</td>
+										<td style={{ ...S.td, textTransform: 'uppercase' }}>{tx.resource}</td>
 										<td style={{ ...S.td, fontSize: 11, color: 'var(--rr-text-secondary)' }}>{(tx as any).description || '--'}</td>
 										<td style={{ ...S.tdRight, color: tx.amount >= 0 ? 'var(--rr-color-success)' : 'var(--rr-text-primary)' }}>
 											{tx.amount >= 0 ? '+' : ''}{fmt(tx.amount)}
@@ -614,6 +616,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	loading,
 	onTransactionPage,
 	onBuyTopup,
+	onAddCapacity,
 	memberNames,
 	teamNames,
 }) => {
@@ -623,7 +626,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 
 	return (
 		<>
-			<SpendingVelocity balance={balance} transactions={transactions} topupPlans={topupPlans} onBuyTopup={onBuyTopup} />
+			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
 			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} memberNames={memberNames} teamNames={teamNames} />
 			<ActiveTasksView activeTasks={activeTasks} />
 			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} memberNames={memberNames} />

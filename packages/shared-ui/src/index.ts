@@ -78,8 +78,6 @@ export type { EnvironmentViewProps, EnvironmentSlotConfig, EnvironmentScope } fr
 
 // --- Billing module (subscription management) --------------------------------
 // Types: import directly from 'rocketride' (BillingDetail, CreditBalance, etc.)
-export { BillingView } from './modules/billing';
-export type { IBillingViewProps } from './modules/billing';
 export { CreditsPanel } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------

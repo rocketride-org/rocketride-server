@@ -227,8 +227,8 @@ export class AccountProvider {
 				await this.handleOpenPortal();
 				break;
 
-			case 'billing:buyCredits':
-				await this.handleBuyCredits(message.packId as string);
+			case 'billing:purchaseTopup':
+				await this.handlePurchaseTopup(panel, message.priceId as string);
 				break;
 
 			// -- Checkout flow (embedded Stripe Elements in the Account webview) ---
@@ -832,7 +832,6 @@ export class AccountProvider {
 				type: 'account:billing',
 				subscriptions: [],
 				creditBalance: null,
-				creditPacks: [],
 				billingLoading: false,
 				billingError: 'No organisation found. Please sign in first.',
 			});
@@ -844,7 +843,6 @@ export class AccountProvider {
 			type: 'account:billing',
 			subscriptions: [],
 			creditBalance: null,
-			creditPacks: [],
 			billingLoading: true,
 			billingError: null,
 		});
@@ -867,8 +865,8 @@ export class AccountProvider {
 				type: 'account:billing',
 				subscriptions,
 				creditBalance,
-				creditPacks: [],
 				topupPlans,
+				allPlans,
 				transactions,
 				usageByUser,
 				usageByTeam,
@@ -881,7 +879,6 @@ export class AccountProvider {
 				type: 'account:billing',
 				subscriptions: [],
 				creditBalance: null,
-				creditPacks: [],
 				transactions: null,
 				usageByUser: [],
 				usageByTeam: [],
@@ -986,19 +983,25 @@ export class AccountProvider {
 	}
 
 	/**
-	 * Creates a Stripe checkout session for a credit pack and opens the URL.
-	 *
-	 * @param packId - The credit pack identifier to purchase.
+	 * Purchases a top-up pack by charging the customer's card on file.
+	 * Posts the result back to the webview for the TopUpModal to handle.
 	 */
-	private async handleBuyCredits(packId: string): Promise<void> {
+	private async handlePurchaseTopup(panel: vscode.WebviewPanel, priceId: string): Promise<void> {
 		const { client, orgId } = this.resolveClient();
-		if (!client || !orgId) return;
-
+		if (!client || !orgId) {
+			await panel.webview.postMessage({ type: 'billing:topupResult', error: 'Not connected' });
+			return;
+		}
 		try {
-			const { url } = await client.billing.createCreditCheckout(orgId, packId, 'https://rocketride.ai');
-			await vscode.env.openExternal(vscode.Uri.parse(url));
-		} catch (error) {
-			console.error(`[AccountProvider] Failed to create credit checkout: ${error}`);
+			const result = await client.billing.purchaseTopup(orgId, priceId);
+			await panel.webview.postMessage({ type: 'billing:topupResult', result });
+			// Re-fetch billing data to reflect the new balance
+			if (result.status === 'succeeded') {
+				await this.fetchBillingData(panel);
+			}
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			await panel.webview.postMessage({ type: 'billing:topupResult', error: msg });
 		}
 	}
 

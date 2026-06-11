@@ -269,9 +269,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	useEffect(() => {
 		onFetchPlans()
 			.then((fetched) => {
-				setPlans(fetched);
+				// Filter out top-up packs — those are handled by the TopUpModal
+				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup');
+				setPlans(subscriptionPlans);
 				// Pre-select the first checkout-able plan
-				const first = fetched.find((p) => !p.metadata?.action);
+				const first = subscriptionPlans.find((p) => !p.metadata?.action);
 				if (first) setSelectedPlan(first);
 			})
 			.catch((err) => setError(err.message ?? 'Failed to load subscription plans.'))

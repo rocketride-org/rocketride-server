@@ -15,13 +15,15 @@
  * for visual consistency across account tabs.
  */
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
-import type { BillingDetail, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from '../../billing/types';
+import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../../billing/types';
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
+import { TopUpModal } from '../../billing/components/TopUpModal';
 import type { ActiveTask, TopupPlan } from '../../billing/components/BillingDashboard';
+import type { CheckoutPlan } from '../../checkout/types';
 import { S as SharedS, Badge } from './shared';
 
 // =============================================================================
@@ -137,13 +139,10 @@ export interface BillingPanelProps {
 	/** Current org credit balance, or null while loading. */
 	creditBalance: CreditBalance | null;
 	/** Available credit packs for purchase. */
-	creditPacks: CreditPack[];
 	/** Called when the user clicks Cancel on a subscription. Opens the modal in AccountView. */
 	onCancelSubscription: (appId: string) => void;
 	/** Open the Stripe customer portal for payment management. */
 	onOpenPortal: () => void;
-	/** Purchase a credit pack. Host handles Stripe checkout redirect/URL. */
-	onBuyCredits: (pack: CreditPack) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
 	/** App manifest entries for resolving display names, icons, etc. from appId. */
@@ -168,6 +167,10 @@ export interface BillingPanelProps {
 	topupPlans?: TopupPlan[];
 	/** Callback when user clicks a top-up pack. */
 	onBuyTopup?: (plan: TopupPlan) => void;
+	/** All plans from app_prices (for the TopUpModal). */
+	allPlans?: CheckoutPlan[];
+	/** Called to purchase a top-up pack (charges card on file). */
+	onPurchaseTopup?: (plan: CheckoutPlan) => Promise<{ status: string; clientSecret?: string }>;
 	/** Member lookup: userId -> display name. */
 	memberNames?: Record<string, string>;
 	/** Team lookup: teamId -> display name. */
@@ -184,7 +187,11 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, memberNames, teamNames }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames }) => {
+	// ── Top-up modal state ──────────────────────────────────────────────────
+	const [showTopUpModal, setShowTopUpModal] = useState(false);
+	const isSubscribed = subscriptions.length > 0;
+	const handleAddCapacity = useCallback(() => setShowTopUpModal(true), []);
 	// Build appId → app lookup for display name resolution
 	const appMap = React.useMemo(() => {
 		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
@@ -197,7 +204,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			{error && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
 			{/* Credits panel (shown when connected) */}
-			{isConnected && <CreditsPanel balance={creditBalance} packs={creditPacks} onBuy={onBuyCredits} />}
+			{isConnected && <CreditsPanel balance={creditBalance} packs={[]} onBuy={async () => {}} onAddCapacity={isSubscribed ? handleAddCapacity : undefined} />}
 
 			{/* Subscriptions card */}
 			<div style={{ ...commonStyles.card, marginTop: 16, marginBottom: 14 }}>
@@ -333,8 +340,18 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					loading={dashboardLoading ?? false}
 					onTransactionPage={onTransactionPage ?? (() => {})}
 					onBuyTopup={onBuyTopup}
+					onAddCapacity={isSubscribed ? handleAddCapacity : undefined}
 					memberNames={memberNames}
 					teamNames={teamNames}
+				/>
+			)}
+
+			{/* Top-up modal */}
+			{showTopUpModal && allPlans && onPurchaseTopup && (
+				<TopUpModal
+					plans={allPlans}
+					onPurchase={onPurchaseTopup}
+					onClose={() => setShowTopUpModal(false)}
 				/>
 			)}
 		</section>

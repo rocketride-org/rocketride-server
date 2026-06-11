@@ -15,6 +15,7 @@
  */
 
 import React, { useState, useRef, type CSSProperties } from 'react';
+import { commonStyles } from '../../../themes/styles';
 import type { CreditBalance, CreditPack } from '../types';
 
 // =============================================================================
@@ -188,6 +189,8 @@ export interface CreditsPanelProps {
 	packs: CreditPack[];
 	/** Called when the user clicks a pack to purchase. Host handles checkout. */
 	onBuy: (pack: CreditPack) => Promise<void>;
+	/** Called when the user clicks "Add more capacity". */
+	onAddCapacity?: () => void;
 }
 
 // =============================================================================
@@ -195,7 +198,7 @@ export interface CreditsPanelProps {
 // =============================================================================
 
 /** Pure credit balance widget with purchasable pack grid. */
-export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBuy }) => {
+export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBuy, onAddCapacity }) => {
 	// ── Purchase state ──────────────────────────────────────────────────────
 	const [purchasing, setPurchasing] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -223,7 +226,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={S.container}>
-			<div style={S.heading}>Compute credits</div>
+			<div style={S.heading}>Account Balance</div>
 
 			{/* Balance summary table — granted, consumed, net per resource */}
 			{balance && balance.balances && Object.keys(balance.balances).length > 0 ? (
@@ -244,7 +247,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 							const resourceName = label.replace('{amount}', '').trim() || resource;
 							return (
 								<tr key={resource}>
-									<td style={S.summaryCell}>{resourceName}</td>
+									<td style={{ ...S.summaryCell, textTransform: 'uppercase' }}>{resourceName}</td>
 									<td style={S.summaryCellRight}>{formatCredits(granted)}</td>
 									<td style={S.summaryCellRight}>{formatCredits(consumed)}</td>
 									<td style={{ ...S.summaryCellRight, color: net < 0 ? 'var(--rr-color-error)' : 'var(--rr-text-primary)' }}>
@@ -257,6 +260,15 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 				</table>
 			) : (
 				<div style={S.balanceEmpty}>— credits available</div>
+			)}
+
+			{/* Add more capacity button */}
+			{onAddCapacity && (
+				<div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+					<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onAddCapacity}>
+						Add more capacity...
+					</button>
+				</div>
 			)}
 
 			{/* Error banner */}

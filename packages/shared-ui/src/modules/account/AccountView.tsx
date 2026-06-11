@@ -23,7 +23,7 @@ import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { commonStyles } from '../../themes/styles';
 import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
-import type { BillingDetail, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from '../billing/types';
+import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
@@ -139,8 +139,6 @@ export interface IAccountViewProps {
 	billingError: string | null;
 	/** Current org credit balance, or null while loading. */
 	creditBalance: CreditBalance | null;
-	/** Available credit packs for purchase. */
-	creditPacks: CreditPack[];
 	/** App manifest entries for resolving display names, icons, etc. from appId. */
 	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 
@@ -149,8 +147,6 @@ export interface IAccountViewProps {
 	onCancelSubscription: (appId: string) => Promise<void>;
 	/** Open the Stripe customer portal for payment management. */
 	onOpenPortal: () => Promise<void>;
-	/** Purchase a credit pack. Host handles Stripe checkout redirect/URL. */
-	onBuyCredits: (pack: CreditPack) => Promise<void>;
 	/** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
 	onSubscribe?: () => void;
 
@@ -175,6 +171,10 @@ export interface IAccountViewProps {
 	topupPlans?: any[];
 	/** Callback when user clicks a top-up pack. */
 	onBuyTopup?: (plan: any) => void;
+	/** All plans from app_prices (for the TopUpModal). */
+	allPlans?: any[];
+	/** Called to purchase a top-up pack (charges card on file). */
+	onPurchaseTopup?: (plan: any) => Promise<{ status: string; clientSecret?: string }>;
 
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */
@@ -237,7 +237,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -701,7 +701,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			billing: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} memberNames={memberNames} teamNames={teamNames} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} memberNames={memberNames} teamNames={teamNames} />
 					</div>
 				),
 			},
@@ -763,7 +763,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance]
 	);
 
 	// =========================================================================

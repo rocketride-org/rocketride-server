@@ -53,11 +53,14 @@ const AccountWebview: React.FC = () => {
 	const [billingLoading, setBillingLoading] = useState(false);
 	const [billingError, setBillingError] = useState<string | null>(null);
 	const [creditBalance, setCreditBalance] = useState<any | null>(null);
-	const [creditPacks, setCreditPacks] = useState<any[]>([]);
 	const [transactions, setTransactions] = useState<any | null>(null);
 	const [usageByUser, setUsageByUser] = useState<any[]>([]);
 	const [usageByTeam, setUsageByTeam] = useState<any[]>([]);
 	const [topupPlans, setTopupPlans] = useState<any[]>([]);
+	const [allPlans, setAllPlans] = useState<any[]>([]);
+
+	// Top-up purchase resolver (promise-based like key creation)
+	const topupResolverRef = useRef<{ resolve: (v: any) => void; reject: (e: Error) => void } | null>(null);
 
 	// Checkout modal state
 	const [showCheckout, setShowCheckout] = useState(false);
@@ -145,11 +148,23 @@ const AccountWebview: React.FC = () => {
 				setBillingLoading((message as any).billingLoading ?? false);
 				setBillingError((message as any).billingError ?? null);
 				setCreditBalance((message as any).creditBalance ?? null);
-				setCreditPacks((message as any).creditPacks ?? []);
-				setTransactions((message as any).transactions ?? null);
+					setTransactions((message as any).transactions ?? null);
 				setUsageByUser((message as any).usageByUser ?? []);
 				setUsageByTeam((message as any).usageByTeam ?? []);
 				setTopupPlans((message as any).topupPlans ?? []);
+				setAllPlans((message as any).allPlans ?? []);
+				break;
+
+			// Top-up purchase result
+			case 'billing:topupResult':
+				if (topupResolverRef.current) {
+					if ((message as any).error) {
+						topupResolverRef.current.reject(new Error((message as any).error));
+					} else {
+						topupResolverRef.current.resolve((message as any).result);
+					}
+					topupResolverRef.current = null;
+				}
 				break;
 
 			// -- Checkout flow responses -------------------------------------------
@@ -301,10 +316,6 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'billing:portal' } as any);
 	}, []);
 
-	/** Opens a Stripe checkout session for a credit pack. */
-	const handleBuyCredits = useCallback(async (pack: any): Promise<void> => {
-		sendMessageRef.current({ type: 'billing:buyCredits', packId: pack.id } as any);
-	}, []);
 
 	/** Opens the inline checkout modal for Pipe Builder subscription. */
 	const handleSubscribe = useCallback((): void => {
@@ -370,11 +381,9 @@ const AccountWebview: React.FC = () => {
 				billingLoading={billingLoading}
 				billingError={billingError}
 				creditBalance={creditBalance}
-				creditPacks={creditPacks}
 				apps={authUser?.apps ?? profile?.apps}
 				onCancelSubscription={handleCancelSubscription}
 				onOpenPortal={handleOpenPortal}
-				onBuyCredits={handleBuyCredits}
 				onSubscribe={handleSubscribe}
 				transactions={transactions}
 				usageByUser={usageByUser}
@@ -383,6 +392,13 @@ const AccountWebview: React.FC = () => {
 				dashboardLoading={billingLoading}
 				onTransactionPage={() => {}}
 				topupPlans={topupPlans}
+				allPlans={allPlans}
+				onPurchaseTopup={async (plan: any) => {
+					return new Promise((resolve, reject) => {
+						topupResolverRef.current = { resolve, reject };
+						sendMessageRef.current({ type: 'billing:purchaseTopup', priceId: plan.stripePriceId } as any);
+					});
+				}}
 				memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
 				teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
 				section={section}

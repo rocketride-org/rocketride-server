@@ -297,12 +297,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	}, [plans]);
 
 	// Plans visible at the current interval, sorted by order ascending.
-	// Top-up packs (kind='topup') are excluded.
 	const visiblePlans = useMemo(() => {
-		const filtered = (showToggle
+		const filtered = showToggle
 			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval)
-			: plans
-		).filter((p) => p.metadata?.kind !== 'topup');
+			: plans;
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
 

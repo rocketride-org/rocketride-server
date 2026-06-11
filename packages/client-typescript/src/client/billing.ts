@@ -133,6 +133,30 @@ export class BillingApi {
 	}
 
 	// =========================================================================
+	// TOP-UP PURCHASE
+	// =========================================================================
+
+	/**
+	 * Purchases a top-up pack by charging the customer's card on file.
+	 *
+	 * On success, credits are applied to the ledger immediately (no webhook
+	 * needed). If the card requires 3D Secure, returns a ``clientSecret``
+	 * for the UI to handle inline.
+	 *
+	 * @param orgId   - Organisation UUID.
+	 * @param priceId - Stripe price_* identifier for the top-up plan.
+	 * @returns Object with ``status`` ('succeeded' or 'requires_action') and
+	 *          optionally ``clientSecret`` for 3DS.
+	 */
+	async purchaseTopup(orgId: string, priceId: string): Promise<{ status: string; clientSecret?: string }> {
+		return this.client.call<{ status: string; clientSecret?: string }>('rrext_account_billing', {
+			subcommand: 'purchase_topup',
+			orgId,
+			priceId,
+		});
+	}
+
+	// =========================================================================
 	// COMPUTE CREDITS WALLET
 	// =========================================================================
 

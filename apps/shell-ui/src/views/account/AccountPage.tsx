@@ -40,7 +40,6 @@ import type {
 	ProfileUpdate,
 	BillingDetail,
 	CreditBalance,
-	CreditPack,
 	TransactionsResult,
 	UsageRollup,
 } from 'rocketride';
@@ -97,7 +96,6 @@ const AccountPage: React.FC = () => {
 	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(
 		(authUser as { credits?: CreditBalance })?.credits ?? null,
 	);
-	const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
 	const [allPlans, setAllPlans] = useState<any[]>([]);
 	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
 	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
@@ -219,7 +217,6 @@ const AccountPage: React.FC = () => {
 			setSubscriptions(subs);
 			setCreditBalance(balance);
 			setAllPlans(plans);
-			setCreditPacks([]);
 			setTransactions(tx);
 			setUsageByUser(byUser);
 			setUsageByTeam(byTeam);
@@ -236,6 +233,17 @@ const AccountPage: React.FC = () => {
 		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
 		if (tx) { setTransactions(tx); setTxPage(page); }
 	}, [client, orgId]);
+
+	/** Purchase a top-up pack by charging the card on file. */
+	const handlePurchaseTopup = useCallback(async (plan: any) => {
+		if (!client || !orgId) throw new Error('Not connected');
+		const result = await client.billing.purchaseTopup(orgId, plan.stripePriceId);
+		if (result.status === 'succeeded') {
+			// Re-fetch billing data to reflect the new balance
+			loadBilling();
+		}
+		return result;
+	}, [client, orgId, loadBilling]);
 
 	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
@@ -412,17 +420,6 @@ const AccountPage: React.FC = () => {
 		window.open(url, '_blank', 'noopener');
 	}, [client, orgId]);
 
-	/**
-	 * Initiates a credit pack purchase via Stripe hosted checkout.
-	 * @param pack - The credit pack to purchase.
-	 */
-	const handleBuyCredits = useCallback(async (pack: CreditPack) => {
-		if (!client || !orgId) return;
-		const returnUrl = `${window.location.origin}${window.location.pathname}`;
-		const { url } = await client.billing.createCreditCheckout(orgId, pack.packId, returnUrl);
-		window.location.href = url;
-	}, [client, orgId]);
-
 	// ── Environment callbacks ───────────────────────────────────────────────
 
 	/**
@@ -468,16 +465,16 @@ const AccountPage: React.FC = () => {
 			billingLoading={billingLoading}
 			billingError={billingError}
 			creditBalance={creditBalance}
-			creditPacks={creditPacks}
 			apps={appManifest}
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
-			onBuyCredits={handleBuyCredits}
 			transactions={transactions}
 			usageByUser={usageByUser}
 			usageByTeam={usageByTeam}
 			activeTasks={[]}
 			topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
+			allPlans={allPlans}
+			onPurchaseTopup={handlePurchaseTopup}
 			dashboardLoading={dashboardLoading}
 			onTransactionPage={handleTransactionPage}
 			memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
