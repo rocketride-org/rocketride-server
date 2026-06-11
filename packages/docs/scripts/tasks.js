@@ -73,6 +73,17 @@ function makeDevStartAction(options = {}) {
 	};
 }
 
+// Preview the built static site. docusaurus serve defaults to packages/docs/build,
+// but the pipeline emits to SITE_OUT (dist/docs), so point --dir there.
+function makeServeAction() {
+	return {
+		description: 'Serve built docs',
+		run: async (ctx, task) => {
+			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
+		}
+	};
+}
+
 function makeCleanAction() {
 	return {
 		description: 'Clean docs',
@@ -114,6 +125,10 @@ module.exports = {
 				description: 'Start docs dev server',
 				steps: ['docs:gather-dev', 'docs:dev-start']
 			})
+		},
+		{
+			name: 'docs:serve',
+			action: makeServeAction
 		},
 		{
 			name: 'docs:clean',

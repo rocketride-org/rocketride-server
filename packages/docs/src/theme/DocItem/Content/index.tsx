@@ -1,4 +1,4 @@
-import React, { type ReactNode } from 'react';
+import React, { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { ThemeClassNames } from '@docusaurus/theme-common';
 import { useDoc } from '@docusaurus/plugin-content-docs/client';
@@ -29,6 +29,7 @@ export default function DocItemContent({ children }: Props): ReactNode {
 	const { pathname } = useLocation();
 	const showActions = pathname !== '/';
 	const mdUrl = markdownUrl(pathname);
+	const [copied, setCopied] = useState(false);
 
 	const copyMarkdown = async () => {
 		// Best-effort: a failed fetch or a denied clipboard write should be a
@@ -38,6 +39,8 @@ export default function DocItemContent({ children }: Props): ReactNode {
 			if (!res.ok) return;
 			const text = await res.text();
 			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
 		} catch {
 			/* clipboard unavailable or fetch failed — ignore */
 		}
@@ -54,7 +57,7 @@ export default function DocItemContent({ children }: Props): ReactNode {
 								<SiMarkdown className="docs-md-actions__icon" /> View as Markdown
 							</a>
 							<button type="button" className="button button--secondary button--sm" onClick={copyMarkdown}>
-								<LuClipboard className="docs-md-actions__icon" /> Copy as Markdown
+								<LuClipboard className="docs-md-actions__icon" /> {copied ? 'Copied' : 'Copy as Markdown'}
 							</button>
 						</div>
 					)}

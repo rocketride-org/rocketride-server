@@ -8,6 +8,8 @@ type FooterLink = { label: string; href: string };
 type FooterColumn = { title: string; items: FooterLink[] };
 type SocialLink = { label: string; href: string; icon: React.ReactNode };
 
+const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
+
 // Footer navigation wired to the docs spine (routeBasePath is '/'). Category
 // labels with no landing page point at their first leaf.
 const COLUMNS: FooterColumn[] = [
@@ -107,9 +109,15 @@ export default function Footer(): React.ReactNode {
 							<ul className="rr-footer__list">
 								{column.items.map((item) => (
 									<li key={item.label}>
-										<Link className="rr-footer__link" to={item.href}>
-											{item.label}
-										</Link>
+										{isExternal(item.href) ? (
+											<a className="rr-footer__link" href={item.href} target="_blank" rel="noopener noreferrer">
+												{item.label}
+											</a>
+										) : (
+											<Link className="rr-footer__link" to={item.href}>
+												{item.label}
+											</Link>
+										)}
 									</li>
 								))}
 							</ul>
