@@ -636,13 +636,79 @@ def test_write_valid_tone_forwarded():
     assert payload['tone'] == 'friendly'
 
 
-def test_write_style_and_tone_mutually_exclusive():
-    """Both writing_style and tone supplied -> at most one in the payload.
+def test_write_builder_style_and_tone_defensive_single_key():
+    """Builder-level defensive fallback: never emits BOTH writing_style and tone.
 
-    DeepL 400s if both are present. Discriminates an impl that forwards both.
+    The user-facing both-present case is rejected by the deepl_write METHOD with
+    an error dict and no HTTP call (see
+    test_write_style_and_tone_both_present_rejected_no_http). This test pins the
+    builder's SECOND line of defence: even if a both-present body reaches the
+    pure builder directly (it never should from the method), the builder must
+    still emit at most one of the two keys so a DeepL 400 cannot slip through.
+    Discriminates a builder that forwards both. It does NOT assert which one
+    wins; that is the method's job to prevent, not the builder's to arbitrate.
     """
     payload = mod._build_write_payload({'text': 'd', 'writing_style': 'business', 'tone': 'friendly'}, _Cfg())
     assert not ('writing_style' in payload and 'tone' in payload)
+
+
+def test_write_style_and_tone_both_present_rejected_no_http(monkeypatch):
+    """deepl_write rejects a call setting BOTH writing_style and tone: error dict,
+    no HTTP call. (CodeRabbit 3399561893: the old behaviour silently picked
+    writing_style and dropped tone; the contract now requires an explicit
+    client-side rejection so the agent disambiguates rather than getting a
+    silently-altered request.)
+
+    Two discriminators in one test: ``_no_call_post`` makes the OLD silent-pick
+    impl (which proceeds to POST writing_style) fail with the no-HTTP assertion,
+    and the message check requires the error to NAME both fields rather than be a
+    generic failure, so a bare ``return _write_error('bad input')`` would not pass.
+    """
+    _no_call_post(monkeypatch)
+    out = _make_instance().deepl_write({'text': 'd', 'writing_style': 'business', 'tone': 'friendly'})
+    assert out['success'] is False
+    low = out['error'].lower()
+    assert 'writing_style' in low or 'style' in low
+    assert 'tone' in low
+
+
+def test_write_valid_style_junk_tone_both_present_rejected_no_http(monkeypatch):
+    """A valid writing_style plus a JUNK tone is STILL a both-present conflict.
+
+    Semantics ratified with the engineer (CodeRabbit 3399561893 fix): the
+    mutual-exclusivity gate is raw PRESENCE (truthiness), not resolved-enum
+    validity. Any truthy tone signals intent to use tone, so the call is rejected
+    and the agent must disambiguate, rather than the node silently honouring the
+    style and discarding the (malformed) tone. Pins that 'business' + 'garbage'
+    is rejected with no HTTP. Discriminates an impl that gated on enum validity
+    (which would let this through, sending writing_style='business').
+    """
+    _no_call_post(monkeypatch)
+    out = _make_instance().deepl_write({'text': 'd', 'writing_style': 'business', 'tone': 'garbage'})
+    assert out['success'] is False
+    assert 'error' in out
+
+
+def test_write_style_only_not_rejected(monkeypatch):
+    """A writing_style with NO tone is not a conflict: the request proceeds.
+
+    Guards against an over-eager gate that rejects whenever writing_style is set.
+    The request must be made and carry writing_style.
+    """
+    cap = _capture_post(monkeypatch, _Resp({'improvements': [{'text': 'x', 'detected_source_language': 'EN'}]}))
+    out = _make_instance().deepl_write({'text': 'd', 'writing_style': 'business'})
+    assert out['success'] is True
+    assert cap['json']['writing_style'] == 'business'
+    assert 'tone' not in cap['json']
+
+
+def test_write_tone_only_not_rejected(monkeypatch):
+    """A tone with NO writing_style is not a conflict: the request proceeds."""
+    cap = _capture_post(monkeypatch, _Resp({'improvements': [{'text': 'x', 'detected_source_language': 'EN'}]}))
+    out = _make_instance().deepl_write({'text': 'd', 'tone': 'friendly'})
+    assert out['success'] is True
+    assert cap['json']['tone'] == 'friendly'
+    assert 'writing_style' not in cap['json']
 
 
 def test_write_invalid_writing_style_dropped():

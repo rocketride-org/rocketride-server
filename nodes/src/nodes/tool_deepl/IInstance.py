@@ -220,6 +220,15 @@ class IInstance(IInstanceBase):
         if text_error:
             return _write_error(text_error)
 
+        # writing_style and tone are mutually exclusive: DeepL 400s on a body
+        # carrying both, so reject client-side rather than silently dropping one.
+        # Gate on raw presence (truthiness), not resolved-enum validity: any
+        # truthy tone signals intent to use tone, so a valid style paired with a
+        # junk tone is still a conflict the agent must disambiguate, rather than
+        # us silently honouring the style and discarding the malformed tone.
+        if args.get('writing_style') and args.get('tone'):
+            return _write_error('writing_style and tone are mutually exclusive: provide one or the other, not both')
+
         target_lang = args.get('target_lang')
         if target_lang is not None:
             if not isinstance(target_lang, str) or target_lang not in VALID_WRITE_TARGET_LANGS:
@@ -346,9 +355,11 @@ def _build_translate_payload(args: Dict[str, Any], cfg: Any) -> Dict[str, Any]:
 def _build_write_payload(args: Dict[str, Any], cfg: Any) -> Dict[str, Any]:
     """Build the /v2/write/rephrase body from already-validated args.
 
-    ``writing_style`` and ``tone`` are mutually exclusive; if both are present
-    and valid, ``writing_style`` wins and ``tone`` is dropped (DeepL rejects a
-    body carrying both). Unset/invalid optionals are omitted.
+    ``writing_style`` and ``tone`` are mutually exclusive; the deepl_write
+    method rejects a call that sets both before reaching this builder, so the
+    both-present case never arrives here. As a defensive fallback the builder
+    still prefers ``writing_style`` if both are somehow present. Unset/invalid
+    optionals are omitted.
     """
     texts = args.get('text')
     payload: Dict[str, Any] = {
