@@ -61,6 +61,8 @@ const AccountWebview: React.FC = () => {
 
 	// Top-up purchase resolver (promise-based like key creation)
 	const topupResolverRef = useRef<{ resolve: (v: any) => void; reject: (e: Error) => void } | null>(null);
+	// Upgrade subscription resolver
+	const upgradeResolverRef = useRef<{ resolve: () => void; reject: (e: Error) => void } | null>(null);
 
 	// Checkout modal state
 	const [showCheckout, setShowCheckout] = useState(false);
@@ -164,6 +166,18 @@ const AccountWebview: React.FC = () => {
 						topupResolverRef.current.resolve((message as any).result);
 					}
 					topupResolverRef.current = null;
+				}
+				break;
+
+			// Upgrade subscription result
+			case 'billing:upgradeResult':
+				if (upgradeResolverRef.current) {
+					if ((message as any).error) {
+						upgradeResolverRef.current.reject(new Error((message as any).error));
+					} else {
+						upgradeResolverRef.current.resolve();
+					}
+					upgradeResolverRef.current = null;
 				}
 				break;
 
@@ -397,6 +411,12 @@ const AccountWebview: React.FC = () => {
 					return new Promise((resolve, reject) => {
 						topupResolverRef.current = { resolve, reject };
 						sendMessageRef.current({ type: 'billing:purchaseTopup', priceId: plan.stripePriceId } as any);
+					});
+				}}
+				onUpgradeSubscription={async (appId: string, newPriceId: string) => {
+					return new Promise<void>((resolve, reject) => {
+						upgradeResolverRef.current = { resolve, reject };
+						sendMessageRef.current({ type: 'billing:upgrade', appId, newPriceId } as any);
 					});
 				}}
 				memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}

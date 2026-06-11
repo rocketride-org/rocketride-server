@@ -797,7 +797,6 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     # Start heartbeat early — the dry-run can block on uv's internal lock
     # for minutes, and we need monitorStatus events to keep the task startup
     # timeout alive during that time.
-    updateProgress(f'Installing {os.path.basename(requirements_path)}')
     _start_heartbeat()
     try:
         return _install_requirements_inner(requirements_path, constraints_path)

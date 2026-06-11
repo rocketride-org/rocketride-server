@@ -245,6 +245,14 @@ const AccountPage: React.FC = () => {
 		return result;
 	}, [client, orgId, loadBilling]);
 
+	/** Upgrade or downgrade an existing subscription to a new plan. */
+	const handleUpgradeSubscription = useCallback(async (appId: string, newPriceId: string) => {
+		if (!client || !orgId) throw new Error('Not connected');
+		await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+		// Re-fetch billing data to reflect the updated subscription
+		loadBilling();
+	}, [client, orgId, loadBilling]);
+
 	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
 		if (!isConnected || !client) return;
@@ -475,6 +483,7 @@ const AccountPage: React.FC = () => {
 			topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
 			allPlans={allPlans}
 			onPurchaseTopup={handlePurchaseTopup}
+			onUpgradeSubscription={handleUpgradeSubscription}
 			dashboardLoading={dashboardLoading}
 			onTransactionPage={handleTransactionPage}
 			memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}

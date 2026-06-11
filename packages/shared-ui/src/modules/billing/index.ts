@@ -17,6 +17,8 @@ export { BillingDashboard } from './components/BillingDashboard';
 export type { BillingDashboardProps, ActiveTask, TopupPlan } from './components/BillingDashboard';
 export { TopUpModal } from './components/TopUpModal';
 export type { TopUpModalProps } from './components/TopUpModal';
+export { UpgradeModal } from './components/UpgradeModal';
+export type { UpgradeModalProps } from './components/UpgradeModal';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 export type { BillingDetail, StripePlan, CreditBalance, CreditPack, LedgerTransaction, TransactionsResult, UsageRollup } from './types';

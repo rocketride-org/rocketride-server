@@ -132,6 +132,34 @@ export class BillingApi {
 		});
 	}
 
+	/**
+	 * Upgrades (or downgrades) an existing subscription to a different plan.
+	 *
+	 * The server swaps the Stripe subscription item to the new price and
+	 * handles proration automatically. The local database row is updated
+	 * before the response is returned.
+	 *
+	 * @param orgId      - Organisation UUID that owns the subscription.
+	 * @param appId      - App whose plan is changing (e.g. "rocketride.pipeBuilder").
+	 * @param newPriceId - Stripe price_* identifier for the target plan.
+	 * @returns Object with status, new plan details, and subscription ID.
+	 */
+	async upgradeSubscription(orgId: string, appId: string, newPriceId: string): Promise<{
+		status: string;
+		subscriptionId: string;
+		newPriceId: string;
+		planNickname: string | null;
+		unitAmount: number | null;
+		billingInterval: string | null;
+	}> {
+		return this.client.call('rrext_account_billing', {
+			subcommand: 'upgrade',
+			orgId,
+			appId,
+			newPriceId,
+		});
+	}
+
 	// =========================================================================
 	// TOP-UP PURCHASE
 	// =========================================================================

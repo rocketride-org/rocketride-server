@@ -22,6 +22,7 @@ import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } fr
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
 import { TopUpModal } from '../../billing/components/TopUpModal';
+import { UpgradeModal } from '../../billing/components/UpgradeModal';
 import type { ActiveTask, TopupPlan } from '../../billing/components/BillingDashboard';
 import type { CheckoutPlan } from '../../checkout/types';
 import { S as SharedS, Badge } from './shared';
@@ -175,6 +176,8 @@ export interface BillingPanelProps {
 	memberNames?: Record<string, string>;
 	/** Team lookup: teamId -> display name. */
 	teamNames?: Record<string, string>;
+	/** Called when the user confirms a plan change. */
+	onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
 }
 
 // =============================================================================
@@ -187,9 +190,11 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames, onUpgradeSubscription }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
+	// ── Upgrade modal state ─────────────────────────────────────────────────
+	const [upgradeTarget, setUpgradeTarget] = useState<BillingDetail | null>(null);
 	const isSubscribed = subscriptions.length > 0;
 	const handleAddCapacity = useCallback(() => setShowTopUpModal(true), []);
 	// Build appId → app lookup for display name resolution
@@ -314,6 +319,11 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 									{/* Status badge + actions */}
 									<div style={SharedS.rowActions}>
 										<Badge variant={sv.variant}>{sv.label}</Badge>
+										{isCancelable && isOrgAdmin && onUpgradeSubscription && (
+											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => setUpgradeTarget(sub)}>
+												Change Plan
+											</button>
+										)}
 										{isCancelable && isOrgAdmin && (
 											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
 												Cancel
@@ -352,6 +362,17 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					plans={allPlans}
 					onPurchase={onPurchaseTopup}
 					onClose={() => setShowTopUpModal(false)}
+				/>
+			)}
+
+			{/* Upgrade / change plan modal */}
+			{upgradeTarget && allPlans && onUpgradeSubscription && (
+				<UpgradeModal
+					plans={allPlans}
+					currentPriceId={upgradeTarget.stripePriceId}
+					currentPlanName={upgradeTarget.planNickname}
+					onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)}
+					onClose={() => setUpgradeTarget(null)}
 				/>
 			)}
 		</section>

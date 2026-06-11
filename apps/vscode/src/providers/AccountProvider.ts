@@ -231,6 +231,10 @@ export class AccountProvider {
 				await this.handlePurchaseTopup(panel, message.priceId as string);
 				break;
 
+			case 'billing:upgrade':
+				await this.handleUpgradeSubscription(panel, message.appId as string, message.newPriceId as string);
+				break;
+
 			// -- Checkout flow (embedded Stripe Elements in the Account webview) ---
 			case 'checkout:fetchPlans':
 				await this.handleCheckoutFetchPlans(panel);
@@ -1002,6 +1006,33 @@ export class AccountProvider {
 		} catch (error: unknown) {
 			const msg = error instanceof Error ? error.message : String(error);
 			await panel.webview.postMessage({ type: 'billing:topupResult', error: msg });
+		}
+	}
+
+	/**
+	 * Handles an upgrade/downgrade subscription request from the webview.
+	 *
+	 * Calls the SDK to change the subscription plan on the server, then
+	 * re-fetches billing data and sends the result back to the webview.
+	 *
+	 * @param panel      - The webview panel to post the result to.
+	 * @param appId      - The app whose subscription is being changed.
+	 * @param newPriceId - Stripe price_* identifier for the target plan.
+	 */
+	private async handleUpgradeSubscription(panel: vscode.WebviewPanel, appId: string, newPriceId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) {
+			await panel.webview.postMessage({ type: 'billing:upgradeResult', error: 'Not connected' });
+			return;
+		}
+		try {
+			await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+			await panel.webview.postMessage({ type: 'billing:upgradeResult' });
+			// Re-fetch billing data to reflect the updated subscription
+			await this.fetchBillingData(panel);
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			await panel.webview.postMessage({ type: 'billing:upgradeResult', error: msg });
 		}
 	}
 

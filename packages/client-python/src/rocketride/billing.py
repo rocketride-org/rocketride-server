@@ -170,6 +170,36 @@ class BillingApi:
             appId=app_id,
         )
 
+    async def upgrade_subscription(
+        self,
+        org_id: str,
+        app_id: str,
+        new_price_id: str,
+    ) -> dict:
+        """
+        Upgrade (or downgrade) an existing subscription to a different plan.
+
+        The server swaps the Stripe subscription item to the new price and
+        handles proration automatically. The local database row is updated
+        before the response is returned.
+
+        Args:
+            org_id: Organisation UUID that owns the subscription.
+            app_id: App whose plan is changing.
+            new_price_id: Stripe price_* identifier for the target plan.
+
+        Returns:
+            Dict with ``status``, ``subscriptionId``, ``newPriceId``,
+            ``planNickname``, ``unitAmount``, ``billingInterval``.
+        """
+        return await self._client.call(
+            'rrext_account_billing',
+            subcommand='upgrade',
+            orgId=org_id,
+            appId=app_id,
+            newPriceId=new_price_id,
+        )
+
     # =========================================================================
     # TOP-UP PURCHASE
     # =========================================================================
