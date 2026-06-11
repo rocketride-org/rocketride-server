@@ -1,0 +1,66 @@
+# Publishes packages/n8n-nodes to npm as `n8n-nodes-rocketride` with provenance.
+#
+# Mirrors the monorepo's _release.yaml approach: npm OIDC TRUSTED PUBLISHING
+# (no NPM_TOKEN) + --provenance. Kept separate from the server release because
+# this package versions on its own cadence (n8n-nodes-vX.Y.Z), not the server's.
+#
+# ONE-TIME SETUP (on npmjs.com, by a maintainer of the npm package):
+#   Package n8n-nodes-rocketride → Settings → Trusted Publisher → GitHub Actions:
+#     Repository:  rocketride-org/rocketride-server
+#     Workflow:    n8n-nodes-release.yml
+#     Environment: release
+#   (Trusted publishing requires npm >= 11.5.1, which this job installs.)
+#
+# RELEASE: bump packages/n8n-nodes/package.json version, then push a matching tag:
+#   git tag n8n-nodes-v0.1.0 && git push origin n8n-nodes-v0.1.0
+name: n8n-nodes Release
+
+on:
+  push:
+    tags:
+      - 'n8n-nodes-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # OIDC: npm trusted publishing + provenance attestation
+    defaults:
+      run:
+        working-directory: packages/n8n-nodes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Guard — tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#n8n-nodes-}"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG) does not match package.json version ($PKG_VERSION)."
+            exit 1
+          fi
+
+      - name: Install + verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npm run lint
+          npm test
+
+      - name: Publish to npm (OIDC trusted publishing + provenance)
+        run: |
+          # OIDC trusted publishing needs npm >= 11.5.1; Node 20 ships npm 10.x.
+          npm install -g npm@latest
+          npm publish --provenance --access public

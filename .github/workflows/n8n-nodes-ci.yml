@@ -1,0 +1,56 @@
+# CI for the standalone n8n community node package (packages/n8n-nodes).
+# This package is intentionally NOT part of the pnpm workspace: it ships as an
+# independently-versioned, npm-published, n8n-VERIFIED community node, whose
+# toolchain (@n8n/node-cli) and eslint/prettier config must stay self-contained
+# and byte-identical to the verified defaults. So it builds/lints/tests with its
+# own npm toolchain here, separate from the monorepo's pnpm pipeline.
+name: n8n-nodes CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/n8n-nodes/**'
+      - '.github/workflows/n8n-nodes-ci.yml'
+  push:
+    branches: [develop, main]
+    paths:
+      - 'packages/n8n-nodes/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-lint-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/n8n-nodes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install (npm — isolated from the pnpm workspace)
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint (n8n verified ruleset)
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Enforce verified-node invariants
+        run: |
+          DEPS=$(node -p "Object.keys(require('./package.json').dependencies || {}).length")
+          if [ "$DEPS" != "0" ]; then
+            echo "::error::Verified n8n nodes must have ZERO runtime dependencies (found $DEPS)."
+            exit 1
+          fi
+          echo "Zero runtime dependencies ✓"
+          # Confirm the published tarball is clean (dist + README + LICENSE only).
+          npm pack --dry-run

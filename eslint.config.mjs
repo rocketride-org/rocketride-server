@@ -9,7 +9,7 @@ import prettierConfig from 'eslint-config-prettier';
 export default tseslint.config(
 	// Global ignores
 	{
-		ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '**/*.min.js', '**/coverage/**', '**/.storybook/**', '**/storybook-static/**', 'apps/vscode/rocketride.js'],
+		ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '**/*.min.js', '**/coverage/**', '**/.storybook/**', '**/storybook-static/**', 'apps/vscode/rocketride.js', 'packages/n8n-nodes/**'],
 	},
 
 	// Base config for all files

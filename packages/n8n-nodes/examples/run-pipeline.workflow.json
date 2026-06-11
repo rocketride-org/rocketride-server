@@ -1,0 +1,40 @@
+{
+	"name": "Run a RocketRide pipeline",
+	"nodes": [
+		{
+			"parameters": {},
+			"id": "a1b2c3d4-0001-4000-8000-000000000001",
+			"name": "When clicking 'Test workflow'",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [0, 0]
+		},
+		{
+			"parameters": {
+				"operation": "run",
+				"payloadMode": "text",
+				"text": "Summarize the key points of the latest quarterly report."
+			},
+			"id": "a1b2c3d4-0002-4000-8000-000000000002",
+			"name": "RocketRide",
+			"type": "n8n-nodes-rocketride.rocketRide",
+			"typeVersion": 1,
+			"position": [240, 0],
+			"credentials": {
+				"rocketRideApi": {
+					"id": "1",
+					"name": "RocketRide account"
+				}
+			}
+		}
+	],
+	"connections": {
+		"When clicking 'Test workflow'": {
+			"main": [[{ "node": "RocketRide", "type": "main", "index": 0 }]]
+		}
+	},
+	"settings": {
+		"executionOrder": "v1"
+	},
+	"pinData": {}
+}

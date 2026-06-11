@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-rocketride.rocketRide",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["AI", "Development", "Utility"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/rocketride-org/rocketride-server/tree/develop/packages/n8n-nodes#credentials"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/rocketride-org/rocketride-server/tree/develop/packages/n8n-nodes#readme"
+			}
+		]
+	}
+}

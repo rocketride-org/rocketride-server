@@ -1,0 +1,61 @@
+import { describe, it, expect } from 'vitest';
+import {
+	buildRunBody,
+	coerceJsonObject,
+	parseRocketRideResponse,
+} from '../nodes/RocketRide/helpers.ts';
+
+describe('buildRunBody', () => {
+	it('text mode -> raw text/plain', () => {
+		expect(buildRunBody('text', { text: 'hi' })).toEqual({ body: 'hi', contentType: 'text/plain' });
+	});
+
+	it('json mode with object -> stringified application/json', () => {
+		const built = buildRunBody('json', { jsonBody: { a: 1 } });
+		expect(built.contentType).toBe('application/json');
+		expect(JSON.parse(built.body)).toEqual({ a: 1 });
+	});
+
+	it('json mode with string -> passed through unchanged', () => {
+		expect(buildRunBody('json', { jsonBody: '{"a":1}' }).body).toBe('{"a":1}');
+	});
+
+	it('structured mode -> { text, documents }', () => {
+		const built = buildRunBody('structured', {
+			text: 't',
+			documents: [{ content: 'c', metadata: { p: 1 } }],
+		});
+		expect(built.contentType).toBe('application/json');
+		expect(JSON.parse(built.body)).toEqual({ text: 't', documents: [{ content: 'c', metadata: { p: 1 } }] });
+	});
+});
+
+describe('coerceJsonObject', () => {
+	it('parses JSON object strings', () => {
+		expect(coerceJsonObject('{"x":1}')).toEqual({ x: 1 });
+	});
+	it('passes objects through', () => {
+		expect(coerceJsonObject({ y: 2 })).toEqual({ y: 2 });
+	});
+	it('returns {} for junk, empty, or nullish', () => {
+		expect(coerceJsonObject('not json')).toEqual({});
+		expect(coerceJsonObject('')).toEqual({});
+		expect(coerceJsonObject(undefined)).toEqual({});
+		expect(coerceJsonObject(42)).toEqual({});
+	});
+});
+
+describe('parseRocketRideResponse', () => {
+	it('unwraps the { status, data } envelope', () => {
+		expect(parseRocketRideResponse({ status: 'OK', data: { a: 1 } })).toEqual({ a: 1 });
+	});
+	it('parses a JSON string then unwraps', () => {
+		expect(parseRocketRideResponse('{"status":"OK","data":{"a":1}}')).toEqual({ a: 1 });
+	});
+	it('returns an object without a data envelope as-is', () => {
+		expect(parseRocketRideResponse({ a: 1 })).toEqual({ a: 1 });
+	});
+	it('wraps non-JSON strings under result', () => {
+		expect(parseRocketRideResponse('plain text')).toEqual({ result: 'plain text' });
+	});
+});
