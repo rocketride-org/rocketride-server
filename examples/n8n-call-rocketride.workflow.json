@@ -1,0 +1,66 @@
+{
+	"name": "Call RocketRide pipeline",
+	"nodes": [
+		{
+			"parameters": {
+				"httpMethod": "POST",
+				"path": "rocketride-demo",
+				"responseMode": "responseNode",
+				"options": {}
+			},
+			"id": "f1a2b3c4-0001-4000-8000-000000000001",
+			"name": "Webhook",
+			"type": "n8n-nodes-base.webhook",
+			"typeVersion": 2,
+			"position": [0, 0],
+			"webhookId": "f1a2b3c4-0001-4000-8000-000000000001"
+		},
+		{
+			"parameters": {
+				"method": "POST",
+				"url": "http://localhost:5567/webhook",
+				"sendHeaders": true,
+				"headerParameters": {
+					"parameters": [
+						{
+							"name": "Authorization",
+							"value": "YOUR_ROCKETRIDE_PUBLIC_AUTH_KEY"
+						}
+					]
+				},
+				"sendBody": true,
+				"specifyBody": "json",
+				"jsonBody": "={{ JSON.stringify($json.body) }}",
+				"options": {}
+			},
+			"id": "f1a2b3c4-0002-4000-8000-000000000002",
+			"name": "Call RocketRide",
+			"type": "n8n-nodes-base.httpRequest",
+			"typeVersion": 4.2,
+			"position": [220, 0]
+		},
+		{
+			"parameters": {
+				"respondWith": "firstIncomingItem",
+				"options": {}
+			},
+			"id": "f1a2b3c4-0003-4000-8000-000000000003",
+			"name": "Respond to Webhook",
+			"type": "n8n-nodes-base.respondToWebhook",
+			"typeVersion": 1.1,
+			"position": [440, 0]
+		}
+	],
+	"connections": {
+		"Webhook": {
+			"main": [[{ "node": "Call RocketRide", "type": "main", "index": 0 }]]
+		},
+		"Call RocketRide": {
+			"main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+		}
+	},
+	"settings": {
+		"executionOrder": "v1"
+	},
+	"pinData": {}
+}

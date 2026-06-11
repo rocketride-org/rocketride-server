@@ -81,6 +81,24 @@ chat -> orchestrator agent -> response
 
 **Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_ANTHROPIC_KEY`
 
+### n8n-roundtrip.pipe
+
+**Call an n8n workflow from a RocketRide pipeline** (pairs with `n8n-call-rocketride.workflow.json`).
+
+```
+webhook -> tool_n8n (triggers n8n workflow "rocketride-demo") -> response
+```
+
+- Lane input is POSTed to the n8n workflow's webhook; the workflow's response flows downstream
+- Import the companion `n8n-call-rocketride.workflow.json` into n8n for the other half of an RR→n8n→RR round-trip
+- See the [n8n integration guide](../docs/README-n8n.md) for setup, activation, and Docker-reachability notes
+
+**Required env vars:** `ROCKETRIDE_N8N_URL` (e.g. `http://localhost:5678`), `ROCKETRIDE_N8N_KEY` (only for async mode / listing)
+
+The [`n8n/`](n8n/) subfolder has runnable test pipes covering every mode — `n8n-fanout.pipe` (sync + async + sequential), `n8n-agent.pipe` (agent calls n8n as a tool), and `n8n-roundtrip.pipe` + `n8n-roundtrip-target.pipe` (the full RR→n8n→RR loop).
+
+---
+
 ## Getting Started
 
 1. Copy a template to your project directory
