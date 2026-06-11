@@ -29,7 +29,7 @@ from rocketlib import debug, expand
 from ai.common.config import Config
 from ai.common.models import GLiNER
 from .Ruleparser import RuleParser
-from .anonymize import anonymize as _anonymize
+from .anonymize import anonymize as _anonymize, anonymize_tokens
 
 
 # Default PII labels for zero-shot detection when the user has not configured
@@ -67,6 +67,10 @@ class GliNERRecognizer:
         self.model_name = config.get('model', 'xomad/gliner-model-merge-large-v1.0')
         self.anonymize = config.get('anonymize', True)
         self.anonymize_char = config.get('anonymizeChar', '\u2588')
+
+        # Redaction style: 'mask' overwrites entities with anonymize_char (\u2588\u2588\u2588\u2588),
+        # 'token' replaces each entity with a labelled placeholder like [PERSON].
+        self.redaction_style = config.get('redactionStyle', 'mask')
 
         # Entity types to detect. Configurable per pipeline via the `entityTypes`
         # field; falls back to the common defaults when unset or empty. Blank
@@ -111,6 +115,17 @@ class GliNERRecognizer:
             )
         )
         return matches
+
+    def convert_ner_results_to_token_matches(self, ner_results):
+        """Build (offset, length, token) tuples, deriving the token from the label."""
+        return [
+            (
+                result['start'],
+                result['end'] - result['start'],
+                f'[{result["label"].upper()}]',
+            )
+            for result in ner_results
+        ]
 
     def normalize_label(self, label):
         """Clean label names to a consistent format."""
@@ -219,18 +234,30 @@ class GliNERRecognizer:
             existing_matches: Optional list of (offset, length) tuples from classifications
 
         Returns:
-            Anonymized text with detected entities replaced by anonymize_char
+            Anonymized text. In 'mask' style detected spans are overwritten with
+            anonymize_char; in 'token' style they are replaced with labelled
+            placeholder tokens (e.g. [PERSON]).
         """
         if not text:
             return text
 
         # Run NER prediction
         ner_results = self.predict(text, labels)
-        ner_matches = self.convert_ner_results_to_matches(ner_results)
 
         debug(f'Anonymize: Detected {len(ner_results)} entities')
 
-        # Combine with existing matches (from classifications)
+        if self.redaction_style == 'token':
+            token_matches = self.convert_ner_results_to_token_matches(ner_results)
+            # Classification matches carry no per-match label -> generic token.
+            fallback = [(offset, length, '[REDACTED]') for offset, length in (existing_matches or [])]
+            all_matches = fallback + token_matches
+            if not all_matches:
+                debug('Anonymize: No entities to mask')
+                return text
+            return anonymize_tokens(text, all_matches)
+
+        # Default 'mask' style (unchanged behavior)
+        ner_matches = self.convert_ner_results_to_matches(ner_results)
         all_matches = list(existing_matches or []) + ner_matches
 
         if not all_matches:
