@@ -124,10 +124,22 @@ export class BarStatus {
 	 * Handles connection-level status changes (connected, disconnected, auth).
 	 * This is the primary driver of the status bar — shows dev connection state.
 	 */
+	/** Reads the current connection mode from config (single source of truth). */
+	private getCurrentMode(): string {
+		try {
+			const { ConfigManager } = require('../config');
+			return ConfigManager.getInstance().getConfig().development.connectionMode ?? 'local';
+		} catch {
+			return 'local';
+		}
+	}
+
 	private handleConnectionStatusChange(status: ConnectionStatus): void {
+		const modeLabel: Record<string, string> = { cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'Direct', local: 'Local' };
+		const currentMode = this.getCurrentMode();
+
 		if (status.state === ConnectionState.CONNECTED) {
-			const modeLabel: Record<string, string> = { cloud: 'Cloud', docker: 'Docker', service: 'Service', onprem: 'Direct', local: 'Local' };
-			this.statusBarItem.text = `$(debug-console) RocketRide: Connected (${modeLabel[status.connectionMode] || status.connectionMode})`;
+			this.statusBarItem.text = `$(debug-console) RocketRide: Connected (${modeLabel[currentMode] || currentMode})`;
 			this.statusBarItem.command = 'rocketride.sidebar.connection.disconnect';
 			this.statusBarItem.tooltip = 'Connected - Click to disconnect';
 			this.statusBarItem.backgroundColor = undefined;
@@ -145,7 +157,7 @@ export class BarStatus {
 			this.statusBarItem.tooltip = status.lastError || 'Authentication failed — click to sign in';
 			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
-		} else if (!status.hasCredentials && (status.connectionMode === 'cloud' || status.connectionMode === 'onprem')) {
+		} else if (!status.hasCredentials && (currentMode === 'cloud' || currentMode === 'onprem')) {
 			this.statusBarItem.text = '$(key) RocketRide: Setup Required';
 			this.statusBarItem.command = 'rocketride.page.settings.open';
 			this.statusBarItem.tooltip = 'Click to open settings page';

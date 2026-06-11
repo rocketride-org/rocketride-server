@@ -17,7 +17,7 @@ import React, { useEffect, useState, useCallback, useMemo, type CSSProperties } 
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
-import { PlanPicker } from './PlanPicker';
+import { PlanPicker, planAmount } from './PlanPicker';
 import type { CheckoutModalProps, CheckoutPlan } from './types';
 
 // =============================================================================
@@ -31,7 +31,7 @@ const S = {
 		border: '1px solid var(--rr-border)',
 		borderRadius: 16,
 		width: '100%',
-		maxWidth: 720,
+		maxWidth: 960,
 		overflow: 'hidden',
 		boxShadow: '0 24px 64px var(--rr-shadow-widget)',
 		position: 'relative' as const,
@@ -197,7 +197,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 
 				// Step 2: Notify server — writes 'incomplete', webhook flips to 'active'
 				try {
-					await onConfirmPending(subscriptionId, plan.priceId);
+					await onConfirmPending(subscriptionId, plan.stripePriceId);
 				} catch {
 					// Non-fatal — the webhook will still update the DB
 				}
@@ -219,14 +219,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 
 			{/* Plan recap bar */}
 			<div style={S.planRecap}>
-				<span style={S.planRecapName}>{plan.label}</span>
-				<span style={S.planRecapAmount}>{plan.amount}</span>
+				<span style={S.planRecapName}>{plan.nickname}</span>
+				<span style={S.planRecapAmount}>{planAmount(plan)}</span>
 			</div>
 
 			<form onSubmit={handleSubmit}>
 				<PaymentElement options={{ wallets: { link: 'never' } }} />
 				<button type="submit" disabled={!stripe || submitting} style={S.submitBtn(!stripe || submitting)}>
-					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${plan.amount}`}
+					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${planAmount(plan)}`}
 				</button>
 			</form>
 		</>
@@ -271,7 +271,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			.then((fetched) => {
 				setPlans(fetched);
 				// Pre-select the first checkout-able plan
-				const first = fetched.find((p) => !p.action);
+				const first = fetched.find((p) => !p.metadata?.action);
 				if (first) setSelectedPlan(first);
 			})
 			.catch((err) => setError(err.message ?? 'Failed to load subscription plans.'))
@@ -280,12 +280,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	/** Creates a Stripe subscription and advances to payment. */
 	const handleContinue = useCallback(async () => {
-		if (!selectedPlan || selectedPlan.action) return;
+		if (!selectedPlan || selectedPlan.metadata?.action) return;
 
 		setLoadingSecret(true);
 		setError(null);
 		try {
-			const res = await onCreateCheckout(selectedPlan.priceId);
+			const res = await onCreateCheckout(selectedPlan.stripePriceId);
 			setClientSecret(res.clientSecret);
 			setSubscriptionId(res.subscriptionId);
 		} catch (err: any) {
@@ -362,8 +362,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							onSelectPlan={setSelectedPlan}
 							footer={
 								<button
-									style={S.continueBtn(!selectedPlan || !!selectedPlan.action)}
-									disabled={!selectedPlan || !!selectedPlan.action}
+									style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action)}
+									disabled={!selectedPlan || !!selectedPlan.metadata?.action}
 									onClick={handleContinue}
 								>
 									Continue

@@ -24,6 +24,7 @@ import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 // =============================================================================
 // INTERFACES
@@ -42,6 +43,8 @@ interface AccountWebviewMessage {
 	params?: Record<string, unknown>;
 	appId?: string;
 	packId?: string;
+	priceId?: string;
+	subscriptionId?: string;
 }
 
 // =============================================================================
@@ -228,11 +231,17 @@ export class AccountProvider {
 				await this.handleBuyCredits(message.packId as string);
 				break;
 
-			case 'billing:subscribe':
-				// Open the pipeline editor which has the embedded Stripe checkout flow
-				// for new subscriptions. The portal is for managing existing subscriptions
-				// only; new subscriptions require the checkout session flow in ProjectProvider.
-				await this.handleSubscribe(panel);
+			// -- Checkout flow (embedded Stripe Elements in the Account webview) ---
+			case 'checkout:fetchPlans':
+				await this.handleCheckoutFetchPlans(panel);
+				break;
+
+			case 'checkout:createSession':
+				await this.handleCheckoutCreateSession(panel, message);
+				break;
+
+			case 'checkout:confirmPending':
+				await this.handleCheckoutConfirmPending(panel, message);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -257,29 +266,46 @@ export class AccountProvider {
 	 */
 	private async sendInitialData(panel: vscode.WebviewPanel): Promise<void> {
 		// Resolve the best available client (dev → deploy cascade).
-		const { client, accountInfo } = this.resolveClient();
+		const { client, accountInfo, orgId } = this.resolveClient();
 		const isConnected = client !== undefined;
 
-		// Fetch profile for the default tab; other sections load on demand.
+		// Fetch all account data upfront in parallel so every tab has data
+		// immediately (badges, counts, billing) without waiting for the user
+		// to click into each section.
 		let profile: ConnectResult | null = accountInfo ?? null;
+		let org = null;
+		let members: any[] = [];
+		let teams: any[] = [];
+		let keys: any[] = [];
+
 		if (client && isConnected) {
-			const fresh = await client.account.getProfile().catch(() => null);
-			if (fresh) profile = fresh;
+			const results = await Promise.all([
+				client.account.getProfile().catch(() => null),
+				orgId ? client.account.getOrg(orgId).catch(() => null) : null,
+				orgId ? client.account.listMembers(orgId).catch(() => []) : [],
+				orgId ? client.account.listTeams(orgId).catch(() => []) : [],
+				client.account.listKeys().catch(() => []),
+			]);
+			if (results[0]) profile = results[0];
+			org = results[1];
+			members = results[2] as any[];
+			teams = results[3] as any[];
+			keys = results[4] as any[];
 		}
 
-		// Post init with profile only — org/members/teams/keys load lazily.
-		// authUser is the ConnectResult (includes defaultTeam); profile is the
-		// richer profile dict from getProfile (includes org/team structure).
 		await panel.webview.postMessage({
 			type: 'account:init',
 			isConnected,
 			profile,
 			authUser: accountInfo ?? null,
-			org: null,
-			members: [],
-			teams: [],
-			keys: [],
+			org,
+			members,
+			teams,
+			keys,
 		});
+
+		// Also fetch billing data immediately
+		await this.fetchBillingData(panel);
 	}
 
 	/**
@@ -813,14 +839,28 @@ export class AccountProvider {
 		});
 
 		try {
-			// Fetch all billing data in parallel via the SDK
-			const [subscriptions, creditBalance, creditPacks] = await Promise.all([client.billing.getDetails(orgId), client.billing.getCreditBalance(orgId), client.billing.listCreditPacks()]);
+			// Fetch all billing data in parallel — all from local DB, no Stripe calls
+			const [subscriptions, creditBalance, allPlans, transactions, usageByUser, usageByTeam] = await Promise.all([
+				client.billing.getDetails(orgId),
+				client.billing.getCreditBalance(orgId),
+				client.billing.getProductPrices(PIPE_BUILDER_APP_ID).catch(() => []),
+				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
+				client.billing.getUsageByUser(orgId).catch(() => []),
+				client.billing.getUsageByTeam(orgId).catch(() => []),
+			]);
+
+			// Split plans into topups for the billing dashboard
+			const topupPlans = (allPlans as any[]).filter((p: any) => p.metadata?.kind === 'topup');
 
 			await panel.webview.postMessage({
 				type: 'account:billing',
 				subscriptions,
 				creditBalance,
-				creditPacks,
+				creditPacks: [],
+				topupPlans,
+				transactions,
+				usageByUser,
+				usageByTeam,
 				billingLoading: false,
 				billingError: null,
 			});
@@ -831,6 +871,9 @@ export class AccountProvider {
 				subscriptions: [],
 				creditBalance: null,
 				creditPacks: [],
+				transactions: null,
+				usageByUser: [],
+				usageByTeam: [],
 				billingLoading: false,
 				billingError: `Failed to load billing data: ${error}`,
 			});
@@ -858,27 +901,61 @@ export class AccountProvider {
 	}
 
 	/**
-	 * Handles a new subscription request from the billing UI.
+	 * Fetches available subscription plans for the checkout modal.
 	 *
-	 * New subscriptions require the Stripe Elements checkout flow which is
-	 * hosted in the ProjectProvider's custom editor webview.  We open a
-	 * pipeline file to trigger that editor, which shows the subscribe
-	 * banner with the embedded checkout when the user is not yet subscribed.
-	 *
-	 * @param panel - The webview panel (used to post error messages if needed).
+	 * @param panel - The webview panel to post the result to.
 	 */
-	private async handleSubscribe(_panel: vscode.WebviewPanel): Promise<void> {
+	private async handleCheckoutFetchPlans(panel: vscode.WebviewPanel): Promise<void> {
 		try {
-			// Open or focus the pipeline editor — its webview renders the
-			// embedded Stripe checkout flow for new subscriptions
-			await vscode.commands.executeCommand('workbench.action.files.newUntitledFile', {
-				languageId: 'rocketride-pipeline',
+			const { client } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			const plans = await client.billing.getProductPrices(PIPE_BUILDER_APP_ID);
+			await panel.webview.postMessage({ type: 'checkout:plansResult', plans, error: null });
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:plansResult', plans: [], error: msg });
+		}
+	}
+
+	/**
+	 * Creates a Stripe checkout session and returns the client secret.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing the priceId.
+	 */
+	private async handleCheckoutCreateSession(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client, orgId } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			if (!orgId) throw new Error('No organisation found');
+			const result = await client.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, message.priceId as string);
+			await panel.webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:sessionResult', clientSecret: '', subscriptionId: '', error: msg });
+		}
+	}
+
+	/**
+	 * Notifies the server that Stripe payment was confirmed client-side.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing subscriptionId and priceId.
+	 */
+	private async handleCheckoutConfirmPending(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			await (client as any).dapRequest('rrext_account_billing', {
+				subcommand: 'confirm_pending',
+				appId: PIPE_BUILDER_APP_ID,
+				subscriptionId: message.subscriptionId,
+				priceId: message.priceId,
 			});
+			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
 		} catch {
-			// Fallback: inform the user to open a pipeline file manually
-			vscode.window.showInformationMessage(
-				'To subscribe, create or open a pipeline file. The pipeline editor includes the checkout flow.'
-			);
+			// Non-fatal -- the webhook will still update the DB
+			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
 		}
 	}
 

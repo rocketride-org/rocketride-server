@@ -41,6 +41,8 @@ import type {
 	BillingDetail,
 	CreditBalance,
 	CreditPack,
+	TransactionsResult,
+	UsageRollup,
 } from 'rocketride';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../../hooks/useAuthUser';
@@ -96,6 +98,12 @@ const AccountPage: React.FC = () => {
 		(authUser as { credits?: CreditBalance })?.credits ?? null,
 	);
 	const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
+	const [allPlans, setAllPlans] = useState<any[]>([]);
+	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
+	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
+	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
+	const [dashboardLoading, setDashboardLoading] = useState(false);
+	const [txPage, setTxPage] = useState(1);
 
 	// ── Refresh signal (bumped by shell:accountUpdate) ─────────────────────
 	const [refreshSignal, setRefreshSignal] = useState(0);
@@ -189,29 +197,47 @@ const AccountPage: React.FC = () => {
 	// ── Load billing data ───────────────────────────────────────────────────
 
 	/** Fetches subscriptions, credit balance, and credit packs in parallel. */
+	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
 		if (!client || !isConnected || !orgId) {
 			setBillingLoading(false);
 			return;
 		}
 		setBillingLoading(true);
+		setDashboardLoading(true);
 		setBillingError(null);
 		try {
-			const [subs, balance, packs] = await Promise.all([
+			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
 				client.billing.getDetails(orgId).catch((err: any) => {
 					setBillingError(err.message ?? 'Failed to load subscriptions');
 					return [] as BillingDetail[];
 				}),
 				client.billing.getCreditBalance(orgId).catch(() => null),
-				client.billing.listCreditPacks().catch(() => [] as CreditPack[]),
+				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []),
+				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
+				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
+				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
 			]);
 			setSubscriptions(subs);
 			setCreditBalance(balance);
-			setCreditPacks(packs);
+			setAllPlans(plans);
+			setCreditPacks([]);
+			setTransactions(tx);
+			setUsageByUser(byUser);
+			setUsageByTeam(byTeam);
+			setTxPage(1);
 		} finally {
 			setBillingLoading(false);
+			setDashboardLoading(false);
 		}
 	}, [client, isConnected, orgId]);
+
+	/** Fetches just the transactions page (for pagination). */
+	const handleTransactionPage = useCallback(async (page: number) => {
+		if (!client || !orgId) return;
+		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
+		if (tx) { setTransactions(tx); setTxPage(page); }
+	}, [client, orgId]);
 
 	// ── Load non-env data on section change ─────────────────────────────────
 	useEffect(() => {
@@ -421,6 +447,15 @@ const AccountPage: React.FC = () => {
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
 			onBuyCredits={handleBuyCredits}
+			transactions={transactions}
+			usageByUser={usageByUser}
+			usageByTeam={usageByTeam}
+			activeTasks={[]}
+			topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
+			dashboardLoading={dashboardLoading}
+			onTransactionPage={handleTransactionPage}
+			memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
+			teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
 			section={section}
 			onSectionChange={setSection}
 			activeTeamId={activeTeamId}

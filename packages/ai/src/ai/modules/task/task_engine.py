@@ -1600,6 +1600,8 @@ class Task(DAPBase):
                     user_id=getattr(_control, 'userId', '') if _control else '',
                     team_id=getattr(_control, 'teamId', '') if _control else '',
                     org_id=getattr(_control, 'orgId', '') if _control else '',
+                    pipeline_name=self._task_name or '',
+                    source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

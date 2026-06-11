@@ -31,7 +31,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { BillingDetail, StripePlan, CreditBalance, CreditPack } from './types/billing.js';
+import type { BillingDetail, AppPrice, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from './types/billing.js';
 
 // =============================================================================
 // BILLING API CLASS
@@ -72,9 +72,9 @@ export class BillingApi {
 	 * changes in the Stripe dashboard are reflected immediately.
 	 *
 	 * @param appId - App identifier (e.g. "rocketride.pipeBuilder").
-	 * @returns Array of StripePlan objects ready for display.
+	 * @returns Array of AppPrice rows from the local database.
 	 */
-	async getProductPrices(appId: string): Promise<StripePlan[]> {
+	async getProductPrices(appId: string): Promise<AppPrice[]> {
 		const body = await this.client.call('rrext_account_billing', { subcommand: 'prices', appId });
 		return body.plans ?? [];
 	}
@@ -162,6 +162,54 @@ export class BillingApi {
 		const body = await this.client.call('rrext_account_billing', { subcommand: 'credits_packs' });
 		return body.packs ?? [];
 	}
+
+	// =========================================================================
+	// TRANSACTIONS & USAGE
+	// =========================================================================
+
+	/**
+	 * Fetches paginated transaction detail from the credit ledger.
+	 *
+	 * @param orgId    - Organisation UUID.
+	 * @param options  - Pagination and scope options.
+	 * @returns Paginated transaction result.
+	 */
+	async getTransactions(
+		orgId: string,
+		options: { scope?: 'org' | 'team' | 'user'; scopeId?: string; page?: number; pageSize?: number; since?: string } = {},
+	): Promise<TransactionsResult> {
+		return this.client.call<TransactionsResult>('rrext_account_billing', {
+			subcommand: 'transactions',
+			orgId,
+			...options,
+		});
+	}
+
+	/**
+	 * Fetches per-user consumption rollup for an org.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @returns Array of usage rollup rows ordered by total consumption descending.
+	 */
+	async getUsageByUser(orgId: string): Promise<UsageRollup[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_user', orgId });
+		return body.usage ?? [];
+	}
+
+	/**
+	 * Fetches per-team consumption rollup for an org.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @returns Array of usage rollup rows ordered by total consumption descending.
+	 */
+	async getUsageByTeam(orgId: string): Promise<UsageRollup[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_team', orgId });
+		return body.usage ?? [];
+	}
+
+	// =========================================================================
+	// CREDIT PACK CHECKOUT
+	// =========================================================================
 
 	/**
 	 * Creates a one-off Stripe Checkout session for a credit pack purchase

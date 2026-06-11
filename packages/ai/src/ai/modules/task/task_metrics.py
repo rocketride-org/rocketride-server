@@ -18,6 +18,7 @@ Classes:
 
 import asyncio
 import time
+import uuid
 import psutil
 from typing import Optional, TYPE_CHECKING, Callable
 from rocketlib import debug
@@ -65,6 +66,8 @@ class TaskMetrics:
         user_id: Optional[str] = None,
         team_id: Optional[str] = None,
         org_id: Optional[str] = None,
+        pipeline_name: Optional[str] = None,
+        source_name: Optional[str] = None,
         sample_interval: Optional[float] = None,
         on_update_callback: Optional[Callable[[], None]] = None,
     ):
@@ -91,10 +94,17 @@ class TaskMetrics:
         """
         self.pid = pid
         self.task_id = task_id
+        # Unique per-run identifier for billing idempotency. task_id is a
+        # display ID (e.g. "44568e99.dropper_1") that can repeat across runs
+        # with the same token. The billing_run_id ensures each run gets its
+        # own ledger rows even if the display task_id is reused.
+        self.billing_run_id = str(uuid.uuid4())
         self.client_id = client_id
         self.user_id = user_id or ''
         self.team_id = team_id or ''
         self.org_id = org_id or ''
+        self.pipeline_name = pipeline_name or ''
+        self.source_name = source_name or ''
         self.sample_interval = sample_interval if sample_interval is not None else CONST_METRICS_SAMPLE_INTERVAL
         self._on_update_callback = on_update_callback
 
@@ -452,15 +462,18 @@ class TaskMetrics:
         """
         # ── Build cumulative token totals ────────────────────────────────
         # All values are already converted to tokens by _update_tokens().
-        # OS-level metrics (cpu, memory, gpu) and subprocess-reported custom
-        # counters are treated identically — one ledger row per resource.
-        token_totals: dict[str, float] = {
-            'cpu_utilization': self._status.tokens.cpu_utilization,
-            'cpu_memory': self._status.tokens.cpu_memory,
-            'gpu_memory': self._status.tokens.gpu_memory,
-            'gpu_inference': self._status.tokens.gpu_inference,
-            **self._status.tokens.custom,
-        }
+        # Each entry is (resource_bucket, description, amount).
+        # Infrastructure metrics (cpu, memory, gpu) bill against 'tokens';
+        # custom counters may bill against their own resource bucket.
+        token_totals: list[tuple[str, str, float]] = [
+            ('tokens', 'cpu_utilization', self._status.tokens.cpu_utilization),
+            ('tokens', 'cpu_memory', self._status.tokens.cpu_memory),
+            ('tokens', 'gpu_memory', self._status.tokens.gpu_memory),
+            ('tokens', 'gpu_inference', self._status.tokens.gpu_inference),
+        ]
+        # Custom counters use the counter name as both resource and description
+        for counter_name, counter_tokens in self._status.tokens.custom.items():
+            token_totals.append((counter_name, counter_name, counter_tokens))
         # ── Debug logging ────────────────────────────────────────────────
         try:
             debug(
@@ -480,14 +493,16 @@ class TaskMetrics:
 
             context = {
                 'task_id': self.task_id,
+                'pipeline': self.pipeline_name,
+                'source': self.source_name,
                 'client_id': self.client_id,
                 'duration_seconds': round(self._duration_seconds, 1),
                 'tokens_total': round(self._status.tokens.total, 2),
             }
-            for resource, amount in token_totals.items():
+            for resource, description, amount in token_totals:
                 if amount <= 0:
                     continue
-                idem_key = f'task:{self.task_id}:{resource}'
+                idem_key = f'task:{self.billing_run_id}:{description}'
                 await account.apply_debit(
                     org_id=self.org_id,
                     user_id=self.user_id,
@@ -496,6 +511,7 @@ class TaskMetrics:
                     amount=amount,
                     idempotency_key=idem_key,
                     context=context,
+                    description=description,
                 )
         except Exception as e:
             debug(f'[TaskMetrics] Error writing to billing ledger: {e}')

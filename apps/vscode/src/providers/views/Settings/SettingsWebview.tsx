@@ -31,6 +31,7 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
+import type { CheckoutPlan } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
@@ -396,10 +397,17 @@ export const Settings: React.FC = () => {
 
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
-	// Subscription state — true means subscribed, defaults to true (no banner until confirmed unsubscribed)
-	const [subscribed, setSubscribed] = useState(true);
+	// Subscription state — defaults to false so the subscribe button shows until the host confirms
+	const [subscribed, setSubscribed] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+
+	// Checkout modal state
+	const checkoutResolvers = useRef<{
+		plans?: { resolve: (v: CheckoutPlan[]) => void; reject: (e: Error) => void };
+		session?: { resolve: (v: { clientSecret: string; subscriptionId: string }) => void; reject: (e: Error) => void };
+		confirm?: { resolve: () => void; reject: (e: Error) => void };
+	}>({});
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
@@ -444,6 +452,10 @@ export const Settings: React.FC = () => {
 					// Deep-clone for cancel/reset so future edits don't mutate the snapshot
 					savedSettingsRef.current = JSON.parse(JSON.stringify(message.settings));
 					setDirty(false);
+					// Subscription status is included in the settingsLoaded payload
+					if ((message as any).isSubscribed !== undefined) {
+						setSubscribed((message as any).isSubscribed);
+					}
 					// Pre-fetch versions from GitHub (cached on backend, shared across all modes)
 					setEngineVersionsLoading(true);
 					sendMessage({ type: 'fetchVersions' });
@@ -464,6 +476,35 @@ export const Settings: React.FC = () => {
 				case 'subscriptionStatus':
 					setSubscribed(message.isSubscribed);
 					break;
+
+				// -- Checkout flow responses ------------------------------------
+				case 'checkout:plansResult' as any: {
+					const r = checkoutResolvers.current.plans;
+					if (r) {
+						checkoutResolvers.current.plans = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve((message as any).plans ?? []);
+					}
+					break;
+				}
+				case 'checkout:sessionResult' as any: {
+					const r = checkoutResolvers.current.session;
+					if (r) {
+						checkoutResolvers.current.session = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve({ clientSecret: (message as any).clientSecret, subscriptionId: (message as any).subscriptionId });
+					}
+					break;
+				}
+				case 'checkout:confirmResult' as any: {
+					const r = checkoutResolvers.current.confirm;
+					if (r) {
+						checkoutResolvers.current.confirm = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve();
+					}
+					break;
+				}
 
 				case 'teamsLoaded' as any:
 					setTeams((message as any).teams || []);
@@ -759,6 +800,32 @@ export const Settings: React.FC = () => {
 		[]
 	);
 
+	// ── Checkout callbacks (passed to CloudPanel) ──────────────────────
+	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.plans = { resolve, reject };
+			sendMessage({ type: 'checkout:fetchPlans' } as any);
+		});
+	}, [sendMessage]);
+
+	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.session = { resolve, reject };
+			sendMessage({ type: 'checkout:createSession', priceId } as any);
+		});
+	}, [sendMessage]);
+
+	const handleConfirmPending = useCallback((subscriptionId: string, priceId: string): Promise<void> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.confirm = { resolve, reject };
+			sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
+		});
+	}, [sendMessage]);
+
+	const handleCheckoutSuccess = useCallback(() => {
+		setSubscribed(true);
+	}, []);
+
 	const panels: Record<string, ITabPanelPanel> = useMemo(
 		() => ({
 			development: {
@@ -816,6 +883,11 @@ export const Settings: React.FC = () => {
 							sudoPasswordInput={sudoPasswordInput}
 							onSudoPasswordChange={setSudoPasswordInput}
 							onSudoSubmit={handleSudoSubmit}
+							isSubscribed={subscribed}
+							onFetchPlans={handleFetchPlans}
+							onCreateCheckout={handleCreateCheckout}
+							onConfirmPending={handleConfirmPending}
+							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 					</div>
 				),
@@ -875,6 +947,11 @@ export const Settings: React.FC = () => {
 							sudoPasswordInput={sudoPasswordInput}
 							onSudoPasswordChange={setSudoPasswordInput}
 							onSudoSubmit={handleSudoSubmit}
+							isSubscribed={subscribed}
+							onFetchPlans={handleFetchPlans}
+							onCreateCheckout={handleCreateCheckout}
+							onConfirmPending={handleConfirmPending}
+							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 					</div>
 				),
@@ -907,11 +984,6 @@ export const Settings: React.FC = () => {
 		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
-	// ── Subscribe handler ───────────────────────────────────────────────
-	const handleSubscribeClick = useCallback(() => {
-		sendMessage({ type: 'openSubscribe' });
-	}, [sendMessage]);
-
 	return (
 		<div style={commonStyles.columnFill}>
 			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
@@ -926,19 +998,6 @@ export const Settings: React.FC = () => {
 							title="Dismiss"
 						>
 							&#10005;
-						</button>
-					</div>
-				</div>
-			)}
-			{/* ── Subscribe banner (cloud-signed-in but not subscribed) ── */}
-			{cloudSignedIn && !subscribed && (
-				<div style={subscribeBannerStyles.container}>
-					<div style={subscribeBannerStyles.content}>
-						<span style={subscribeBannerStyles.text}>
-							Subscribe to RocketRide Pipe Builder to unlock pipeline execution and advanced features.
-						</span>
-						<button style={subscribeBannerStyles.button} onClick={handleSubscribeClick}>
-							Subscribe
 						</button>
 					</div>
 				</div>

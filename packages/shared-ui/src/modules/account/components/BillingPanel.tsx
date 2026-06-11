@@ -18,8 +18,10 @@
 import React from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
-import type { BillingDetail, CreditBalance, CreditPack } from '../../billing/types';
+import type { BillingDetail, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from '../../billing/types';
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
+import { BillingDashboard } from '../../billing/components/BillingDashboard';
+import type { ActiveTask, TopupPlan } from '../../billing/components/BillingDashboard';
 import { S as SharedS, Badge } from './shared';
 
 // =============================================================================
@@ -148,6 +150,28 @@ export interface BillingPanelProps {
 	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 	/** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
 	onSubscribe?: () => void;
+
+	// ── Dashboard data (admin insights) ─────────────────────────────────────
+	/** Paginated transaction result for the transaction log. */
+	transactions?: TransactionsResult | null;
+	/** Per-user usage rollup. */
+	usageByUser?: UsageRollup[];
+	/** Per-team usage rollup. */
+	usageByTeam?: UsageRollup[];
+	/** Currently running tasks with live token data. */
+	activeTasks?: ActiveTask[];
+	/** Whether dashboard data is still loading. */
+	dashboardLoading?: boolean;
+	/** Callback to change the transaction page. */
+	onTransactionPage?: (page: number) => void;
+	/** Available top-up packs. */
+	topupPlans?: TopupPlan[];
+	/** Callback when user clicks a top-up pack. */
+	onBuyTopup?: (plan: TopupPlan) => void;
+	/** Member lookup: userId -> display name. */
+	memberNames?: Record<string, string>;
+	/** Team lookup: teamId -> display name. */
+	teamNames?: Record<string, string>;
 }
 
 // =============================================================================
@@ -160,7 +184,7 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the standard card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin, onSubscribe }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, memberNames, teamNames }) => {
 	// Build appId → app lookup for display name resolution
 	const appMap = React.useMemo(() => {
 		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
@@ -284,7 +308,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 									<div style={SharedS.rowActions}>
 										<Badge variant={sv.variant}>{sv.label}</Badge>
 										{isCancelable && isOrgAdmin && (
-											<button style={{ ...commonStyles.buttonDanger, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
+											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
 												Cancel
 											</button>
 										)}
@@ -296,6 +320,23 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					)}
 				</div>
 			</div>
+
+			{/* Admin billing dashboard */}
+			{isOrgAdmin && isConnected && (
+				<BillingDashboard
+					balance={creditBalance}
+					transactions={transactions ?? null}
+					usageByUser={usageByUser ?? []}
+					usageByTeam={usageByTeam ?? []}
+					activeTasks={activeTasks ?? []}
+					topupPlans={topupPlans ?? []}
+					loading={dashboardLoading ?? false}
+					onTransactionPage={onTransactionPage ?? (() => {})}
+					onBuyTopup={onBuyTopup}
+					memberNames={memberNames}
+					teamNames={teamNames}
+				/>
+			)}
 		</section>
 	);
 };

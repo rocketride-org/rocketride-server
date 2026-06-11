@@ -23,7 +23,8 @@ import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { commonStyles } from '../../themes/styles';
 import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
-import type { BillingDetail, CreditBalance, CreditPack } from '../billing/types';
+import type { BillingDetail, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from '../billing/types';
+import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
@@ -153,6 +154,28 @@ export interface IAccountViewProps {
 	/** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
 	onSubscribe?: () => void;
 
+	// -- Dashboard data (admin billing insights) -------------------------------
+	/** Paginated transaction result for the transaction log. */
+	transactions?: TransactionsResult | null;
+	/** Per-user usage rollup. */
+	usageByUser?: UsageRollup[];
+	/** Per-team usage rollup. */
+	usageByTeam?: UsageRollup[];
+	/** Currently running tasks with live token data. */
+	activeTasks?: ActiveTask[];
+	/** Whether dashboard data is still loading. */
+	dashboardLoading?: boolean;
+	/** Callback to change the transaction page. */
+	onTransactionPage?: (page: number) => void;
+	/** Member lookup: userId -> display name. */
+	memberNames?: Record<string, string>;
+	/** Team lookup: teamId -> display name. */
+	teamNames?: Record<string, string>;
+	/** Available top-up packs (filtered from plans by kind='topup'). */
+	topupPlans?: any[];
+	/** Callback when user clicks a top-up pack. */
+	onBuyTopup?: (plan: any) => void;
+
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */
 	section: AccountSection;
@@ -214,7 +237,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, onSubscribe, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -678,7 +701,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 			billing: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} memberNames={memberNames} teamNames={teamNames} />
 					</div>
 				),
 			},

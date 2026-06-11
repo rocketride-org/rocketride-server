@@ -230,6 +230,7 @@ class AccountBase(ABC):
         amount: float,
         idempotency_key: str,
         context: dict,
+        description: str | None = None,
     ) -> bool:
         """
         Debit an org's ledger (UPSERT for task usage).
@@ -244,11 +245,11 @@ class AccountBase(ABC):
             org_id:          Organisation to debit.
             user_id:         User whose task triggered the burn (required for attribution).
             team_id:         Team the task belongs to (required for attribution).
-            resource:        Resource being consumed (e.g. ``cpu_utilization``, ``gpu_memory``).
+            resource:        Billing bucket (e.g. tokens, video, audio).
             amount:          Positive amount to debit (negated internally).
-            idempotency_key: Namespaced dedup key (e.g. ``task:abc123:cpu_utilization``).
+            idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).
             context:         Human-readable audit context — pipeline name, source, etc.
-                             Required so org admins can understand what the charge is for.
+            description:     Line-item detail (e.g. gpu_memory, cpu_utilization).
 
         Returns:
             True on success, False on duplicate or no-op.

@@ -16,8 +16,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from 'shared';
+import { AccountView, CheckoutModal } from 'shared';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
@@ -54,6 +54,18 @@ const AccountWebview: React.FC = () => {
 	const [billingError, setBillingError] = useState<string | null>(null);
 	const [creditBalance, setCreditBalance] = useState<any | null>(null);
 	const [creditPacks, setCreditPacks] = useState<any[]>([]);
+	const [transactions, setTransactions] = useState<any | null>(null);
+	const [usageByUser, setUsageByUser] = useState<any[]>([]);
+	const [usageByTeam, setUsageByTeam] = useState<any[]>([]);
+	const [topupPlans, setTopupPlans] = useState<any[]>([]);
+
+	// Checkout modal state
+	const [showCheckout, setShowCheckout] = useState(false);
+	const checkoutResolvers = useRef<{
+		plans?: { resolve: (v: CheckoutPlan[]) => void; reject: (e: Error) => void };
+		session?: { resolve: (v: { clientSecret: string; subscriptionId: string }) => void; reject: (e: Error) => void };
+		confirm?: { resolve: () => void; reject: (e: Error) => void };
+	}>({});
 
 	// Section load error
 	const [sectionError, setSectionError] = useState<string | null>(null);
@@ -134,7 +146,40 @@ const AccountWebview: React.FC = () => {
 				setBillingError((message as any).billingError ?? null);
 				setCreditBalance((message as any).creditBalance ?? null);
 				setCreditPacks((message as any).creditPacks ?? []);
+				setTransactions((message as any).transactions ?? null);
+				setUsageByUser((message as any).usageByUser ?? []);
+				setUsageByTeam((message as any).usageByTeam ?? []);
+				setTopupPlans((message as any).topupPlans ?? []);
 				break;
+
+			// -- Checkout flow responses -------------------------------------------
+			case 'checkout:plansResult': {
+				const r = checkoutResolvers.current.plans;
+				if (r) {
+					checkoutResolvers.current.plans = undefined;
+					if ((message as any).error) r.reject(new Error((message as any).error));
+					else r.resolve((message as any).plans ?? []);
+				}
+				break;
+			}
+			case 'checkout:sessionResult': {
+				const r = checkoutResolvers.current.session;
+				if (r) {
+					checkoutResolvers.current.session = undefined;
+					if ((message as any).error) r.reject(new Error((message as any).error));
+					else r.resolve({ clientSecret: (message as any).clientSecret, subscriptionId: (message as any).subscriptionId });
+				}
+				break;
+			}
+			case 'checkout:confirmResult': {
+				const r = checkoutResolvers.current.confirm;
+				if (r) {
+					checkoutResolvers.current.confirm = undefined;
+					if ((message as any).error) r.reject(new Error((message as any).error));
+					else r.resolve();
+				}
+				break;
+			}
 
 			// Env variables removed — now handled by EnvironmentWebview.
 
@@ -261,9 +306,42 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'billing:buyCredits', packId: pack.id } as any);
 	}, []);
 
-	/** Opens the checkout flow for Pipe Builder subscription. */
+	/** Opens the inline checkout modal for Pipe Builder subscription. */
 	const handleSubscribe = useCallback((): void => {
-		sendMessageRef.current({ type: 'billing:subscribe' } as any);
+		setShowCheckout(true);
+	}, []);
+
+	// -- Checkout flow callbacks (bridge to host via postMessage) ----------
+
+	/** Fetches available plans from the server via the host. */
+	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.plans = { resolve, reject };
+			sendMessageRef.current({ type: 'checkout:fetchPlans' } as any);
+		});
+	}, []);
+
+	/** Creates a Stripe checkout session via the host. */
+	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.session = { resolve, reject };
+			sendMessageRef.current({ type: 'checkout:createSession', priceId } as any);
+		});
+	}, []);
+
+	/** Confirms pending payment via the host. */
+	const handleConfirmPending = useCallback((subscriptionId: string, priceId: string): Promise<void> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.confirm = { resolve, reject };
+			sendMessageRef.current({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
+		});
+	}, []);
+
+	/** Closes the checkout modal and refreshes billing data on success. */
+	const handleCheckoutSuccess = useCallback((): void => {
+		setShowCheckout(false);
+		// Trigger billing data re-fetch so subscriptions list updates
+		sendMessageRef.current({ type: 'account:sectionChange', section: 'billing' });
 	}, []);
 
 	// =========================================================================
@@ -274,52 +352,77 @@ const AccountWebview: React.FC = () => {
 	// "disconnected" flash while the provider fetches data.
 	if (!ready) return null;
 
+	const stripeKey = process.env.RR_STRIPE_PUBLISHABLE_KEY || '';
+
 	return (
-		<AccountView
-			isConnected={isConnected}
-			sectionError={sectionError}
-			profile={profile}
-			authUser={authUser}
-			keys={keys}
-			org={org}
-			members={members}
-			teams={teams}
-			teamDetail={teamDetail}
-			subscriptions={subscriptions}
-			billingLoading={billingLoading}
-			billingError={billingError}
-			creditBalance={creditBalance}
-			creditPacks={creditPacks}
-			apps={authUser?.apps ?? profile?.apps}
-			onCancelSubscription={handleCancelSubscription}
-			onOpenPortal={handleOpenPortal}
-			onBuyCredits={handleBuyCredits}
-			onSubscribe={handleSubscribe}
-			section={section}
-			onSectionChange={(s) => {
-				setSection(s);
-				setSectionError(null);
-				sendMessageRef.current({ type: 'account:sectionChange', section: s });
-			}}
-			activeTeamId={activeTeamId}
-			onActiveTeamIdChange={setActiveTeamId}
-			onSaveProfile={handleSaveProfile}
-			onSetDefaultTeam={handleSetDefaultTeam}
-			onLogout={handleLogout}
-			onDeleteAccount={handleDeleteAccount}
-			onSaveOrgName={handleSaveOrgName}
-			onCreateKey={handleCreateKey}
-			onRevokeKey={handleRevokeKey}
-			onInviteMember={handleInviteMember}
-			onUpdateMemberRole={handleUpdateMemberRole}
-			onRemoveMember={handleRemoveMember}
-			onCreateTeam={handleCreateTeam}
-			onDeleteTeam={handleDeleteTeam}
-			onAddTeamMember={handleAddTeamMember}
-			onEditTeamMemberPerms={handleEditTeamMemberPerms}
-			onRemoveTeamMember={handleRemoveTeamMember}
-			onLoadTeamDetail={handleLoadTeamDetail}
-		/>
+		<>
+			<AccountView
+				isConnected={isConnected}
+				sectionError={sectionError}
+				profile={profile}
+				authUser={authUser}
+				keys={keys}
+				org={org}
+				members={members}
+				teams={teams}
+				teamDetail={teamDetail}
+				subscriptions={subscriptions}
+				billingLoading={billingLoading}
+				billingError={billingError}
+				creditBalance={creditBalance}
+				creditPacks={creditPacks}
+				apps={authUser?.apps ?? profile?.apps}
+				onCancelSubscription={handleCancelSubscription}
+				onOpenPortal={handleOpenPortal}
+				onBuyCredits={handleBuyCredits}
+				onSubscribe={handleSubscribe}
+				transactions={transactions}
+				usageByUser={usageByUser}
+				usageByTeam={usageByTeam}
+				activeTasks={[]}
+				dashboardLoading={billingLoading}
+				onTransactionPage={() => {}}
+				topupPlans={topupPlans}
+				memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
+				teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
+				section={section}
+				onSectionChange={(s) => {
+					setSection(s);
+					setSectionError(null);
+					sendMessageRef.current({ type: 'account:sectionChange', section: s });
+				}}
+				activeTeamId={activeTeamId}
+				onActiveTeamIdChange={setActiveTeamId}
+				onSaveProfile={handleSaveProfile}
+				onSetDefaultTeam={handleSetDefaultTeam}
+				onLogout={handleLogout}
+				onDeleteAccount={handleDeleteAccount}
+				onSaveOrgName={handleSaveOrgName}
+				onCreateKey={handleCreateKey}
+				onRevokeKey={handleRevokeKey}
+				onInviteMember={handleInviteMember}
+				onUpdateMemberRole={handleUpdateMemberRole}
+				onRemoveMember={handleRemoveMember}
+				onCreateTeam={handleCreateTeam}
+				onDeleteTeam={handleDeleteTeam}
+				onAddTeamMember={handleAddTeamMember}
+				onEditTeamMemberPerms={handleEditTeamMemberPerms}
+				onRemoveTeamMember={handleRemoveTeamMember}
+				onLoadTeamDetail={handleLoadTeamDetail}
+			/>
+			{showCheckout && stripeKey && (
+				<CheckoutModal
+					appName="Pipe Builder"
+					appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud."
+					stripePublishableKey={stripeKey}
+					onFetchPlans={handleFetchPlans}
+					onCreateCheckout={handleCreateCheckout}
+					onConfirmPending={handleConfirmPending}
+					onSuccess={handleCheckoutSuccess}
+					onClose={() => setShowCheckout(false)}
+				/>
+			)}
+		</>
 	);
 };
 
