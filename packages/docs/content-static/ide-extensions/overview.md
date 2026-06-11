@@ -11,10 +11,10 @@ every call — without leaving your IDE.
 
 ## Install
 
-| Editor | Install from |
-| --- | --- |
-| VS Code | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride) |
-| VS Code forks (Cursor, Windsurf, VSCodium, …) | [Open VSX Registry](https://open-vsx.org/extension/RocketRide/rocketride) |
+| Editor                                        | Install from                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| VS Code                                       | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride) |
+| VS Code forks (Cursor, Windsurf, VSCodium, …) | [Open VSX Registry](https://open-vsx.org/extension/RocketRide/rocketride)                        |
 
 Or search for **RocketRide** in your editor's Extensions view.
 
@@ -31,6 +31,5 @@ workspace so the editor's AI understands how to build RocketRide pipelines.
 ## Where to go next
 
 - **[VS Code](/ide-extensions/vscode)** — installation, the canvas, deploying a runtime, and
-  usage (the detailed guide; applies to all supported editors).
-- **[Cursor](/ide-extensions/cursor)** — how the agent-rules integration works in Cursor.
-- **[Windsurf](/ide-extensions/windsurf)** — how the agent-rules integration works in Windsurf.
+  usage (the detailed guide; applies to all supported editors, including forks like Cursor,
+  Windsurf, and VSCodium).

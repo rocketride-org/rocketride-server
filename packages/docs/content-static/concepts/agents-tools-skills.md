@@ -1,5 +1,5 @@
 ---
-title: Agents & tools
+title: Agents & Tools
 sidebar_position: 4
 ---
 

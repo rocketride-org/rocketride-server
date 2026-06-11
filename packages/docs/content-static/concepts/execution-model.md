@@ -1,5 +1,5 @@
 ---
-title: Execution model
+title: Execution Model
 sidebar_position: 5
 ---
 

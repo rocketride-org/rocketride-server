@@ -1,5 +1,5 @@
 ---
-title: Nodes & connectors
+title: Nodes & Connectors
 sidebar_position: 3
 ---
 

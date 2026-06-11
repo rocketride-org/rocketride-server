@@ -24,7 +24,7 @@ const SPINE = [
 		items: [
 			{ id: 'evaluate/why-rocketride', label: 'Why RocketRide' },
 			{ id: 'evaluate/understanding', label: 'Understanding RocketRide' },
-			{ id: 'evaluate/use-cases', label: 'Use cases' },
+			{ id: 'evaluate/use-cases', label: 'Use Cases' },
 			{ id: 'evaluate/security', label: 'Security' }
 		]
 	},
@@ -32,10 +32,10 @@ const SPINE = [
 		label: 'Concepts',
 		items: [
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
-			{ id: 'concepts/runtime-engine', label: 'Runtime & engine' },
-			{ id: 'concepts/nodes-connectors', label: 'Nodes & connectors' },
-			{ id: 'concepts/agents-tools-skills', label: 'Agents & tools' },
-			{ id: 'concepts/execution-model', label: 'Execution model' }
+			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
+			{ id: 'concepts/nodes-connectors', label: 'Nodes & Connectors' },
+			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
+			{ id: 'concepts/execution-model', label: 'Execution Model' }
 		]
 	},
 	{
@@ -57,13 +57,11 @@ const SPINE = [
 		label: 'IDE Extensions',
 		items: [
 			{ id: 'ide-extensions/overview', label: 'Overview' },
-			{ id: 'ide-extensions/vscode', label: 'VS Code', mount: true },
-			{ id: 'ide-extensions/cursor', label: 'Cursor' },
-			{ id: 'ide-extensions/windsurf', label: 'Windsurf' }
+			{ id: 'ide-extensions/vscode', label: 'VS Code', mount: true }
 		]
 	},
-	{ id: 'pipeline-reference', label: 'Pipeline JSON reference', mount: true },
-	{ id: 'cli', label: 'CLI reference' },
+	{ id: 'pipeline-reference', label: 'Pipeline JSON Reference', mount: true },
+	{ id: 'cli', label: 'CLI Reference' },
 	{ id: 'cloud', label: 'Cloud' },
 	{ id: 'self-hosting', label: 'Self-hosting' },
 	{ id: 'troubleshooting', label: 'Troubleshooting' },
