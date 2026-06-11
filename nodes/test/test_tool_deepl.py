@@ -675,7 +675,7 @@ def test_write_style_and_tone_both_present_rejected_no_http(monkeypatch):
 def test_write_valid_style_junk_tone_both_present_rejected_no_http(monkeypatch):
     """A valid writing_style plus a JUNK tone is STILL a both-present conflict.
 
-    Semantics ratified with the engineer (CodeRabbit 3399561893 fix): the
+    Semantics agreed with the engineer (CodeRabbit 3399561893 fix): the
     mutual-exclusivity gate is raw PRESENCE (truthiness), not resolved-enum
     validity. Any truthy tone signals intent to use tone, so the call is rejected
     and the agent must disambiguate, rather than the node silently honouring the
