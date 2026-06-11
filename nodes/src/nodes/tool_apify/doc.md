@@ -68,5 +68,5 @@ Returns the dataset items.
 
 | Section | Fields |
 | --- | --- |
-| Apify | `type`, `tool_apify.apikey` |
+| Apify | `type`, `tool_apify.apikey`, `tool_apify.max_items`, `tool_apify.run_timeout_secs`, `tool_apify.max_cost_usd` |
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
