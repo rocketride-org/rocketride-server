@@ -171,6 +171,13 @@ body {
 	color: var(--ifm-link-color);
 }
 
+/* Brand (logo + "RocketRide" title) on the left: tint the title to the link
+ * accent on hover, matching the other navbar links. Double :not(#\#) keeps the
+ * specificity above Infima's navbar rules. */
+.navbar__brand:not(#\#):not(#\#):hover .navbar__title {
+	color: var(--ifm-link-hover-color);
+}
+
 /* GitHub link with live star count (custom-githubStars navbar item). */
 .github-stars {
 	display: inline-flex;
