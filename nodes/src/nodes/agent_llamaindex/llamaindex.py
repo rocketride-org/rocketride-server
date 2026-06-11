@@ -70,6 +70,14 @@ def _messages_to_text(messages: List[Any]) -> str:
     return '\n\n'.join(parts).strip()
 
 
+def _clean_answer(text: str) -> str:
+    """Strip a leading ReAct 'Thought:' so loop scaffolding doesn't leak to the user."""
+    cleaned = safe_str(text).strip()
+    if cleaned.startswith('Thought:'):
+        cleaned = cleaned[len('Thought:') :].strip()
+    return cleaned
+
+
 class LlamaIndexDriver(AgentBase):
     FRAMEWORK = 'llamaindex'
 
@@ -89,9 +97,8 @@ class LlamaIndexDriver(AgentBase):
         formatter = ReActChatFormatter.from_defaults()
         parser = ReActOutputParser()
 
+        # Instructions are already merged into the prompt by the base run_agent.
         query = safe_str(question.getPrompt() or '')
-        if self._instructions:
-            query = 'Additional instructions:\n' + '\n'.join(safe_str(i) for i in self._instructions) + '\n\n' + query
 
         chat_history = [ChatMessage(role=MessageRole.USER, content=query)]
         current_reasoning: List[Any] = []
@@ -105,8 +112,8 @@ class LlamaIndexDriver(AgentBase):
             try:
                 step = parser.parse(raw)
             except Exception:
-                # Unparseable output means the model answered directly; return it.
-                return raw, stack
+                # Unparseable output means the model answered directly; strip scaffolding.
+                return _clean_answer(raw), stack
 
             if step.is_done:
                 return safe_str(getattr(step, 'response', raw)), stack
@@ -115,7 +122,7 @@ class LlamaIndexDriver(AgentBase):
             try:
                 observation = self.call_tool(context, step.action, step.action_input or {})
             except Exception as e:
-                observation = {'error': str(e), 'type': type(e).__name__}
+                observation = {'tool': step.action, 'error': str(e), 'type': type(e).__name__}
 
             obs_text = safe_str(
                 json.dumps(observation, default=str) if isinstance(observation, (dict, list)) else observation
@@ -124,4 +131,5 @@ class LlamaIndexDriver(AgentBase):
             current_reasoning.append(ObservationReasoningStep(observation=obs_text))
             stack.append({'action': step.action, 'action_input': step.action_input, 'observation': obs_text})
 
-        return raw, stack
+        # Iteration budget exhausted without a final Answer.
+        return 'Agent stopped after reaching the maximum number of reasoning steps.', stack

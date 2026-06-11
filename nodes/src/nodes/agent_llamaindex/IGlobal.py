@@ -30,9 +30,12 @@ from rocketlib import IGlobalBase, OPEN_MODE
 
 
 class IGlobal(IGlobalBase):
+    """Global state for agent_llamaindex: bootstraps and holds the LlamaIndex driver."""
+
     agent: Any = None
 
     def beginGlobal(self) -> None:
+        """Resolve runtime deps and build the LlamaIndex driver (skipped in CONFIG mode)."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
