@@ -6,9 +6,9 @@ Monorepo for the RocketRide (Aparavi) data toolchain. Contains a C++ engine, Pyt
 
 ## Stack
 
-- **Engine**: C++ core (`packages/engine/`) — built via `./builder`
-- **Python**: SDK (`packages/sdk/`), tools, tests — Python 3.10+, ruff for lint/format, pytest
-- **TypeScript**: VS Code extension (`apps/vscode/`) — Node.js, tabs, single quotes, no semicolons optional (see rules)
+- **Engine**: C++ core (`packages/server/`), built via `./builder`
+- **Python**: SDK (`packages/client-python/`), tools, tests. Python 3.10+, ruff for lint/format, pytest
+- **TypeScript**: VS Code extension (`apps/vscode/`), Node.js, tabs, single quotes, semicolons (see rules)
 - **Build system**: `./builder` CLI wraps platform-specific builds and test orchestration
 
 ## Common Commands
@@ -16,39 +16,40 @@ Monorepo for the RocketRide (Aparavi) data toolchain. Contains a C++ engine, Pyt
 ```bash
 # Build
 ./builder build                  # Full build
-./builder build engine           # Engine only
+./builder build server           # Server/engine core only
 ./builder build vscode           # VS Code extension only
 
 # Test
 ./builder test                   # All tests
-py -m pytest <path>              # Python tests directly
+python -m pytest <path>          # Python tests directly
 npx tsc --noEmit                 # TypeScript type-check
 
 # Lint & Format
-py -m ruff check <path>          # Python lint
-py -m ruff format <path>         # Python format
+python -m ruff check <path>      # Python lint
+python -m ruff format <path>     # Python format
 npx prettier --check <path>      # TS/JS format check
 ```
 
 ## API Documentation
 
-The co-located per-package docs — assembled into the docs site by `builder docs:build` — are the **source of truth** (see the co-located documentation rule below). The agent integration docs at `docs/agents/` are the assistant-facing integration reference within it: **read them first before writing any RocketRide integration code.**
+The co-located per-package docs (assembled into the docs site by `builder docs:build`) are the **source of truth** (see the co-located documentation rule below). The agent integration docs at `docs/agents/` are the assistant-facing integration reference within it: **read them first before writing any RocketRide integration code.**
 
-1. `ROCKETRIDE_QUICKSTART.md` — start here, copy working examples
-2. `ROCKETRIDE_README.md` — setup checklist
-3. `ROCKETRIDE_python_API.md` or `ROCKETRIDE_typescript_API.md` — client methods
-4. `ROCKETRIDE_PIPELINE_RULES.md` — pipeline rules
-5. `ROCKETRIDE_COMPONENT_REFERENCE.md` — component catalog
-6. `ROCKETRIDE_COMMON_MISTAKES.md` — troubleshooting
+1. `ROCKETRIDE_QUICKSTART.md`: start here, copy working examples
+2. `ROCKETRIDE_README.md`: setup checklist
+3. `ROCKETRIDE_python_API.md` or `ROCKETRIDE_typescript_API.md`: client methods
+4. `ROCKETRIDE_PIPELINE_RULES.md`: pipeline rules
+5. `ROCKETRIDE_COMPONENT_REFERENCE.md`: component catalog
+6. `ROCKETRIDE_COMMON_MISTAKES.md`: troubleshooting
 
 ## Conventions
 
-- **Commits**: conventional commits — `feat(scope):`, `fix(scope):`, `chore(scope):`, etc.
+- **Commits**: conventional commits: `feat(scope):`, `fix(scope):`, `chore(scope):`, etc.
 - **Branches**: `feat/RR-<ticket>-short-description`, `fix/RR-<ticket>-short-description`
-- **PR base branch**: `main`
-- **Error handling (TS)**: use `Callout.call()` wrapper, never raw try/catch
-- **Error types (TS)**: always throw `AppError`, never plain `Error`
-- **Logging (TS)**: use `logger.*`, never `console.log`
+- **PR base branch**: `develop`
+- **Error handling (VS Code extension)**: use `Callout.call()` wrapper, never raw try/catch
+- **Error types (VS Code extension)**: always throw `AppError`, never plain `Error`
+- **Logging (VS Code extension)**: use `logger.*`, never `console.log`
+- These three rules govern the VS Code extension only. The docs-site theme components (`packages/docs`) use plain React with raw try/catch by design; do not apply them there.
 - **Python quotes**: single quotes (enforced by ruff)
 - **TS quotes**: single quotes preferred
 
