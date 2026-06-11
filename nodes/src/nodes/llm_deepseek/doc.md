@@ -71,32 +71,32 @@ Connects DeepSeek models to your pipeline — either via the DeepSeek cloud API 
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `cloud-reasoner` | Cloud Reasoner | deepseek-reasoner |
-| `cloud-chat` | Cloud Chat | deepseek-chat |
-| `deepseek-r1-1_5b` |  | deepseek-r1:1.5b |
-| `deepseek-r1-7b` |  | deepseek-r1:7b |
-| `deepseek-r1-8b` |  | deepseek-r1:8b |
-| `deepseek-r1-14b` |  | deepseek-r1:14b |
-| `deepseek-r1-32b` |  | deepseek-r1:32b |
-| `deepseek-r1-70b` |  | deepseek-r1:70b |
-| `deepseek-r1-671b` |  | deepseek-r1:671b |
-| `deepseek-v3` |  | deepseek-v3 |
-| `deepseek-chat-v3-0324` | DeepSeek: DeepSeek V3 0324 | deepseek-chat-v3-0324 |
-| `deepseek-chat-v3-1` | DeepSeek: DeepSeek V3.1 | deepseek-chat-v3.1 |
-| `deepseek-r1` | DeepSeek: R1 | deepseek-r1 |
-| `deepseek-r1-0528` | DeepSeek: R1 0528 | deepseek-r1-0528 |
-| `deepseek-r1-distill-llama-70b` | DeepSeek: R1 Distill Llama 70B | deepseek-r1-distill-llama-70b |
-| `deepseek-r1-distill-qwen-32b` | DeepSeek: R1 Distill Qwen 32B | deepseek-r1-distill-qwen-32b |
-| `deepseek-r1t2-chimera` | TNG: DeepSeek R1T2 Chimera | deepseek-r1t2-chimera |
-| `deepseek-v3-1-nex-n1` | Nex AGI: DeepSeek V3.1 Nex N1 | deepseek-v3.1-nex-n1 |
-| `deepseek-v3-1-terminus` | DeepSeek: DeepSeek V3.1 Terminus | deepseek-v3.1-terminus |
-| `deepseek-v3-2` | DeepSeek: DeepSeek V3.2 | deepseek-v3.2 |
-| `deepseek-v3-2-exp` | DeepSeek: DeepSeek V3.2 Exp | deepseek-v3.2-exp |
-| `deepseek-v3-2-speciale` | DeepSeek: DeepSeek V3.2 Speciale | deepseek-v3.2-speciale |
-| `deepseek-v4-flash` | DeepSeek: DeepSeek V4 Flash | deepseek-v4-flash |
-| `deepseek-v4-pro` | DeepSeek: DeepSeek V4 Pro | deepseek-v4-pro |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `cloud-reasoner` | Cloud Reasoner | deepseek-reasoner | 128K | 4,096 |
+| `cloud-chat` | Cloud Chat | deepseek-chat | 163,840 | 16,384 |
+| `deepseek-r1-1_5b` |  | deepseek-r1:1.5b | 128K | 4,096 |
+| `deepseek-r1-7b` |  | deepseek-r1:7b | 128K | 4,096 |
+| `deepseek-r1-8b` |  | deepseek-r1:8b | 128K | 4,096 |
+| `deepseek-r1-14b` |  | deepseek-r1:14b | 128K | 4,096 |
+| `deepseek-r1-32b` |  | deepseek-r1:32b | 128K | 4,096 |
+| `deepseek-r1-70b` |  | deepseek-r1:70b | 128K | 4,096 |
+| `deepseek-r1-671b` |  | deepseek-r1:671b | 128K | 4,096 |
+| `deepseek-v3` |  | deepseek-v3 | 128K | 4,096 |
+| `deepseek-chat-v3-0324` | DeepSeek: DeepSeek V3 0324 | deepseek-chat-v3-0324 | 163,840 | 16,384 |
+| `deepseek-chat-v3-1` | DeepSeek: DeepSeek V3.1 | deepseek-chat-v3.1 | 32,768 | 7,168 |
+| `deepseek-r1` | DeepSeek: R1 | deepseek-r1 | 64K | 16K |
+| `deepseek-r1-0528` | DeepSeek: R1 0528 | deepseek-r1-0528 | 163,840 | 32,768 |
+| `deepseek-r1-distill-llama-70b` | DeepSeek: R1 Distill Llama 70B | deepseek-r1-distill-llama-70b | 131,072 | 16,384 |
+| `deepseek-r1-distill-qwen-32b` | DeepSeek: R1 Distill Qwen 32B | deepseek-r1-distill-qwen-32b | 32,768 | 32,768 |
+| `deepseek-r1t2-chimera` | TNG: DeepSeek R1T2 Chimera | deepseek-r1t2-chimera | 163,840 | 163,840 |
+| `deepseek-v3-1-nex-n1` | Nex AGI: DeepSeek V3.1 Nex N1 | deepseek-v3.1-nex-n1 | 131,072 | 163,840 |
+| `deepseek-v3-1-terminus` | DeepSeek: DeepSeek V3.1 Terminus | deepseek-v3.1-terminus | 163,840 | 32,768 |
+| `deepseek-v3-2` | DeepSeek: DeepSeek V3.2 | deepseek-v3.2 | 131,072 | 65,536 |
+| `deepseek-v3-2-exp` | DeepSeek: DeepSeek V3.2 Exp | deepseek-v3.2-exp | 163,840 | 65,536 |
+| `deepseek-v3-2-speciale` | DeepSeek: DeepSeek V3.2 Speciale | deepseek-v3.2-speciale | 163,840 | 163,840 |
+| `deepseek-v4-flash` | DeepSeek: DeepSeek V4 Flash | deepseek-v4-flash | 1,048,576 | 384K |
+| `deepseek-v4-pro` | DeepSeek: DeepSeek V4 Pro | deepseek-v4-pro | 1,048,576 | 384K |
 
 **Configuration sections**
 

@@ -48,9 +48,9 @@ Performs web search using the Exa API. Accepts a question and returns semantic o
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  | exa-search |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `default` |  | exa-search | 16,384 |  |
 
 **Configuration sections**
 

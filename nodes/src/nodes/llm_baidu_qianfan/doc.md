@@ -31,12 +31,12 @@ Use the Baidu Qianfan node to call ERNIE chat models through Qianfan's OpenAI-co
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `ernie-4-5-turbo-128k` | ERNIE 4.5 Turbo 128K | ernie-4.5-turbo-128k |
-| `ernie-4-5-turbo-32k` | ERNIE 4.5 Turbo 32K | ernie-4.5-turbo-32k |
-| `ernie-5-0-thinking-preview` | ERNIE 5.0 Thinking Preview | ernie-5.0-thinking-preview |
-| `custom` | Custom |  |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `ernie-4-5-turbo-128k` | ERNIE 4.5 Turbo 128K | ernie-4.5-turbo-128k | 128K | 4,096 |
+| `ernie-4-5-turbo-32k` | ERNIE 4.5 Turbo 32K | ernie-4.5-turbo-32k | 32,768 | 4,096 |
+| `ernie-5-0-thinking-preview` | ERNIE 5.0 Thinking Preview | ernie-5.0-thinking-preview | 128K | 8,192 |
+| `custom` | Custom |  | 32,768 | 4,096 |
 
 **Configuration sections**
 

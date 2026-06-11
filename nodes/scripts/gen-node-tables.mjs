@@ -82,6 +82,15 @@ function esc(v) {
 	return String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
 }
 
+function fmtTokens(n) {
+	if (n == null || n === '') return '';
+	const num = Number(n);
+	if (!Number.isFinite(num)) return esc(n);
+	if (num >= 1_000_000 && num % 1_000_000 === 0) return `${num / 1_000_000}M`;
+	if (num >= 1000 && num % 1000 === 0) return `${num / 1000}K`;
+	return num.toLocaleString('en-US');
+}
+
 function serviceBlock(svc, label) {
 	const lines = [];
 	if (label) lines.push(`### Service: \`${label}\``, '');
@@ -106,9 +115,18 @@ function serviceBlock(svc, label) {
 
 	const profiles = svc.preconfig?.profiles;
 	if (profiles && Object.keys(profiles).length) {
-		lines.push('**Profiles**', '', '| Profile | Title | Model |', '| --- | --- | --- |');
-		for (const [key, p] of Object.entries(profiles)) {
-			lines.push(`| \`${esc(key)}\` | ${esc(p?.title)} | ${esc(p?.model)} |`);
+		const entries = Object.entries(profiles);
+		const hasTokens = entries.some(([, p]) => p?.modelTotalTokens != null || p?.modelOutputTokens != null);
+		if (hasTokens) {
+			lines.push('**Profiles**', '', '| Profile | Title | Model | Context | Max output |', '| --- | --- | --- | --- | --- |');
+			for (const [key, p] of entries) {
+				lines.push(`| \`${esc(key)}\` | ${esc(p?.title)} | ${esc(p?.model)} | ${fmtTokens(p?.modelTotalTokens)} | ${fmtTokens(p?.modelOutputTokens)} |`);
+			}
+		} else {
+			lines.push('**Profiles**', '', '| Profile | Title | Model |', '| --- | --- | --- |');
+			for (const [key, p] of entries) {
+				lines.push(`| \`${esc(key)}\` | ${esc(p?.title)} | ${esc(p?.model)} |`);
+			}
 		}
 		lines.push('');
 	}

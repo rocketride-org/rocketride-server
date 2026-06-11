@@ -62,23 +62,23 @@ Connects xAI Grok models to your pipeline. Used primarily as an `llm` invoke con
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom Model |  |
-| `grok-4-1-fast-reasoning` | Grok 4.1 Fast | grok-4-1-fast-reasoning |
-| `grok-4-1-fast-non-reasoning` | Grok 4.1 Fast Non-Reasoning | grok-4-1-fast-non-reasoning |
-| `grok-code-fast-1` | Grok Code Fast 1 | grok-code-fast-1 |
-| `grok-4-fast-reasoning` | Grok 4 Fast | grok-4-fast-reasoning |
-| `grok-4-fast-non-reasoning` | Grok 4 Fast Non-Reasoning | grok-4-fast-non-reasoning |
-| `grok-4` | Grok 4 | grok-4-0709 |
-| `grok-3-mini` | Grok 3 Mini | grok-3-mini |
-| `grok-3` | Grok 3 | grok-3 |
-| `grok-3-beta` | xAI: Grok 3 Beta | grok-3-beta |
-| `grok-3-mini-beta` | xAI: Grok 3 Mini Beta | grok-3-mini-beta |
-| `grok-4-1-fast` | xAI: Grok 4.1 Fast | grok-4.1-fast |
-| `grok-4-20` | xAI: Grok 4.20 | grok-4.20 |
-| `grok-4-20-multi-agent` | xAI: Grok 4.20 Multi-Agent | grok-4.20-multi-agent |
-| `grok-4-fast` | xAI: Grok 4 Fast | grok-4-fast |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom Model |  | 131,072 |  |
+| `grok-4-1-fast-reasoning` | Grok 4.1 Fast | grok-4-1-fast-reasoning | 2M | 4,096 |
+| `grok-4-1-fast-non-reasoning` | Grok 4.1 Fast Non-Reasoning | grok-4-1-fast-non-reasoning | 2M | 4,096 |
+| `grok-code-fast-1` | Grok Code Fast 1 | grok-code-fast-1 | 256K | 10K |
+| `grok-4-fast-reasoning` | Grok 4 Fast | grok-4-fast-reasoning | 2M | 4,096 |
+| `grok-4-fast-non-reasoning` | Grok 4 Fast Non-Reasoning | grok-4-fast-non-reasoning | 2M | 4,096 |
+| `grok-4` | Grok 4 | grok-4-0709 | 256K | 256K |
+| `grok-3-mini` | Grok 3 Mini | grok-3-mini | 131,072 | 131,072 |
+| `grok-3` | Grok 3 | grok-3 | 131,072 | 131,072 |
+| `grok-3-beta` | xAI: Grok 3 Beta | grok-3-beta | 131,072 | 131,072 |
+| `grok-3-mini-beta` | xAI: Grok 3 Mini Beta | grok-3-mini-beta | 131,072 | 131,072 |
+| `grok-4-1-fast` | xAI: Grok 4.1 Fast | grok-4.1-fast | 2M | 30K |
+| `grok-4-20` | xAI: Grok 4.20 | grok-4.20 | 2M | 4,096 |
+| `grok-4-20-multi-agent` | xAI: Grok 4.20 Multi-Agent | grok-4.20-multi-agent | 2M | 4,096 |
+| `grok-4-fast` | xAI: Grok 4 Fast | grok-4-fast | 2M | 30K |
 
 **Configuration sections**
 

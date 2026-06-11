@@ -59,13 +59,13 @@ Sends images to OpenAI vision-capable models and returns text analysis. Accepts 
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `openai-4-1` | GPT-4.1 | gpt-4.1 |
-| `openai-4-1-mini` | GPT-4.1-mini | gpt-4.1-mini |
-| `openai-4-1-nano` | GPT-4.1-nano | gpt-4.1-nano |
-| `openai-4o` | GPT-4o | gpt-4o |
-| `openai-4o-mini` | GPT-4o-mini | gpt-4o-mini |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `openai-4-1` | GPT-4.1 | gpt-4.1 | 1,047,576 |  |
+| `openai-4-1-mini` | GPT-4.1-mini | gpt-4.1-mini | 1,047,576 |  |
+| `openai-4-1-nano` | GPT-4.1-nano | gpt-4.1-nano | 1,047,576 |  |
+| `openai-4o` | GPT-4o | gpt-4o | 128K |  |
+| `openai-4o-mini` | GPT-4o-mini | gpt-4o-mini | 128K |  |
 
 **Configuration sections**
 

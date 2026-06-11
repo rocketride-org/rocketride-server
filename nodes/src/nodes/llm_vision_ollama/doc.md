@@ -63,18 +63,18 @@ Sends images to locally-hosted Ollama vision models and returns text analysis. N
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom |  |
-| `llama3_2-vision-11b` | Llama 3.2 Vision 11B | llama3.2-vision:11b |
-| `llama3_2-vision-90b` | Llama 3.2 Vision 90B | llama3.2-vision:90b |
-| `llava-7b` | LLaVA 7B | llava:7b |
-| `llava-13b` | LLaVA 13B | llava:13b |
-| `llava-34b` | LLaVA 34B | llava:34b |
-| `moondream` | Moondream 2 | moondream |
-| `minicpm-v` | MiniCPM-V | minicpm-v |
-| `qwen2_5vl-3b` | Qwen 2.5 VL 3B | qwen2.5vl:3b |
-| `qwen2_5vl-7b` | Qwen 2.5 VL 7B | qwen2.5vl:7b |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom |  | 16,385 |  |
+| `llama3_2-vision-11b` | Llama 3.2 Vision 11B | llama3.2-vision:11b | 128K |  |
+| `llama3_2-vision-90b` | Llama 3.2 Vision 90B | llama3.2-vision:90b | 128K |  |
+| `llava-7b` | LLaVA 7B | llava:7b | 32,768 |  |
+| `llava-13b` | LLaVA 13B | llava:13b | 4,096 |  |
+| `llava-34b` | LLaVA 34B | llava:34b | 4,096 |  |
+| `moondream` | Moondream 2 | moondream | 2,048 |  |
+| `minicpm-v` | MiniCPM-V | minicpm-v | 8,192 |  |
+| `qwen2_5vl-3b` | Qwen 2.5 VL 3B | qwen2.5vl:3b | 128K |  |
+| `qwen2_5vl-7b` | Qwen 2.5 VL 7B | qwen2.5vl:7b | 128K |  |
 
 **Configuration sections**
 

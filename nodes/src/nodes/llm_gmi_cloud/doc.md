@@ -87,30 +87,30 @@ GMI Cloud has three tiers:
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` |  |  |
-| `llama-4-scout` | Llama 4 Scout | meta-llama/Llama-4-Scout-17B-16E-Instruct |
-| `llama-4-maverick` | Llama 4 Maverick | meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 |
-| `qwen3-235b` | Qwen3 235B | Qwen/Qwen3-235B-A22B-FP8 |
-| `qwen3-32b` | Qwen3 32B | Qwen/Qwen3-32B-FP8 |
-| `qwen3-30b` | Qwen3 30B | Qwen/Qwen3-30B-A3B |
-| `qwen3-coder-480b` | Qwen3 Coder 480B | Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 |
-| `deepseek-v3-2` | DeepSeek V3.2 | deepseek-ai/DeepSeek-V3.2 |
-| `deepseek-v3` | DeepSeek V3 | deepseek-ai/DeepSeek-V3-0324 |
-| `deepseek-r1` | DeepSeek R1 | deepseek-ai/DeepSeek-R1 |
-| `deepseek-r1-distill-32b` | DeepSeek R1 Distill 32B | deepseek-ai/DeepSeek-R1-Distill-Qwen-32B |
-| `deepseek-r1-distill-1-5b` | DeepSeek R1 Distill 1.5B | deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B |
-| `deepseek-prover-v2` | DeepSeek Prover V2 | deepseek-ai/DeepSeek-Prover-V2-671B |
-| `gpt-5-2` | GPT-5.2 | openai/gpt-5.2 |
-| `gpt-5-1` | GPT-5.1 | openai/gpt-5.1 |
-| `gpt-5` | GPT-5 | openai/gpt-5 |
-| `gpt-4o` | GPT-4o | openai/gpt-4o |
-| `claude-opus-4-5` | Claude Opus 4.5 | anthropic/claude-opus-4.5 |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 | anthropic/claude-sonnet-4.5 |
-| `gemini-3-pro` | Gemini 3.1 Pro | google/gemini-3.1-pro-preview |
-| `gemini-3-flash` | Gemini 3 Flash | google/gemini-3-flash-preview |
-| `gemini-3-1-flash-lite` | Gemini 3.1 Flash Lite | google/gemini-3.1-flash-lite-preview |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` |  |  | 16,384 |  |
+| `llama-4-scout` | Llama 4 Scout | meta-llama/Llama-4-Scout-17B-16E-Instruct | 1,048,576 |  |
+| `llama-4-maverick` | Llama 4 Maverick | meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 | 1,048,576 |  |
+| `qwen3-235b` | Qwen3 235B | Qwen/Qwen3-235B-A22B-FP8 | 131,072 |  |
+| `qwen3-32b` | Qwen3 32B | Qwen/Qwen3-32B-FP8 | 131,072 |  |
+| `qwen3-30b` | Qwen3 30B | Qwen/Qwen3-30B-A3B | 131,072 |  |
+| `qwen3-coder-480b` | Qwen3 Coder 480B | Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 | 131,072 |  |
+| `deepseek-v3-2` | DeepSeek V3.2 | deepseek-ai/DeepSeek-V3.2 | 163,840 |  |
+| `deepseek-v3` | DeepSeek V3 | deepseek-ai/DeepSeek-V3-0324 | 163,840 |  |
+| `deepseek-r1` | DeepSeek R1 | deepseek-ai/DeepSeek-R1 | 131,072 |  |
+| `deepseek-r1-distill-32b` | DeepSeek R1 Distill 32B | deepseek-ai/DeepSeek-R1-Distill-Qwen-32B | 131,072 |  |
+| `deepseek-r1-distill-1-5b` | DeepSeek R1 Distill 1.5B | deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B | 131,072 |  |
+| `deepseek-prover-v2` | DeepSeek Prover V2 | deepseek-ai/DeepSeek-Prover-V2-671B | 131,072 |  |
+| `gpt-5-2` | GPT-5.2 | openai/gpt-5.2 | 128K |  |
+| `gpt-5-1` | GPT-5.1 | openai/gpt-5.1 | 128K |  |
+| `gpt-5` | GPT-5 | openai/gpt-5 | 128K |  |
+| `gpt-4o` | GPT-4o | openai/gpt-4o | 128K |  |
+| `claude-opus-4-5` | Claude Opus 4.5 | anthropic/claude-opus-4.5 | 200K |  |
+| `claude-sonnet-4-5` | Claude Sonnet 4.5 | anthropic/claude-sonnet-4.5 | 200K |  |
+| `gemini-3-pro` | Gemini 3.1 Pro | google/gemini-3.1-pro-preview | 128K |  |
+| `gemini-3-flash` | Gemini 3 Flash | google/gemini-3-flash-preview | 128K |  |
+| `gemini-3-1-flash-lite` | Gemini 3.1 Flash Lite | google/gemini-3.1-flash-lite-preview | 128K |  |
 
 **Configuration sections**
 

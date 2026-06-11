@@ -86,13 +86,13 @@ Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). K
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `gemini-2_5-flash` | Gemini 2.5 Flash - Fast Vision (1M tokens) | models/gemini-2.5-flash |
-| `gemini-2_5-pro` | Gemini 2.5 Pro - High Quality Vision (1M tokens) | models/gemini-2.5-pro |
-| `gemini-2_5-flash-lite` | Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens) | models/gemini-2.5-flash-lite |
-| `gemini-3_1-pro-preview` | Gemini 3.1 Pro - Latest Vision (1M tokens) | models/gemini-3.1-pro-preview |
-| `gemini-3_1-flash-image-preview` | Gemini 3.1 Flash Image Preview (131k tokens) | models/gemini-3.1-flash-image-preview |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `gemini-2_5-flash` | Gemini 2.5 Flash - Fast Vision (1M tokens) | models/gemini-2.5-flash | 1,048,576 |  |
+| `gemini-2_5-pro` | Gemini 2.5 Pro - High Quality Vision (1M tokens) | models/gemini-2.5-pro | 1,048,576 |  |
+| `gemini-2_5-flash-lite` | Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens) | models/gemini-2.5-flash-lite | 1,048,576 |  |
+| `gemini-3_1-pro-preview` | Gemini 3.1 Pro - Latest Vision (1M tokens) | models/gemini-3.1-pro-preview | 1,048,576 |  |
+| `gemini-3_1-flash-image-preview` | Gemini 3.1 Flash Image Preview (131k tokens) | models/gemini-3.1-flash-image-preview | 131,072 |  |
 
 **Configuration sections**
 

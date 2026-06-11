@@ -61,36 +61,36 @@ Connects OpenAI GPT models to your pipeline. Used primarily as an `llm` invoke c
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` |  |  |
-| `openai-5-4` | GPT-5.4 | gpt-5.4 |
-| `openai-5-4-pro` | GPT-5.4 Pro | gpt-5.4-pro |
-| `openai-5-4-mini` | GPT-5.4-mini | gpt-5.4-mini |
-| `openai-5-4-nano` | GPT-5.4-nano | gpt-5.4-nano |
-| `openai-4o` | GPT-4o | gpt-4o |
-| `openai-4o-mini` | GPT-4o-mini | gpt-4o-mini |
-| `openai-5` | GPT-5 | gpt-5 |
-| `openai-5-1` | GPT-5.1 | gpt-5.1 |
-| `openai-5-2` | GPT-5.2 | gpt-5.2 |
-| `openai-5-mini` | GPT-5-mini | gpt-5-mini |
-| `openai-5-nano` | GPT-5-nano | gpt-5-nano |
-| `gpt-3-5-turbo` | OpenAI: GPT-3.5 Turbo | gpt-3.5-turbo |
-| `gpt-3-5-turbo-16k` | OpenAI: GPT-3.5 Turbo 16k | gpt-3.5-turbo-16k |
-| `gpt-4` | OpenAI: GPT-4 | gpt-4 |
-| `gpt-4-1` | OpenAI: GPT-4.1 | gpt-4.1 |
-| `gpt-4-1-mini` | OpenAI: GPT-4.1 Mini | gpt-4.1-mini |
-| `gpt-4-1-nano` | OpenAI: GPT-4.1 Nano | gpt-4.1-nano |
-| `gpt-4-turbo` | OpenAI: GPT-4 Turbo | gpt-4-turbo |
-| `gpt-5-1-chat-latest` | GPT-5.1 Chat Latest | gpt-5.1-chat-latest |
-| `gpt-5-2-chat-latest` | GPT-5.2 Chat Latest | gpt-5.2-chat-latest |
-| `gpt-5-3-chat-latest` | GPT-5.3 Chat Latest | gpt-5.3-chat-latest |
-| `gpt-5-chat-latest` | GPT-5 Chat Latest | gpt-5-chat-latest |
-| `o1` | OpenAI: o1 | o1 |
-| `o3` | OpenAI: o3 | o3 |
-| `o3-mini` | OpenAI: o3 Mini | o3-mini |
-| `o4-mini` | OpenAI: o4 Mini | o4-mini |
-| `gpt-5-5` | OpenAI: GPT-5.5 | gpt-5.5 |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` |  |  | 16,384 |  |
+| `openai-5-4` | GPT-5.4 | gpt-5.4 | 1050K | 128K |
+| `openai-5-4-pro` | GPT-5.4 Pro | gpt-5.4-pro | 1050K | 128K |
+| `openai-5-4-mini` | GPT-5.4-mini | gpt-5.4-mini | 400K | 128K |
+| `openai-5-4-nano` | GPT-5.4-nano | gpt-5.4-nano | 400K | 128K |
+| `openai-4o` | GPT-4o | gpt-4o | 128K | 16,384 |
+| `openai-4o-mini` | GPT-4o-mini | gpt-4o-mini | 128K | 16,384 |
+| `openai-5` | GPT-5 | gpt-5 | 400K | 128K |
+| `openai-5-1` | GPT-5.1 | gpt-5.1 | 400K | 128K |
+| `openai-5-2` | GPT-5.2 | gpt-5.2 | 400K | 128K |
+| `openai-5-mini` | GPT-5-mini | gpt-5-mini | 400K | 128K |
+| `openai-5-nano` | GPT-5-nano | gpt-5-nano | 400K | 128K |
+| `gpt-3-5-turbo` | OpenAI: GPT-3.5 Turbo | gpt-3.5-turbo | 16,385 | 4,096 |
+| `gpt-3-5-turbo-16k` | OpenAI: GPT-3.5 Turbo 16k | gpt-3.5-turbo-16k | 16,385 | 4,096 |
+| `gpt-4` | OpenAI: GPT-4 | gpt-4 | 8,191 | 4,096 |
+| `gpt-4-1` | OpenAI: GPT-4.1 | gpt-4.1 | 1,047,576 | 32,768 |
+| `gpt-4-1-mini` | OpenAI: GPT-4.1 Mini | gpt-4.1-mini | 1,047,576 | 32,768 |
+| `gpt-4-1-nano` | OpenAI: GPT-4.1 Nano | gpt-4.1-nano | 1,047,576 | 32,768 |
+| `gpt-4-turbo` | OpenAI: GPT-4 Turbo | gpt-4-turbo | 128K | 4,096 |
+| `gpt-5-1-chat-latest` | GPT-5.1 Chat Latest | gpt-5.1-chat-latest | 16,384 | 16,384 |
+| `gpt-5-2-chat-latest` | GPT-5.2 Chat Latest | gpt-5.2-chat-latest | 16,384 | 16,384 |
+| `gpt-5-3-chat-latest` | GPT-5.3 Chat Latest | gpt-5.3-chat-latest | 16,384 | 16,384 |
+| `gpt-5-chat-latest` | GPT-5 Chat Latest | gpt-5-chat-latest | 16,384 | 16,384 |
+| `o1` | OpenAI: o1 | o1 | 200K | 100K |
+| `o3` | OpenAI: o3 | o3 | 200K | 100K |
+| `o3-mini` | OpenAI: o3 Mini | o3-mini | 200K | 100K |
+| `o4-mini` | OpenAI: o4 Mini | o4-mini | 200K | 100K |
+| `gpt-5-5` | OpenAI: GPT-5.5 | gpt-5.5 | 1050K | 128K |
 
 **Configuration sections**
 

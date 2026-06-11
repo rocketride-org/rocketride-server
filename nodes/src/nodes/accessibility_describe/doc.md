@@ -67,11 +67,11 @@ Customize the **Analysis Prompt** field to change this structure.
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `gemini-2.5-flash` | Gemini 2.5 Flash - Fast & Efficient (1M tokens) | gemini-2.5-flash |
-| `gemini-2.5-pro` | Gemini 2.5 Pro - High Quality (1M tokens) | gemini-2.5-pro |
-| `gemini-2.0-flash` | Gemini 2.0 Flash - Balanced (1M tokens) | gemini-2.0-flash |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `gemini-2.5-flash` | Gemini 2.5 Flash - Fast & Efficient (1M tokens) | gemini-2.5-flash | 1,048,576 |  |
+| `gemini-2.5-pro` | Gemini 2.5 Pro - High Quality (1M tokens) | gemini-2.5-pro | 1,048,576 |  |
+| `gemini-2.0-flash` | Gemini 2.0 Flash - Balanced (1M tokens) | gemini-2.0-flash | 1,048,576 |  |
 
 **Configuration sections**
 

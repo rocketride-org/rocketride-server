@@ -84,44 +84,44 @@ Connects Mistral AI models to your pipeline. Used primarily as an `llm` invoke c
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom Model |  |
-| `mistral-large` | Mistral Large 3 | mistral-large-2512 |
-| `mistral-medium` | Mistral Medium 3.1 | mistral-medium-2508 |
-| `mistral-small` | Mistral Small 3.2 | mistral-small-2506 |
-| `codestral` | Codestral | codestral-2508 |
-| `magistral-medium` | Magistral Medium 1.2 | magistral-medium-2509 |
-| `magistral-small` | Magistral Small 1.2 | magistral-small-2509 |
-| `devstral-medium` | Devstral Medium 1.0 | devstral-medium-2507 |
-| `devstral-small` | Devstral Small 1.1 | devstral-small-2507 |
-| `ministral-14b` | Ministral 3 14B | ministral-14b-2512 |
-| `ministral-8b` | Ministral 3 8B | ministral-8b-2512 |
-| `ministral-3b` | Ministral 3 3B | ministral-3b-2512 |
-| `codestral-latest` | Codestral-latest | codestral-latest |
-| `devstral-2512` | Mistral: Devstral 2 2512 | devstral-2512 |
-| `devstral-latest` | Devstral-latest | devstral-latest |
-| `devstral-medium-latest` | Devstral-medium-latest | devstral-medium-latest |
-| `magistral-medium-latest` | Magistral-medium-latest | magistral-medium-latest |
-| `magistral-small-latest` | Magistral-small-latest | magistral-small-latest |
-| `ministral-14b-latest` | Ministral-14b-latest | ministral-14b-latest |
-| `ministral-3b-latest` | Ministral-3b-latest | ministral-3b-latest |
-| `ministral-8b-latest` | Ministral-8b-latest | ministral-8b-latest |
-| `mistral-large-2411` | Mistral Large 2411 | mistral-large-2411 |
-| `mistral-large-latest` | Mistral Large Latest | mistral-large-latest |
-| `mistral-medium-2505` | Mistral Medium 2505 | mistral-medium-2505 |
-| `mistral-medium-2604` | Mistral Medium 2604 | mistral-medium-2604 |
-| `mistral-medium-3` | Mistral: Mistral Medium 3 | mistral-medium-3 |
-| `mistral-medium-3-5` | Mistral Medium 3.5 | mistral-medium-3-5 |
-| `mistral-medium-c21211-r0-75` | Mistral Medium C21211 R0 75 | mistral-medium-c21211-r0-75 |
-| `mistral-medium-latest` | Mistral Medium Latest | mistral-medium-latest |
-| `mistral-small-2603` | Mistral: Mistral Small 4 | mistral-small-2603 |
-| `mistral-small-latest` | Mistral Small Latest | mistral-small-latest |
-| `mistral-tiny-2407` | Mistral Tiny 2407 | mistral-tiny-2407 |
-| `mistral-tiny-latest` | Mistral Tiny Latest | mistral-tiny-latest |
-| `mistral-vibe-cli-fast` | Mistral Vibe Cli Fast | mistral-vibe-cli-fast |
-| `mistral-vibe-cli-latest` | Mistral Vibe Cli Latest | mistral-vibe-cli-latest |
-| `mistral-vibe-cli-with-tools` | Mistral Vibe Cli With Tools | mistral-vibe-cli-with-tools |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom Model |  | 32,768 |  |
+| `mistral-large` | Mistral Large 3 | mistral-large-2512 | 262,144 | 262,144 |
+| `mistral-medium` | Mistral Medium 3.1 | mistral-medium-2508 | 131,072 | 4,096 |
+| `mistral-small` | Mistral Small 3.2 | mistral-small-2506 | 131,072 | 4,096 |
+| `codestral` | Codestral | codestral-2508 | 256K | 256K |
+| `magistral-medium` | Magistral Medium 1.2 | magistral-medium-2509 | 40K | 40K |
+| `magistral-small` | Magistral Small 1.2 | magistral-small-2509 | 40,960 | 4,096 |
+| `devstral-medium` | Devstral Medium 1.0 | devstral-medium-2507 | 128K | 128K |
+| `devstral-small` | Devstral Small 1.1 | devstral-small-2507 | 128K | 128K |
+| `ministral-14b` | Ministral 3 14B | ministral-14b-2512 | 262,144 | 4,096 |
+| `ministral-8b` | Ministral 3 8B | ministral-8b-2512 | 262,144 | 4,096 |
+| `ministral-3b` | Ministral 3 3B | ministral-3b-2512 | 131,072 | 4,096 |
+| `codestral-latest` | Codestral-latest | codestral-latest | 8,191 | 8,191 |
+| `devstral-2512` | Mistral: Devstral 2 2512 | devstral-2512 | 262,144 | 256K |
+| `devstral-latest` | Devstral-latest | devstral-latest | 256K | 256K |
+| `devstral-medium-latest` | Devstral-medium-latest | devstral-medium-latest | 256K | 256K |
+| `magistral-medium-latest` | Magistral-medium-latest | magistral-medium-latest | 40K | 40K |
+| `magistral-small-latest` | Magistral-small-latest | magistral-small-latest | 40K | 40K |
+| `ministral-14b-latest` | Ministral-14b-latest | ministral-14b-latest | 16,384 | 4,096 |
+| `ministral-3b-latest` | Ministral-3b-latest | ministral-3b-latest | 16,384 | 4,096 |
+| `ministral-8b-latest` | Ministral-8b-latest | ministral-8b-latest | 16,384 | 4,096 |
+| `mistral-large-2411` | Mistral Large 2411 | mistral-large-2411 | 131,072 | 128K |
+| `mistral-large-latest` | Mistral Large Latest | mistral-large-latest | 32K | 4,096 |
+| `mistral-medium-2505` | Mistral Medium 2505 | mistral-medium-2505 | 8,191 | 8,191 |
+| `mistral-medium-2604` | Mistral Medium 2604 | mistral-medium-2604 | 16,384 | 4,096 |
+| `mistral-medium-3` | Mistral: Mistral Medium 3 | mistral-medium-3 | 131,072 | 4,096 |
+| `mistral-medium-3-5` | Mistral Medium 3.5 | mistral-medium-3-5 | 16,384 | 4,096 |
+| `mistral-medium-c21211-r0-75` | Mistral Medium C21211 R0 75 | mistral-medium-c21211-r0-75 | 16,384 | 4,096 |
+| `mistral-medium-latest` | Mistral Medium Latest | mistral-medium-latest | 131,072 | 131,072 |
+| `mistral-small-2603` | Mistral: Mistral Small 4 | mistral-small-2603 | 262,144 | 4,096 |
+| `mistral-small-latest` | Mistral Small Latest | mistral-small-latest | 131,072 | 131,072 |
+| `mistral-tiny-2407` | Mistral Tiny 2407 | mistral-tiny-2407 | 16,384 | 4,096 |
+| `mistral-tiny-latest` | Mistral Tiny Latest | mistral-tiny-latest | 16,384 | 4,096 |
+| `mistral-vibe-cli-fast` | Mistral Vibe Cli Fast | mistral-vibe-cli-fast | 16,384 | 4,096 |
+| `mistral-vibe-cli-latest` | Mistral Vibe Cli Latest | mistral-vibe-cli-latest | 16,384 | 4,096 |
+| `mistral-vibe-cli-with-tools` | Mistral Vibe Cli With Tools | mistral-vibe-cli-with-tools | 16,384 | 4,096 |
 
 **Configuration sections**
 

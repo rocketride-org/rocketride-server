@@ -50,9 +50,9 @@ There are no preset profiles — all fields are specified directly.
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` |  |  |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` |  |  | 32,768 |  |
 
 **Configuration sections**
 
@@ -76,12 +76,12 @@ There are no preset profiles — all fields are specified directly.
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `llama-3-3-70b` | Llama 3.3 70B Instruct | meta-llama/Llama-3.3-70B-Instruct |
-| `qwen3-235b` | Qwen3 235B | Qwen/Qwen3-235B-A22B |
-| `deepseek-v3` | DeepSeek V3 | deepseek-ai/DeepSeek-V3 |
-| `custom` |  |  |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `llama-3-3-70b` | Llama 3.3 70B Instruct | meta-llama/Llama-3.3-70B-Instruct | 131,072 |  |
+| `qwen3-235b` | Qwen3 235B | Qwen/Qwen3-235B-A22B | 131,072 |  |
+| `deepseek-v3` | DeepSeek V3 | deepseek-ai/DeepSeek-V3 | 131,072 |  |
+| `custom` |  |  | 131,072 |  |
 
 **Configuration sections**
 

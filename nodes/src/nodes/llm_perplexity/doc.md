@@ -58,14 +58,14 @@ Connects Perplexity AI Sonar models to your pipeline. Sonar models include real-
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `sonar-pro` | Sonar Pro | sonar-pro |
-| `sonar` | Sonar | sonar |
-| `sonar-reasoning-pro` | Sonar Reasoning Pro | sonar-reasoning-pro |
-| `sonar-reasoning` | Sonar Reasoning | sonar-reasoning |
-| `sonar-deep-research` | Sonar Deep Research | sonar-deep-research |
-| `sonar-pro-search` | Perplexity: Sonar Pro Search | sonar-pro-search |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `sonar-pro` | Sonar Pro | sonar-pro | 200K | 8K |
+| `sonar` | Sonar | sonar | 127,072 | 4,096 |
+| `sonar-reasoning-pro` | Sonar Reasoning Pro | sonar-reasoning-pro | 128K | 4,096 |
+| `sonar-reasoning` | Sonar Reasoning | sonar-reasoning | 128K | 4,096 |
+| `sonar-deep-research` | Sonar Deep Research | sonar-deep-research | 128K | 4,096 |
+| `sonar-pro-search` | Perplexity: Sonar Pro Search | sonar-pro-search | 200K | 8K |
 
 **Configuration sections**
 

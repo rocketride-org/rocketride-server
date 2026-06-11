@@ -89,20 +89,20 @@ These models will not fit on a typical laptop without aggressive quantization. M
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom Model |  |
-| `minimax-m2` | MiniMax M2 | MiniMax-M2 |
-| `minimax-m2-1` | MiniMax M2.1 | MiniMax-M2.1 |
-| `minimax-m2-1-highspeed` | MiniMax M2.1 Highspeed | MiniMax-M2.1-highspeed |
-| `minimax-m2-5` | MiniMax M2.5 | MiniMax-M2.5 |
-| `minimax-m2-5-highspeed` | MiniMax M2.5 Highspeed | MiniMax-M2.5-highspeed |
-| `minimax-m2-7` | MiniMax M2.7 | MiniMax-M2.7 |
-| `minimax-m2-7-highspeed` | MiniMax M2.7 Highspeed | MiniMax-M2.7-highspeed |
-| `minimax-m2-local` | MiniMax M2 (Local) | MiniMaxAI/MiniMax-M2 |
-| `minimax-m2-5-local` | MiniMax M2.5 (Local) | MiniMaxAI/MiniMax-M2.5 |
-| `minimax-m2-7-local` | MiniMax M2.7 (Local) | MiniMaxAI/MiniMax-M2.7 |
-| `minimax-m3` | MiniMax M3 | MiniMax-M3 |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom Model |  | 200K | 8,192 |
+| `minimax-m2` | MiniMax M2 | MiniMax-M2 | 204,800 | 65,536 |
+| `minimax-m2-1` | MiniMax M2.1 | MiniMax-M2.1 | 204,800 | 65,536 |
+| `minimax-m2-1-highspeed` | MiniMax M2.1 Highspeed | MiniMax-M2.1-highspeed | 204,800 | 65,536 |
+| `minimax-m2-5` | MiniMax M2.5 | MiniMax-M2.5 | 204,800 | 65,536 |
+| `minimax-m2-5-highspeed` | MiniMax M2.5 Highspeed | MiniMax-M2.5-highspeed | 204,800 | 65,536 |
+| `minimax-m2-7` | MiniMax M2.7 | MiniMax-M2.7 | 204,800 | 65,536 |
+| `minimax-m2-7-highspeed` | MiniMax M2.7 Highspeed | MiniMax-M2.7-highspeed | 204,800 | 65,536 |
+| `minimax-m2-local` | MiniMax M2 (Local) | MiniMaxAI/MiniMax-M2 | 204,800 | 8,192 |
+| `minimax-m2-5-local` | MiniMax M2.5 (Local) | MiniMaxAI/MiniMax-M2.5 | 204,800 | 8,192 |
+| `minimax-m2-7-local` | MiniMax M2.7 (Local) | MiniMaxAI/MiniMax-M2.7 | 204,800 | 8,192 |
+| `minimax-m3` | MiniMax M3 | MiniMax-M3 | 1M | 131,072 |
 
 **Configuration sections**
 

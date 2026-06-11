@@ -27,15 +27,17 @@ Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm` 
 
 ## Profiles
 
-| Profile                       | Model ID            | Context                          |
-| ----------------------------- | ------------------- | -------------------------------- |
-| Claude Sonnet 4.6 _(default)_ | `claude-sonnet-4-6` | 1M context, 128K output          |
-| Claude Opus 4.7               | `claude-opus-4-7`   | 1M context, 128K output          |
-| Claude Opus 4.6               | `claude-opus-4-6`   | 1M context, 128K output          |
-| Claude Sonnet 4.5             | `claude-sonnet-4-5` | 1M context, 64K output           |
-| Claude Opus 4.5               | `claude-opus-4-5`   | 200K context, 64K output         |
-| Claude Haiku 4.5              | `claude-haiku-4-5`  | 200K context, 64K output         |
-| Custom                        | _(user-specified)_  | Specify model ID and token limit |
+| Profile                       | Model ID            |
+| ----------------------------- | ------------------- |
+| Claude Sonnet 4.6 _(default)_ | `claude-sonnet-4-6` |
+| Claude Opus 4.7               | `claude-opus-4-7`   |
+| Claude Opus 4.6               | `claude-opus-4-6`   |
+| Claude Sonnet 4.5             | `claude-sonnet-4-5` |
+| Claude Opus 4.5               | `claude-opus-4-5`   |
+| Claude Haiku 4.5              | `claude-haiku-4-5`  |
+| Custom                        | _(user-specified)_  |
+
+Per-profile context and output token limits are in the Reference table below, sourced from the node's `services.json`.
 
 ## Upstream docs
 
@@ -60,15 +62,15 @@ Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm` 
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` |  |  |
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 | claude-sonnet-4-6 |
-| `claude-opus-4-6` | Claude Opus 4.6 | claude-opus-4-6 |
-| `claude-haiku-4-5` | Claude Haiku 4.5 | claude-haiku-4-5 |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 | claude-sonnet-4-5 |
-| `claude-opus-4-5` | Claude Opus 4.5 | claude-opus-4-5 |
-| `claude-opus-4-7` | Anthropic: Claude Opus 4.7 | claude-opus-4-7 |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` |  |  | 200K |  |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | claude-sonnet-4-6 | 1M | 128K |
+| `claude-opus-4-6` | Claude Opus 4.6 | claude-opus-4-6 | 1M | 128K |
+| `claude-haiku-4-5` | Claude Haiku 4.5 | claude-haiku-4-5 | 200K | 64K |
+| `claude-sonnet-4-5` | Claude Sonnet 4.5 | claude-sonnet-4-5 | 1M | 64K |
+| `claude-opus-4-5` | Claude Opus 4.5 | claude-opus-4-5 | 200K | 64K |
+| `claude-opus-4-7` | Anthropic: Claude Opus 4.7 | claude-opus-4-7 | 1M | 128K |
 
 **Configuration sections**
 

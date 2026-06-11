@@ -95,31 +95,31 @@ Connects locally-hosted Ollama models to your pipeline. Used primarily as an `ll
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom |  |
-| `llama3_3` | Llama 3.3 | llama3.3:latest |
-| `llama3_1-8b` | Llama 3.1 8B | llama3.1:8b |
-| `llama3_1-70b` | Llama 3.1 70B | llama3.1:70b |
-| `llama3_1-405b` | Llama 3.1 405B | llama3.1:405b |
-| `phi4-14b` | Phi 4 14B | phi4 |
-| `llama3_2-3b` | Llama 3.2 3B | llama3.2 |
-| `llama3_2-1b` | Llama 3.2 1B | llama3.2:1b |
-| `llama4-latest` | Llama 4 Latest | llama4:latest |
-| `mistral-7b` | Mistral 7B | mistral |
-| `qwen2_5-7b` | Qwen 2.5 7B | qwen2.5 |
-| `qwen2_5-0_5b` | Qwen 2.5 0.5B | qwen2.5:0.5b |
-| `qwen2_5-1_5b` | Qwen 2.5 1.5B | qwen2.5:1.5b |
-| `qwen2_5-3b` | Qwen 2.5 3B | qwen2.5:3b |
-| `qwen2_5-14b` | Qwen 2.5 14B | qwen2.5:14b |
-| `qwen2_5-32b` | Qwen 2.5 32B | qwen2.5:32b |
-| `qwen2_5-72b` | Qwen 2.5 72B | qwen2.5:72b |
-| `qwen3-latest` | Qwen 3 Latest | qwen3:latest |
-| `deepseek-r1-1_5b` | DeepSeek R1 1.5B | deepseek-r1:1.5b |
-| `deepseek-r1-7b` | DeepSeek R1 7B | deepseek-r1:7b |
-| `deepseek-r1-14b` | DeepSeek R1 14B | deepseek-r1:14b |
-| `deepseek-r1-32b` | DeepSeek R1 32B | deepseek-r1:32b |
-| `deepseek-r1-671b` | DeepSeek R1 671B | deepseek-r1:671b |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom |  | 16,385 |  |
+| `llama3_3` | Llama 3.3 | llama3.3:latest | 128K |  |
+| `llama3_1-8b` | Llama 3.1 8B | llama3.1:8b | 128K |  |
+| `llama3_1-70b` | Llama 3.1 70B | llama3.1:70b | 128K |  |
+| `llama3_1-405b` | Llama 3.1 405B | llama3.1:405b | 128K |  |
+| `phi4-14b` | Phi 4 14B | phi4 | 16K |  |
+| `llama3_2-3b` | Llama 3.2 3B | llama3.2 | 128K |  |
+| `llama3_2-1b` | Llama 3.2 1B | llama3.2:1b | 128K |  |
+| `llama4-latest` | Llama 4 Latest | llama4:latest | 10M |  |
+| `mistral-7b` | Mistral 7B | mistral | 32K |  |
+| `qwen2_5-7b` | Qwen 2.5 7B | qwen2.5 | 128K |  |
+| `qwen2_5-0_5b` | Qwen 2.5 0.5B | qwen2.5:0.5b | 128K |  |
+| `qwen2_5-1_5b` | Qwen 2.5 1.5B | qwen2.5:1.5b | 128K |  |
+| `qwen2_5-3b` | Qwen 2.5 3B | qwen2.5:3b | 128K |  |
+| `qwen2_5-14b` | Qwen 2.5 14B | qwen2.5:14b | 128K |  |
+| `qwen2_5-32b` | Qwen 2.5 32B | qwen2.5:32b | 128K |  |
+| `qwen2_5-72b` | Qwen 2.5 72B | qwen2.5:72b | 128K |  |
+| `qwen3-latest` | Qwen 3 Latest | qwen3:latest | 128K |  |
+| `deepseek-r1-1_5b` | DeepSeek R1 1.5B | deepseek-r1:1.5b | 128K |  |
+| `deepseek-r1-7b` | DeepSeek R1 7B | deepseek-r1:7b | 128K |  |
+| `deepseek-r1-14b` | DeepSeek R1 14B | deepseek-r1:14b | 128K |  |
+| `deepseek-r1-32b` | DeepSeek R1 32B | deepseek-r1:32b | 128K |  |
+| `deepseek-r1-671b` | DeepSeek R1 671B | deepseek-r1:671b | 128K |  |
 
 **Configuration sections**
 

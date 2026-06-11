@@ -101,30 +101,30 @@ Connects Amazon Bedrock-hosted models to your pipeline. Used primarily as an `ll
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` | Custom |  |
-| `ai21_jamba-1_5-large` | Jamba 1.5 Large | ai21.jamba-1-5-large-v1:0 |
-| `ai21_jamba-1_5-mini` | Jamba 1.5 Mini | ai21.jamba-1-5-mini-v1:0 |
-| `amazon_titan-text-express` | Titan Text Express | amazon.titan-text-express-v1 |
-| `amazon_nova-2-lite` | Nova 2 Lite | amazon.nova-2-lite-v1:0 |
-| `anthropic_claude-3_7-sonnet` | Claude Sonnet 3.7 | anthropic.claude-3-7-sonnet-20250219-v1:0 |
-| `anthropic_claude-sonnet-4-5` | Claude Sonnet 4.5 | anthropic.claude-sonnet-4-5-20250929-v1:0 |
-| `anthropic_claude-3_5-haiku` | Claude Haiku 3.5 | anthropic.claude-3-5-haiku-20241022-v1:0 |
-| `anthropic_claude-haiku-4-5` | Claude Haiku 4.5 | anthropic.claude-haiku-4-5-20251001-v1:0 |
-| `anthropic_claude-opus-4` | Claude Opus 4 | anthropic.claude-opus-4-20250514-v1:0 |
-| `anthropic_claude-opus-4-5` | Claude Opus 4.5 | anthropic.claude-opus-4-5-20251101-v1:0 |
-| `cohere_command-r-plus` | Command R+ | cohere.command-r-plus-v1:0 |
-| `cohere_command-r` | Command R | cohere.command-r-v1:0 |
-| `meta_llama3_1-8b` | Llama 3.1 8B Instruct | meta.llama3-1-8b-instruct-v1:0 |
-| `meta_llama3_1-70b` | Llama 3.1 70B Instruct | meta.llama3-1-70b-instruct-v1:0 |
-| `meta_llama3_3-70b` | Llama 3.3 70B Instruct | meta.llama3-3-70b-instruct-v1:0 |
-| `meta_llama3_2-1b` | Llama 3.2 1B Instruct | meta.llama3-2-1b-instruct-v1:0 |
-| `meta_llama3_2-3b` | Llama 3.2 3B Instruct | meta.llama3-2-3b-instruct-v1:0 |
-| `meta_llama3_2-11b` | Llama 3.2 11B Vision Instruct | meta.llama3-2-11b-instruct-v1:0 |
-| `meta_llama3_2-90b` | Llama 3.2 90B Vision Instruct | meta.llama3-2-90b-instruct-v1:0 |
-| `meta_llama4-scout-17b` | Llama 4 Scout 17B Instruct | meta.llama4-scout-17b-instruct-v1:0 |
-| `meta_llama4-maverick-17b` | Llama 4 Maverick 17B Instruct | meta.llama4-maverick-17b-instruct-v1:0 |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` | Custom |  | 256K |  |
+| `ai21_jamba-1_5-large` | Jamba 1.5 Large | ai21.jamba-1-5-large-v1:0 | 256K |  |
+| `ai21_jamba-1_5-mini` | Jamba 1.5 Mini | ai21.jamba-1-5-mini-v1:0 | 256K |  |
+| `amazon_titan-text-express` | Titan Text Express | amazon.titan-text-express-v1 | 8,192 |  |
+| `amazon_nova-2-lite` | Nova 2 Lite | amazon.nova-2-lite-v1:0 | 1M |  |
+| `anthropic_claude-3_7-sonnet` | Claude Sonnet 3.7 | anthropic.claude-3-7-sonnet-20250219-v1:0 | 200K |  |
+| `anthropic_claude-sonnet-4-5` | Claude Sonnet 4.5 | anthropic.claude-sonnet-4-5-20250929-v1:0 | 200K |  |
+| `anthropic_claude-3_5-haiku` | Claude Haiku 3.5 | anthropic.claude-3-5-haiku-20241022-v1:0 | 200K |  |
+| `anthropic_claude-haiku-4-5` | Claude Haiku 4.5 | anthropic.claude-haiku-4-5-20251001-v1:0 | 200K |  |
+| `anthropic_claude-opus-4` | Claude Opus 4 | anthropic.claude-opus-4-20250514-v1:0 | 200K |  |
+| `anthropic_claude-opus-4-5` | Claude Opus 4.5 | anthropic.claude-opus-4-5-20251101-v1:0 | 200K |  |
+| `cohere_command-r-plus` | Command R+ | cohere.command-r-plus-v1:0 | 128K |  |
+| `cohere_command-r` | Command R | cohere.command-r-v1:0 | 128K |  |
+| `meta_llama3_1-8b` | Llama 3.1 8B Instruct | meta.llama3-1-8b-instruct-v1:0 | 128K |  |
+| `meta_llama3_1-70b` | Llama 3.1 70B Instruct | meta.llama3-1-70b-instruct-v1:0 | 128K |  |
+| `meta_llama3_3-70b` | Llama 3.3 70B Instruct | meta.llama3-3-70b-instruct-v1:0 | 128K |  |
+| `meta_llama3_2-1b` | Llama 3.2 1B Instruct | meta.llama3-2-1b-instruct-v1:0 | 128K |  |
+| `meta_llama3_2-3b` | Llama 3.2 3B Instruct | meta.llama3-2-3b-instruct-v1:0 | 128K |  |
+| `meta_llama3_2-11b` | Llama 3.2 11B Vision Instruct | meta.llama3-2-11b-instruct-v1:0 | 128K |  |
+| `meta_llama3_2-90b` | Llama 3.2 90B Vision Instruct | meta.llama3-2-90b-instruct-v1:0 | 128K |  |
+| `meta_llama4-scout-17b` | Llama 4 Scout 17B Instruct | meta.llama4-scout-17b-instruct-v1:0 | 3500K |  |
+| `meta_llama4-maverick-17b` | Llama 4 Maverick 17B Instruct | meta.llama4-maverick-17b-instruct-v1:0 | 1M |  |
 
 **Configuration sections**
 

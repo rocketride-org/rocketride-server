@@ -63,14 +63,14 @@ Sends images to Mistral vision-capable models and returns text analysis. Accepts
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `mistral-large-3` | Mistral Large 3 - Premier Vision (256k tokens) | mistral-large-2512 |
-| `mistral-medium-3.1` | Mistral Medium 3.1 - Balanced Vision (128k tokens) | mistral-medium-2508 |
-| `mistral-small-3.2` | Mistral Small 3.2 - Fast & Cheap Vision (128k tokens) | mistral-small-2506 |
-| `ministral-14b-3` | Ministral 3 14B - High Performance Vision (256k tokens) | ministral-14b-2512 |
-| `ministral-8b-3` | Ministral 3 8B - Balanced Vision (256k tokens) | ministral-8b-2512 |
-| `ministral-3b-3` | Ministral 3 3B - Efficient Vision (256k tokens) | ministral-3b-2512 |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `mistral-large-3` | Mistral Large 3 - Premier Vision (256k tokens) | mistral-large-2512 | 256K |  |
+| `mistral-medium-3.1` | Mistral Medium 3.1 - Balanced Vision (128k tokens) | mistral-medium-2508 | 128K |  |
+| `mistral-small-3.2` | Mistral Small 3.2 - Fast & Cheap Vision (128k tokens) | mistral-small-2506 | 128K |  |
+| `ministral-14b-3` | Ministral 3 14B - High Performance Vision (256k tokens) | ministral-14b-2512 | 256K |  |
+| `ministral-8b-3` | Ministral 3 8B - Balanced Vision (256k tokens) | ministral-8b-2512 | 256K |  |
+| `ministral-3b-3` | Ministral 3 3B - Efficient Vision (256k tokens) | ministral-3b-2512 | 256K |  |
 
 **Configuration sections**
 

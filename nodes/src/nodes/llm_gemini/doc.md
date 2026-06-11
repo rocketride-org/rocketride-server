@@ -65,28 +65,28 @@ Profiles marked **Image** support image generation output. Deprecated profiles (
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `custom` |  |  |
-| `gemini-3_1-pro-preview` | Gemini 3.1 Pro | models/gemini-3.1-pro-preview |
-| `gemini-3_1-flash-image-preview` | Gemini 3.1 Flash Image Preview | models/gemini-3.1-flash-image-preview |
-| `gemini-3_1-flash-lite-preview` | Gemini 3.1 Flash Lite | models/gemini-3.1-flash-lite-preview |
-| `gemini-3-flash-preview` | Gemini 3 Flash Preview | models/gemini-3-flash-preview |
-| `gemini-3-pro-image-preview` | Gemini 3 Pro Image Preview | models/gemini-3-pro-image-preview |
-| `gemini-2_5-pro` | Gemini 2.5 Pro | models/gemini-2.5-pro |
-| `gemini-2_5-flash` | Gemini 2.5 Flash | models/gemini-2.5-flash |
-| `gemini-2_5-flash-lite` | Gemini 2.5 Flash Lite | models/gemini-2.5-flash-lite |
-| `gemini-2_5-flash-image` | Gemini 2.5 Flash Image | models/gemini-2.5-flash-image |
-| `gemini-3-pro-preview` | Gemini 3 Pro Preview | models/gemini-3-pro-preview |
-| `gemini-3-pro-image` | Gemini 3 Pro Image | models/gemini-3-pro-image |
-| `gemini-2_0-flash` | Gemini 2.0 Flash | models/gemini-2.0-flash |
-| `gemini-2_0-flash-lite` | Gemini 2.0 Flash Lite | models/gemini-2.0-flash-lite |
-| `models-gemini-2-5-flash-lite-preview-09-2025` | Google: Gemini 2.5 Flash Lite Preview 09-2025 | models/gemini-2.5-flash-lite-preview-09-2025 |
-| `models-gemini-2-5-pro-preview` | Google: Gemini 2.5 Pro Preview 06-05 | models/gemini-2.5-pro-preview |
-| `models-gemini-2-5-pro-preview-05-06` | Google: Gemini 2.5 Pro Preview 05-06 | models/gemini-2.5-pro-preview-05-06 |
-| `models-gemini-3-1-pro-preview-customtools` | Google: Gemini 3.1 Pro Preview Custom Tools | models/gemini-3.1-pro-preview-customtools |
-| `models-gemini-flash-latest` | Google Gemini Flash Latest | models/gemini-flash-latest |
-| `models-gemini-pro-latest` | Google Gemini Pro Latest | models/gemini-pro-latest |
+| Profile | Title | Model | Context | Max output |
+| --- | --- | --- | --- | --- |
+| `custom` |  |  | 1,114,112 | 65,536 |
+| `gemini-3_1-pro-preview` | Gemini 3.1 Pro | models/gemini-3.1-pro-preview | 1,048,576 | 65,536 |
+| `gemini-3_1-flash-image-preview` | Gemini 3.1 Flash Image Preview | models/gemini-3.1-flash-image-preview | 131,072 | 65,536 |
+| `gemini-3_1-flash-lite-preview` | Gemini 3.1 Flash Lite | models/gemini-3.1-flash-lite-preview | 1,048,576 | 65,536 |
+| `gemini-3-flash-preview` | Gemini 3 Flash Preview | models/gemini-3-flash-preview | 1,048,576 | 65,536 |
+| `gemini-3-pro-image-preview` | Gemini 3 Pro Image Preview | models/gemini-3-pro-image-preview | 65,536 | 32,768 |
+| `gemini-2_5-pro` | Gemini 2.5 Pro | models/gemini-2.5-pro | 1,048,576 | 65,536 |
+| `gemini-2_5-flash` | Gemini 2.5 Flash | models/gemini-2.5-flash | 1,048,576 | 65,535 |
+| `gemini-2_5-flash-lite` | Gemini 2.5 Flash Lite | models/gemini-2.5-flash-lite | 1,048,576 | 65,535 |
+| `gemini-2_5-flash-image` | Gemini 2.5 Flash Image | models/gemini-2.5-flash-image | 32,768 | 32,768 |
+| `gemini-3-pro-preview` | Gemini 3 Pro Preview | models/gemini-3-pro-preview | 1,048,576 | 65,536 |
+| `gemini-3-pro-image` | Gemini 3 Pro Image | models/gemini-3-pro-image | 98,304 | 32,768 |
+| `gemini-2_0-flash` | Gemini 2.0 Flash | models/gemini-2.0-flash | 1,048,576 | 65,535 |
+| `gemini-2_0-flash-lite` | Gemini 2.0 Flash Lite | models/gemini-2.0-flash-lite |  | 65,536 |
+| `models-gemini-2-5-flash-lite-preview-09-2025` | Google: Gemini 2.5 Flash Lite Preview 09-2025 | models/gemini-2.5-flash-lite-preview-09-2025 | 1,048,576 | 65,535 |
+| `models-gemini-2-5-pro-preview` | Google: Gemini 2.5 Pro Preview 06-05 | models/gemini-2.5-pro-preview | 1,048,576 | 65,536 |
+| `models-gemini-2-5-pro-preview-05-06` | Google: Gemini 2.5 Pro Preview 05-06 | models/gemini-2.5-pro-preview-05-06 | 1,048,576 | 65,535 |
+| `models-gemini-3-1-pro-preview-customtools` | Google: Gemini 3.1 Pro Preview Custom Tools | models/gemini-3.1-pro-preview-customtools | 1,048,576 | 65,536 |
+| `models-gemini-flash-latest` | Google Gemini Flash Latest | models/gemini-flash-latest | 1,048,576 | 65,536 |
+| `models-gemini-pro-latest` | Google Gemini Pro Latest | models/gemini-pro-latest | 1,048,576 | 65,536 |
 
 **Configuration sections**
 
