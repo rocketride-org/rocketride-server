@@ -22,7 +22,7 @@ preprocessors, OCR/NER, web tools, agents, and sources like Chat. Each node ship
 (its config, inputs, and outputs) and runs inside the engine. Connectors are the nodes that
 read from and write to external systems. See
 [Nodes & connectors](/concepts/nodes-connectors) and
-[Agents, tools & skills](/concepts/agents-tools-skills).
+[Agents & tools](/concepts/agents-tools-skills).
 
 ## The runtime engine
 

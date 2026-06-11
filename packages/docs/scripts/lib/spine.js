@@ -34,14 +34,14 @@ const SPINE = [
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
 			{ id: 'concepts/runtime-engine', label: 'Runtime & engine' },
 			{ id: 'concepts/nodes-connectors', label: 'Nodes & connectors' },
-			{ id: 'concepts/agents-tools-skills', label: 'Agents, tools & skills' },
+			{ id: 'concepts/agents-tools-skills', label: 'Agents & tools' },
 			{ id: 'concepts/execution-model', label: 'Execution model' }
 		]
 	},
 	{
 		label: 'Protocols',
 		items: [
-			{ id: 'protocols/websocket', label: 'WebSocket (5565)', mount: true },
+			{ id: 'protocols/websocket', label: 'WebSocket', mount: true },
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
 	},
