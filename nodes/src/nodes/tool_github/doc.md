@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>GitHub - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Gives agents full access to the GitHub REST API — files, issues, pull requests, reviews, releases, workflows, search, and more. Useful for agents that manage codebases, triage issues, automate releases, or operate CI/CD pipelines.

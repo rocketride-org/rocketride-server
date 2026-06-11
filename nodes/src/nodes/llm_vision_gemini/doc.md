@@ -4,10 +4,6 @@ date: 2026-04-14
 sidebar_position: 1
 ---
 
-<head>
-  <title>Gemini Vision - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Sends images to Google Gemini vision-capable models and returns text analysis. Accepts either a single image or a stream of image documents (e.g. from the frame grabber). Metadata such as frame number and timestamp is preserved on the `documents` output.

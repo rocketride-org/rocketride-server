@@ -3,10 +3,6 @@ title: "Send / Send Files / Pipe"
 date: 2025-07-29
 ---
 
-<head>
-  <title>send() Method - RocketRide Documentation</title>
-</head>
-
 - [Overview](#overview)
 - [send()](#send)
 - [send_files() / sendFiles()](#send_files--sendfiles)

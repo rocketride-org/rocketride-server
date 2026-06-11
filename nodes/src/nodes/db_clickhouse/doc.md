@@ -4,10 +4,6 @@ date: 2026-06-01
 sidebar_position: 1
 ---
 
-<head>
-  <title>ClickHouse - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 ClickHouse node with two roles: pipeline node (natural-language queries via lanes) and tool node (agents call it directly). Connects over the native TCP protocol (default port 9000) via `clickhouse-driver`. This is a **query / read** node — it does not expose a pipeline ingestion (insert) lane (see [Ingestion](#ingestion)).

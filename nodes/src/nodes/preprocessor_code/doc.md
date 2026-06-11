@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Code Preprocessor - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Splits source code text into chunks that respect syntax boundaries (functions, classes, blocks) rather than cutting mid-construct. Outputs documents ready for embedding or LLM processing.

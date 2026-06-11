@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Chroma - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Vector store node backed by [ChromaDB](https://www.trychroma.com/). Stores embedded documents and retrieves them by semantic (vector) similarity search.

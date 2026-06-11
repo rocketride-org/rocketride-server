@@ -4,10 +4,6 @@ date: 2026-03-02
 sidebar_position: 2
 ---
 
-<head>
-  <title>Installation - VS Code Extension - RocketRide Documentation</title>
-</head>
-
 ## Installing the Extension
 
 1. Open VS Code.

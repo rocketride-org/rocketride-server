@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>GMI Cloud - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects GMI Cloud-hosted models to your pipeline via an OpenAI-compatible API. GMI Cloud runs 100+ open-weight and proxied proprietary models on H100/H200 infrastructure. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.

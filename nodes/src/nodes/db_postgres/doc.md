@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>PostgreSQL - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 PostgreSQL node with two roles: pipeline node (natural-language queries via lanes) and tool node (agents call it directly).

@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Amazon Bedrock - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects Amazon Bedrock-hosted models to your pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.

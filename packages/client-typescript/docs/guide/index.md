@@ -4,10 +4,6 @@ sidebar_position: 2
 title: Node
 ---
 
-<head>
-  <title>Node SDK - RocketRide Documentation</title>
-</head>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-typescript.png" alt="RocketRide TypeScript SDK" width="900" />
 </p>

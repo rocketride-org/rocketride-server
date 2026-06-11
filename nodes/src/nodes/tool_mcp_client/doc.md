@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>MCP Client - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects to an external [Model Context Protocol](https://modelcontextprotocol.io/) server and exposes its tools to agent nodes. Agents discover and invoke tools from the connected MCP server during their reasoning loop. This node has no pipeline lanes — it is connected to agents via the `tools` invoke channel.

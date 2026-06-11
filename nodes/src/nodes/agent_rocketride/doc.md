@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>RocketRide Wave - RocketRide Documentation</title>
-</head>
-
 :::note
 This node is **experimental**.
 :::

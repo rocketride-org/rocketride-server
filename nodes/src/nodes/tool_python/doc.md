@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Python - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Gives agents the ability to execute Python code in a sandboxed environment. Useful for data manipulation, calculations, formatting, and any logic the agent needs to run directly rather than describe.

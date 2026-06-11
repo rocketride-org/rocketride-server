@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>HTTP Results - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Captures pipeline output and returns it as a structured JSON response. Each lane type is mapped to a named key in the response body. Used as the terminal node in pipelines triggered via HTTP.

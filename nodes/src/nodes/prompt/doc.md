@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Prompt - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Assembles a structured `Question` object from multiple pipeline inputs and emits it downstream. This is the primary mechanism for injecting retrieved documents, extracted text, and table content into a question before it reaches an LLM or agent node.

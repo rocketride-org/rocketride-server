@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Transformer Embedding - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Generates text embeddings using local sentence-transformer models. Runs on the model server — no API key required. GPU-accelerated when available.

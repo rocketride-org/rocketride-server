@@ -4,10 +4,6 @@ date: 2026-03-02
 sidebar_position: 3
 ---
 
-<head>
-  <title>Usage Guide - VS Code Extension - RocketRide Documentation</title>
-</head>
-
 ## Creating a Pipeline
 
 1. Right-click in the Explorer or click **+** in the RocketRide sidebar.

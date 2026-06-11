@@ -3,10 +3,6 @@ title: "Get Task Status"
 date: 2025-07-29
 ---
 
-<head>
-  <title>get_task_status() Method - RocketRide Documentation</title>
-</head>
-
 - [Overview](#overview)
 - [Method Signature](#method-signature)
 - [Parameters](#parameters)

@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Summarization - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Splits incoming text into chunks and uses an LLM to extract a summary, key points, and named entities from each chunk. Outputs results as plain text or structured documents.

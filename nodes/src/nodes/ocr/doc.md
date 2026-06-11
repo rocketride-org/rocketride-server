@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>OCR - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Extracts text and tables from images using optical character recognition. Accepts raw images or image documents. The `image` lane produces both text and table output; the `documents` lane produces text only. Runs locally — GPU-capable.

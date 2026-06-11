@@ -4,10 +4,6 @@ date: 2026-03-02
 sidebar_position: 2
 ---
 
-<head>
-  <title>LangChain - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Single-agent node using LangChain's `create_agent`. Receives a question, runs a tool-calling agent loop, and emits an answer.

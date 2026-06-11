@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Remote Processing - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Forwards pipeline execution to a separate RocketRide server. The pipeline configuration is sent to the remote server over HTTP, data streams through a WebSocket connection, and results are returned when processing completes. Use this to run GPU-heavy or resource-intensive sub-pipelines on a dedicated machine.
