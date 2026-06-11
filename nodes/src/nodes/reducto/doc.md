@@ -72,4 +72,58 @@ See the [Reducto parsing configurations documentation](https://docs.reducto.ai/v
 | Section | Fields |
 | --- | --- |
 | Reducto | `reducto.default` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `reducto.api_key` | string | API Key |  |
+| `reducto.parse_mode` | boolean | Advanced Mode | default `false` |
+| `reducto.Contains_Handwritten_Text` | boolean | Contains Handwritten Text | default `false` |
+| `reducto.Contains_Non_English_Text` | boolean | Contains Non-English Text | default `false` |
+| `reducto.Summarize_Text` | boolean | AI Summarize Figures/Images | default `false` |
+| `reducto.advanced_documentation` | null | Advanced Parse Mode - How to |  |
+| `reducto.options` | string | Options |  |
+| `reducto.advanced_options` | string | Advanced Options |  |
+| `reducto.experimental_options` | string | Experimental Options |  |
+
+**Dependencies**
+
+`reductoai`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self)` | Declare instance attributes; heavy initialization happens in beginGlobal. |
+| `beginGlobal(self)` | Initialize the global configuration. |
+| `validateConfig(self)` | Validate the Reducto node configuration. |
+| `ensureDependencies(self)` | Ensure the dependencies are installed. |
+| `endGlobal(self)` | Clean up resources when global configuration is being destroyed. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self)` | Declare instance attributes; heavy work happens in open/process. |
+| `open(self, object: Entry)` | Call from engLib, process object startup. |
+| `close(self)` | Call from engLib, process object complete. |
+| `writeTag(self, tag)` | Process data tags from the tag lane. |
+
+`Parser` — extends `ReaderBase` (`parser.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Reducto parser with provider, connection config, and bag. |
+| `read(self, file_data: bytes) -> str` | Read and parse document data using Reducto. |
+| `parse(self, file_data: bytes, file_name: Optional[str]) -> tuple[str, List[str]]` | Parse document data using Reducto API. |
+| `extract_content(self, parse_response: Any) -> tuple[str, List[str]]` | Extract text and table content from parse result. |
+
+**Source**
+
+[`nodes/src/nodes/reducto`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/reducto)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

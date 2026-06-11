@@ -77,4 +77,47 @@ Sends images to Mistral vision-capable models and returns text analysis. Accepts
 | Section | Fields |
 | --- | --- |
 | Mistral Vision | `image_vision_mistral.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `vision.systemPrompt` | string | System Instructions |  |
+| `vision.prompt` | string | Analysis Prompt |  |
+| `image_vision_mistral.profile` | string | Vision Model | default `mistral-large-3` |
+
+**Dependencies**
+
+`mistralai`, `mistral-common[sentencepiece]`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents and emit vision model responses as text documents. |
+
+`Chat` — extends `ChatBase` (`mistral_vision.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Mistral Vision chat instance. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current vision model. |
+| `getTokens(self, value: str) -> int` | Count tokens using the official Mistral tokenizer SDK. |
+| `chat(self, question: Question) -> Answer` | Send a vision request to Mistral AI and get the response. |
+
+**Source**
+
+[`nodes/src/nodes/llm_vision_mistral`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_vision_mistral)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

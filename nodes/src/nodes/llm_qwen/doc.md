@@ -87,4 +87,41 @@ US deployments require the `-us` model suffix (e.g., `qwen3.5-flash-us`).
 | Section | Fields |
 | --- | --- |
 | Qwen | `qwen.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `qwen.region` | string | Region | default `us` |
+| `qwen.profile` | string | Model | default `qwen-flash` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the configuration for Qwen LLM node. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`qwen_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Qwen chat bot. |
+| `is_retryable_error(self, error)` | Determine if the error is retryable. |
+| `map_exception(self, error)` | Convert unfriendly exceptions to friendlier ones. |
+
+**Source**
+
+[`nodes/src/nodes/llm_qwen`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_qwen)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

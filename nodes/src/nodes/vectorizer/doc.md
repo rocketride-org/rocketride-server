@@ -30,4 +30,27 @@ Nothing to configure. No profiles, no config fields, no credentials; it leans on
 | Class type |  |
 | Capabilities | internal |
 | Protocol | `vectorizer://` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, obj: Dict)` | Open the processing for a given object. |
+| `writeTable(self, table: str)` | Process a table entry if vectorization is enabled. |
+| `writeText(self, text: str)` | Process a text entry for vectorization. |
+| `close(self)` | Close the current instance. |
+| `renderObject(self, object)` | Render an object by retrieving its stored data and passing it to the text writer. |
+
+**Source**
+
+[`nodes/src/nodes/vectorizer`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/vectorizer)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

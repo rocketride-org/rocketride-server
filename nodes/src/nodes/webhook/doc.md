@@ -103,4 +103,20 @@ The node creates its endpoint from the host and port passed in by the engine (`-
 | Section | Fields |
 | --- | --- |
 | Web Hook | `hideForm`, `type`, `source.mode`, `parameters` |
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointBase` (`IEndpoint.py`)
+
+| Method | Summary |
+| --- | --- |
+| `scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None])` | Initialize the scan process. |
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/webhook`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/webhook)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

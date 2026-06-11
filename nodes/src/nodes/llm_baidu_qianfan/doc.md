@@ -43,4 +43,42 @@ Use the Baidu Qianfan node to call ERNIE chat models through Qianfan's OpenAI-co
 | Section | Fields |
 | --- | --- |
 | Baidu Qianfan | `baidu_qianfan.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `modelOutputTokens` | number | Output Tokens |  |
+| `baidu_qianfan.serverbase` | string | Base URL | default `https://qianfan.baidubce.com/v2` |
+| `baidu_qianfan.profile` | string | Model | default `ernie-4-5-turbo-128k` |
+
+**Dependencies**
+
+`openai`, `langchain`, `langchain-core`, `langchain-openai`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the configured Qianfan OpenAI-compatible endpoint at save time. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`qianfan_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Baidu Qianfan chat bot. |
+| `is_retryable_error(self, error)` | Determine if the error is retryable. |
+| `map_exception(self, error)` | Convert provider exceptions to user-facing errors. |
+
+**Source**
+
+[`nodes/src/nodes/llm_baidu_qianfan`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_baidu_qianfan)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

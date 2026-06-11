@@ -68,4 +68,46 @@ All models support up to 8,191 tokens per input.
 | Section | Fields |
 | --- | --- |
 | OpenAI | `openai_embed.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `openai_embed.model` | string | Model name |  |
+| `openai_embed.profile` | string | Model | default `text-embedding-3-small` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, obj: Entry)` | Initialize the instance with a given entry. |
+| `writeDocuments(self, documents: List[Doc])` | Encode and processes a list of documents. |
+| `writeQuestions(self, question: Question)` | Encode a single question. |
+
+`OpenAIEmbeddingWrapper` — extends `EmbeddingBase` (`OpenAIEmbeddingWrapper.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Construct OpenAI embedding wrapper. |
+| `getVectorSize(self) -> int` | Return the vector size of the embedding module. |
+| `getMaximumTokens(self) -> int` | Return the maximum number of tokens in a request. |
+| `encodeQuestion(self, question: Question) -> List` | Encode the given question into a vector and return the vector as an array of floats. |
+| `encodeChunks(self, chunks: List[Doc]) -> None` | Encode the given document chunks into a vector and place it in the embedding field of the document. |
+
+**Source**
+
+[`nodes/src/nodes/embedding_openai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_openai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

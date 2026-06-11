@@ -76,4 +76,57 @@ Splits text into chunks for downstream embedding or LLM processing. Uses LangCha
 | Section | Fields |
 | --- | --- |
 | General Text | `langchain.splitter.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `langchain.splitter.strlen` | number | String length | default `512` |
+| `langchain.splitter.tokens` | number | Number of tokens | default `512` |
+| `langchain.splitter.mode` | string | Split by | default `strlen` |
+| `langchain.splitter.default.splitter` | string |  | const `RecursiveCharacterTextSplitter` |
+| `langchain.splitter.recursive.separators` | string | Split separators | default `'\n\n', '\n', ' ', ''` |
+| `langchain.splitter.recursive.splitter` | string |  | const `RecursiveCharacterTextSplitter` |
+| `langchain.splitter.character.separator` | string | Split separator | default `"\n"` |
+| `langchain.splitter.character.splitter` | string |  | const `CharacterTextSplitter` |
+| `langchain.splitter.markdown.splitter` | string |  | const `MarkdownTextSplitter` |
+| `langchain.splitter.latex.splitter` | string |  | const `LatexTextSplitter` |
+| `langchain.splitter.nltk.splitter` | string |  | const `NLTKTextSplitter` |
+| `langchain.splitter.spacy.splitter` | string |  | const `SpacyTextSplitter` |
+| `langchain.splitter.spacy.model` | string | Model | default `en_core_web_sm` |
+| `langchain.splitter.custom.splitter` | string | Splitter class name | const `RecursiveCharacterTextSplitter` |
+| `langchain.splitter.profile` | string | Text splitter | default `default` |
+
+**Dependencies**
+
+`langchain`, `langchain-text-splitters`, `langchain-core`, `accelerate`, `transformers`, `tokenizers`, `huggingface-hub`, `pyyaml`, `filelock`, `regex`, `tqdm`, `safetensors`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` |  |
+| `writeTable(self, table: str)` |  |
+| `writeText(self, text: str)` |  |
+| `closing(self)` |  |
+
+`PreProcessor` — extends `PreProcessorBase` (`langchain.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the preprocessor with the provider, connection configuration, and bag. |
+| `process(self, text: str, path: str) -> List[str]` |  |
+
+**Source**
+
+[`nodes/src/nodes/preprocessor_langchain`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/preprocessor_langchain)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

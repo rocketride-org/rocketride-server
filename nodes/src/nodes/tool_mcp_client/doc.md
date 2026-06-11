@@ -82,6 +82,14 @@ Launches a local subprocess as the MCP server.
 | --- | --- |
 | Butterbase MCP Client | `type`, `mcp_client.bearer`, `mcp_client.endpoint`, `mcp_client.serverName` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `mcp_client.bearer` | string | API Key | default `` |
+| `mcp_client.endpoint` | string | Endpoint | default `https://api.butterbase.ai/mcp` |
+| `mcp_client.serverName` | string | Server name | default `butterbase` |
+
 ### Service: `json`
 
 | Property | Value |
@@ -103,4 +111,86 @@ Launches a local subprocess as the MCP server.
 | Section | Fields |
 | --- | --- |
 | MCP Client | `type`, `mcp_client.serverName`, `mcp_client.transport` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `mcp_client.serverName` | string | Server name | default `mcp` |
+| `mcp_client.transport` | string | Transport | default `streamable-http` |
+| `mcp_client.commandLine` | string | Command line | default `python -m rocketride_mcp` |
+| `mcp_client.endpoint` | string | Endpoint | default `` |
+| `mcp_client.sse_endpoint` | string | SSE endpoint (legacy) | default `` |
+| `mcp_client.headers` | object | Headers | default `[object Object]` |
+| `mcp_client.bearer` | string | Bearer token | default `` |
+| `mcp_client.stdio` |  | STDIO (subprocess) |  |
+| `mcp_client.http` |  | HTTP (Streamable HTTP) |  |
+| `mcp_client.sse` |  | Legacy HTTP+SSE |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` | Validate config at save-time with quick local checks. |
+| `endGlobal(self) -> None` |  |
+| `list_namespaced_tools(self) -> List[Dict[str, Any]]` |  |
+| `get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]` |  |
+| `call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+`McpProtocolError` — extends `RuntimeError` (`mcp_sse_client.py`)
+
+`McpToolDef` (`mcp_sse_client.py`)
+
+`McpSseClient` (`mcp_sse_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, sse_endpoint: str, headers: Optional[Dict[str, str]], protocol_version: str, client_name: str, client_version: str, timeout_s: float) -> None` | Create an MCP SSE client. |
+| `start(self) -> None` |  |
+| `stop(self) -> None` |  |
+| `list_tools(self) -> List[McpToolDef]` |  |
+| `call_tool(self, *, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]` |  |
+
+`McpProtocolError` — extends `RuntimeError` (`mcp_stdio_client.py`)
+
+`McpToolDef` (`mcp_stdio_client.py`)
+
+`McpStdioClient` (`mcp_stdio_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, command: str, args: List[str], env: Optional[Dict[str, str]], cwd: Optional[str], protocol_version: str, client_name: str, client_version: str, timeout_s: float) -> None` | Create an MCP stdio client. |
+| `start(self) -> None` |  |
+| `stop(self) -> None` |  |
+| `list_tools(self) -> List[McpToolDef]` |  |
+| `call_tool(self, *, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]` |  |
+
+`McpProtocolError` — extends `RuntimeError` (`mcp_streamable_http_client.py`)
+
+`McpHttpStatusError` — extends `RuntimeError` (`mcp_streamable_http_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, status: int, body: bytes \| None, url: str \| None) -> None` | Create an HTTP status error with response context. |
+
+`McpToolDef` (`mcp_streamable_http_client.py`)
+
+`McpStreamableHttpClient` (`mcp_streamable_http_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, endpoint: str, headers: Optional[Dict[str, str]], protocol_version: str, client_name: str, client_version: str, timeout_s: float) -> None` | Create an MCP streamable HTTP client. |
+| `start(self) -> None` |  |
+| `stop(self) -> None` |  |
+| `list_tools(self) -> List[McpToolDef]` |  |
+| `call_tool(self, *, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]` |  |
+
+**Source**
+
+[`nodes/src/nodes/tool_mcp_client`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_mcp_client)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

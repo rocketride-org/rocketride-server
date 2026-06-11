@@ -58,4 +58,38 @@ No configuration options. Fixed playback settings:
 | Section | Fields |
 | --- | --- |
 | Audio Player |  |
+
+**Dependencies**
+
+`imageio_ffmpeg`, `sounddevice`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize the global context for the audio player. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self)` |  |
+| `endInstance(self)` |  |
+| `writeAudio(self, action: int, mimeType: str, buffer: bytes)` |  |
+| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+`Player` — extends `AudioReader` (`player.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, lock: threading.Lock, **kwargs)` | Initialize the Player instance. |
+| `onData(self, data: bytes)` | Accumulate small chunks and enqueue 16K buffers for playback. |
+| `start(self)` | Start the audio playback stream and the data extractor. |
+| `stop(self)` | Stop audio stream and ensure all buffered audio is played. |
+
+**Source**
+
+[`nodes/src/nodes/audio_player`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/audio_player)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

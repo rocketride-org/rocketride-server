@@ -77,4 +77,56 @@ Requires a MongoDB Atlas **M10+** cluster or **serverless** instance — vector 
 | --- | --- |
 | MongoDB Atlas Vector Store | `vector.cloud.host`, `vector.apikey`, `vector.score`, `vector.database`, `vector.collection` |
 | MongoDB Atlas | `type`, `atlas.target.parameters`, `target.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io |  |
+| `atlas.provider` | string |  | const `atlas` |
+| `atlas.store` |  | Store |  |
+
+**Dependencies**
+
+`pymongo`, `dnspython`, `pydantic`, `urllib3`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `validateConfig(self)` | Validate MongoDB config at save-time with optional connection testing. |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the document store. |
+| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`atlas.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the MongoDB Atlas vector store. |
+| `count_documents(self) -> int` | Return the number of documents in the store. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform keyword search using MongoDB text search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform semantic search using Atlas Vector Search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Get documents matching the filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Get unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the store. |
+| `remove(self, objectIds: List[str]) -> None` | Remove documents by object IDs. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark documents as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark documents as active (not deleted). |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render complete document by combining all chunks. |
+
+**Source**
+
+[`nodes/src/nodes/atlas`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/atlas)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

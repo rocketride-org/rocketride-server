@@ -93,4 +93,41 @@ Profiles marked **Image** support image generation output. Deprecated profiles (
 | Section | Fields |
 | --- | --- |
 | Gemini | `gemini.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `gemini.model` | string | Model |  |
+| `gemini.modelTotalTokens` | number | Total Tokens |  |
+| `gemini.outputTokens` | number | Output Tokens |  |
+| `gemini.apikey` | string | API Key |  |
+| `gemini.profile` | string | Model | default `gemini-3_1-pro-preview` |
+
+**Dependencies**
+
+`google-genai`, `google-api-core`, `google-auth`, `googleapis-common-protos`, `proto-plus`, `protobuf`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate Gemini configuration at save-time using a minimal API probe. |
+| `beginGlobal(self)` | Initialize the global chat instance. |
+| `endGlobal(self)` | Clean up the global chat instance. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`gemini.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Gemini chat bot. |
+| `getTokens(self, value: str) -> int` | Estimate the number of tokens in a given text string. |
+
+**Source**
+
+[`nodes/src/nodes/llm_gemini`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_gemini)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

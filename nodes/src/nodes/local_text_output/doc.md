@@ -53,4 +53,36 @@ The source file extension is replaced with `.txt` on output. Subdirectories are 
 | Section | Fields |
 | --- | --- |
 | Destination path | `local_text_output.target.parameters` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `local_text_output.exclude` | string | exclude | default `N/A` |
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize global state and configuration. |
+| `validateConfig(self)` | Linux and Mac have no special characters that are not allowed in paths. |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` |  |
+| `endInstance(self) -> None` |  |
+| `writeText(self, text: str)` | Accumulate text content for the current object. |
+| `open(self, object: Entry)` | Open a new source object for processing. |
+| `close(self)` | Close the current object and write accumulated text to file. |
+
+**Source**
+
+[`nodes/src/nodes/local_text_output`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/local_text_output)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

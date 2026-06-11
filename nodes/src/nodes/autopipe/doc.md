@@ -60,4 +60,19 @@ Preprocessor defaults to LangChain with the default chunking profile.
 | --- | --- |
 | RocketRide Autopipe | `remote`, `all.embedding`, `all.store` |
 | RocketRide Autopipe | `remote`, `all.embedding` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Node autopipe works in conjuction with the vectorizer, indexer, parse filters and figures out the right configuration of the stack. |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/autopipe`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/autopipe)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

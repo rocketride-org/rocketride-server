@@ -95,4 +95,49 @@ or env vars.
 | Section | Fields |
 | --- | --- |
 | xTrace Memory | `type`, `xtrace_memory.api_key`, `xtrace_memory.org_id`, `xtrace_memory.user_id`, `xtrace_memory.group_ids`, `xtrace_memory.show_advanced` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `xtrace_memory.api_key` | string | API Key | default `` |
+| `xtrace_memory.org_id` | string | Org id | default `` |
+| `xtrace_memory.user_id` | string | User id | default `` |
+| `xtrace_memory.group_ids` | string | Group ids (shared memory) | default `` |
+| `xtrace_memory.show_advanced` | boolean | Advanced settings | default `false` |
+| `xtrace_memory.base_url` | string | Base URL | default `https://api.production.xtrace.ai` |
+| `xtrace_memory.agent_id` | string | Agent id | default `` |
+| `xtrace_memory.app_id` | string | App id | default `` |
+| `xtrace_memory.wait` | boolean | Synchronous ingest | default `true` |
+| `xtrace_memory.ingest_timeout` | integer | Ingest timeout (s) | default `30` |
+| `xtrace_memory.extract_artifacts` | boolean | Extract artifacts | default `false` |
+| `xtrace_memory.search_mode` | string | Recall mode | default `compose` |
+| `xtrace_memory.search_limit` | integer | Recall limit | default `10` |
+
+**Dependencies**
+
+`requests`, `tenacity`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` |  |
+| `open(self, _obj: Any) -> None` | Anchor a fresh conversation id per client session (no store wipe). |
+| `remember(self, args)` | Ingest conversation turns into xTrace memory. |
+| `recall(self, args)` | Search xTrace memory and return relevant context. |
+
+**Source**
+
+[`nodes/src/nodes/tool_xtrace_memory`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_xtrace_memory)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

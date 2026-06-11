@@ -64,4 +64,112 @@ The default `memory` backend is in-process and needs no setup (intended for test
 | Section | Fields |
 | --- | --- |
 | Persistent Memory | `backend`, `redis_host`, `redis_port`, `redis_password`, `session_ttl_hours`, `max_history`, `auto_summarize` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `backend` | string | Backend | default `memory` |
+| `redis_host` | string | Redis Host | default `localhost` |
+| `redis_port` | number | Redis Port | default `6379` |
+| `redis_password` | string | Redis Password |  |
+| `session_ttl_hours` | number | Session TTL (hours) | default `0` |
+| `max_history` | number | Max History Entries | default `100` |
+| `auto_summarize` | boolean | Auto-Summarize | default `true` |
+
+**Dependencies**
+
+`redis>=6.4.0,<7.0.0`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Initialize the persistent memory store from node configuration. |
+| `endGlobal(self) -> None` | Release resources and close backend connections. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, _obj: Entry) -> None` | Reset per-object state for the current pipeline item. |
+| `writeQuestions(self, question: Question) -> None` | Load session context from memory and attach to question metadata, then forward. |
+| `writeAnswers(self, answer: Answer) -> None` | Store answer text in session memory for future retrieval, then forward. |
+
+`MemoryBackend` — extends `ABC` (`memory_store.py`)
+
+| Method | Summary |
+| --- | --- |
+| `create_session(self, session_id: str, ttl_seconds: Optional[float]) -> Dict[str, Any]` | Create a new session. Returns metadata about the session. |
+| `resume_session(self, session_id: str) -> Dict[str, Any]` | Resume an existing session. Raises if not found. |
+| `list_sessions(self) -> List[str]` | Return all active session IDs. |
+| `delete_session(self, session_id: str) -> Dict[str, Any]` | Delete a session and all its data. |
+| `put(self, session_id: str, key: str, value: Any) -> Dict[str, Any]` | Store a value under a key in the given session. |
+| `get(self, session_id: str, key: str) -> Dict[str, Any]` | Retrieve a value by key from the given session. |
+| `list_keys(self, session_id: str) -> Dict[str, Any]` | List all keys in the given session. |
+| `clear(self, session_id: str, key: Optional[str]) -> Dict[str, Any]` | Clear a specific key or all keys in a session. |
+| `get_history(self, session_id: str, limit: int) -> Dict[str, Any]` | Return the most recent history entries for a session. |
+| `replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None` | Replace all history entries for a session with the given list. |
+| `increment(self, session_id: str, key: str, amount: int) -> Dict[str, Any]` | Increment a numeric value using a default non-atomic get/put sequence. |
+| `close(self) -> None` | Release any resources held by the backend. No-op by default. |
+
+`InMemoryBackend` — extends `MemoryBackend` (`memory_store.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self) -> None` | Initialize empty session stores with a threading lock. |
+| `create_session(self, session_id: str, ttl_seconds: Optional[float]) -> Dict[str, Any]` |  |
+| `resume_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `list_sessions(self) -> List[str]` |  |
+| `delete_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `put(self, session_id: str, key: str, value: Any) -> Dict[str, Any]` |  |
+| `get(self, session_id: str, key: str) -> Dict[str, Any]` |  |
+| `list_keys(self, session_id: str) -> Dict[str, Any]` |  |
+| `clear(self, session_id: str, key: Optional[str]) -> Dict[str, Any]` |  |
+| `get_history(self, session_id: str, limit: int) -> Dict[str, Any]` |  |
+| `increment(self, session_id: str, key: str, amount: int) -> Dict[str, Any]` |  |
+| `replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None` |  |
+| `close(self) -> None` | No-op for in-memory storage. |
+
+`RedisBackend` — extends `MemoryBackend` (`memory_store.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, host: str, port: int, password: Optional[str], **kwargs: Any) -> None` | Connect to Redis with the given host, port, and optional password. |
+| `create_session(self, session_id: str, ttl_seconds: Optional[float]) -> Dict[str, Any]` |  |
+| `resume_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `list_sessions(self) -> List[str]` |  |
+| `delete_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `put(self, session_id: str, key: str, value: Any) -> Dict[str, Any]` |  |
+| `get(self, session_id: str, key: str) -> Dict[str, Any]` |  |
+| `list_keys(self, session_id: str) -> Dict[str, Any]` |  |
+| `clear(self, session_id: str, key: Optional[str]) -> Dict[str, Any]` |  |
+| `get_history(self, session_id: str, limit: int) -> Dict[str, Any]` |  |
+| `increment(self, session_id: str, key: str, amount: int) -> Dict[str, Any]` |  |
+| `replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None` |  |
+| `close(self) -> None` | Close the Redis connection explicitly. |
+
+`PersistentMemoryStore` (`memory_store.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, backend: str, max_history: int, auto_summarize: bool, redis_host: str, redis_port: int, redis_password: Optional[str], session_ttl_hours: float) -> None` | Create a PersistentMemoryStore with the specified backend and options. |
+| `backend(self) -> MemoryBackend` | Expose the underlying backend for testing. |
+| `create_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `resume_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `list_sessions(self) -> List[str]` |  |
+| `delete_session(self, session_id: str) -> Dict[str, Any]` |  |
+| `put(self, session_id: str, key: str, value: Any) -> Dict[str, Any]` |  |
+| `get(self, session_id: str, key: str) -> Dict[str, Any]` |  |
+| `increment(self, session_id: str, key: str, amount: int) -> Dict[str, Any]` |  |
+| `list_keys(self, session_id: str) -> Dict[str, Any]` |  |
+| `clear(self, session_id: str, key: Optional[str]) -> Dict[str, Any]` |  |
+| `get_history(self, session_id: str, limit: int) -> Dict[str, Any]` |  |
+| `summarize_if_needed(self, session_id: str, max_entries: int) -> bool` | Compress older history entries into a summary when history exceeds *max_entries*. |
+
+**Source**
+
+[`nodes/src/nodes/memory_persistent`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/memory_persistent)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

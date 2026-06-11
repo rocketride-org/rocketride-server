@@ -80,4 +80,46 @@ Extracts named entities (people, organizations, locations, dates, etc.) from tex
 | Section | Fields |
 | --- | --- |
 | Named Entity Recognition | `ner.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `ner.model` | string | Model name |  |
+| `ner.aggregation_strategy` | string | Entity aggregation strategy | default `simple` |
+| `ner.min_confidence` | number | Minimum confidence threshold | default `0.9` |
+| `ner.store_in_metadata` | boolean | Store entities in document metadata | default `true` |
+| `ner.profile` | string | Model | default `bertLarge` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize the NER recognizer when the pipeline starts. |
+| `endGlobal(self)` | Clean up the NER recognizer when the pipeline ends. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, obj: Entry)` | Initialize instance for a new object. |
+| `writeText(self, text: str)` | Process text and extract named entities. |
+| `writeDocuments(self, documents: List[Doc])` | Process documents and extract named entities. |
+| `closing(self)` | Called before close, finalize any pending operations. |
+| `close(self)` | Clean up instance state. |
+
+`NERRecognizer` (`ner_recognizer.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize NER recognizer. |
+| `extract_entities(self, text: str) -> List[Dict[str, Any]]` | Extract named entities from text. |
+| `get_entity_summary(self, entities: List[Dict[str, Any]]) -> Dict[str, List[str]]` | Get a summary of entities grouped by type. |
+| `format_entities_for_display(self, entities: List[Dict[str, Any]]) -> str` | Format entities as human-readable text. |
+
+**Source**
+
+[`nodes/src/nodes/ner`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/ner)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

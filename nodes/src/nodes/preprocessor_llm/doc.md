@@ -56,4 +56,37 @@ Splits text into semantically coherent chunks using an LLM to detect context bou
 | Section | Fields |
 | --- | --- |
 | LLM | `preprocessor_llm.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `preprocessor_llm.numberOfTokens` | number | Number of tokens per document chunk. Needs to match your embedding model. | default `384` |
+| `preprocessor_llm.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`langchain`, `langchain-core`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Initialize global configuration and dependencies. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` | Begin the instance for processing. |
+| `open(self, object: Entry)` | Initialize the instance for a new object. |
+| `writeText(self, text: str)` | Add the text to the accumulator so we can chunk a document. |
+| `writeTable(self, text: str)` | Add the table to the accumulator so we can chunk a document. |
+| `closing(self)` | Process the accumulated text and extract chunks. |
+
+**Source**
+
+[`nodes/src/nodes/preprocessor_llm`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/preprocessor_llm)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -65,4 +65,41 @@ Output documents carry an `embedding` vector, ready for ingestion into a vector 
 | Section | Fields |
 | --- | --- |
 | Video Embedding | `embedding.profile`, `embedding.extraction` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `embedding.model` | string | Model name |  |
+| `embedding.profile` | string | Model | default `openai-patch16` |
+| `embedding.interval` | number | Interval (in seconds) between frames | default `5` |
+| `embedding.max_frames` | number | Maximum number of frames to extract (0=unlimited) | default `50` |
+| `embedding.start_time` | number | Start time (in seconds) for frame extraction (0=beginning) | default `0` |
+| `embedding.duration` | number | Duration (in seconds) for frame extraction (0=end of video) | default `0` |
+| `embedding.maxVideoSizeMB` | number | Maximum video file size (MB) | default `500` |
+| `embedding.extraction` |  | Frame Extraction |  |
+
+**Dependencies**
+
+`transformers`, `accelerate`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize resources needed for the video embedding node. |
+| `endGlobal(self)` | Clean up resources when the global lifecycle ends. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *args, **kwargs)` | Initialize the video embedding instance with frame tracking state. |
+| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` | Handle streaming video data via the AVI action protocol. |
+
+**Source**
+
+[`nodes/src/nodes/embedding_video`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_video)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

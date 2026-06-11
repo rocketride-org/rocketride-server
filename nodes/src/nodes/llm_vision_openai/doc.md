@@ -72,4 +72,48 @@ Sends images to OpenAI vision-capable models and returns text analysis. Accepts 
 | Section | Fields |
 | --- | --- |
 | OpenAI Vision | `image_vision_openai.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `image_vision_openai.apikey` | string | API Key |  |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `vision.systemPrompt` | string | System Instructions |  |
+| `vision.prompt` | string | Analysis Prompt |  |
+| `image_vision_openai.profile` | string | Vision Model | default `openai-4-1` |
+
+**Dependencies**
+
+`openai>=2.38.0`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` | Handle AVI image protocol for streaming image frames. |
+| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents inline and emit vision model responses as text documents. |
+
+`Chat` — extends `ChatBase` (`openai_vision.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the OpenAI Vision chat instance. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current model. |
+| `getTokens(self, value: str) -> int` | Approximate token count (4 chars per token heuristic). |
+| `chat(self, question: Question) -> Answer` | Send an image to OpenAI Vision and get the response. |
+
+**Source**
+
+[`nodes/src/nodes/llm_vision_openai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_vision_openai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -64,4 +64,35 @@ Returns an array of discovered links across the site.
 | Section | Fields |
 | --- | --- |
 | Firecrawl | `type`, `tool_firecrawl.apikey` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_firecrawl.apikey` | string | API Key | default `` |
+
+**Dependencies**
+
+`firecrawl-py`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `scrape_url(self, args)` | Scrape a single web page. |
+| `map_url(self, args)` | Map a website's URL structure. |
+
+**Source**
+
+[`nodes/src/nodes/tool_firecrawl`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_firecrawl)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

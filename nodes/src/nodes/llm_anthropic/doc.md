@@ -74,4 +74,38 @@ Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm` 
 | Section | Fields |
 | --- | --- |
 | Anthropic | `anthropic.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `anthropic.profile` | string | Model | default `claude-sonnet-4-6` |
+
+**Dependencies**
+
+`langchain-anthropic`, `anthropic`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Save-time validation for Anthropic. |
+| `beginGlobal(self)` | Initialize the global filter state by loading dependencies and creating a Chat instance. |
+| `endGlobal(self)` | Clean up global filter state by clearing the chat instance. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`anthropic.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Anthropic chat bot. |
+
+**Source**
+
+[`nodes/src/nodes/llm_anthropic`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_anthropic)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -77,4 +77,50 @@ The `questions` lane is used when querying a vector store — the store expects 
 | Section | Fields |
 | --- | --- |
 | Sentence Transformer | `embedding.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `embedding.model` | string | Model name |  |
+| `embedding.truncate_dim` | number | Truncate dimensions |  |
+| `embedding.document_prefix` | string | Document prefix |  |
+| `embedding.query_prefix` | string | Query prefix |  |
+| `embedding.profile` | string | Model | default `miniLM` |
+
+**Dependencies**
+
+`numpy`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, obj: Entry)` | Initialize the instance with a given entry. |
+| `writeDocuments(self, documents: List[Doc])` | Encode and processes a list of documents. |
+| `writeQuestions(self, question: Question)` | Encode a single question. |
+| `close(self)` |  |
+
+`Embedding` — extends `EmbeddingBase` (`sentenceTransformer.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Embedding instance with provider configuration. |
+| `getVectorSize(self) -> int` | Return the vector size of the embedding module. |
+| `getMaximumTokens(self) -> int` | Return the maximum number of tokens in a request. |
+| `encodeQuestion(self, question: Question) -> List` | Given a string (document), encode the document into a vector. |
+| `encodeChunks(self, chunks: List[Doc]) -> None` | Given a list of documents, encode the document into a vector. |
+
+**Source**
+
+[`nodes/src/nodes/embedding_transformer`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_transformer)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

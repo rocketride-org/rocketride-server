@@ -104,4 +104,56 @@ When **Advanced Configuration** is enabled, supply a raw JSON object instead of 
 | Section | Fields |
 | --- | --- |
 | LlamaParse | `llamaparse.default` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `llamaparse.use_advanced_config` | boolean | Advanced Configuration | default `false` |
+| `llamaparse.api_key` | string | API Key |  |
+| `llamaparse.parse_mode` | string | Parse Mode | default `parse_page_with_lvm` |
+| `llamaparse.lvm_model` | string | LVM Model | default `anthropic-sonnet-4.0` |
+| `llamaparse.use_system_prompt_append` | boolean | Use Additional Instructions | default `false` |
+| `llamaparse.system_prompt_append` | string | Additional Instructions |  |
+| `llamaparse.spreadsheet_extract_sub_tables` | boolean | Extract Sub Tables | default `false` |
+| `llamaparse.advanced_config` | string | Advanced Configuration (JSON) | default `{   "parse_mode": "parse_page_with_llm",   "spreadsheet_extract_sub_tables": false,   "system_prompt_append": "",   "lvm_model": "anthropic-sonnet-4.0" }` |
+
+**Dependencies**
+
+`llama-parse`, `llama-index-core`, `llama-cloud`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate LlamaParse configuration at save-time. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` | Call from engLib, process object startup. |
+| `close(self)` | Call from engLib, process object complete. |
+| `writeTag(self, tag)` | Process data tags from the tag lane. |
+| `extract_tables_from_text(self, text: str)` | Extract tables from parsed text and write them to the table lane. |
+| `extract_tables_from_structured_data(self, structured_data: list)` | Extract tables from structured data and write them to the table lane. |
+| `writeText(self, text: str)` | Call from engLib, process text. |
+| `writeTable(self, table: str)` | Call from engLib, process table data. |
+| `writeDocuments(self, documents: List[Doc])` | Call from engLib, process document objects. |
+
+`Parser` — extends `ReaderBase` (`parser.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the LlamaParse parser with the given provider, connection configuration, and bag. |
+| `read(self, file) -> str` | Read and parse document data using LlamaParse. |
+| `parse(self, file_data: bytes, file_name: Optional[str]) -> dict[str, Any]` | Parse document data using LlamaParse. |
+
+**Source**
+
+[`nodes/src/nodes/llamaparse`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llamaparse)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

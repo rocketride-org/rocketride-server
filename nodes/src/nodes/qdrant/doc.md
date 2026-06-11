@@ -75,4 +75,58 @@ Documents must be run through an embedding node before reaching this node.
 | --- | --- |
 | Qdrant Vector Store | `qdrant.profile` |
 | Qdrant | `type`, `qdrant.target.parameters`, `target.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io |  |
+| `qdrant.serverName` | string | Tool Server Name | default `qdrant` |
+| `qdrant.profile` | string | Type of Qdrant host | default `cloud` |
+| `qdrant.provider` | string |  | const `qdrant` |
+| `qdrant.store` |  | Store |  |
+
+**Dependencies**
+
+`grpcio`, `grpcio-tools`, `portalocker`, `pydantic`, `urllib3`, `httpx`, `qdrant_client`, `numpy`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `validateConfig(self)` | Validate Qdrant config at save-time with a fast SDK probe. |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `VectorStoreToolMixin`, `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
+| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`qdrant.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the qdrant vector store. |
+| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Given a filter, this will return the document groups matching the filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Query and return all the unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the document store. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
+
+**Source**
+
+[`nodes/src/nodes/qdrant`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/qdrant)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

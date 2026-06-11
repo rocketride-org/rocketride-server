@@ -81,4 +81,45 @@ Sends images to locally-hosted Ollama vision models and returns text analysis. N
 | Section | Fields |
 | --- | --- |
 | Ollama Vision | `image_vision_ollama.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `vision.systemPrompt` | string | System Instructions |  |
+| `vision.prompt` | string | Analysis Prompt |  |
+| `image_vision_ollama.profile` | string | Vision Model | default `llama3_2-vision-11b` |
+
+**Dependencies**
+
+`langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents and emit vision model responses as text documents. |
+
+`Chat` — extends `ChatBase` (`ollama_vision.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Ollama Vision chat instance. |
+| `chat(self, question: Question) -> Answer` | Send a vision request to Ollama and get the response. |
+
+**Source**
+
+[`nodes/src/nodes/llm_vision_ollama`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_vision_ollama)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

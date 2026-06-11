@@ -84,4 +84,39 @@ Extract at video keyframes (I-frames).
 | Section | Fields |
 | --- | --- |
 | Video Frame Grabber | `grabber.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `grabber.percent` | number | Percentage change for frame | default `0.4` |
+| `grabber.second.interval` | number | Interval (in seconds) between frames | default `5` |
+| `grabber.start_time` | number | Start time (in seconds) for frame extraction (0=beginning) | default `0` |
+| `grabber.duration` | number | Duration  (in seconds) for frame extraction (0=end of video) | default `0` |
+| `grabber.max_frames` | number | Maximum number of frames to extract (0=unlimited) | default `0` |
+| `grabber.min_scene_gap` | number | Minimum gap between scenes (seconds) | default `0` |
+| `grabber.profile` | string | Frame grabber mode | default `interval` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self)` |  |
+| `endInstance(self)` |  |
+| `open(self, obj: Entry)` |  |
+| `close(self)` |  |
+| `writeVideo(self, action: AVI_ACTION, mimeType: str, buffer: bytes)` |  |
+
+**Source**
+
+[`nodes/src/nodes/frame_grabber`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/frame_grabber)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

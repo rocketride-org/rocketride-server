@@ -45,4 +45,49 @@ The source file extension is replaced with `.txt` on output.
 | Section | Fields |
 | --- | --- |
 | Text Output | `type`, `text_output.target.parameters`, `target.mode` |
+
+**Dependencies**
+
+`cffi`, `cryptography==46.0.7`, `pycparser`, `pyspnego`, `smbprotocol`, `sspilib`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`Endpoint` (`endpoint.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginEndpoint(self)` | Call from engLib, Endpoint initialization. |
+| `endEndpoint(self)` | Call from engLib, Endpoint cleanup. |
+| `validateConfig(self, syntaxOnly: bool)` | Call from engLib, Endpoint configuration validation. |
+| `getConfigSubKey(self)` | Call from engLib, target service uniqueness key. |
+| `getPipeFilters(self)` | Call from engLib, list of pipe filters. |
+| `connect(self)` | Authenticate and test connection to the target share. |
+| `validate_param(param_name: str, param_value: str, is_required: bool, min_lenght: int, max_length: int, pattern: str, validator: Any) -> bool` | Validate parameter to match the requirements. |
+| `validate_smb_username(username: str)` |  |
+| `validate_smb_path(smb_path: str)` | Validate sub-path to be not rooted, not containing dot folders and special characters. |
+
+`Instance` (`instance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self)` | Call from engLib, Instance initialization. |
+| `endInstance(self)` | Call from engLib, Instance cleanup. |
+| `writeTextBegin(self)` |  |
+| `writeText(self, text: str)` |  |
+| `open(self, object: Entry)` | Call from engLib, process object startup. |
+| `close(self)` | Call from engLib, process object complete. |
+| `get_transform_key(self) -> str` | Build transform key for current object. |
+| `handle_object_error(self)` | Update current object with error details of exeption occurred. |
+| `skip_object(self, msg: str)` | Skip further processing of the current object. |
+
+**Source**
+
+[`nodes/src/nodes/text_output`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/text_output)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -62,4 +62,55 @@ ROCKETRIDE_RERANK_COHERE_KEY=...
 | Section | Fields |
 | --- | --- |
 | Cohere Rerank | `rerank_cohere.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model | default `rerank-english-v3.0` |
+| `top_n` | number | Top N |  |
+| `min_score` | number | Min Score |  |
+| `rerank_cohere.profile` | string | Model | default `rerank-english-v3.0` |
+
+**Dependencies**
+
+`cohere>=6.1.0,<7.0.0`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the configuration for the Cohere Rerank node. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Receive a question with retrieved documents and rerank them by relevance. |
+
+`RerankError` — extends `Exception` (`rerank_client.py`)
+
+`RerankAuthenticationError` — extends `RerankError` (`rerank_client.py`)
+
+`RerankRateLimitError` — extends `RerankError` (`rerank_client.py`)
+
+`RerankBadRequestError` — extends `RerankError` (`rerank_client.py`)
+
+`RerankServerError` — extends `RerankError` (`rerank_client.py`)
+
+`RerankClient` (`rerank_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, logicalType: str, config: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Cohere rerank client. |
+| `rerank(self, query: str, documents: List[str], top_n: Optional[int], model: Optional[str]) -> List[Dict[str, Any]]` | Rerank a list of documents by relevance to the given query. |
+| `rerank_with_threshold(self, query: str, documents: List[str], top_n: Optional[int], min_score: Optional[float], model: Optional[str]) -> List[Dict[str, Any]]` | Rerank documents and filter by minimum relevance score. |
+
+**Source**
+
+[`nodes/src/nodes/rerank_cohere`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/rerank_cohere)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -77,6 +77,27 @@ Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serve
 | Elasticsearch Vector Store | `elasticsearch.profile` |
 | Elasticsearch | `type`, `elasticsearch.target.parameters`, `target.mode` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.cloud.host` |  | Enter the Elastic Cloud host URL e.g. <your-deployment-id>.es.<region>.cloud.es.io |  |
+| `vector.index` | string | Index Name / Collection Name | default `rocketride` |
+| `elasticsearch.index` | string | Index Name / Collection Name | default `rocketride` |
+| `elasticsearch.type` | string | Type | default `vector_database` |
+| `elasticsearch.store_enabled` | boolean | Store | default `true` |
+| `elasticsearch.mode` | boolean | Store Mode | default `true` |
+| `elasticsearch.index_label` | object | Index Mode |  |
+| `elasticsearch.vstore_label` | object | Vector Store Mode |  |
+| `elasticsearch.search` | boolean | Customize Indexing Search Behavior | default `false` |
+| `elasticsearch.matchOperator` | string | Match Operator | default `or` |
+| `elasticsearch.search.exact.slop` | number | Slop | default `0` |
+| `elasticsearch.search.highlight` | boolean | Return contextual snippets | default `false` |
+| `elasticsearch.search.highlight.fragment_size` | number | Snippet size (characters) | default `250` |
+| `elasticsearch.profile` | string | Deployment Type | default `self-managed` |
+| `elasticsearch.provider` | string |  | const `elasticsearch` |
+| `elasticsearch.store` |  | Store |  |
+
 ### Service: `opensearch`
 
 | Property | Value |
@@ -104,4 +125,87 @@ Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serve
 | Section | Fields |
 | --- | --- |
 | OpenSearch Index/Vector | `opensearch.host`, `opensearch.collection`, `opensearch.auth.enabled`, `opensearch.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `opensearch.host` | string | Host | default `http://localhost:9200` |
+| `opensearch.auth.enabled` | boolean | Use basic auth | default `true` |
+| `opensearch.auth.username` | string | Username | default `admin` |
+| `opensearch.auth.password` | string | Password | default `` |
+| `opensearch.collection` | string | Collection | default `rocketride` |
+| `opensearch.mode` | boolean | Store Mode | default `false` |
+| `opensearch.search` | boolean | Customize Indexing Search Behavior | default `false` |
+| `opensearch.matchOperator` | string | Match Operator | default `or` |
+| `opensearch.search.exact.slop` | number | Slop | default `0` |
+| `opensearch.search.highlight` | boolean | Return contextual snippets | default `false` |
+| `opensearch.search.highlight.fragment_size` | number | Snippet size (characters) | default `250` |
+| `opensearch.score` | number | Retrieval Score | default `0.5` |
+| `opensearch.dim` | integer | Embedding Dimension | default `768` |
+| `opensearch.index_label` | object | Index Mode |  |
+| `opensearch.vstore_label` | object | Vector Store Mode |  |
+| `opensearch.provider` | string |  | const `opensearch` |
+
+**Dependencies**
+
+`elasticsearch>=8.0.0,<9.0.0`, `opensearch-py==3.2.0`, `numpy`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Initialize backend (Elasticsearch or OpenSearch) from node config. |
+| `validateConfig(self) -> None` | Validate node config at save-time (fast probe). Backend is auto-detected. |
+| `endGlobal(self) -> None` | Release store or client and clear references. |
+
+`IInstance` — extends `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question) -> None` | Run a search for the given question and write results to the pipeline. |
+| `writeDocuments(self, documents: List[Doc]) -> None` | Ingest documents (with embeddings) into the store. Only supported in vstore mode. |
+| `writeText(self, text: str) -> None` | Ingest raw text into the index (text lane in index mode). |
+| `renderObject(self, object: Entry) -> None` | Stream document text to the writeText lane (Elasticsearch only; uses DocumentStoreBase). |
+
+`Store` — extends `DocumentStoreBase` (`elasticsearch_store.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> None` | Initialize the Elasticsearch store from node config. |
+| `count_documents(self) -> int` | Return the number of documents in the index. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search using Elasticsearch text search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search using vector similarity. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Given a filter, this will return the document groups matching the filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Query and return all the unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the document store. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
+| `ensure_index_text(self, mappings: Optional[Dict[str, Any]]) -> None` | Create a text/BM25 index if missing. Used for index mode. |
+| `upsert_text_document(self, doc_id: Optional[str], body: Dict[str, Any], refresh: bool) -> None` | Index or update a single text document (index mode ingestion). |
+| `search_text_all(self, query: str, batch_size: int, scroll: str, filters: Optional[Dict[str, Any]], source: Optional[List[str]], match_operator: str, match_operator_slop: int, highlight: bool, highlight_fragment_size: int, body: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]` | Scroll/scan all matching documents and return every hit (elasticsearch.helpers.scan). |
+
+`OpenSearchClient` (`opensearch_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, host: str, username: Optional[str], password: Optional[str], **kwargs: Any) -> None` | Initialize the OpenSearch client with optional basic auth. |
+| `close(self) -> None` | Close the OpenSearch client. |
+| `ping(self) -> bool` | Check connectivity to the cluster. |
+| `ensure_index_text(self, index: str, mappings: Optional[Dict[str, Any]]) -> None` | Create a text/BM25 index if missing. |
+| `ensure_index_vector(self, index: str, dimension: int, method: Optional[Dict[str, Any]]) -> None` | Create a vector index if missing (knn_vector). |
+| `upsert_document(self, index: str, doc_id: Optional[str], body: Dict[str, Any], refresh: bool) -> None` | Index or update a single document (text and/or vector). If doc_id is None, an id is auto-generated. |
+| `upsert_vector_document(self, index: str, doc_id: str, vector: List[float], content: Optional[str], metadata: Optional[Dict[str, Any]], refresh: bool) -> None` | Index or update a single vector document. |
+| `search_vector(self, index: str, vector: Sequence[float], k: int, source: Optional[List[str]], num_candidates: Optional[int]) -> Dict[str, Any]` | k-NN search on vector field. |
+| `search_text_all(self, index: str, query: str, batch_size: int, scroll: str, filters: Optional[Dict[str, Any]], source: Optional[List[str]], match_operator: str, match_operator_slop: int, highlight: bool, highlight_fragment_size: int, body: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]` | Scroll/scan all matching documents and return every hit. |
+
+**Source**
+
+[`nodes/src/nodes/index_search`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/index_search)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

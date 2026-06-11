@@ -97,4 +97,40 @@ Connects OpenAI GPT models to your pipeline. Used primarily as an `llm` invoke c
 | Section | Fields |
 | --- | --- |
 | OpenAI | `openai.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `openai.profile` | string | Model | default `openai-5-2` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the configuration for OpenAI LLM node. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`openai_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the OpenAI chat bot. |
+| `is_retryable_error(self, error)` | Determine if the error is retryable. |
+| `map_exception(self, error)` | Convert unfriendly openai exceptions to friendlier ones. |
+
+**Source**
+
+[`nodes/src/nodes/llm_openai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_openai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -1,19 +1,27 @@
 /**
- * nodes:docs-generate — write a generated parameter/IO table into the marked
- * block of each node's co-located doc.md.
+ * nodes:docs-generate — write a generated reference block into the marked
+ * region of each node's co-located doc.md.
  *
- * Source of truth: nodes/src/nodes/<name>/services*.json (JSONC). Multi-service
- * nodes emit one section per service file. The generated content lives strictly
- * between the markers; hand-written prose around them is preserved. Nodes without
- * a doc.md are skipped (doc.md is authored/migrated separately).
+ * Source of truth: nodes/src/nodes/<name>/services*.json (JSONC), requirements.txt,
+ * and the node's Python classes (via extract_node_api.py). Multi-service nodes emit
+ * one schema section per service file. The generated content lives strictly between
+ * the markers; hand-written prose around them is preserved. Nodes without a doc.md
+ * are skipped (doc.md is authored/migrated separately).
+ *
+ * Each generated block contains, per node: per-service metadata / lanes / profiles /
+ * config sections / schema fields, then node-level Dependencies, Classes, and a Source
+ * link to the node directory on the repo's default branch.
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const NODES_DIR = path.join(HERE, '..', 'src', 'nodes');
+const ROOT = path.join(HERE, '..', '..');
+const EXTRACT_SCRIPT = path.join(HERE, 'extract_node_api.py');
 
 const START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const END = '<!-- ROCKETRIDE:GENERATED:PARAMS END -->';
@@ -122,12 +130,63 @@ function serviceBlock(svc, label) {
 		lines.push('');
 	}
 
+	// Schema: per-field detail from services.json `fields`. Skip pure grouping refs
+	// (entries that only wire properties together and carry no type/title/description).
+	const fields = svc.fields && typeof svc.fields === 'object' ? Object.entries(svc.fields) : [];
+	const documented = fields.filter(([, f]) => f && typeof f === 'object' && (f.type || f.title || f.description));
+	if (documented.length) {
+		lines.push('**Schema fields**', '', '| Field | Type | Title / Description | Const / Default |', '| --- | --- | --- | --- |');
+		for (const [name, f] of documented) {
+			const titleDesc = f.title || f.description || '';
+			const constDefault = f.const != null ? `const \`${esc(f.const)}\`` : f.default != null ? `default \`${esc(f.default)}\`` : '';
+			lines.push(`| \`${esc(name)}\` | ${esc(f.type)} | ${esc(titleDesc)} | ${constDefault} |`);
+		}
+		lines.push('');
+	}
+
 	return lines.join('\n');
 }
 
-function generateBlock(dir) {
+/** Parse requirements.txt: drop comments / blank lines, keep version pins. */
+function readDependencies(dir) {
+	const file = path.join(dir, 'requirements.txt');
+	if (!existsSync(file)) return [];
+	return readFileSync(file, 'utf8')
+		.split('\n')
+		.map((line) => line.replace(/#.*$/, '').trim())
+		.filter(Boolean);
+}
+
+function dependenciesBlock(dir) {
+	const deps = readDependencies(dir);
+	if (!deps.length) return '';
+	return ['**Dependencies**', '', deps.map((d) => `\`${esc(d)}\``).join(', '), ''].join('\n');
+}
+
+function classesBlock(classes) {
+	if (!classes || !classes.length) return '';
+	const lines = ['**Classes**', ''];
+	for (const cls of classes) {
+		const ext = cls.bases && cls.bases.length ? ` — extends ${cls.bases.map((b) => `\`${esc(b)}\``).join(', ')}` : '';
+		lines.push(`\`${esc(cls.name)}\`${ext} (\`${esc(cls.file)}\`)`, '');
+		if (cls.methods && cls.methods.length) {
+			lines.push('| Method | Summary |', '| --- | --- |');
+			for (const m of cls.methods) lines.push(`| \`${esc(m.signature)}\` | ${esc(m.summary)} |`);
+			lines.push('');
+		}
+	}
+	// Trailing blank line kept (like the other blocks) so generateBlock's join
+	// leaves a blank line before the next section instead of butting a table
+	// straight against **Source**.
+	return lines.join('\n');
+}
+
+function sourceBlock(name, repo) {
+	return ['**Source**', '', `[\`nodes/src/nodes/${name}\`](${repo.base}/tree/${repo.branch}/nodes/src/nodes/${name})`, ''].join('\n');
+}
+
+function generateBlock(dir, name, apiData, repo) {
 	const services = readdirSync(dir).filter((f) => /^services.*\.json$/.test(f)).sort();
-	if (!services.length) return '_No machine-readable schema for this node._';
 	const multi = services.length > 1;
 	const parts = [];
 	for (const f of services) {
@@ -135,7 +194,55 @@ function generateBlock(dir) {
 		const label = multi ? f.replace(/^services\.?/, '').replace(/\.json$/, '') || 'default' : '';
 		parts.push(serviceBlock(svc, label));
 	}
+	if (!services.length) parts.push('_No machine-readable schema for this node._');
+
+	// Node-level sections (emitted once, after the per-service schema blocks).
+	const deps = dependenciesBlock(dir);
+	if (deps) parts.push(deps);
+	const classes = classesBlock(apiData[name]);
+	if (classes) parts.push(classes);
+	parts.push(sourceBlock(name, repo));
+
 	return parts.join('\n').trim();
+}
+
+/** Run the static Python extractor once for all nodes; tolerate its absence. */
+function loadNodeApi() {
+	for (const py of ['python3', 'python']) {
+		try {
+			return JSON.parse(execFileSync(py, [EXTRACT_SCRIPT, NODES_DIR], { encoding: 'utf8' }));
+		} catch (err) {
+			if (err && err.code === 'ENOENT') continue; // try next interpreter
+			console.warn(`nodes:docs-generate: class extraction failed (${err.message}); Classes sections omitted`);
+			return {};
+		}
+	}
+	console.warn('nodes:docs-generate: no python interpreter found; Classes sections omitted');
+	return {};
+}
+
+/** Resolve the repo URL base and default branch for Source links. */
+function resolveRepo() {
+	let base = 'https://github.com/rocketride-org/rocketride-server';
+	try {
+		const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+		const url = pkg?.repository?.url || '';
+		const m = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
+		if (m) base = `https://github.com/${m[1]}`;
+	} catch {
+		// fall back to the default base
+	}
+
+	let branch = 'develop';
+	try {
+		branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'origin/HEAD'], { cwd: ROOT, encoding: 'utf8' })
+			.trim()
+			.replace(/^origin\//, '') || 'develop';
+	} catch {
+		// origin/HEAD not configured locally — default branch is develop
+	}
+
+	return { base, branch };
 }
 
 function injectBlock(docPath, block) {
@@ -157,6 +264,8 @@ function injectBlock(docPath, block) {
 }
 
 function main() {
+	const apiData = loadNodeApi();
+	const repo = resolveRepo();
 	let updated = 0;
 	let skipped = 0;
 	for (const name of readdirSync(NODES_DIR)) {
@@ -166,9 +275,9 @@ function main() {
 			skipped++;
 			continue;
 		}
-		if (injectBlock(docPath, generateBlock(dir))) updated++;
+		if (injectBlock(docPath, generateBlock(dir, name, apiData, repo))) updated++;
 	}
-	console.log(`nodes:docs-generate updated ${updated} doc.md, skipped ${skipped} without doc.md`);
+	console.log(`nodes:docs-generate updated ${updated} doc.md, skipped ${skipped} without doc.md (branch ${repo.branch})`);
 }
 
 main();

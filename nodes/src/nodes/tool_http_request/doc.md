@@ -97,4 +97,52 @@ Set all rate limit values to `0` to disable rate limiting entirely.
 | Section | Fields |
 | --- | --- |
 | HTTP Request | `type`, `http_request.allowGET`, `http_request.allowPOST`, `http_request.allowPUT`, `http_request.allowPATCH`, `http_request.allowDELETE`, `http_request.allowHEAD`, `http_request.allowOPTIONS`, `http_request.urlWhitelist`, `http_request.rateLimitPerSecond`, `http_request.rateLimitPerMinute`, `http_request.maxConcurrentRequests` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `http_request.serverName` | string | Server name | default `http` |
+| `http_request.allowGET` | boolean | GET | default `true` |
+| `http_request.allowPOST` | boolean | POST | default `true` |
+| `http_request.allowPUT` | boolean | PUT | default `true` |
+| `http_request.allowPATCH` | boolean | PATCH | default `true` |
+| `http_request.allowDELETE` | boolean | DELETE | default `true` |
+| `http_request.allowHEAD` | boolean | HEAD | default `false` |
+| `http_request.allowOPTIONS` | boolean | OPTIONS | default `false` |
+| `http_request.whitelistPattern` | string | URL Pattern (regex) | default `` |
+| `http_request.urlWhitelist` | array | URL Whitelist |  |
+| `http_request.rateLimitPerSecond` | number | Max requests per second | default `10` |
+| `http_request.rateLimitPerMinute` | number | Max requests per minute | default `100` |
+| `http_request.maxConcurrentRequests` | number | Max concurrent requests | default `5` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `http_request(self, args)` | Make an HTTP request with security guardrails. |
+
+`RateLimitError` — extends `Exception` (`rate_limiter.py`)
+
+`RateLimiter` (`rate_limiter.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, max_per_second: int, max_per_minute: int, max_concurrent: int) -> None` | Initialise token buckets and concurrency semaphore. |
+| `acquire(self) -> None` | Acquire a rate-limit slot, or raise ``RateLimitError``. |
+| `release(self) -> None` | Release the concurrency slot after a request completes. |
+
+**Source**
+
+[`nodes/src/nodes/tool_http_request`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_http_request)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

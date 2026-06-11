@@ -60,6 +60,15 @@ There are no preset profiles — all fields are specified directly.
 | --- | --- |
 | OpenAI-Compatible API | `openai_api.profile` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `base_url` | string | Base URL |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `openai_api.profile` | string | Model | default `custom` |
+
 ### Service: `nebius`
 
 | Property | Value |
@@ -88,4 +97,41 @@ There are no preset profiles — all fields are specified directly.
 | Section | Fields |
 | --- | --- |
 | Nebius | `openai_api.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `base_url` | string | Base URL |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `openai_api.profile` | string | Model | default `llama-3-3-70b` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the configuration for OpenAI-compatible API LLM node. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`openai_client.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the OpenAI-compatible chat bot. |
+| `is_retryable_error(self, error)` | Determine if the error is retryable. |
+| `map_exception(self, error)` | Convert unfriendly openai exceptions to friendlier ones. |
+
+**Source**
+
+[`nodes/src/nodes/llm_openai_api`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_openai_api)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

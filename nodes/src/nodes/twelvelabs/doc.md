@@ -57,4 +57,37 @@ Analyzes video using the TwelveLabs Pegasus model and returns a text response. T
 | Section | Fields |
 | --- | --- |
 | TwelveLabs | `twelvelabs.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `twelvelabs.apikey` | string | API Key |  |
+| `twelvelabs.instructions` | array | Instructions |  |
+| `twelvelabs.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`twelvelabs`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self) -> None` | Initialize the global configuration for the TwelveLabs node. |
+| `beginGlobal(self) -> None` | Load the API key and instructions from configuration once, |
+| `endGlobal(self) -> None` | Clear the global configuration. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` | Initialize the instance. |
+| `writeVideo(self, action: int, mimeType: str, buffer: bytes) -> None` | Write video data to the instance. |
+
+**Source**
+
+[`nodes/src/nodes/twelvelabs`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/twelvelabs)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -58,4 +58,33 @@ You need a bot token from @BotFather (e.g. `123456:ABC-DEF1234ghIkl-zyx57W2v1u12
 | Section | Fields |
 | --- | --- |
 | Telegram Bot | `type`, `Pipe.source.parameters` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `telegram.botToken` | string | Bot Token |  |
+| `telegram.mode` | string | Connection Mode | default `polling` |
+| `telegram.webhookUrl` | string | Webhook URL |  |
+| `Pipe.source.parameters` |  | Bot Configuration |  |
+
+**Dependencies**
+
+`aiohttp>=3.13.5`, `requests`, `fastapi`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointBase` (`IEndpoint.py`)
+
+| Method | Summary |
+| --- | --- |
+| `scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None])` | Entry point called by the RocketRide engine to start the node. |
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/telegram`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/telegram)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

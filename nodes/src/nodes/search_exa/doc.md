@@ -57,4 +57,47 @@ Performs web search using the Exa API. Accepts a question and returns semantic o
 | Section | Fields |
 | --- | --- |
 | Exa Search | `search_exa.apikey`, `search_exa.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `search_exa.profile` | string | Profile | default `default` |
+| `search_exa.apikey` | string | API Key | default `` |
+| `search_exa.type` | string | Search Type | default `auto` |
+| `search_exa.numResults` | integer | Results | default `5` |
+| `search_exa.includeHighlights` | boolean | Include Highlights | default `true` |
+| `search_exa.highlightChars` | integer | Highlight Chars | default `600` |
+
+**Dependencies**
+
+`requests`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Initialize the shared Exa backend for runtime execution. |
+| `validateConfig(self) -> None` | Validate user-visible configuration without starting the backend. |
+| `endGlobal(self) -> None` | Release shared runtime state for this node instance. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question) -> None` |  |
+
+`ExaSearch` — extends `ChatBase` (`exa_search.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the ExaSearch node. |
+| `getTokens(self, value: str) -> int` | Estimate token usage for the given text using a word-based heuristic. |
+| `chat(self, question: Question) -> Answer` | Execute one Exa search request and return the raw result payload as an answer. |
+
+**Source**
+
+[`nodes/src/nodes/search_exa`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/search_exa)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

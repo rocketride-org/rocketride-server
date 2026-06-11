@@ -68,4 +68,49 @@ Splits source code text into chunks that respect syntax boundaries (functions, c
 | Section | Fields |
 | --- | --- |
 | Code | `code.splitter.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `code.splitter.strlen` | number | Maximum string length | default `512` |
+| `code.splitter.auto.language` | string |  | const `auto` |
+| `code.splitter.c.language` | string |  | const `c` |
+| `code.splitter.cpp.language` | string |  | const `cpp` |
+| `code.splitter.python.language` | string |  | const `python` |
+| `code.splitter.javascript.language` | string |  | const `javascript` |
+| `code.splitter.typescript.language` | string |  | const `typescript` |
+| `code.splitter.profile` | string | Code splitter profile | default `auto` |
+
+**Dependencies**
+
+`tree-sitter`, `tree-sitter-c`, `tree-sitter-cpp`, `tree-sitter-javascript`, `tree-sitter-python`, `tree-sitter-typescript`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` |  |
+| `writeTable(self, table: str)` |  |
+| `writeText(self, text: str)` |  |
+
+`PreProcessor` — extends `PreProcessorBase` (`code.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the splitter with the given programming language. |
+| `process(self, code: str) -> List[str]` | Split the given source code into meaningful chunks using TreeSitter. |
+
+**Source**
+
+[`nodes/src/nodes/preprocessor_code`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/preprocessor_code)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

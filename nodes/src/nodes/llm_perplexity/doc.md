@@ -72,4 +72,41 @@ Connects Perplexity AI Sonar models to your pipeline. Sonar models include real-
 | Section | Fields |
 | --- | --- |
 | Perplexity | `perplexity.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `perplexity.profile` | string | Model | default `sonar-pro` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate Perplexity configuration at save-time with a minimal probe. |
+| `beginGlobal(self)` | Initialize the global chat instance. |
+| `endGlobal(self)` | Clean up the global chat instance. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`perplexity.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Perplexity AI node. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current model. |
+| `getTokens(self, value: str) -> int` | Estimate token count for a given text string. |
+| `chat(self, question: Question) -> Answer` | Process a question and return an answer with retry logic. |
+
+**Source**
+
+[`nodes/src/nodes/llm_perplexity`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_perplexity)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

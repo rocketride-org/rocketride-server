@@ -107,4 +107,58 @@ Surya and TrOCR's detector pin OpenCV to versions the project deliberately overr
 | Section | Fields |
 | --- | --- |
 | OCR Settings | `ocr.profile`, `ocr.engine`, `ocr.script_family`, `ocr.table_engine` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `ocr.engine` | string | OCR Engine | default `easyocr` |
+| `ocr.script_family` | string | Script Family | default `latin` |
+| `ocr.det_arch` | string | Detection Architecture (DocTR) | default `db_resnet50` |
+| `ocr.reco_arch` | string | Recognition Architecture (DocTR) | default `crnn_vgg16_bn` |
+| `ocr.table_engine` | string | Table OCR Engine | default `doctr` |
+| `ocr.profile` | string | OCR Profile | default `latin` |
+
+**Dependencies**
+
+`img2table`, `pillow`, `numpy`
+
+**Classes**
+
+`ModelServerOCR` — extends `OCRInstance` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, engine: str, languages: List[str])` | Initialize the adapter with a model server OCR engine. |
+| `ocr(self)` | Lazy-load the OCR engine from model server (or local fallback). |
+| `content(self, document) -> List[List[Tuple]]` | Perform OCR on all images in the document. |
+| `of(self, document) -> Any` | Entry point called by img2table to run OCR on a document. |
+| `to_ocr_dataframe(self, content: List[List]) -> Any` | Convert OCR content to OCRDataframe. |
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` |  |
+| `extract_tables_from_image(self, image_data: bytes, table_callback)` | Extract tables from image bytes using img2table and invoke a callback for each table. |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+| `writeDocuments(self, documents: List[Doc])` |  |
+
+`Reader` — extends `ReaderBase` (`ocr.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the OCR reader. |
+| `read(self, image_data) -> str` | Read text from an image. |
+
+**Source**
+
+[`nodes/src/nodes/ocr`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/ocr)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

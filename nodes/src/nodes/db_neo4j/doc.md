@@ -90,4 +90,46 @@ Generated Cypher is validated with `EXPLAIN` before execution. If validation fai
 | Section | Fields |
 | --- | --- |
 | Neo4J | `neo4jdb.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `neo4jdb.uri` | string | Connection URI | default `neo4j://localhost:7687` |
+| `neo4jdb.auth_method` | string | Authentication | default `userpass` |
+| `neo4jdb.user` | string | User | default `neo4j` |
+| `neo4jdb.password` | string | Password |  |
+| `neo4jdb.token` | string | Bearer token |  |
+| `neo4jdb.database` | string | Database name | default `neo4j` |
+| `neo4jdb.db_description` | string | Graph description | default `` |
+| `neo4jdb.max_attempts` | integer | Max validation attempts | default `5` |
+| `neo4jdb.allow_execute` | boolean | Allow direct query execution | default `false` |
+| `neo4jdb.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`neo4j`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Open the Neo4J driver, verify connectivity, and cache the graph schema. |
+| `endGlobal(self) -> None` | Close the Neo4J driver and release the connection. |
+| `validateConfig(self) -> None` | Test connectivity with a trivial read query; safe to call at save-time. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `get_data(self, args)` | Translate natural language to Cypher and execute. |
+| `get_schema(self, args)` | Return the cached graph schema. |
+| `get_cypher(self, args)` | Translate natural language to Cypher without executing. |
+| `writeQuestions(self, question: Question) -> None` | Translate a natural-language question to Cypher, execute it, emit results. |
+
+**Source**
+
+[`nodes/src/nodes/db_neo4j`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_neo4j)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

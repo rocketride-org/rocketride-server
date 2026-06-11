@@ -131,4 +131,38 @@ Connects Amazon Bedrock-hosted models to your pipeline. Used primarily as an `ll
 | Section | Fields |
 | --- | --- |
 | Amazon Bedrock | `bedrock.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `bedrock.profile` | string | Model | default `meta_llama3_3-70b` |
+
+**Dependencies**
+
+`langchain-aws`, `langchain-core`, `langchain`, `boto3`, `botocore`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate Amazon Bedrock config at save-time using a minimal API probe. |
+| `beginGlobal(self)` | Initialize global filter state by loading deps and creating a Chat instance. |
+| `endGlobal(self)` | Clean up global filter state by clearing the chat instance. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`bedrock.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Bedrock chat bot. |
+
+**Source**
+
+[`nodes/src/nodes/llm_bedrock`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_bedrock)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

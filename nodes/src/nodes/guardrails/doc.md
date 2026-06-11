@@ -71,4 +71,58 @@ How it reacts is up to the **policy mode**: `block` rejects the offending questi
 | Section | Fields |
 | --- | --- |
 | Guardrails | `guardrails.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `policy_mode` | string | Policy mode | default `warn` |
+| `enable_prompt_injection` | boolean | Enable prompt injection detection | default `true` |
+| `enable_content_safety` | boolean | Enable content safety check | default `true` |
+| `enable_pii_detection` | boolean | Enable PII detection | default `true` |
+| `enable_hallucination_check` | boolean | Enable hallucination check | default `false` |
+| `max_input_length` | number | Max input length (chars) | default `0` |
+| `max_tokens_estimate` | number | Max tokens (estimate) | default `0` |
+| `expected_format` | string | Expected output format | default `` |
+| `blocked_topics` | array | Blocked topics |  |
+| `allowed_topics` | array | Allowed topics |  |
+| `guardrails.profile` | string | Profile | default `basic` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self)` | Initialize the guardrails instance state. |
+| `open(self, entry: Entry)` | Reset per-object state. |
+| `writeQuestions(self, question: Question)` | Run input guardrails on the question before forwarding. |
+| `writeAnswers(self, answer: Answer)` | Run output guardrails on the answer before forwarding. |
+| `writeDocuments(self, documents)` | Collect source documents for hallucination checks. |
+| `close(self)` | Reset state on close. |
+
+`GuardrailsEngine` (`guardrails_engine.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, config: Dict[str, Any])` | Initialize the guardrails engine with configuration. |
+| `check_prompt_injection(self, text: str) -> Dict[str, Any]` | Detect prompt injection attempts using regex patterns and keyword scoring. |
+| `check_topic_restriction(self, text: str, allowed_topics: Optional[List[str]], blocked_topics: Optional[List[str]]) -> Dict[str, Any]` | Check text against allowed and blocked topic lists. |
+| `check_input_length(self, text: str, max_chars: int, max_tokens_estimate: int) -> Dict[str, Any]` | Check that input does not exceed length limits. |
+| `check_hallucination(self, output: str, source_documents: Optional[List[str]]) -> Dict[str, Any]` | Verify that claims in output are grounded in source documents. |
+| `check_content_safety(self, text: str) -> Dict[str, Any]` | Detect harmful or unsafe content patterns. |
+| `check_pii_leak(self, text: str) -> Dict[str, Any]` | Detect PII patterns in text (emails, phones, SSNs, credit cards, IPs). |
+| `check_format_compliance(self, text: str, expected_format: str) -> Dict[str, Any]` | Verify that output matches an expected structure. |
+| `evaluate(self, text: str, mode: str, context: Optional[Dict[str, Any]]) -> Dict[str, Any]` | Run all enabled guardrails checks on the given text. |
+
+**Source**
+
+[`nodes/src/nodes/guardrails`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/guardrails)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

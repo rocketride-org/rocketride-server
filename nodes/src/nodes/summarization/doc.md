@@ -62,4 +62,40 @@ Splits incoming text into chunks and uses an LLM to extract a summary, key point
 | Section | Fields |
 | --- | --- |
 | Summarization | `summarization.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `summarization.numberOfSummaries` | number | Number of chunks to summarize after the document is split |  |
+| `summarization.numberOfSummaryWords` | number | Number of words in each summary. Set to 0 to disable summaries. |  |
+| `summarization.numberOfKeyPointWords` | number | Number of words in each key point. Set to 0 to disable key points. |  |
+| `summarization.numberOfEntities` | number | Number of entities to extract from the document. Set to 0 to disable entity extraction. |  |
+| `summarization.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` | Begin the instance for processing. |
+| `open(self, object: Entry)` | Initialize the instance for a new object. |
+| `writeText(self, text: str)` | Add the text to the accumulator so we can summarize a document. |
+| `writeTable(self, text: str)` | Add the table to the accumulator so we can summarize a document. |
+| `closing(self)` | Process the accumulated text and extract summaries. |
+
+**Source**
+
+[`nodes/src/nodes/summarization`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/summarization)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

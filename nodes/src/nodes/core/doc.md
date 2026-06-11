@@ -36,19 +36,132 @@ Each service exposes its own config fields (credentials, hosts/ports, collection
 
 ### Service: `all`
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `all.preprocessor` |  | Preprocessor | default `preprocessor_langchain` |
+| `all.embedding` |  | Embedding | default `embedding_transformer` |
+| `all.store` |  | Vector Store | default `qdrant` |
+| `all.llm` |  | LLM | default `openai` |
+
 ### Service: `common.anonymize`
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `anonymizeChar` | string | Anonymization Character | default `█` |
+| `anonymizeAll` | boolean | Anonymize All Data | default `false` |
+| `anonymize` | boolean | Anonymize Classified Information | default `false` |
 
 ### Service: `common.aws`
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `aws.accessKey` | string | Access key |  |
+| `aws.secretKey` | string | Secret key |  |
+| `aws.region` | string | Region | default `` |
+
 ### Service: `common.google`
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `google.authType` | string | Authentication Type | default `service` |
+| `google.oAuthButton` | string | Login with Google |  |
+| `google.customerId` | string | Customer ID |  |
+| `google.adminEmail` | string | Administrator E-mail |  |
+| `google.serviceKey` | string | Service Account Key File |  |
+| `google.userToken` | string | Access Token |  |
 
 ### Service: `common`
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `storePath` | string | Store path |  |
+| `url` | string | URL | default `https://` |
+| `sync` | boolean |  | default `true` |
+| `actions` | object |  |  |
+| `source.mode` | string |  | default `Source` |
+| `target.mode` | string |  | default `Target` |
+| `hideForm` | boolean |  | default `true` |
+| `estimation.accessCost` | number | Access cost | default `0` |
+| `estimation.accessDelay` | number | Access delay | default `0` |
+| `estimation.accessRate` | number | Access rate | default `0` |
+| `estimation.storeCost` | number | Store cost | default `0` |
+| `estimation` |  | Cost estimations |  |
+| `include.path` | string | Include path |  |
+| `include.classify` | boolean | Enable Classification | default `false` |
+| `include.ocr` | boolean | Enable OCR | default `false` |
+| `include.signing` | boolean | Content Signature | default `true` |
+| `include.index` | boolean | Enable Indexing | default `false` |
+| `include.permissions` | boolean | Enable Permissions | default `false` |
+| `include.vectorize` | boolean | Enable AI Embeddings | default `false` |
+| `include` | array | Include paths |  |
+| `exclude.path` | string | Exclude path |  |
+| `exclude` | array | Exclude paths |  |
+| `DTC.features` | object | What features do you want? |  |
+| `DTC.include.path` | string | Include path |  |
+| `DTC.include` | array | Provide the path to your data |  |
+| `DTC.exclude.path` | string | Exclude path |  |
+| `DTC.exclude` | array | Provide the path to exclude |  |
+| `Pipe.features` | object | What features do you want? |  |
+| `Pipe.include.path` | string | Include path |  |
+| `Pipe.include` | array | Provide the path to your data |  |
+| `Pipe.exclude.path` | string | Exclude path |  |
+| `Pipe.exclude` | array | Provide the path to exclude |  |
+
 ### Service: `common.llm`
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `llm.local.serverbase` | string | LLM URL | default `http://localhost:11434/v1` |
+| `llm.cloud.apikey` | string | API key (Token) |  |
+| `llm.cloud.project` | string | Project (Organization) |  |
+| `llm.cloud.location` | string | Location |  |
+| `llm.cloud.modelSource` | string | Model source |  |
 
 ### Service: `common.remote`
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `remote.host` | string | Host | default `pipe.rocketride.ai` |
+| `remote.port` | number | Port | default `5565` |
+| `remote.apikey` | string | API key |  |
+| `remote.local.mode` | string |  | const `local` |
+| `remote.remote.mode` | string |  | const `remote` |
+| `remote.profile` | string | Processing Mode | default `local` |
+| `remote.provider` | string |  | const `remote` |
+| `remote` |  | Remote/Local Processing |  |
+
 ### Service: `common.vector`
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.host` | string | Host |  |
+| `vector.port` | number | Port |  |
+| `vector.cloud.host` | string | Host |  |
+| `vector.cloud.port` | number | Port |  |
+| `vector.local.host` | string | Host |  |
+| `vector.local.port` | number | Port |  |
+| `vector.local.grpc_port` | number | gRPC Port |  |
+| `vector.collection` | string | Collection | default `ROCKETRIDE` |
+| `vector.score` | number | Retrieval Score | default `0.7` |
+| `vector.apikey` | string | API key |  |
+| `vectorizer.embedding` |  | Embedding |  |
+| `vectorizer.store` |  | Vector Store |  |
 
 ### Service: `filesys`
 
@@ -70,6 +183,19 @@ Each service exposes its own config fields (credentials, hosts/ports, collection
 | --- | --- |
 | File System | `type`, `actions`, `source.mode`, `filesys.source.parameters`, `include`, `exclude`, `estimation` |
 | File System | `type`, `actions`, `source.mode`, `Pipe.filesys.source.parameters`, `Pipe.include`, `Pipe.exclude` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `include` |  | This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.  Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)  Format for Linux : /file.core.net/foldername |  |
+| `exclude` |  | This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.  Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)  Format for Linux : /file.core.net/foldername |  |
+| `excludeExternalDrives` | boolean | Exclude external drives | default `true` |
+| `excludeEnableGlobal` | boolean | Exclude typical OS files and directories | default `true` |
+| `excludeSymlinks` | boolean | Exclude symlinks | default `true` |
+| `filesys.source.parameters` |  | Parameters |  |
+| `Pipe.include` |  | Example Path: /Users/usr/Documents/product-images/* |  |
+| `Pipe.exclude` |  | Example Path: /Users/usr/Documents/product-images/* |  |
 
 ### Service: `hash`
 
@@ -126,6 +252,13 @@ Each service exposes its own config fields (credentials, hosts/ports, collection
 | Null Source | `type`, `actions`, `source.mode`, `null.source.parameters` |
 | Null Target | `type`, `target.mode`, `null.target.parameters` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `null.source.parameters` |  | Parameters |  |
+| `null.target.parameters` |  | Parameters |  |
+
 ### Service: `parse`
 
 | Property | Value |
@@ -159,4 +292,21 @@ Each service exposes its own config fields (credentials, hosts/ports, collection
 | Section | Fields |
 | --- | --- |
 | Zip Stream | `type`, `zip.target.parameters` |
+
+**Classes**
+
+`GoogleAccessError` — extends `PermissionError` (`google_access.py`)
+
+`AccessSpec` (`google_access.py`)
+
+`GoogleAccess` (`google_access.py`)
+
+| Method | Summary |
+| --- | --- |
+| `require_write(self, op: str) -> None` | Raise if the node is read-only. |
+| `require_flag(self, name: str, op: str) -> None` | Raise if the named destructive gate is not enabled. |
+
+**Source**
+
+[`nodes/src/nodes/core`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/core)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

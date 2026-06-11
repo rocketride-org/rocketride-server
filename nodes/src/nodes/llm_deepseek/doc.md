@@ -103,4 +103,37 @@ Connects DeepSeek models to your pipeline — either via the DeepSeek cloud API 
 | Section | Fields |
 | --- | --- |
 | Deepseek | `deepseek.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `deepseek.profile` | string | Model | default `cloud-reasoner` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate only cloud DeepSeek models (API-based) at save time. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`deepseek.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Deepseek chat bot. |
+
+**Source**
+
+[`nodes/src/nodes/llm_deepseek`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_deepseek)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

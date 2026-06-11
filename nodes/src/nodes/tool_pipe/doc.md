@@ -43,4 +43,31 @@ When the agent calls the tool, its input fans out to every connected output lane
 | Section | Fields |
 | --- | --- |
 | Pipeline Tool | `type`, `tool_pipe.tool_description`, `tool_pipe.return_type` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_pipe.tool_description` | string | Tool Description | default `` |
+| `tool_pipe.return_type` | string | Return Type | default `text` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `run_pipe(self, input_obj) -> dict` | Run the connected pipeline with the given input and return its result. |
+
+**Source**
+
+[`nodes/src/nodes/tool_pipe`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_pipe)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

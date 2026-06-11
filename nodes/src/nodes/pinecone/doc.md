@@ -73,4 +73,59 @@ Documents must be run through an embedding node before reaching this node.
 | --- | --- |
 | Pinecone Vector Store | `pinecone.profile` |
 | Pinecone | `type`, `pinecone.target.parameters`, `target.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `pinecone.collection` | string | Collection | default `rocketride` |
+| `pinecone.serverName` | string | Tool Server Name | default `pinecone` |
+| `pinecone.profile` | string | Type of Pinecone Connection | default `pod-based` |
+| `pinecone.provider` | string |  | const `pinecone` |
+| `pinecone.store` |  | Store |  |
+
+**Dependencies**
+
+`pinecone`, `pinecone-plugin-assistant`, `pinecone-plugin-interface`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize Pinecone store connection and set up global resources. |
+| `validateConfig(self)` | Validate the configuration for Pinecone vector store. |
+| `endGlobal(self)` | Clean up global resources and release Pinecone store connection. |
+
+`IInstance` — extends `VectorStoreToolMixin`, `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
+| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`pinecone.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the pinecone vector store. We use our own custom DocumentStoreBase. |
+| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Given a filter, return the document groups matching the filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Query and return all the unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the document store. |
+| `updateRecords(self, objectIds: List[str], metadataUpdates: Dict[str, Any], isDeleteOperation: bool) -> None` | Collect the ids of records in a list of objectIds to update or delete the records. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render the complete document. |
+
+**Source**
+
+[`nodes/src/nodes/pinecone`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/pinecone)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

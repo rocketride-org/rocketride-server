@@ -69,4 +69,42 @@ Each account gets its own isolated `files/` directory — the node picks up the 
 | Section | Fields |
 | --- | --- |
 | File System | `type`, `filesystem.allowRead`, `filesystem.allowWrite`, `filesystem.allowList`, `filesystem.allowMkdir`, `filesystem.allowStat`, `filesystem.allowDelete`, `filesystem.pathWhitelist` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `filesystem.allowRead` | boolean | Read files | default `true` |
+| `filesystem.allowWrite` | boolean | Write files | default `true` |
+| `filesystem.allowList` | boolean | List directories | default `true` |
+| `filesystem.allowMkdir` | boolean | Create directories | default `true` |
+| `filesystem.allowStat` | boolean | Stat (metadata) | default `true` |
+| `filesystem.allowDelete` | boolean | Delete files | default `false` |
+| `filesystem.whitelistPattern` | string | Path Pattern (regex) | default `` |
+| `filesystem.pathWhitelist` | array | Path Whitelist |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `read_file(self, args)` |  |
+| `write_file(self, args)` |  |
+| `delete_file(self, args)` |  |
+| `list_directory(self, args)` |  |
+| `create_directory(self, args)` |  |
+| `stat_file(self, args)` |  |
+
+**Source**
+
+[`nodes/src/nodes/tool_filesystem`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_filesystem)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

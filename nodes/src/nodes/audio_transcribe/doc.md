@@ -71,4 +71,52 @@ Defaults to English (`en`). Change the `language` config value to transcribe oth
 | Section | Fields |
 | --- | --- |
 | Transcribe | `transcribe.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `transcribe.model` | string | Model | default `base` |
+| `transcribe.silence_threshold` | number | Silence Threshold | default `0.25` |
+| `transcribe.min_seconds` | number | Minimum Seconds | default `240` |
+| `transcribe.max_seconds` | number | Maximum Seconds | default `300` |
+| `transcribe.vad_level` | number | VAD Level | default `1` |
+| `transcribe.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`faster-whisper`, `ctranslate2`, `av`, `tokenizers`, `huggingface-hub`, `tqdm`, `onnxruntime`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `transcribe(self, audio: Any) -> List[SimpleNamespace]` | Transcribe the given audio using the Whisper model. |
+| `beginGlobal(self)` | Initialize the global state. |
+| `endGlobal(self)` | Clean up global state. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self)` | Initialize the instance-level transcription pipeline. |
+| `open(self, object: Entry)` | Open the instance with the provided object. |
+| `writeAudio(self, action: int, mimeType: str, buffer: bytes)` |  |
+| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+`Transcribe` — extends `AudioReader` (`transcribe.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, segment_callback: Callable[[str], None], transcribe: Callable[[Any], Any], **kwargs)` | Initialize the Transcribe instance. |
+| `onData(self, chunk: bytes)` | Handle incoming PCM audio. |
+| `outputText(self, text: str)` | Output transcribed text. Override to customize output. |
+| `start(self)` | Begins audio decoding stream. |
+| `stop(self)` | End audio stream and flush pending audio. |
+
+**Source**
+
+[`nodes/src/nodes/audio_transcribe`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/audio_transcribe)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

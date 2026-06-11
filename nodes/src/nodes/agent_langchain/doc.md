@@ -68,4 +68,42 @@ Exposes itself as `<nodeId>.run_agent` so parent agents can delegate to it in hi
 | Section | Fields |
 | --- | --- |
 | LangChain | `agent_description`, `instructions` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `agent_description` | string | Agent description | default `` |
+| `instructions` | array | Instructions |  |
+| `agent_langchain.profile` | string | Profile | default `default` |
+
+**Dependencies**
+
+`langchain`, `langchain-core`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` |  |
+| `run_agent(self, input_obj: Any) -> Any` | Invoke this agent as a tool from a parent agent. |
+
+`LangChainDriver` — extends `AgentBase` (`langchain.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, iGlobal: Any) -> None` | Initialize the LangChain driver. |
+
+**Source**
+
+[`nodes/src/nodes/agent_langchain`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/agent_langchain)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

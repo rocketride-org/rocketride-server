@@ -109,4 +109,39 @@ These models will not fit on a typical laptop without aggressive quantization. M
 | Section | Fields |
 | --- | --- |
 | MiniMax | `minimax.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `minimax.serverbase` | string | Server base URL | default `https://api.minimax.io/v1` |
+| `minimax.profile` | string | Model | default `minimax-m2` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate the MiniMax cloud configuration at save time. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`minimax.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the MiniMax chat bot. |
+
+**Source**
+
+[`nodes/src/nodes/llm_minimax`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_minimax)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

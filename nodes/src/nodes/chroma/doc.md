@@ -74,4 +74,57 @@ Documents must be run through an embedding node before reaching this node.
 | --- | --- |
 | Chroma Vector Store | `chroma.profile` |
 | Chroma | `type`, `chroma.target.parameters`, `target.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-url> |  |
+| `chroma.serverName` | string | Tool Server Name | default `chroma` |
+| `chroma.profile` | string | Type of chroma host | default `cloud` |
+| `chroma.provider` | string |  | const `chroma` |
+| `chroma.store` |  | Store |  |
+
+**Dependencies**
+
+`chromadb-client`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `VectorStoreToolMixin`, `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
+| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`chroma.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the chroma vector store. |
+| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Retrieve document groups matching a given filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Retrieve unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the ChromaDB collection. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render the complete document. |
+
+**Source**
+
+[`nodes/src/nodes/chroma`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/chroma)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

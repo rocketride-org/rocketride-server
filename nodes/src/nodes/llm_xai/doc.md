@@ -85,4 +85,38 @@ Connects xAI Grok models to your pipeline. Used primarily as an `llm` invoke con
 | Section | Fields |
 | --- | --- |
 | xAI | `xai.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `xai.profile` | string | Model | default `grok-3` |
+
+**Dependencies**
+
+`langchain-xai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Save-time validation for xAI using a minimal probe. |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`xai.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the XAI chat bot. |
+
+**Source**
+
+[`nodes/src/nodes/llm_xai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_xai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

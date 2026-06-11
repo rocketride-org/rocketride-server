@@ -80,4 +80,65 @@ The pgvector extension must be installed in the target PostgreSQL database befor
 | --- | --- |
 | PostgreSQL Vector Store | `postgres.profile` |
 | PostgreSQL | `type`, `postgres.target.parameters` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `vector.collection` | string | Table | default `rocketride` |
+| `vector.local.host` |  | Host | default `your-postgres-host.example.com` |
+| `vector.local.port` |  | Port | default `5432` |
+| `vector.local.user` | string | User | default `postgres` |
+| `vector.local.password` | string | Password |  |
+| `vector.local.database` | string | Database | default `postgres` |
+| `vector.similarity` | string | Similarity Metric | default `cosine` |
+| `postgres.profile` | string | Type of PostgreSQL host | default `local` |
+| `postgres.provider` | string |  | const `postgres` |
+| `postgres.store` |  | Store |  |
+| `postgres.target.autopipe` |  | Parameters |  |
+| `postgres.target.parameters` |  | Parameters |  |
+
+**Dependencies**
+
+`psycopg2-binary`, `pgvector`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `validateConfig(self)` | Validate PostgreSQL vector store config with fast, read-only probes. |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
+| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`vectordb_postgres.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the postgres vector store. |
+| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform a keyword search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Retrieve document groups matching a given filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | Retrieve unique parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the document store. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, renders the complete document. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform a semantic search. |
+
+**Source**
+
+[`nodes/src/nodes/vectordb_postgres`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/vectordb_postgres)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

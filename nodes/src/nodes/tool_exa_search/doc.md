@@ -46,4 +46,38 @@ Drop your Exa API key into the **API Key** config field (grab one at https://exa
 | Section | Fields |
 | --- | --- |
 | Exa Search | `type`, `tool_exa_search.apikey`, `tool_exa_search.numResults`, `tool_exa_search.useAutoprompt`, `tool_exa_search.searchType`, `tool_exa_search.includeText` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_exa_search.apikey` | string | API Key | default `` |
+| `tool_exa_search.numResults` | integer | Number of Results | default `10` |
+| `tool_exa_search.useAutoprompt` | boolean | Use Autoprompt | default `true` |
+| `tool_exa_search.searchType` | string | Search Type | default `auto` |
+| `tool_exa_search.includeText` | boolean | Include Text Content | default `true` |
+
+**Dependencies**
+
+`requests`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `exa_search(self, args)` | Search the web using Exa semantic search. |
+
+**Source**
+
+[`nodes/src/nodes/tool_exa_search`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_exa_search)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

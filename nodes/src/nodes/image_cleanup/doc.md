@@ -50,4 +50,27 @@ No configuration fields. The cleanup pipeline runs automatically.
 | Section | Fields |
 | --- | --- |
 | Image Cleanup |  |
+
+**Dependencies**
+
+`pillow`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+**Source**
+
+[`nodes/src/nodes/image_cleanup`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/image_cleanup)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

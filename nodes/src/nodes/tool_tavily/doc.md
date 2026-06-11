@@ -47,4 +47,37 @@ ROCKETRIDE_TAVILY_KEY=tvly-...
 | Section | Fields |
 | --- | --- |
 | Tavily | `type`, `tool_tavily.apikey`, `tool_tavily.maxResults`, `tool_tavily.searchDepth`, `tool_tavily.topic` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_tavily.apikey` | string | API Key | default `` |
+| `tool_tavily.maxResults` | integer | Max Results | default `5` |
+| `tool_tavily.searchDepth` | string | Search Depth | default `advanced` |
+| `tool_tavily.topic` | string | Topic | default `general` |
+
+**Dependencies**
+
+`requests`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `tavily(self, args)` | Search the web using the Tavily API. |
+
+**Source**
+
+[`nodes/src/nodes/tool_tavily`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_tavily)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

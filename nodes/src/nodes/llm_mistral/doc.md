@@ -128,4 +128,41 @@ Connects Mistral AI models to your pipeline. Used primarily as an `llm` invoke c
 | Section | Fields |
 | --- | --- |
 | Mistral AI | `mistral.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `mistral.profile` | string | Model | default `mistral-large` |
+
+**Dependencies**
+
+`mistralai`, `mistral-common[sentencepiece]`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate Mistral configuration at save-time with a minimal probe. |
+| `beginGlobal(self)` | Initialize the global instance for the Mistral AI node. |
+| `endGlobal(self)` | Clean up the global instance when the node shuts down. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`mistral.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Mistral AI chat bot. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current model. |
+| `getTokens(self, value: str) -> int` | Estimate token count for a given text string. |
+| `chat(self, question: Question) -> Answer` | Send a chat message to Mistral AI and get the response. |
+
+**Source**
+
+[`nodes/src/nodes/llm_mistral`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_mistral)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

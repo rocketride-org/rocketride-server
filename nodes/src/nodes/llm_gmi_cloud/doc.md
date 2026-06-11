@@ -117,4 +117,41 @@ GMI Cloud has three tiers:
 | Section | Fields |
 | --- | --- |
 | GMI Cloud | `gmi_cloud.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `gmi_cloud.serverbase` | string | Endpoint URL |  |
+| `gmi_cloud.profile` | string | Model | default `deepseek-v3` |
+
+**Dependencies**
+
+`openai`, `langchain-openai`, `langchain-core`, `langchain`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate GMI Cloud models at save time. |
+| `beginGlobal(self)` | Initialize the GMI Cloud chat client. |
+| `endGlobal(self)` | Release the chat client. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+`Chat` — extends `ChatBase` (`gmi_cloud.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the GMI Cloud chat bot. |
+| `is_retryable_error(self, error)` | Determine if the error is retryable. |
+| `map_exception(self, error)` | Convert GMI Cloud API exceptions to friendlier messages. |
+
+**Source**
+
+[`nodes/src/nodes/llm_gmi_cloud`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_gmi_cloud)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

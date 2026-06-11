@@ -47,4 +47,24 @@ None.
 | Section | Fields |
 | --- | --- |
 | Thumbnail |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize global context. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` | Open a new object for processing. |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` | Handle image data chunks streamed in multiple steps. |
+| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents and emit thumbnailed versions. |
+
+**Source**
+
+[`nodes/src/nodes/thumbnail`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/thumbnail)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

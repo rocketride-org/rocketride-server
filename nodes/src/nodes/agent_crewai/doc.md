@@ -82,6 +82,21 @@ The Manager requires at least one connected CrewAI Subagent on the `crewai` chan
 | --- | --- |
 | CrewAI Agent | `agent_crewai.default` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `agent_description` | string | Agent description | default `` |
+| `instructions` | array | Instructions |  |
+| `advanced_mode` | boolean | Advanced Mode | default `false` |
+| `agent_crewai.agent_config_header` | null | Agent Config |  |
+| `role` | string | Role |  |
+| `goal` | string | Goal |  |
+| `backstory` | string | Backstory |  |
+| `agent_crewai.task_config_header` | null | Task Config |  |
+| `task_description` | string | Task |  |
+| `expected_output` | string | Expected Output |  |
+
 ### Service: `manager`
 
 | Property | Value |
@@ -108,6 +123,16 @@ The Manager requires at least one connected CrewAI Subagent on the `crewai` chan
 | --- | --- |
 | CrewAI Manager | `agent_crewai_manager.default` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `agent_description` | string | Agent description | default `` |
+| `instructions` | array | Instructions |  |
+| `advanced_mode` | boolean | Advanced Mode | default `false` |
+| `goal` | string | Manager Goal |  |
+| `backstory` | string | Manager Backstory |  |
+
 ### Service: `subagent`
 
 | Property | Value |
@@ -127,4 +152,43 @@ The Manager requires at least one connected CrewAI Subagent on the `crewai` chan
 | Section | Fields |
 | --- | --- |
 | CrewAI Subagent | `agent_crewai_subagent.default` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `instructions` | array | Instructions |  |
+| `advanced_mode` | boolean | Advanced Mode | default `false` |
+| `agent_crewai_subagent.agent_config_header` | null | Agent Config |  |
+| `role` | string | Role |  |
+| `goal` | string | Goal |  |
+| `backstory` | string | Backstory |  |
+| `agent_crewai_subagent.task_config_header` | null | Task Config |  |
+| `task_description` | string | Task |  |
+| `expected_output` | string | Expected Output |  |
+
+**Dependencies**
+
+`crewai>=1.14.1`
+
+**Classes**
+
+`CrewBase` — extends `AgentBase` (`crewai_base.py`)
+
+`CrewListener` — extends `BaseEventListener` (`crewai_listener.py`)
+
+| Method | Summary |
+| --- | --- |
+| `setup_listeners(self, crewai_event_bus: Any) -> None` | Register the singleton `_dispatch` handler on every relevant event class. |
+
+`CrewRunner` (`crewai_runner.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self) -> None` | Create the loop and start the daemon thread that runs it forever. |
+| `submit(self, context: 'AgentContext', coro: Coroutine[Any, Any, Any]) -> Any` | Submit a kickoff coroutine bound to a per-run context. |
+
+**Source**
+
+[`nodes/src/nodes/agent_crewai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/agent_crewai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

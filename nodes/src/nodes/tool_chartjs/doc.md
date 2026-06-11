@@ -62,4 +62,24 @@ A ` ```chartjs ` fenced block containing the Chart.js JSON configuration. The ag
 | Section | Fields |
 | --- | --- |
 | Chart (Chart.js) | `type` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_chartjs.serverName` | string | Server name | default `chartjs` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `generate_chart(self, args)` | Generate a Chart.js v4 chart configuration from data via the pipeline LLM. |
+
+**Source**
+
+[`nodes/src/nodes/tool_chartjs`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_chartjs)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

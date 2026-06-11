@@ -54,4 +54,25 @@ Place this node after a text source (e.g. parse, preprocessor) and before a vect
 | Section | Fields |
 | --- | --- |
 | Dictionary |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` | Initialize the instance for a new object. |
+| `writeText(self, text: str)` | Process and write textual data. |
+| `writeTable(self, text: str)` | Process and write tabular data. |
+| `writeAnswers(self, answer: Answer)` |  |
+
+**Source**
+
+[`nodes/src/nodes/dictionary`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/dictionary)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

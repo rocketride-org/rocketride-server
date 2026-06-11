@@ -90,4 +90,72 @@ Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the c
 | Section | Fields |
 | --- | --- |
 | GitHub | `type`, `github.token`, `github.defaultRepo`, `github.readOnly` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `github.token` | string | Personal Access Token | default `` |
+| `github.defaultRepo` | string | Default Repository | default `` |
+| `github.readOnly` | boolean | Read-only mode | default `false` |
+
+**Dependencies**
+
+`requests>=2.34.2`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `file_get(self, args)` |  |
+| `file_list(self, args)` |  |
+| `file_create(self, args)` |  |
+| `file_edit(self, args)` |  |
+| `file_delete(self, args)` |  |
+| `issue_get(self, args)` |  |
+| `issue_list(self, args)` |  |
+| `issue_create(self, args)` |  |
+| `issue_comment(self, args)` |  |
+| `issue_edit(self, args)` |  |
+| `issue_lock(self, args)` |  |
+| `pr_get(self, args)` |  |
+| `pr_list(self, args)` |  |
+| `pr_create(self, args)` |  |
+| `review_create(self, args)` |  |
+| `review_list(self, args)` |  |
+| `review_get(self, args)` |  |
+| `review_update(self, args)` |  |
+| `repo_get(self, args)` |  |
+| `release_list(self, args)` |  |
+| `release_get(self, args)` |  |
+| `release_create(self, args)` |  |
+| `release_update(self, args)` |  |
+| `release_delete(self, args)` |  |
+| `workflow_list(self, args)` |  |
+| `workflow_get(self, args)` |  |
+| `workflow_dispatch(self, args)` |  |
+| `workflow_enable(self, args)` |  |
+| `workflow_disable(self, args)` |  |
+| `workflow_get_usage(self, args)` |  |
+| `org_list_repos(self, args)` |  |
+| `user_get_repos(self, args)` |  |
+| `user_invite(self, args)` |  |
+| `search_code(self, args)` |  |
+| `search_issues(self, args)` |  |
+| `commit_list(self, args)` |  |
+| `commit_get(self, args)` |  |
+
+**Source**
+
+[`nodes/src/nodes/tool_github`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_github)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

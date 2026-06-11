@@ -71,4 +71,12 @@ Forwards pipeline execution to a separate RocketRide server. The pipeline config
 | Class type |  |
 | Capabilities | internal, nosaas |
 | Protocol | `remote_server://` |
+
+**Dependencies**
+
+`fastapi`, `nest-asyncio`, `websockets`
+
+**Source**
+
+[`nodes/src/nodes/remote`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/remote)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

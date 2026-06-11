@@ -88,4 +88,32 @@ Generated SQL is validated by running `EXPLAIN` against the live database. If va
 | Section | Fields |
 | --- | --- |
 | MySQL | `mysql.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `mysql.host` | string | MySQL host | default `localhost` |
+| `mysql.user` | string | User | default `root` |
+| `mysql.password` | string | Password |  |
+| `mysql.database` | string | Database name | default `database` |
+| `mysql.table` | string | Table name | default `table` |
+| `mysql.db_description` | string | Database description | default `` |
+| `mysql.max_attempts` | integer | Max validation attempts | default `5` |
+| `mysql.allow_execute` | boolean | Allow direct query execution | default `false` |
+| `mysql.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`pymysql==1.2.0`, `cryptography==46.0.7`
+
+**Classes**
+
+`IGlobal` — extends `DatabaseGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `DatabaseInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/db_mysql`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_mysql)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

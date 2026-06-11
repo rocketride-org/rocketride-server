@@ -76,4 +76,32 @@ Additional modules can be whitelisted in configuration.
 | Section | Fields |
 | --- | --- |
 | Python | `type`, `tool_python.timeout`, `tool_python.allowedModules` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `tool_python.serverName` | string | Server name | default `python` |
+| `tool_python.moduleName` | string | Module name | default `` |
+| `tool_python.timeout` | integer | Execution timeout (seconds) | default `20` |
+| `tool_python.allowedModules` | array | Additional Allowed Modules |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `execute(self, args)` | Execute Python code in a sandboxed environment. |
+
+**Source**
+
+[`nodes/src/nodes/tool_python`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_python)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

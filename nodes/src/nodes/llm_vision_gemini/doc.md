@@ -99,4 +99,49 @@ Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). K
 | Section | Fields |
 | --- | --- |
 | Gemini Vision | `image_vision_gemini.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `image_vision_gemini.apikey` | string | API Key |  |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `vision.systemPrompt` | string | System Instructions |  |
+| `vision.prompt` | string | Analysis Prompt |  |
+| `image_vision_gemini.profile` | string | Vision Model | default `gemini-2_5-flash` |
+
+**Dependencies**
+
+`google-genai>=1.14.0`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `validateConfig(self)` | Validate Gemini configuration at save-time using a minimal API probe. |
+| `beginGlobal(self)` | Initialize the global chat instance. |
+| `endGlobal(self)` | Clean up the global chat instance. |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` | Handle AVI image protocol for streaming image frames. |
+| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents inline and emit vision model responses as text documents. |
+
+`Chat` — extends `ChatBase` (`gemini_vision.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Gemini Vision chat instance. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current model. |
+| `getTokens(self, value: str) -> int` | Approximate token count (4 chars per token heuristic). |
+| `chat(self, question: Question) -> Answer` | Send an image to Gemini Vision and get the response. |
+
+**Source**
+
+[`nodes/src/nodes/llm_vision_gemini`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_vision_gemini)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -91,4 +91,59 @@ Models run locally — no API key required. Downloaded from HuggingFace on first
 | Section | Fields |
 | --- | --- |
 | Anonymize | `anonymize.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `anonymizeChar` | string | Character to use for anonymization |  |
+| `anonymize.model` | string | Model name |  |
+| `anonymize.profile` | string | Model | default `glinerMergedLarge` |
+
+**Dependencies**
+
+`gliner`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` |  |
+| `writeText(self, text: str)` |  |
+| `writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict)` |  |
+| `closing(self)` |  |
+| `close(self)` | Call from engLib, process object startup. |
+
+`RuleParser` (`Ruleparser.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, file_path)` | Load all idRef -> English name mappings once during initialization. |
+| `get_rules_names(self, unique_id_refs)` | Return English names for the given unique_id_refs. |
+
+`GliNERRecognizer` (`glinerRecognizer.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the GLiNER Recognizer. |
+| `extract_keywords_from_xml(self, data)` | Safely extracts keyword terms from the given JSON string. |
+| `convert_ner_results_to_matches(self, ner_results)` |  |
+| `normalize_label(self, label)` | Clean label names to a consistent format. |
+| `batch_labels(self, labels, batch_size)` | Split labels into smaller batches. |
+| `predict(self, text, labels, batch_size)` |  |
+| `process(self, text: str, labels: list, existing_matches: list) -> str` | Core anonymization method - detects entities using GLiNER and masks them. |
+| `handleClassifications(self, classifications: dict, target_object_text: str, classificationPolicy: any, classificationRules: any)` | Handle classifications from upstream classifier - extracts labels and matches, |
+
+**Source**
+
+[`nodes/src/nodes/anonymize`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/anonymize)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

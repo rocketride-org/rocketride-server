@@ -176,4 +176,108 @@ pytest nodes/test/tool_git/test_tools.py -v
 | Section | Fields |
 | --- | --- |
 | Git | `type`, `git.repoPath`, `git.authType`, `git.username`, `git.token`, `git.sshKey`, `git.sshPassphrase`, `git.safeMode`, `git.readOnlyMode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `git.repoPath` | string | Repository Path | default `` |
+| `git.authType` | string | Authentication Type | default `none` |
+| `git.username` | string | Username | default `` |
+| `git.token` | string | Token / Password | default `` |
+| `git.sshKey` | string | SSH Private Key | default `` |
+| `git.sshPassphrase` | string | SSH Key Passphrase | default `` |
+| `git.safeMode` | boolean | Safe Mode | default `true` |
+| `git.readOnlyMode` | boolean | Read-Only Mode | default `true` |
+
+**Dependencies**
+
+`pygit2>=1.19.2`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Initialise the GitRepo instance; clone remote URL or open local path if configured. |
+| `validateConfig(self) -> None` | Emit warnings for invalid authType, missing credentials, or a non-existent local repoPath. |
+| `endGlobal(self) -> None` | Release the repo reference and delete any auto-cloned temp directory. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `clone(self, args: Dict[str, Any]) -> Any` | Clone a remote repository. |
+| `init(self, args: Dict[str, Any]) -> Any` | Initialise a new empty repository. |
+| `status(self, args: Dict[str, Any]) -> Any` | Working-tree status. |
+| `log(self, args: Dict[str, Any]) -> Any` | Commit history with optional filters. |
+| `show(self, args: Dict[str, Any]) -> Any` | Show full commit details. |
+| `diff(self, args: Dict[str, Any]) -> Any` | Unified diff. |
+| `blame(self, args: Dict[str, Any]) -> Any` | Per-line blame. |
+| `file_at(self, args: Dict[str, Any]) -> Any` | File content at a specific ref. |
+| `write_file(self, args: Dict[str, Any]) -> Any` | Write text content to a file in the working tree. |
+| `stage(self, args: Dict[str, Any]) -> Any` | Stage files for the next commit. |
+| `commit(self, args: Dict[str, Any]) -> Any` | Create a commit from the staged index. |
+| `stash(self, args: Dict[str, Any]) -> Any` | Manage stash entries (push/pop/list/drop). |
+| `branch_list(self, args: Dict[str, Any]) -> Any` | List branches. |
+| `branch_create(self, args: Dict[str, Any]) -> Any` | Create a new branch. |
+| `checkout(self, args: Dict[str, Any]) -> Any` | Check out an existing branch. |
+| `branch_delete(self, args: Dict[str, Any]) -> Any` | Delete a branch. |
+| `merge(self, args: Dict[str, Any]) -> Any` | Merge a branch into the current branch. |
+| `fetch(self, args: Dict[str, Any]) -> Any` | Fetch from a remote. |
+| `pull(self, args: Dict[str, Any]) -> Any` | Fetch then fast-forward merge. |
+| `push(self, args: Dict[str, Any]) -> Any` | Push to a remote. |
+| `grep(self, args: Dict[str, Any]) -> Any` | Regex search across tracked files. |
+| `ls_files(self, args: Dict[str, Any]) -> Any` | List tracked files. |
+
+`GitError` — extends `Exception` (`git_repo.py`)
+
+`_TokenCallbacks` — extends `pygit2.RemoteCallbacks` (`git_repo.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, username: str, token: str) -> None` | Store HTTPS credentials. |
+| `credentials(self, url: str, username_from_url: Optional[str], allowed_types: int) -> pygit2.UserPass` | Return a UserPass credential object for libgit2. |
+
+`_SshCallbacks` — extends `pygit2.RemoteCallbacks` (`git_repo.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, key_content: str, passphrase: str) -> None` | Store SSH key material; temp file is created lazily in credentials(). |
+| `credentials(self, url: str, username_from_url: Optional[str], allowed_types: int) -> pygit2.Keypair` | Write the SSH key to a temp file on first call and return a Keypair. |
+| `close(self) -> None` | Delete the temporary key file if it was created. |
+
+`GitRepo` (`git_repo.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, repo_path: str, auth_type: str, username: str, token: str, ssh_key: str, ssh_passphrase: str, safe_mode: bool, read_only_mode: bool) -> None` | Configure the wrapper and optionally open an existing local repository. |
+| `open(self, path: str) -> None` | Open an existing local repository at *path* and bind it to this wrapper. |
+| `clone(self, url: str, path: str, branch: Optional[str]) -> Dict[str, Any]` | Clone *url* into *path*. |
+| `init(self, path: str, initial_branch: str) -> Dict[str, Any]` | Initialise a new empty repository at *path*. |
+| `status(self) -> Dict[str, Any]` | Return working-tree status. |
+| `log(self, max_count: int, branch: Optional[str], path: Optional[str], author: Optional[str], since: Optional[str], until: Optional[str]) -> List[Dict[str, Any]]` | Return commit history. |
+| `show(self, ref: str) -> Dict[str, Any]` | Return full commit details including diff. |
+| `diff(self, ref_a: Optional[str], ref_b: Optional[str], path: Optional[str], staged: bool) -> Dict[str, Any]` | Produce a unified diff. |
+| `blame(self, path: str, ref: Optional[str]) -> List[Dict[str, Any]]` | Return per-line blame for *path*. |
+| `file_at(self, path: str, ref: str) -> Dict[str, Any]` | Return file content at a specific commit/ref. |
+| `write_file(self, path: str, content: str) -> Dict[str, Any]` | Write *content* to *path* in the working tree (creates or overwrites). |
+| `stage(self, paths: List[str]) -> Dict[str, Any]` | Stage files (add to index). |
+| `commit(self, message: str, author_name: str, author_email: str) -> Dict[str, Any]` | Create a commit from the current index. |
+| `stash(self, op: str, message: str, index: int) -> Dict[str, Any]` | Push, pop, list, or drop stash entries. |
+| `branch_list(self, remote: bool, all_branches: bool) -> Dict[str, Any]` | List branches. |
+| `branch_create(self, name: str, from_ref: Optional[str]) -> Dict[str, Any]` | Create a new branch. |
+| `checkout(self, branch: str) -> Dict[str, Any]` | Checkout an existing branch. |
+| `branch_delete(self, name: str, force: bool) -> Dict[str, Any]` | Delete a branch. |
+| `merge(self, branch: str) -> Dict[str, Any]` | Merge *branch* into the current branch. |
+| `fetch(self, remote: str, branch: Optional[str]) -> Dict[str, Any]` | Fetch from a remote. |
+| `pull(self, remote: str, branch: Optional[str]) -> Dict[str, Any]` | Fetch then fast-forward merge. |
+| `push(self, remote: str, branch: Optional[str], force: bool) -> Dict[str, Any]` | Push to a remote. |
+| `grep(self, pattern: str, ref: Optional[str], path: Optional[str], ignore_case: bool, max_results: int) -> List[Dict[str, Any]]` | Search tracked files for a pattern. Stops after *max_results* hits. |
+| `ls_files(self, path: Optional[str], untracked: bool) -> Dict[str, Any]` | List tracked (and optionally untracked) files. |
+
+**Source**
+
+[`nodes/src/nodes/tool_git`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_git)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

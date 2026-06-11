@@ -68,4 +68,43 @@ Output documents have an `embedding` vector attached, ready for ingestion into a
 | Section | Fields |
 | --- | --- |
 | Image | `embedding.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `embedding.model` | string | Model name |  |
+| `embedding.profile` | string | Model | default `openai-patch16` |
+
+**Dependencies**
+
+`transformers`, `accelerate`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialize resources needed for the node when the global lifecycle begins. |
+| `endGlobal(self)` | Clean up resources and references when the global lifecycle ends. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *args, **kwargs)` | Initialize instance state. |
+| `writeDocuments(self, documents: List[Doc])` | Process and enrich a list of documents by generating embeddings for image documents. |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+`Embedding` (`embedding.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the Embedding instance. |
+| `create_image_embedding(self, image: Image) -> List[float]` | Create a normalized embedding vector for a given image. |
+
+**Source**
+
+[`nodes/src/nodes/embedding_image`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_image)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

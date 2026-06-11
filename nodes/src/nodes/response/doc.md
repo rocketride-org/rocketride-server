@@ -79,6 +79,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | --- | --- |
 | Return Answers | `laneName` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `answers` |
+
 ### Service: `audio`
 
 | Property | Value |
@@ -104,6 +110,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | Section | Fields |
 | --- | --- |
 | Return Audio | `laneName` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `audio` |
 
 ### Service: `documents`
 
@@ -131,6 +143,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | --- | --- |
 | Return Documents | `laneName` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `documents` |
+
 ### Service: `image`
 
 | Property | Value |
@@ -156,6 +174,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | Section | Fields |
 | --- | --- |
 | Return Image | `laneName` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `image` |
 
 ### Service: `json`
 
@@ -190,6 +214,14 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | --- | --- |
 | Response | `lanes` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneId` | string | Lane name |  |
+| `laneName` | string | Result key |  |
+| `lanes` | array | Lanes |  |
+
 ### Service: `questions`
 
 | Property | Value |
@@ -215,6 +247,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | Section | Fields |
 | --- | --- |
 | Return Questions | `laneName` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `questions` |
 
 ### Service: `table`
 
@@ -242,6 +280,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | --- | --- |
 | Return Table | `laneName` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `table` |
+
 ### Service: `text`
 
 | Property | Value |
@@ -268,6 +312,12 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | --- | --- |
 | Return Text | `laneName` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `text` |
+
 ### Service: `video`
 
 | Property | Value |
@@ -293,4 +343,37 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 | Section | Fields |
 | --- | --- |
 | Return Video | `laneName` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `laneName` | string | Identifier key within result | default `video` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` | Initialize the instance for a new object. |
+| `close(self)` | Finalize the instance for the current object. |
+| `writeText(self, text: str)` |  |
+| `writeTable(self, table: str)` |  |
+| `writeDocuments(self, documents: List[Doc])` |  |
+| `writeQuestions(self, questions: Question)` |  |
+| `writeAnswers(self, answer: Answer)` |  |
+| `writeAudio(self, aviAction: int, mimeType: str, data: bytes)` |  |
+| `writeVideo(self, aviAction: int, mimeType: str, data: bytes)` |  |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+**Source**
+
+[`nodes/src/nodes/response`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/response)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

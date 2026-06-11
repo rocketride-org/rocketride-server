@@ -91,6 +91,20 @@ Generated SQL is validated by running `EXPLAIN` against the live database. If va
 | --- | --- |
 | PostgreSQL | `postgresdb.profile` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `postgresdb.host` | string | PostgreSQL host | default `localhost` |
+| `postgresdb.user` | string | User | default `postgres` |
+| `postgresdb.password` | string | Password |  |
+| `postgresdb.database` | string | Database name | default `postgres` |
+| `postgresdb.table` | string | Table name | default `table` |
+| `postgresdb.db_description` | string | Database description | default `` |
+| `postgresdb.max_attempts` | integer | Max validation attempts | default `5` |
+| `postgresdb.allow_execute` | boolean | Allow direct query execution | default `false` |
+| `postgresdb.profile` | string |  | default `default` |
+
 ### Service: `supabase`
 
 | Property | Value |
@@ -117,4 +131,32 @@ Generated SQL is validated by running `EXPLAIN` against the live database. If va
 | Section | Fields |
 | --- | --- |
 | Supabase | `postgresdb.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `postgresdb.host` | string | Supabase host |  |
+| `postgresdb.user` | string | User | default `postgres` |
+| `postgresdb.password` | string | Password |  |
+| `postgresdb.database` | string | Database name | default `postgres` |
+| `postgresdb.table` | string | Table name | default `table` |
+| `postgresdb.db_description` | string | Database description | default `` |
+| `postgresdb.max_attempts` | integer | Max validation attempts | default `5` |
+| `postgresdb.allow_execute` | boolean | Allow direct query execution | default `false` |
+| `postgresdb.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`psycopg2-binary==2.9.12`
+
+**Classes**
+
+`IGlobal` — extends `DatabaseGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `DatabaseInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/db_postgres`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_postgres)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

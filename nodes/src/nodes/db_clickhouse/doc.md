@@ -103,4 +103,33 @@ Unlike the MySQL/PostgreSQL nodes, this node intentionally does **not** expose t
 | Section | Fields |
 | --- | --- |
 | ClickHouse | `clickhouse.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `clickhouse.host` | string | ClickHouse host | default `localhost` |
+| `clickhouse.user` | string | User | default `default` |
+| `clickhouse.password` | string | Password |  |
+| `clickhouse.database` | string | Database name | default `default` |
+| `clickhouse.tls` | boolean | Use TLS | default `false` |
+| `clickhouse.table` | string | Table name | default `table` |
+| `clickhouse.db_description` | string | Database description | default `` |
+| `clickhouse.max_attempts` | integer | Max validation attempts | default `5` |
+| `clickhouse.allow_execute` | boolean | Allow direct query execution | default `false` |
+| `clickhouse.profile` | string |  | default `default` |
+
+**Dependencies**
+
+`clickhouse-sqlalchemy==0.3.2`, `clickhouse-driver==0.2.9`
+
+**Classes**
+
+`IGlobal` — extends `DatabaseGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `DatabaseInstanceBase` (`IInstance.py`)
+
+**Source**
+
+[`nodes/src/nodes/db_clickhouse`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_clickhouse)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

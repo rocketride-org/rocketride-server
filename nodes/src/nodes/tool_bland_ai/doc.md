@@ -81,4 +81,45 @@ Returns a `call_id` for use with `get_call` and `analyze_call`.
 | Section | Fields |
 | --- | --- |
 | Bland AI Voice Agent | `type`, `bland_ai.apikey`, `bland_ai.voice`, `bland_ai.maxDuration`, `bland_ai.language`, `bland_ai.record` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `bland_ai.serverName` | string | Server name | default `bland` |
+| `bland_ai.apikey` | string | API Key | default `` |
+| `bland_ai.voice` | string | Default Voice | default `June` |
+| `bland_ai.maxDuration` | integer | Max Call Duration (minutes) | default `5` |
+| `bland_ai.record` | boolean | Record Calls | default `true` |
+| `bland_ai.language` | string | Language | default `en` |
+
+**Dependencies**
+
+`requests`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `validateConfig(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `invoke(self, param: Any) -> Any` |  |
+
+`BlandDriver` — extends `ToolsBase` (`bland_driver.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, *, server_name: str, api_key: str, default_voice: str, max_duration: int, record: bool, language: str) -> None` |  |
+
+**Source**
+
+[`nodes/src/nodes/tool_bland_ai`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_bland_ai)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

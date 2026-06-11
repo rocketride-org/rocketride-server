@@ -83,4 +83,43 @@ The LLM maintains a **scratch** field — persistent working notes (memory keys,
 | Section | Fields |
 | --- | --- |
 | RocketRide Wave | `agent_description`, `instructions`, `max_waves` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `agent_description` | string | Agent description | default `` |
+| `instructions` | array | Instructions |  |
+| `max_waves` | integer | Max Waves | default `10` |
+| `agent_rocketride.profile` | string | Profile | default `default` |
+
+**Dependencies**
+
+`jmespath`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` | Create the :class:`RocketRideDriver` that powers the agent loop. |
+| `endGlobal(self) -> None` | Release the agent driver when the pipe closes. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question) -> None` | Entry point for the questions lane — runs the wave agent loop. |
+| `run_agent(self, input_obj: Any) -> Any` | Invoke this agent as a tool from a parent agent. |
+
+`RocketRideDriver` — extends `AgentBase` (`rocketride_agent.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, iGlobal) -> None` | Initialize the Wave driver and load host services. |
+
+**Source**
+
+[`nodes/src/nodes/agent_rocketride`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/agent_rocketride)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

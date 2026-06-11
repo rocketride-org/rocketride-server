@@ -62,6 +62,15 @@ In data-flow terms, the Deep Agent consumes `questions` and produces `answers` (
 | --- | --- |
 | Deep Agent | `agent_deepagent.default` |
 
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `agent_description` | string | Agent description | default `` |
+| `system_prompt` | string | System prompt | default `` |
+| `instructions` | array | Instructions |  |
+| `advanced_mode` | boolean | Advanced Mode | default `false` |
+
 ### Service: `subagent`
 
 | Property | Value |
@@ -81,4 +90,29 @@ In data-flow terms, the Deep Agent consumes `questions` and produces `answers` (
 | Section | Fields |
 | --- | --- |
 | Deep Agent Subagent | `agent_deepagent_subagent.default` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `description` | string | Description | default `` |
+| `system_prompt` | string | System prompt | default `` |
+| `instructions` | array | Instructions |  |
+| `advanced_mode` | boolean | Advanced Mode | default `false` |
+
+**Dependencies**
+
+`deepagents`, `langchain`, `langchain-core`, `pydantic`
+
+**Classes**
+
+`DeepAgentDriver` — extends `AgentBase` (`deepagent.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, iGlobal: Any) -> None` | Initialise the DeepAgents driver. |
+
+**Source**
+
+[`nodes/src/nodes/agent_deepagent`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/agent_deepagent)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

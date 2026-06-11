@@ -81,4 +81,56 @@ Both modes are available without extra configuration — the pipeline's question
 | --- | --- |
 | Astra DB Vector Store | `astra_db.api_endpoint`, `astra_db.application_token`, `vector.score`, `vector.collection` |
 | Astra DB | `type`, `astra_db.target.parameters`, `target.mode` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `astra_db.api_endpoint` | string | API Endpoint |  |
+| `astra_db.application_token` | string | Application Token |  |
+| `astra_db.provider` | string |  | const `astra_db` |
+
+**Dependencies**
+
+`astrapy`
+
+**Classes**
+
+`IEndpoint` — extends `IEndpointTransform` (`IEndpoint.py`)
+
+`IGlobal` — extends `IGlobalTransform` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceTransform` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
+| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
+| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
+
+`Store` — extends `DocumentStoreBase` (`astra_db.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])` | Initialize the astradb vector store. |
+| `doesCollectionExist(self, modelName: str) -> bool` | Override base class to handle AstraDB-specific collection validation. |
+| `count_documents(self) -> int` | Return the number of documents in the document store. |
+| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search using AstraDB's native lexical search. |
+| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
+| `get(self, docFilter: DocFilter, checkCollection: bool) -> List[Doc]` | Retrieve documents matching the filter. |
+| `getPaths(self, parent: str \| None, offset: int, limit: int) -> Dict[str, str]` | More efficient implementation using aggregation to get distinct parent paths. |
+| `addChunks(self, chunks: List[Doc], checkCollection: bool) -> None` | Add document chunks to the document store. |
+| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
+| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
+| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
+| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
+
+**Source**
+
+[`nodes/src/nodes/astra_db`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/astra_db)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

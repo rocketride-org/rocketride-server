@@ -78,4 +78,52 @@ Customize the **Analysis Prompt** field to change this structure.
 | Section | Fields |
 | --- | --- |
 | Accessibility Describe | `accessibility_describe.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `model` | string | Model |  |
+| `modelTotalTokens` | number | Tokens |  |
+| `accessibility.systemPrompt` | string | System Instructions | default `You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.` |
+| `accessibility.prompt` | string | Analysis Prompt | default `Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words.` |
+| `accessibility.prioritizeHazards` | string | Hazard Priority | default `high` |
+| `accessibility.spatialFormat` | string | Spatial Format | default `clock` |
+| `accessibility_describe.profile` | string | Vision Model | default `gemini-2.5-flash` |
+
+**Dependencies**
+
+`google-genai>=1.14.0`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `LLMBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self)` | Initialize per-instance image buffer state. |
+| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
+
+`AccessibilityVisionError` — extends `Exception` (`accessibility_vision.py`)
+
+`Chat` — extends `ChatBase` (`accessibility_vision.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self, provider: str, connConfig: dict[str, Any], bag: dict[str, Any])` | Initialize the Gemini Vision accessibility chat instance. |
+| `prompt(self) -> str` | Get the current analysis prompt. |
+| `getTotalTokens(self) -> int` | Get the total token limit for the current model. |
+| `getTokens(self, value: str) -> int` | Approximate token count (4 chars per token heuristic). |
+| `chat(self, question: Question) -> Answer` | Send an image to Gemini for accessibility-focused scene description. |
+
+**Source**
+
+[`nodes/src/nodes/accessibility_describe`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/accessibility_describe)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

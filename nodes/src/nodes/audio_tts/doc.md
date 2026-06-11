@@ -53,4 +53,38 @@ If misaki/spaCy initialization fails, see the full multi-engine README on the re
 | Section | Fields |
 | --- | --- |
 | Text To Speech | `audio_tts.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `audio_tts.kokoro_voice` | string | Voice | default `af_heart` |
+| `audio_tts.profile` | string | TTS profile | default `kokoro` |
+
+**Dependencies**
+
+`numpy`, `kokoro>=0.9.4`, `soundfile>=0.13.1`
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` | Initialise local pipeline or remote client from the node configuration. |
+| `synthesize(self, text: str) -> Dict[str, Any]` | Synthesise ``text`` to a temporary WAV file and return its path. |
+| `endGlobal(self)` | Release the local pipeline and disconnect the remote client, if any. |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeDocuments(self, documents)` |  |
+| `writeQuestions(self, question)` |  |
+| `writeAnswers(self, answer)` |  |
+| `writeText(self, text: str)` |  |
+
+**Source**
+
+[`nodes/src/nodes/audio_tts`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/audio_tts)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

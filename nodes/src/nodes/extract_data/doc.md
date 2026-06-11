@@ -72,4 +72,37 @@ The LLM infers field values even when the source text doesn't use the exact colu
 | Section | Fields |
 | --- | --- |
 | Data Extract | `extract.profile` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `extract.column` | string | Column | default `column` |
+| `extract.type` | string | Type | default `text` |
+| `extract.defval` | string | Default Value | default `` |
+| `extract.fields` | array |  |  |
+| `extract.profile` | string |  | default `default` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self) -> None` |  |
+| `endGlobal(self) -> None` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `open(self, object: Entry)` | Initialize the instance for a new object. |
+| `writeText(self, text: str)` | Process and write textual data. Extracts definitions from the text, assigns metadata, and writes the resulting documents. |
+| `writeTable(self, text: str)` | Process and write tabular data. Extracts definitions from the text, assigns metadata for tables, and writes the resulting documents. |
+| `writeAnswers(self, answer: Answer)` |  |
+| `closing(self)` | Clean up the instance before closing. |
+
+**Source**
+
+[`nodes/src/nodes/extract_data`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/extract_data)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

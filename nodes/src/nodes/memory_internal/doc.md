@@ -47,4 +47,34 @@ None.
 | Section | Fields |
 | --- | --- |
 | Memory (Internal) | `type` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginInstance(self) -> None` |  |
+| `open(self, _obj: Any) -> None` | Clear the memory store so each client session starts fresh. |
+| `put(self, args)` | Store a value under a key. |
+| `get(self, args)` | Retrieve a value by key. |
+| `list(self, args)` | List all keys. |
+| `clear(self, args)` | Clear one or all keys. |
+
+`MemoryStore` (`memory.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self) -> None` |  |
+| `put(self, key: str, value: Any) -> Dict[str, Any]` | Store a value (string, number, object, or array) under a key. |
+| `get(self, key: str) -> Dict[str, Any]` | Retrieve the full stored value for a key, or ``None`` if missing. |
+| `list(self) -> Dict[str, Any]` | Return a sorted list of all keys currently in memory. |
+| `clear(self, key: Optional[str]) -> Dict[str, Any]` | Clear a specific key or, if *key* is omitted, all keys. |
+| `dispatch(self, tool_name: str, args: Any) -> Dict[str, Any]` | Route a ``memory.*`` tool call to the corresponding method. |
+
+**Source**
+
+[`nodes/src/nodes/memory_internal`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/memory_internal)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

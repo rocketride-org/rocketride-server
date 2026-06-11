@@ -50,4 +50,23 @@ None.
 | Section | Fields |
 | --- | --- |
 | Question | `type` |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `writeText(self, question: str)` | Create a question from text and send it. |
+
+**Source**
+
+[`nodes/src/nodes/question`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/question)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

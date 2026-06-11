@@ -99,4 +99,35 @@ source ─────────→ questions ──────────�
 | Section | Fields |
 | --- | --- |
 | Instructions | `instructions` |
+
+**Schema fields**
+
+| Field | Type | Title / Description | Const / Default |
+| --- | --- | --- | --- |
+| `instructions` | array | Instructions |  |
+
+**Classes**
+
+`IGlobal` — extends `IGlobalBase` (`IGlobal.py`)
+
+| Method | Summary |
+| --- | --- |
+| `beginGlobal(self)` |  |
+| `endGlobal(self)` |  |
+
+`IInstance` — extends `IInstanceBase` (`IInstance.py`)
+
+| Method | Summary |
+| --- | --- |
+| `__init__(self)` | Initialize the prompt node instance state. |
+| `open(self, entry: Entry)` |  |
+| `writeQuestions(self, question: Question)` | Collect questions for merging. |
+| `writeDocuments(self, documents)` | Collect documents for merging. |
+| `writeText(self, text: str)` | Collect text for merging. |
+| `writeTable(self, table: str)` | Collect table data for merging. |
+| `closing(self)` | When the node is closing, merge all collected inputs into one question. |
+
+**Source**
+
+[`nodes/src/nodes/prompt`](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/prompt)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
