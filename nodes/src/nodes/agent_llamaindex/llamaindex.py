@@ -42,7 +42,9 @@ def _build_tools(descriptors: List[Any]) -> List[Any]:
     """Wrap host tool descriptors as LlamaIndex FunctionTools (metadata only; we execute via call_tool)."""
     from llama_index.core.tools import FunctionTool
 
-    def _noop(*_args: Any, **_kwargs: Any) -> str:
+    # No params: FunctionTool infers a pydantic schema from the signature, and
+    # we execute the real tool via call_tool, so an empty schema is fine.
+    def _noop() -> str:
         return ''
 
     tools: List[Any] = []
