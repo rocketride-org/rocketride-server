@@ -181,7 +181,7 @@ async function getPythonVersion(options = {}) {
 
 function getVcpkgTriplet(options = {}) {
 	const arch = options.arch || os.arch();
-	if (isWindows()) return 'x64-windows-vc-rocketride';
+	if (isWindows()) return 'x64-windows-msvc-rocketride';
 	if (isLinux()) return 'x64-linux-clang-rocketride';
 	if (isMac()) return arch === 'arm64' ? 'arm64-osx-appleclang-rocketride' : 'x64-osx-appleclang-rocketride';
 	throw new Error('Unsupported platform');

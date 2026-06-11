@@ -24,7 +24,7 @@ endif()
 # Triplet: use value from cache (set by toolchain or by caller), or detect from platform
 if(NOT DEFINED VCPKG_TARGET_TRIPLET OR VCPKG_TARGET_TRIPLET STREQUAL "")
     if(WIN32)
-        set(VCPKG_TARGET_TRIPLET "x64-windows-vc-rocketride" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "x64-windows-msvc-rocketride" CACHE STRING "" FORCE)
     elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
         if(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64)$")
             set(VCPKG_TARGET_TRIPLET "arm64-osx-appleclang-rocketride" CACHE STRING "" FORCE)

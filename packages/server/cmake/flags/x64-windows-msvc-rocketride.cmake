@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-# Engine compiler/linker flags for the x64-windows-vc-rocketride build (MSVC).
+# Engine compiler/linker flags for the x64-windows-msvc-rocketride build (MSVC).
 
 # Basic settings
 set(CMAKE_C_COMPILER "cl" CACHE STRING "" FORCE)
