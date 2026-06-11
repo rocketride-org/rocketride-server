@@ -21,7 +21,12 @@ const SPINE = [
 	{ id: 'quickstart', label: 'Quickstart' },
 	{
 		label: 'Evaluate',
-		items: [{ id: 'evaluate/use-cases', label: 'Use cases' }]
+		items: [
+			{ id: 'evaluate/why-rocketride', label: 'Why RocketRide' },
+			{ id: 'evaluate/understanding', label: 'Understanding RocketRide' },
+			{ id: 'evaluate/use-cases', label: 'Use cases' },
+			{ id: 'evaluate/security', label: 'Security' }
+		]
 	},
 	{
 		label: 'Concepts',
@@ -40,7 +45,7 @@ const SPINE = [
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
 	},
-	{ label: 'Nodes & Connectors', autogen: NODES_DIR },
+	{ label: 'Nodes', autogen: NODES_DIR },
 	{
 		label: 'Develop',
 		items: [
@@ -51,6 +56,7 @@ const SPINE = [
 	{
 		label: 'IDE Extensions',
 		items: [
+			{ id: 'ide-extensions/overview', label: 'Overview' },
 			{ id: 'ide-extensions/vscode', label: 'VS Code', mount: true },
 			{ id: 'ide-extensions/cursor', label: 'Cursor' },
 			{ id: 'ide-extensions/windsurf', label: 'Windsurf' }
