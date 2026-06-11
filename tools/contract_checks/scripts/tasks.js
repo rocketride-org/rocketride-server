@@ -46,7 +46,7 @@ const CLI_SCRIPT = path.join(PACKAGE_DIR, 'cli.py');
 // Engine binary (built by server:build; execCommand resolves extension on Windows).
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 
-// depends._get_cache_dir() = <engine executable dir>/cache.
+// depends.engine_cache_dir() = <engine executable dir>/cache.
 const ENGINE_CACHE_DIR = path.join(DIST_ROOT, 'server', 'cache');
 
 

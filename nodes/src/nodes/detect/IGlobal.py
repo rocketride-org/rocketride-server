@@ -54,9 +54,13 @@ class IGlobal(IGlobalBase):
             backend = DEFAULT_BACKEND
 
         prompt = (config.get('prompt') or conn.get('detect.prompt') or conn.get('prompt') or '').strip()
+        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
         try:
-            threshold = float(config.get('threshold', DEFAULT_THRESHOLD))
+            threshold = float(raw_threshold)
         except (TypeError, ValueError):
+            threshold = None
+        if threshold is None or not (0.0 <= threshold <= 1.0):
+            warning(f'detect: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
             threshold = DEFAULT_THRESHOLD
 
         classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]

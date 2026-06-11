@@ -24,7 +24,7 @@
 
 import threading
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
 
@@ -41,7 +41,10 @@ class IGlobal(IGlobalBase):
 
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        model_name = (config.get('model') or '').strip() or DEFAULT_MODEL
+        model_name = (config.get('model') or '').strip()
+        if not model_name:
+            warning(f'caption: no model configured, using default {DEFAULT_MODEL}')
+            model_name = DEFAULT_MODEL
         task = str(config.get('task', DEFAULT_TASK)).strip() or DEFAULT_TASK
         revision = (config.get('revision') or '').strip() or None
 

@@ -59,14 +59,19 @@ class IGlobal(IGlobalBase):
             mode = DEFAULT_MODE
 
         model_name = (config.get('model') or '').strip() or None
+        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
         try:
-            threshold = float(config.get('threshold', DEFAULT_THRESHOLD))
+            threshold = float(raw_threshold)
         except (TypeError, ValueError):
+            threshold = None
+        if threshold is None or not (0.0 <= threshold <= 1.0):
+            warning(f'detect_segment: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
             threshold = DEFAULT_THRESHOLD
         try:
             max_edge = int(config.get('maxEdge', DEFAULT_MAX_EDGE))
         except (TypeError, ValueError):
             max_edge = DEFAULT_MAX_EDGE
+        max_edge = min(4096, max(256, max_edge))
 
         revision = (config.get('revision') or '').strip() or None
 

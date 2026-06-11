@@ -24,7 +24,7 @@
 
 import threading
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
 # Bounds for the source long-edge cap (composite resolution).
@@ -47,7 +47,10 @@ class IGlobal(IGlobalBase):
 
         node_cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        model_name = (node_cfg.get('model') or '').strip() or DEFAULT_MODEL
+        model_name = (node_cfg.get('model') or '').strip()
+        if not model_name:
+            warning(f'background_removal: no model configured, using default {DEFAULT_MODEL}')
+            model_name = DEFAULT_MODEL
 
         # max_edge: bound composite/source resolution so memory stays predictable.
         try:

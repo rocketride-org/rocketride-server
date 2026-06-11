@@ -51,14 +51,19 @@ class IGlobal(IGlobalBase):
         if profile not in PROFILE_TO_MODE:
             warning(f'pose_estimation: unknown profile "{profile}", falling back to {DEFAULT_MODE}.')
 
+        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
         try:
-            self.threshold = float(config.get('threshold', DEFAULT_THRESHOLD))
+            self.threshold = float(raw_threshold)
         except (TypeError, ValueError):
+            self.threshold = None
+        if self.threshold is None or not (0.0 <= self.threshold <= 1.0):
+            warning(f'pose_estimation: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
             self.threshold = DEFAULT_THRESHOLD
         try:
             max_persons = int(config.get('max_persons', DEFAULT_MAX_PERSONS))
         except (TypeError, ValueError):
             max_persons = DEFAULT_MAX_PERSONS
+        max_persons = min(200, max(1, max_persons))
 
         # device=None -> model server when --modelserver is set, else local.
         self.pose_estimator = PoseEstimator(mode=mode, device=None, threshold=self.threshold, max_persons=max_persons)

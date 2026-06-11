@@ -21,12 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import List
 import os
+import base64
+
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question, Answer
 from ai.common.image import ImageProcessor
 from rocketlib import AVI_ACTION, Entry, debug
-from typing import List
+
 from .IGlobal import IGlobal
 
 
@@ -223,8 +226,6 @@ class IInstance(IInstanceBase):
 
             if key not in self.instance.currentObject.response:
                 self.instance.currentObject.response[key] = []
-
-            import base64
 
             video_str = base64.b64encode(bytes(self.video)).decode('utf-8')
             self.video = bytearray()
