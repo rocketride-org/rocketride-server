@@ -154,14 +154,17 @@ module.exports = {
 		{ name: 'docs:compile', action: makeCompileAction },
 		{ name: 'docs:dev-start', action: makeDevStartAction },
 
-		// Public actions (have descriptions)
+		// docs:build is intentionally description-less so the global `builder build`
+		// command does not expand to it (the docs site is built on its own cadence).
+		// Run it explicitly with `builder docs:build`.
 		{
 			name: 'docs:build',
 			action: () => ({
-				description: 'Build docs',
 				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:index', 'docs:compile']
 			})
 		},
+
+		// Public actions (have descriptions)
 		{
 			name: 'docs:dev',
 			action: () => ({
