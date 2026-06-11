@@ -36,9 +36,9 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 |---------|---------|-------------|
 | `rocketride.connectionMode` | — | Connection mode: `cloud`, `onprem`, or `local` |
 | `rocketride.hostUrl` | `http://localhost:5565` | RocketRide server URL |
-| `rocketride.deployUrl` | `https://cloud.rocketride.ai` | Cloud deployment API URL |
-| `rocketride.apiKey` | — | Authentication token (stored in secure storage) |
-| `rocketride.autoConnect` | — | Auto-connect to server on extension activation |
+| `rocketride.deployment.hostUrl` | `https://cloud.rocketride.ai` | Cloud deployment API URL |
+
+> Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 
 ### Pipeline
 
@@ -52,7 +52,7 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
-| `rocketride.local.engineArgs` | — | Additional startup arguments for the local engine |
+| `rocketride.engineArgs` | — | Additional startup arguments for the local engine |
 
 ### Integrations
 

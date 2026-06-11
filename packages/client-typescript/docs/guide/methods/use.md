@@ -137,10 +137,10 @@ config = {
     'source': 'webhook_1',
     'components': [
         {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
-        {'id': 'ai_chat_1', 'provider': 'ai_chat', 'config': {'model': 'gpt-4'},
+        {'id': 'llm_1', 'provider': 'llm_openai', 'config': {'model': 'gpt-4'},
          'input': [{'from': 'webhook_1', 'lane': 'output'}]},
         {'id': 'response_1', 'provider': 'response', 'config': {},
-         'input': [{'from': 'ai_chat_1', 'lane': 'answer'}]},
+         'input': [{'from': 'llm_1', 'lane': 'answer'}]},
     ],
 }
 result = await client.use(pipeline=config)
@@ -185,7 +185,7 @@ Pipeline configuration files define the processing workflow:
     },
     {
       "id": "processor_1",
-      "provider": "ai_chat",
+      "provider": "llm_openai",
       "config": { "model": "gpt-4" },
       "input": [{ "from": "webhook_1", "lane": "output" }]
     },

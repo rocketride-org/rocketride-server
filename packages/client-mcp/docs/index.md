@@ -176,7 +176,7 @@ result = await session.read_resource("rocketride://status")
 
 # Example: list available node types
 result = await session.read_resource("rocketride://nodes")
-# Returns: {"nodes": [{"name": "llm-openai", "type": "processor"}, ...]}
+# Returns: {"nodes": [{"name": "llm_openai", "type": "processor"}, ...]}
 ```
 
 When the RocketRide client is not connected, resources return a JSON error payload (e.g. `{"pipelines": [], "error": "Client is not connected"}`) instead of raising an exception. Unknown URIs raise a `ValueError`.
