@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 
-title: Node
+title: TypeScript
 ---
 
 <p align="center">
