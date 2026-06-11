@@ -340,9 +340,12 @@ article a {
 	height: 1.15em;
 }
 
-/* Never underline the home side-card links (beat Infima's link-hover rule). */
+/* Never underline the side-card links or their inner text (beat Infima's
+ * link-hover rule). The descendant selector also covers the title/body/code
+ * spans, which otherwise pick up the propagated underline on hover. */
 .rr-side-card:not(#\#),
-.rr-side-card:not(#\#):hover {
+.rr-side-card:not(#\#):hover,
+.rr-side-card:not(#\#):hover * {
 	text-decoration: none;
 }
 
@@ -627,7 +630,11 @@ article a {
 	margin-bottom: 1.5rem;
 }
 
-.rr-doc-header + h1 {
+/* CommonMark (.md) wraps the body's leading `# Title` in its own <header>,
+ * while .mdx emits a bare <h1>; hide either so it never duplicates the
+ * custom header's title. */
+.rr-doc-header + h1,
+.rr-doc-header + header {
 	display: none;
 }
 
