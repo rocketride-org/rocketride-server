@@ -230,12 +230,17 @@ def pytest_generate_tests(metafunc):
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
         #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
-        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
+        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image, embedding_transformer, embedding_video); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
         skip_nodes = {
             'anonymize',
             'ocr',
             'ner',
             'embedding_image',
+            # Download model weights from huggingface.co at test time, so they turn the
+            # required CI check red whenever the HF hub is unreachable/rate-limited — on
+            # PRs unrelated to embeddings (RR-1120). Same class as embedding_image above.
+            'embedding_transformer',  # sentence-transformers (miniLM)
+            'embedding_video',  # CLIP (openai-patch16)
             'image_cleanup',
             'frame_grabber',
             'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
