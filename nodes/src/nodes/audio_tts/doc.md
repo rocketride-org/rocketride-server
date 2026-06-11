@@ -5,7 +5,7 @@ Text-to-speech node using **Kokoro-82M** only. Additional engines (Piper, Bark, 
 ## Behavior (aligned with reference branch for `engine: kokoro`)
 
 - **Input:** `text` lane
-- **Output:** `audio` lane — WAV bytes via `writeAudio` (BEGIN / WRITE / END) with MIME `audio/wav`
+- **Output:** `audio` lane — WAV bytes with MIME `audio/wav`
 - **Local:** `kokoro.KPipeline`, spaCy `en_core_web_sm` via `ensure_spacy_en_model()`
 - **`--modelserver`:** `ModelClient` + `KokoroLoader` on the server
 

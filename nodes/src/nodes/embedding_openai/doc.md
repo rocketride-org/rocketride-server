@@ -10,11 +10,12 @@ Generates text embeddings using OpenAI's embedding API. Requires an OpenAI API k
 
 **Lanes:**
 
-| Lane in     | Lane out    | Description                                         |
-| ----------- | ----------- | --------------------------------------------------- |
-| `documents` | `documents` | Embed document text, attach vector to each document |
+| Lane in     | Lane out    | Description                                            |
+| ----------- | ----------- | ----------------------------------------------------- |
+| `documents` | `documents` | Embed document text, attach vector to each document   |
+| `questions` | `questions` | Embed a query string, attach vector for similarity search |
 
-Output documents have an `embedding` vector attached, ready for ingestion into a vector store.
+Output documents have an `embedding` vector attached, ready for ingestion into a vector store. The `questions` lane embeds a search query with the same model so it can be matched against a stored index.
 
 ## Configuration
 
