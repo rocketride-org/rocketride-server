@@ -37,9 +37,15 @@ from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import normalize_tool_input
 
-from daytona import DaytonaError
+from daytona import DaytonaError, DaytonaNotFoundError
 
 from .IGlobal import IGlobal
+
+_SESSION_NOTE = (
+    'The sandbox persists between calls (files, installed packages), but after '
+    'sitting idle past the auto-stop interval it is recycled and a fresh empty '
+    'one is created on the next call — re-upload/reinstall if that happens.'
+)
 
 
 def _truncate(text: str, cap: int) -> tuple[str, bool]:
@@ -70,6 +76,21 @@ def _exec_result(response, cap: int) -> dict:
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    def _with_sandbox(self, call):
+        """Run ``call(sandbox)``, recreating the sandbox once if it expired.
+
+        The sandbox is ephemeral: after the inactivity auto-stop it is deleted
+        server-side and every SDK call on the stale handle raises
+        DaytonaNotFoundError. Drop the handle and retry once on a fresh
+        sandbox so one idle gap doesn't brick the tool for the whole pipeline.
+        """
+        sandbox = self.IGlobal.get_sandbox()
+        try:
+            return call(sandbox)
+        except DaytonaNotFoundError:
+            self.IGlobal.drop_sandbox(sandbox)
+            return call(self.IGlobal.get_sandbox())
+
     @tool_function(
         input_schema={
             'type': 'object',
@@ -92,7 +113,7 @@ class IInstance(IInstanceBase):
         },
         description=lambda self: (
             f'Execute code in a remote Daytona sandbox (isolated from this machine) and return its output. '
-            f'The sandbox persists between calls, so variables on disk, installed packages and files carry over. '
+            f'{_SESSION_NOTE} '
             f'Sandbox language: {self.IGlobal.language}. Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
         ),
     )
@@ -104,8 +125,9 @@ class IInstance(IInstanceBase):
             raise ValueError('"code" is required and must be a non-empty string')
 
         try:
-            sandbox = self.IGlobal.get_sandbox()
-            response = sandbox.process.code_run(code, timeout=self.IGlobal.exec_timeout_secs)
+            response = self._with_sandbox(
+                lambda sandbox: sandbox.process.code_run(code, timeout=self.IGlobal.exec_timeout_secs)
+            )
         except DaytonaError as e:
             return {'error': str(e), 'exit_code': -1, 'output': '', 'truncated': False}
         return _exec_result(response, self.IGlobal.max_output_chars)
@@ -135,8 +157,8 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            f'Run a shell command in the remote Daytona sandbox. The sandbox persists between calls — '
-            f'install dependencies, build, then run. Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
+            f'Run a shell command in the remote Daytona sandbox — install dependencies, build, then run. '
+            f'{_SESSION_NOTE} Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
         ),
     )
     def run_command(self, args):
@@ -155,8 +177,7 @@ class IInstance(IInstanceBase):
             exec_kwargs['cwd'] = cwd.strip()
 
         try:
-            sandbox = self.IGlobal.get_sandbox()
-            response = sandbox.process.exec(command, **exec_kwargs)
+            response = self._with_sandbox(lambda sandbox: sandbox.process.exec(command, **exec_kwargs))
         except DaytonaError as e:
             return {'error': str(e), 'exit_code': -1, 'output': '', 'truncated': False}
         return _exec_result(response, self.IGlobal.max_output_chars)
@@ -198,8 +219,7 @@ class IInstance(IInstanceBase):
 
         path = path.strip()
         try:
-            sandbox = self.IGlobal.get_sandbox()
-            sandbox.fs.upload_file(content.encode('utf-8'), path)
+            self._with_sandbox(lambda sandbox: sandbox.fs.upload_file(content.encode('utf-8'), path))
         except DaytonaError as e:
             return {'error': str(e), 'success': False, 'path': path}
         return {'success': True, 'path': path}
@@ -232,9 +252,19 @@ class IInstance(IInstanceBase):
         if not path or not isinstance(path, str) or not path.strip():
             raise ValueError('"path" is required and must be a non-empty string')
 
+        # No expired-sandbox retry here: a 404 on download is ambiguous between
+        # "file missing" and "sandbox gone", and recreating an empty sandbox
+        # cannot produce the file either way. run/upload calls recover the
+        # session; this one just reports the miss.
         try:
             sandbox = self.IGlobal.get_sandbox()
             raw = sandbox.fs.download_file(path.strip())
+        except DaytonaNotFoundError:
+            return {
+                'error': f'file not found (or the sandbox expired): {path.strip()}',
+                'content': '',
+                'truncated': False,
+            }
         except DaytonaError as e:
             return {'error': str(e), 'content': '', 'truncated': False}
 

@@ -34,6 +34,8 @@ deleted in ``endGlobal``. Tool logic lives on IInstance via @tool_function.
 
 from __future__ import annotations
 
+import threading
+
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
@@ -53,6 +55,10 @@ class IGlobal(IGlobalBase):
 
     client: Daytona | None = None
     sandbox = None  # daytona Sandbox; created lazily, deleted in endGlobal
+    # Guards lazy sandbox creation: agents issue parallel tool calls (e.g.
+    # deepagent's asyncio.gather fan-out), and an unsynchronized check-then-act
+    # would create two billed sandboxes and orphan one.
+    _sandbox_lock: threading.Lock | None = None
     # Safety bounds for agent-driven execution; overridable from config.
     snapshot: str = ''
     language: str = 'python'
@@ -63,6 +69,8 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
+
+        self._sandbox_lock = threading.Lock()
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         apikey = str((cfg.get('apikey') or '')).strip()
@@ -94,17 +102,32 @@ class IGlobal(IGlobalBase):
         Ephemeral + auto-stop so the sandbox cleans itself up (and stops
         billing) even if endGlobal never runs, e.g. on a crashed engine.
         """
-        if self.sandbox is None:
-            params_kwargs = {
-                'ephemeral': True,
-                'auto_stop_interval': self.auto_stop_minutes,
-                'language': self.language,
-            }
-            if self.snapshot:
-                params_kwargs['snapshot'] = self.snapshot
-            self.sandbox = self.client.create(CreateSandboxFromSnapshotParams(**params_kwargs))
-            debug(f'tool_daytona: created sandbox {getattr(self.sandbox, "id", "?")}')
-        return self.sandbox
+        sandbox = self.sandbox
+        if sandbox is None:
+            with self._sandbox_lock:
+                if self.sandbox is None:
+                    params_kwargs = {
+                        'ephemeral': True,
+                        'auto_stop_interval': self.auto_stop_minutes,
+                        'language': self.language,
+                    }
+                    if self.snapshot:
+                        params_kwargs['snapshot'] = self.snapshot
+                    self.sandbox = self.client.create(CreateSandboxFromSnapshotParams(**params_kwargs))
+                    debug(f'tool_daytona: created sandbox {getattr(self.sandbox, "id", "?")}')
+                sandbox = self.sandbox
+        return sandbox
+
+    def drop_sandbox(self, sandbox) -> None:
+        """Forget a sandbox the server reports gone.
+
+        Being ephemeral, the sandbox is deleted server-side once the
+        inactivity auto-stop fires; dropping the stale handle lets the next
+        get_sandbox() call create a fresh one instead of failing forever.
+        """
+        with self._sandbox_lock:
+            if self.sandbox is sandbox:
+                self.sandbox = None
 
     def validateConfig(self) -> None:
         try:

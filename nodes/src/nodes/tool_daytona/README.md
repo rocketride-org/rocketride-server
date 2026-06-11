@@ -1,4 +1,10 @@
-# Daytona Tool
+---
+title: Daytona
+date: 2026-06-11
+sidebar_position: 1
+---
+
+## What it does
 
 Gives agents an isolated [Daytona](https://www.daytona.io) cloud sandbox for running code and shell commands — generated code executes remotely, never on the engine host. One ephemeral sandbox is created lazily on the first tool call, shared across calls (installed packages and files persist within the session), and deleted when the pipeline shuts down.
 

@@ -51,6 +51,10 @@ class _StubDaytonaError(Exception):
     """Real exception class so IInstance's except clauses catch it under the stub."""
 
 
+class _StubDaytonaNotFoundError(_StubDaytonaError):
+    """Mirror of the SDK hierarchy: NotFound subclasses DaytonaError."""
+
+
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the module."""
     rocketlib = MagicMock()
@@ -70,6 +74,7 @@ def _build_import_stubs():
 
     daytona = MagicMock()
     daytona.DaytonaError = _StubDaytonaError
+    daytona.DaytonaNotFoundError = _StubDaytonaNotFoundError
     daytona.Daytona = MagicMock()
     daytona.DaytonaConfig = MagicMock()
     daytona.CreateSandboxFromSnapshotParams = MagicMock()
@@ -128,16 +133,25 @@ class _FakeSandbox:
 
 
 class _FakeGlobal:
-    def __init__(self, sandbox, *, exec_timeout_secs=120, max_output_chars=1000, language='python'):
+    def __init__(self, sandbox, *, exec_timeout_secs=120, max_output_chars=1000, language='python', next_sandbox=None):
         self._sandbox = sandbox
+        self._next_sandbox = next_sandbox
         self.exec_timeout_secs = exec_timeout_secs
         self.max_output_chars = max_output_chars
         self.language = language
         self.get_sandbox_calls = 0
+        self.dropped = []
 
     def get_sandbox(self):
         self.get_sandbox_calls += 1
+        if self._sandbox is None and self._next_sandbox is not None:
+            self._sandbox = self._next_sandbox
         return self._sandbox
+
+    def drop_sandbox(self, sandbox):
+        self.dropped.append(sandbox)
+        if self._sandbox is sandbox:
+            self._sandbox = None
 
 
 def _instance(global_state):
@@ -206,7 +220,7 @@ def test_run_command_passes_timeout_and_strips_cwd():
 
 
 def test_run_code_returns_error_dict_on_daytona_error():
-    process = _FakeProcess(raise_error=_StubDaytonaError('boom'))
+    process = _FakeProcess(raise_error=mod.DaytonaError('boom'))
     glb = _FakeGlobal(_FakeSandbox(process))
     inst = _instance(glb)
     out = inst.run_code({'code': 'print(1)'})
@@ -221,3 +235,43 @@ def test_run_code_truncates_long_output():
     out = inst.run_code({'code': 'print(1)'})
     assert len(out['output']) == 1000
     assert out['truncated'] is True
+
+
+# ---------------------------------------------------------------------------
+# Expired-sandbox recovery
+# ---------------------------------------------------------------------------
+
+
+def test_run_code_recreates_sandbox_once_on_not_found():
+    dead = _FakeSandbox(_FakeProcess(raise_error=mod.DaytonaNotFoundError('sandbox gone')))
+    fresh_process = _FakeProcess(_FakeResponse(result='recovered', exit_code=0))
+    glb = _FakeGlobal(dead, next_sandbox=_FakeSandbox(fresh_process))
+    inst = _instance(glb)
+    out = inst.run_code({'code': 'print(1)'})
+    assert out == {'exit_code': 0, 'output': 'recovered', 'truncated': False}
+    assert glb.dropped == [dead]
+    assert glb.get_sandbox_calls == 2
+
+
+def test_run_code_gives_up_after_one_recreate():
+    dead = _FakeSandbox(_FakeProcess(raise_error=mod.DaytonaNotFoundError('gone')))
+    also_dead = _FakeSandbox(_FakeProcess(raise_error=mod.DaytonaNotFoundError('still gone')))
+    glb = _FakeGlobal(dead, next_sandbox=also_dead)
+    inst = _instance(glb)
+    out = inst.run_code({'code': 'print(1)'})
+    assert out['error'] == 'still gone'
+    assert glb.dropped == [dead]
+
+
+def test_download_file_does_not_recreate_on_not_found():
+    class _Fs:
+        def download_file(self, path):
+            raise mod.DaytonaNotFoundError('404')
+
+    sandbox = _FakeSandbox(_FakeProcess())
+    sandbox.fs = _Fs()
+    glb = _FakeGlobal(sandbox)
+    inst = _instance(glb)
+    out = inst.download_file({'path': 'a.txt'})
+    assert 'file not found' in out['error']
+    assert glb.dropped == []
