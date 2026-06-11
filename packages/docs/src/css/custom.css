@@ -164,33 +164,6 @@ body {
 	height: 1.75rem;
 }
 
-/* Logo links to rocketride.ai; on hover, tint the mark to the theme accent
- * (indigo light / horizon dark) via a masked overlay — an <img> can't be
- * recolored directly. */
-.navbar__brand {
-	position: relative;
-}
-
-.navbar__brand::before {
-	content: '';
-	position: absolute;
-	left: 0;
-	top: 50%;
-	width: 1.75rem;
-	height: 1.75rem;
-	transform: translateY(-50%);
-	background-color: var(--ifm-link-color);
-	-webkit-mask: url('/img/rocketride-icon-white.svg') center / contain no-repeat;
-	mask: url('/img/rocketride-icon-white.svg') center / contain no-repeat;
-	opacity: 0;
-	transition: opacity 0.15s ease;
-	pointer-events: none;
-}
-
-.navbar__brand:hover::before {
-	opacity: 1;
-}
-
 /* Home link colored like content links (Infima boosts .navbar__link to (2,1,0),
  * so match the hack to win). */
 .navbar__link--colored:not(#\#):not(#\#),

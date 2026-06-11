@@ -87,6 +87,10 @@ const config: Config = {
 
 	themeConfig: {
 		...(algolia ? { algolia } : {}),
+		// Follow the visitor's OS theme: respectPrefersColorScheme makes the
+		// system `prefers-color-scheme` win on first visit. defaultMode is only the
+		// fallback when the browser reports no preference; the manual toggle still
+		// overrides and persists per-visitor.
 		colorMode: {
 			defaultMode: 'dark',
 			respectPrefersColorScheme: true,
