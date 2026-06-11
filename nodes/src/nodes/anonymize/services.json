@@ -253,6 +253,13 @@
 				"driver license"
 			]
 		},
+		"redactionStyle": {
+			"type": "string",
+			"title": "Redaction style",
+			"description": "How detected entities are replaced. 'mask' overwrites each entity with the anonymization character (████). 'token' replaces each entity with a labelled tag like [PERSON] or [EMAIL].",
+			"default": "mask",
+			"enum": ["mask", "token"]
+		},
 		"anonymize.model": {
 			"type": "string",
 			"title": "Model name",
@@ -262,75 +269,75 @@
 		},
 		"anonymize.custom": {
 			"object": "custom",
-			"properties": ["anonymize.model", "anonymizeChar", "entityTypes"]
+			"properties": ["anonymize.model", "anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerMergedLarge": {
 			"object": "glinerMergedLarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerMultiPII": {
 			"object": "glinerMultiPII",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerPIILarge": {
 			"object": "glinerPIILarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerSmall": {
 			"object": "glinerSmall",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerMedium": {
 			"object": "glinerMedium",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerLarge": {
 			"object": "glinerLarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerMulti": {
 			"object": "glinerMulti",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.gretelSmall": {
 			"object": "gretelSmall",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.gretelLarge": {
 			"object": "gretelLarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerKo": {
 			"object": "glinerKo",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerIt": {
 			"object": "glinerIt",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerAr": {
 			"object": "glinerAr",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerCommunitySmall": {
 			"object": "glinerCommunitySmall",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerCommunityMedium": {
 			"object": "glinerCommunityMedium",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerCommunityLarge": {
 			"object": "glinerCommunityLarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerBiomedSmall": {
 			"object": "glinerBiomedSmall",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.glinerBiomedLarge": {
 			"object": "glinerBiomedLarge",
-			"properties": ["anonymizeChar", "entityTypes"]
+			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
 		},
 		"anonymize.profile": {
 			"title": "Model",
