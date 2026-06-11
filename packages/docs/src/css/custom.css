@@ -243,6 +243,16 @@ body {
 	border-left: none !important;
 }
 
+/* Right "on this page" nav: hover/active links follow the link color (Imperial
+ * Indigo light / Horizon Blue dark) instead of Infima's --ifm-color-primary
+ * blue ramp, matching the sidebar and breadcrumb active states. */
+.table-of-contents__link:hover,
+.table-of-contents__link:hover code,
+.table-of-contents__link--active,
+.table-of-contents__link--active code {
+	color: var(--ifm-link-color);
+}
+
 /* ----------------------------------------------------------------------------
  * Content: cards, callouts, tables, code
  * ------------------------------------------------------------------------- */
@@ -367,7 +377,9 @@ article a {
 	border-radius: 12px;
 	margin-bottom: 1rem;
 	color: inherit;
-	transition: border-color 0.15s ease, transform 0.15s ease;
+	transition:
+		border-color 0.15s ease,
+		transform 0.15s ease;
 }
 
 .rr-side-card:nth-child(3n + 1) {
@@ -570,7 +582,9 @@ article a {
 	border-radius: 50%;
 	border: 1px solid var(--rr-panel-border);
 	color: var(--ifm-color-emphasis-700);
-	transition: color 0.15s ease, border-color 0.15s ease;
+	transition:
+		color 0.15s ease,
+		border-color 0.15s ease;
 }
 
 .rr-footer__social:hover {

@@ -37,7 +37,49 @@ function memberRow(member, source) {
 function main() {
 	const source = ts.createSourceFile(SOURCE, readFileSync(SOURCE, 'utf8'), ts.ScriptTarget.Latest, true);
 
-	const out = ['---', 'title: Pipeline JSON Reference', 'slug: /pipeline-reference', '---', '', '# Pipeline JSON Reference', '', 'Generated from the `.pipe` schema types in `packages/client-typescript/src/client/types/pipeline.ts`. A `.pipe` file is JSON conforming to these interfaces.', ''];
+	const preamble = [
+		'---',
+		'title: Pipeline JSON Reference',
+		'slug: /pipeline-reference',
+		'---',
+		'',
+		'# Pipeline JSON Reference',
+		'',
+		'A `.pipe` file is JSON conforming to the interfaces below. The schema is the',
+		'contract the [engine](/concepts/runtime-engine) loads and the SDKs send over',
+		'the [WebSocket protocol](/protocols/websocket) — the same JSON whether you',
+		'author it visually or by hand. For the concepts behind these fields, see',
+		'[Pipelines](/concepts/pipelines) and the [Execution model](/concepts/execution-model).',
+		'',
+		'## Top-level shape',
+		'',
+		'A pipeline is an object with a `components` array (the nodes of the graph) and,',
+		'when agents or other invokers are involved, a `control` array describing the',
+		'invoke connections. Each component declares its `id`, `provider`, `config`, and',
+		'the input lanes it consumes.',
+		'',
+		'```json',
+		'{',
+		'  "components": [',
+		'    { "id": "in", "provider": "webhook", "config": {} },',
+		'    {',
+		'      "id": "out",',
+		'      "provider": "response",',
+		'      "config": { "laneName": "text" },',
+		'      "input": [{ "lane": "text", "from": "in" }]',
+		'    }',
+		'  ]',
+		'}',
+		'```',
+		'',
+		'## Interfaces',
+		'',
+		'The definitions below are generated from the `.pipe` schema types in',
+		'`packages/client-typescript/src/client/types/pipeline.ts`; a `.pipe` file is JSON',
+		'conforming to them.',
+		'',
+	];
+	const out = [...preamble];
 
 	ts.forEachChild(source, (node) => {
 		if (!ts.isInterfaceDeclaration(node) && !ts.isTypeAliasDeclaration(node)) return;
