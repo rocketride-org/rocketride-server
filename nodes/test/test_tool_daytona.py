@@ -275,3 +275,50 @@ def test_download_file_does_not_recreate_on_not_found():
     out = inst.download_file({'path': 'a.txt'})
     assert 'file not found' in out['error']
     assert glb.dropped == []
+
+
+# ---------------------------------------------------------------------------
+# upload_file / download_file
+# ---------------------------------------------------------------------------
+
+
+class _FakeFs:
+    def __init__(self):
+        self.files = {}
+
+    def upload_file(self, content, path):
+        self.files[path] = bytes(content)
+
+    def download_file(self, path):
+        if path not in self.files:
+            raise mod.DaytonaNotFoundError(f'404: {path}')
+        return self.files[path]
+
+
+def test_upload_file_encodes_utf8_and_reports_path():
+    sandbox = _FakeSandbox(_FakeProcess())
+    sandbox.fs = _FakeFs()
+    glb = _FakeGlobal(sandbox)
+    inst = _instance(glb)
+    out = inst.upload_file({'path': '  app/main.py  ', 'content': 'print("привет")'})
+    assert out == {'success': True, 'path': 'app/main.py'}
+    assert sandbox.fs.files['app/main.py'] == 'print("привет")'.encode('utf-8')
+
+
+def test_upload_file_rejects_missing_content_without_touching_sandbox():
+    glb = _FakeGlobal(_FakeSandbox(_FakeProcess()))
+    inst = _instance(glb)
+    with pytest.raises(ValueError):
+        inst.upload_file({'path': 'a.txt'})
+    assert glb.get_sandbox_calls == 0
+
+
+def test_download_file_decodes_and_truncates():
+    sandbox = _FakeSandbox(_FakeProcess())
+    sandbox.fs = _FakeFs()
+    sandbox.fs.files['big.txt'] = ('я' * 2000).encode('utf-8')
+    glb = _FakeGlobal(sandbox, max_output_chars=1000)
+    inst = _instance(glb)
+    out = inst.download_file({'path': 'big.txt'})
+    assert len(out['content']) == 1000
+    assert out['truncated'] is True

@@ -41,13 +41,15 @@ Returns `exit_code`, `output` and `truncated`.
 | `path`    | yes      | Destination path inside the sandbox    |
 | `content` | yes      | Text content to write (UTF-8)          |
 
+Returns `success` and `path`, or `error` on failure.
+
 ### daytona.download_file
 
 | Parameter | Required | Description                       |
 | --------- | -------- | --------------------------------- |
 | `path`    | yes      | Path of the file to read          |
 
-Returns `content` (UTF-8, truncated at the configured cap) and `truncated`.
+Returns `content` (UTF-8, truncated at the configured cap) and `truncated`, or `error` when the file is missing or the sandbox call fails. `run_code`/`run_command` likewise return `error` instead of `exit_code`/`output` when the sandbox call itself fails.
 
 ## Configuration
 

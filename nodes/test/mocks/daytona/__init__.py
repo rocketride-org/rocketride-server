@@ -90,6 +90,9 @@ class _MockSandbox:
         self.deleted = True
 
 
+Sandbox = _MockSandbox
+
+
 class Daytona:
     def __init__(self, config=None):
         self.config = config
@@ -100,6 +103,7 @@ class Daytona:
 
 __all__ = [
     'CreateSandboxFromSnapshotParams',
+    'Sandbox',
     'Daytona',
     'DaytonaConfig',
     'DaytonaError',

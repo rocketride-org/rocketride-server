@@ -39,7 +39,7 @@ import threading
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
-from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig
+from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, Sandbox
 
 
 def _int_or(value, default: int, *, lo: int, hi: int) -> int:
@@ -54,7 +54,7 @@ class IGlobal(IGlobalBase):
     """Global state for tool_daytona."""
 
     client: Daytona | None = None
-    sandbox = None  # daytona Sandbox; created lazily, deleted in endGlobal
+    sandbox: Sandbox | None = None  # created lazily, deleted in endGlobal
     # Guards lazy sandbox creation: agents issue parallel tool calls (e.g.
     # deepagent's asyncio.gather fan-out), and an unsynchronized check-then-act
     # would create two billed sandboxes and orphan one.
@@ -96,7 +96,7 @@ class IGlobal(IGlobalBase):
 
         self.client = Daytona(DaytonaConfig(**config_kwargs))
 
-    def get_sandbox(self):
+    def get_sandbox(self) -> Sandbox:
         """Return the shared sandbox, creating it on first use.
 
         Ephemeral + auto-stop so the sandbox cleans itself up (and stops
@@ -118,7 +118,7 @@ class IGlobal(IGlobalBase):
                 sandbox = self.sandbox
         return sandbox
 
-    def drop_sandbox(self, sandbox) -> None:
+    def drop_sandbox(self, sandbox: Sandbox) -> None:
         """Forget a sandbox the server reports gone.
 
         Being ephemeral, the sandbox is deleted server-side once the
