@@ -240,6 +240,11 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'account:setDefaultTeam', teamId });
 	}, []);
 
+	/** Switches the user's active organization. */
+	const handleSetDefaultOrg = useCallback(async (orgId: string): Promise<void> => {
+		sendMessageRef.current({ type: 'account:setDefaultOrg', orgId });
+	}, []);
+
 	/** Triggers the logout flow on the host side. */
 	const handleLogout = useCallback(() => {
 		sendMessageRef.current({ type: 'account:logout' });
@@ -274,7 +279,7 @@ const AccountWebview: React.FC = () => {
 	}, []);
 
 	/** Sends an invitation to a new organization member. */
-	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string }): Promise<void> => {
+	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }): Promise<void> => {
 		sendMessageRef.current({ type: 'account:inviteMember', params });
 	}, []);
 
@@ -286,6 +291,11 @@ const AccountWebview: React.FC = () => {
 	/** Removes an organization member. */
 	const handleRemoveMember = useCallback(async (userId: string): Promise<void> => {
 		sendMessageRef.current({ type: 'account:removeMember', userId });
+	}, []);
+
+	/** Resends the initialization email for a pending member. */
+	const handleResendInvite = useCallback(async (userId: string): Promise<void> => {
+		sendMessageRef.current({ type: 'account:resendInvite', userId });
 	}, []);
 
 	/** Creates a new team. */
@@ -431,6 +441,7 @@ const AccountWebview: React.FC = () => {
 				onActiveTeamIdChange={setActiveTeamId}
 				onSaveProfile={handleSaveProfile}
 				onSetDefaultTeam={handleSetDefaultTeam}
+				onSetDefaultOrg={handleSetDefaultOrg}
 				onLogout={handleLogout}
 				onDeleteAccount={handleDeleteAccount}
 				onSaveOrgName={handleSaveOrgName}
@@ -439,6 +450,7 @@ const AccountWebview: React.FC = () => {
 				onInviteMember={handleInviteMember}
 				onUpdateMemberRole={handleUpdateMemberRole}
 				onRemoveMember={handleRemoveMember}
+				onResendInvite={handleResendInvite}
 				onCreateTeam={handleCreateTeam}
 				onDeleteTeam={handleDeleteTeam}
 				onAddTeamMember={handleAddTeamMember}

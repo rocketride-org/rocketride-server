@@ -392,6 +392,18 @@ export interface ConnectResult {
 	 * The shell should show a waitlist page instead of the main workspace.
 	 */
 	waitlisted?: boolean;
+
+	/**
+	 * All org memberships the user has (for the org switcher UI).
+	 * Only present in profile responses, not in the auth handshake.
+	 */
+	memberships?: OrgInfo[];
+
+	/**
+	 * The ID of the user's currently active (default) organization.
+	 * Only present in profile responses.
+	 */
+	defaultOrgId?: string;
 }
 
 /**

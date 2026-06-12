@@ -315,6 +315,12 @@ const AccountPage: React.FC = () => {
 		await client.account.setDefaultTeam(teamId);
 	}, [client]);
 
+	/** Switches the user's active organization. */
+	const handleSetDefaultOrg = useCallback(async (orgId: string) => {
+		if (!client) return;
+		await client.account.setDefaultOrg(orgId);
+	}, [client]);
+
 	/** Deletes the user account. */
 	const handleDeleteAccount = useCallback(async () => {
 		if (!client) return;
@@ -345,7 +351,7 @@ const AccountPage: React.FC = () => {
 	}, [client, loadKeys]);
 
 	/** Sends an invitation to a new organization member. */
-	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string }) => {
+	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
 		if (!client || !orgId) return;
 		await client.account.inviteMember(orgId, params);
 		await loadMembers();
@@ -364,6 +370,12 @@ const AccountPage: React.FC = () => {
 		await client.account.removeMember(orgId, userId);
 		await loadMembers();
 	}, [client, orgId, loadMembers]);
+
+	/** Resends the initialization email for a pending member. */
+	const handleResendInvite = useCallback(async (userId: string) => {
+		if (!client || !orgId) return;
+		await client.account.resendInvite(orgId, userId);
+	}, [client, orgId]);
 
 	/** Creates a new team. */
 	const handleCreateTeam = useCallback(async (name: string) => {
@@ -494,6 +506,7 @@ const AccountPage: React.FC = () => {
 			onActiveTeamIdChange={setActiveTeamId}
 			onSaveProfile={handleSaveProfile}
 			onSetDefaultTeam={handleSetDefaultTeam}
+			onSetDefaultOrg={handleSetDefaultOrg}
 			onLogout={() => logout?.()}
 			onDeleteAccount={handleDeleteAccount}
 			onSaveOrgName={handleSaveOrgName}
@@ -502,6 +515,7 @@ const AccountPage: React.FC = () => {
 			onInviteMember={handleInviteMember}
 			onUpdateMemberRole={handleUpdateMemberRole}
 			onRemoveMember={handleRemoveMember}
+			onResendInvite={handleResendInvite}
 			onCreateTeam={handleCreateTeam}
 			onDeleteTeam={handleDeleteTeam}
 			onAddTeamMember={handleAddTeamMember}

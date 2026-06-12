@@ -156,6 +156,10 @@ export class AccountProvider {
 				await this.handleSetDefaultTeam(panel, message.teamId as string);
 				break;
 
+			case 'account:setDefaultOrg':
+				await this.handleSetDefaultOrg(panel, message.orgId as string);
+				break;
+
 			// -- API Keys ---------------------------------------------------------
 			case 'account:createKey':
 				await this.handleCreateKey(panel, message.params as { name: string; teamId: string; permissions: string[]; expiresAt?: string });
@@ -181,6 +185,10 @@ export class AccountProvider {
 
 			case 'account:removeMember':
 				await this.handleRemoveMember(panel, message.userId as string);
+				break;
+
+			case 'account:resendInvite':
+				await this.handleResendInvite(panel, message.userId as string);
 				break;
 
 			// -- Teams ------------------------------------------------------------
@@ -411,6 +419,30 @@ export class AccountProvider {
 		await panel.webview.postMessage({ type: 'account:authUser', authUser });
 	}
 
+	/**
+	 * Switches the user's active organization.
+	 *
+	 * @param panel - The webview panel.
+	 * @param orgId - The org ID to switch to.
+	 */
+	private async handleSetDefaultOrg(panel: vscode.WebviewPanel, orgId: string): Promise<void> {
+		const { client } = this.resolveClient();
+		if (!client) {
+			this.postError(panel, 'Not connected');
+			return;
+		}
+
+		// Step 1: send the set_default_org request.
+		await client.account.setDefaultOrg(orgId);
+
+		// Step 2: the server pushes a refreshed ConnectResult to all connections.
+		// Re-fetch profile and authUser so the UI reflects the new active org.
+		const profile = await client.account.getProfile().catch(() => null);
+		const authUser = client.getAccountInfo();
+		await panel.webview.postMessage({ type: 'account:profile', profile: profile || authUser || null });
+		await panel.webview.postMessage({ type: 'account:authUser', authUser });
+	}
+
 	// =========================================================================
 	// API KEY HANDLERS
 	// =========================================================================
@@ -573,6 +605,22 @@ export class AccountProvider {
 
 		// Step 2: refresh the member list.
 		await this.refreshMembers(panel);
+	}
+
+	/**
+	 * Resends the initialization email for a pending org member.
+	 *
+	 * @param panel  - The webview panel.
+	 * @param userId - The pending member's user ID.
+	 */
+	private async handleResendInvite(panel: vscode.WebviewPanel, userId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client) {
+			this.postError(panel, 'Not connected');
+			return;
+		}
+
+		await client.account.resendInvite(orgId!, userId);
 	}
 
 	/**
