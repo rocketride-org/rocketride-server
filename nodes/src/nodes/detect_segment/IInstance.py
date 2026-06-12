@@ -137,6 +137,9 @@ class IInstance(IInstanceBase):
 
         size = semantic.get('size') or [image.height, image.width]
         h, w = int(size[0]), int(size[1])
+        if not (0 < h <= 8192 and 0 < w <= 8192):
+            warning(f'detect_segment: implausible semantic map size {h}x{w}; skipping overlay')
+            return image
         classes = semantic.get('classes') or {}
 
         class_map_b64 = semantic.get('class_map')

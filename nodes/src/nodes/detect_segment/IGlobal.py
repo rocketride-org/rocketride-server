@@ -83,6 +83,9 @@ class IGlobal(IGlobalBase):
     def endGlobal(self):
         """Disconnect the facade and release shared state on teardown."""
         if self.segmenter is not None:
-            self.segmenter.disconnect()
+            try:
+                self.segmenter.disconnect()
+            except Exception as exc:
+                warning(f'detect_segment: error during teardown, ignoring: {exc}')
         self.segmenter = None
         self.device_lock = None

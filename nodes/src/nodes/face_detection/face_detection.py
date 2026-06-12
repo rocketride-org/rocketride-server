@@ -56,10 +56,16 @@ from ai.common.config import Config
 
 MODEL_URLS: Dict[str, str] = {
     # Short-range: ~2m subject distance, faster, optimized for selfies.
+    # Pinned to the immutable '/1/' revision (not '/latest/') for reproducibility.
     'short': (
         'https://storage.googleapis.com/mediapipe-models/face_detector/'
-        'blaze_face_short_range/float16/latest/blaze_face_short_range.tflite'
+        'blaze_face_short_range/float16/1/blaze_face_short_range.tflite'
     ),
+}
+
+# sha256 of each pinned model artifact, verified after download.
+MODEL_SHA256: Dict[str, str] = {
+    'short': 'b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f',
 }
 
 # System sonames MediaPipe dlopens at runtime -> how to install them (Debian/Ubuntu).
@@ -120,7 +126,8 @@ class FaceDetector:
         cache_dir = model_cache_dir('face_detector')
 
         digest = hashlib.sha1(self.model_url.encode('utf-8')).hexdigest()[:16]
-        fname = f'{digest}_{os.path.basename(self.model_url) or "model.tflite"}'
+        base = os.path.basename(self.model_url) or 'model.tflite'
+        fname = f'{digest}_{base}'
         local_path = os.path.join(cache_dir, fname)
 
         if not os.path.exists(local_path):
@@ -130,6 +137,15 @@ class FaceDetector:
                 # Explicit timeout so a stalled CDN/socket can't hang global init indefinitely.
                 with urllib.request.urlopen(self.model_url, timeout=60) as resp, open(tmp_path, 'wb') as out:
                     shutil.copyfileobj(resp, out)
+                expected = MODEL_SHA256.get(self.profile)
+                if expected:
+                    with open(tmp_path, 'rb') as f:
+                        actual = hashlib.sha256(f.read()).hexdigest()
+                    if actual != expected:
+                        raise RuntimeError(
+                            f'face_detection: model checksum mismatch for {self.model_url} '
+                            f'(expected {expected}, got {actual})'
+                        )
                 os.replace(tmp_path, local_path)
             except Exception:
                 if os.path.exists(tmp_path):
