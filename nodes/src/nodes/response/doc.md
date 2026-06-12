@@ -55,242 +55,223 @@ Multiple lane-to-key mappings can be added to return several outputs in a single
 
 ### Service: `answers`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_answers://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_answers://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `answers` |  |
+- `answers` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Answers | `laneName` |
+- **Return Answers** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `answers`
 
 ### Service: `audio`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_audio://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_audio://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `audio` |  |
+- `audio` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Audio | `laneName` |
+- **Return Audio** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `audio`
 
 ### Service: `documents`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_documents://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_documents://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `documents` |  |
+- `documents` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Documents | `laneName` |
+- **Return Documents** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `documents`
 
 ### Service: `image`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_image://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_image://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `image` |  |
+- `image` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Image | `laneName` |
+- **Return Image** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `image`
 
 ### Service: `json`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities | internal |
-| Protocol | `response://` |
+- **Class type** — infrastructure
+- **Capabilities** — internal
+- **Protocol** — `response://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `text` |  |
-| `table` |  |
-| `documents` |  |
-| `questions` |  |
-| `answers` |  |
-| `audio` |  |
-| `video` |  |
-| `image` |  |
+- `text` — ingest lane
+- `table` — ingest lane
+- `documents` — ingest lane
+- `questions` — ingest lane
+- `answers` — ingest lane
+- `audio` — ingest lane
+- `video` — ingest lane
+- `image` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Response | `lanes` |
+- **Response** — `lanes`
+
+**Schema**
+
+- **Lane name** (`laneId`) — `string`
+- **Result key** (`laneName`) — `string`
+- **Lanes** (`lanes`) — `array`. Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key.
 
 ### Service: `questions`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_questions://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_questions://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `questions` |  |
+- `questions` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Questions | `laneName` |
+- **Return Questions** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `questions`
 
 ### Service: `table`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_table://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_table://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `table` |  |
+- `table` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Table | `laneName` |
+- **Return Table** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `table`
 
 ### Service: `text`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_text://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_text://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `text` |  |
+- `text` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Text | `laneName` |
+- **Return Text** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `text`
 
 ### Service: `video`
 
-| Property | Value |
-| --- | --- |
-| Class type | infrastructure |
-| Capabilities |  |
-| Protocol | `response_video://` |
+- **Class type** — infrastructure
+- **Protocol** — `response_video://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `video` |  |
+- `video` — ingest lane
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Return Video | `laneName` |
+- **Return Video** — `laneName`
+
+**Schema**
+
+- **Identifier key within result** (`laneName`) — `string`, default `video`
+
+### Classes
+
+**`IGlobal.py` — `IGlobal(IGlobalBase)`**
+
+- `beginGlobal(self)`
+
+**`IInstance.py` — `IInstance(IInstanceBase)`**
+
+- `open(self, object: Entry)` — Initialize the instance for a new object.
+- `close(self)` — Finalize the instance for the current object.
+- `writeText(self, text: str)`
+- `writeTable(self, table: str)`
+- `writeDocuments(self, documents: List[Doc])`
+- `writeQuestions(self, questions: Question)`
+- `writeAnswers(self, answer: Answer)`
+- `writeAudio(self, aviAction: int, mimeType: str, data: bytes)`
+- `writeVideo(self, aviAction: int, mimeType: str, data: bytes)`
+- `writeImage(self, action: int, mimeType: str, buffer: bytes)`
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/response](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/response)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

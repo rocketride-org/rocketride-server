@@ -28,79 +28,71 @@ The node creates its endpoint from the host and port passed in by the engine (`-
 
 ### Service: `chat`
 
-| Property | Value |
-| --- | --- |
-| Class type | source |
-| Capabilities | noinclude |
-| Protocol | `chat://` |
+- **Class type** — source
+- **Capabilities** — noinclude
+- **Protocol** — `chat://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `_source` | `questions` |
+- `_source` → `questions`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Chat | `hideForm`, `type`, `source.mode`, `Pipe.source.parameters` |
+- **Chat** — `hideForm`, `type`, `source.mode`, `Pipe.source.parameters`
 
 ### Service: `dropper`
 
-| Property | Value |
-| --- | --- |
-| Class type | source |
-| Capabilities | noinclude |
-| Protocol | `dropper://` |
+- **Class type** — source
+- **Capabilities** — noinclude
+- **Protocol** — `dropper://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `_source` | `tags` |
+- `_source` → `tags`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Dropper | `hideForm`, `type`, `source.mode`, `Pipe.source.parameters` |
+- **Dropper** — `hideForm`, `type`, `source.mode`, `Pipe.source.parameters`
 
 ### Service: `webhook`
 
-| Property | Value |
-| --- | --- |
-| Class type | source |
-| Capabilities | noinclude |
-| Protocol | `webhook://` |
+- **Class type** — source
+- **Capabilities** — noinclude
+- **Protocol** — `webhook://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `_source` | `tags`, `text`, `audio`, `video`, `image`, `questions` |
+- `_source` → `tags`, `text`, `audio`, `video`, `image`, `questions`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Web Hook | `hideForm`, `type`, `source.mode`, `parameters` |
+- **Web Hook** — `hideForm`, `type`, `source.mode`, `parameters`
+
+### Classes
+
+**`IGlobal.py` — `IGlobal(IGlobalBase)`**
+
+**`IInstance.py` — `IInstance(IInstanceBase)`**
+
+**`IEndpoint.py` — `IEndpoint(IEndpointBase)`**
+
+The IEndpoint class handles the actual HTTP request endpoint.
+
+- `scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None])` — Initialize the scan process.
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/webhook](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/webhook)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

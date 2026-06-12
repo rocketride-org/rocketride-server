@@ -1,11 +1,11 @@
 ---
 sidebar_position: 2
 
-title: Node
+title: TypeScript
 ---
 
 <head>
-  <title>Node SDK - RocketRide Documentation</title>
+  <title>TypeScript SDK - RocketRide Documentation</title>
 </head>
 
 <p align="center">

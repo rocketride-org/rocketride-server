@@ -36,127 +36,199 @@ Each service exposes its own config fields (credentials, hosts/ports, collection
 
 ### Service: `all`
 
+**Schema**
+
+- **Preprocessor** (`all.preprocessor`) — default `preprocessor_langchain`
+- **Embedding** (`all.embedding`) — default `embedding_transformer`
+- **Vector Store** (`all.store`) — default `qdrant`
+- **LLM** (`all.llm`) — default `openai`
+
 ### Service: `common.anonymize`
+
+**Schema**
+
+- **Anonymization Character** (`anonymizeChar`) — `string`, default `█`. Specify a character that will mask any sensitive data in the text.  For example, if you specify the characher "*", then the text "SSN: 064 70 6733" will become "SSN: ***********". If you specify the character "?" the text will become "SSN: ???????????".
+- **Anonymize All Data** (`anonymizeAll`) — `boolean`, default `false`. Enable it if you want to collapse to the fixed length any sensitive data in the text.  For example, if you enable it, then the text "SSN: 064 70 6733" will become "SSN: ***". If you disable it, the text will remain "SSN: ***********".
+- **Anonymize Classified Information** (`anonymize`) — `boolean`, default `false`. Enable it if you want to mask any sensitive data in the text. If you leave it disabled, the text will be output as it is.  For example, if you enable it, then the text "SSN: 064 70 6733" will become "SSN: ***********". If you disable it, the text will remain "SSN: 064 70 6733".
 
 ### Service: `common.aws`
 
+**Schema**
+
+- **Access key** (`aws.accessKey`) — `string`. This is a key which gives access to your AWS resources. It is provided by the service provider. It is used to sign the requests you send to Amazon S3.
+- **Secret key** (`aws.secretKey`) — `string`. This is a key used to access the AWS services.
+- **Region** (`aws.region`) — `string`. This is defined and provided by the service provider.
+
 ### Service: `common.google`
+
+**Schema**
+
+- **Authentication Type** (`google.authType`) — `string`, default `service`
+- **Login with Google** (`google.oAuthButton`) — `string`
+- **Customer ID** (`google.customerId`) — `string`. Enter your Google Workspace Customer ID.  This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage.
+- **Administrator E-mail** (`google.adminEmail`) — `string`. Enter the email address of a Google Workspace administrator.  This email should belong to a user with administrative privileges in your Google Workspace domain.
+- **Service Account Key File** (`google.serviceKey`) — `string`. Upload the JSON key file for your Google Workspace service account.  This file contains the credentials necessary to authenticate API requests.
+- **Access Token** (`google.userToken`) — `string`. It is a long term token that allows you to get new access tokens to access the Google API.
 
 ### Service: `common`
 
+**Schema**
+
+- **Store path** (`storePath`) — `string`. This path defines the exact specific folder in the filesystem.  Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)  Format for Linux : /file.core.net/foldername  Format for AWS/S3 : bucketname/foldername Format for Azure blob : containername/foldername Format for SharePoint: sitename/drivename/foldername Format for onedrive: account/foldername
+- **URL** (`url`) — `string`, default `https://`. URL to connect to the service. E.g: https://[dnsname].com
+- `sync` — `boolean`, default `true`
+- `source.mode` — `string`, default `Source`
+- `target.mode` — `string`, default `Target`
+- `hideForm` — `boolean`, default `true`
+- **Access cost** (`estimation.accessCost`) — `number`, default `0`. The egress cost per MB to recall a file.
+- **Access delay** (`estimation.accessDelay`) — `number`, default `0`. Elapsed time before access to a file starts. (For example: S3 could be 0 second delay, while Glacier could be hours.
+- **Access rate** (`estimation.accessRate`) — `number`, default `0`. Time required to recall a file in MB per second.
+- **Store cost** (`estimation.storeCost`) — `number`, default `0`. The cost per MB to store a file for a month.
+- **Include path** (`include.path`) — `string`
+- **Enable Classification** (`include.classify`) — `boolean`, default `false`. Classification will assign each file to one or more classification policies. Once enabled, all supported files will be classified into one or more of the activated classification policies.
+- **Enable OCR** (`include.ocr`) — `boolean`, default `false`. Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search.
+- **Content Signature** (`include.signing`) — `boolean`, default `true`. Content Signature executes a hash algorithm on the content of every object to generate a "signature". Identical signatures indicate identical content and are an effective method to detect duplicate objects.
+- **Enable Indexing** (`include.index`) — `boolean`, default `false`. Indexing will allow for full-text search of all processed files. Once enabled, all supported files will be scanned and indexed as they are processed. Once Index is enabled, other parameters like OCR and classify could be enabled too.
+- **Enable Permissions** (`include.permissions`) — `boolean`, default `false`. Permissions allow gathering of file ownerships and permissions from all connected and scanned sources.
+- **Enable AI Embeddings** (`include.vectorize`) — `boolean`, default `false`. AI embeddings make text content accessible to AI technologies like semantic relevancy and generative AP chants. Once AI embeddings are enabled, other parameters like OCR and classify could be enabled too.
+- **Include paths** (`include`) — `array`
+- **Exclude path** (`exclude.path`) — `string`
+- **Exclude paths** (`exclude`) — `array`
+- **Include path** (`DTC.include.path`) — `string`
+- **Provide the path to your data** (`DTC.include`) — `array`
+- **Exclude path** (`DTC.exclude.path`) — `string`
+- **Provide the path to exclude** (`DTC.exclude`) — `array`
+- **Include path** (`Pipe.include.path`) — `string`
+- **Provide the path to your data** (`Pipe.include`) — `array`
+- **Exclude path** (`Pipe.exclude.path`) — `string`
+- **Provide the path to exclude** (`Pipe.exclude`) — `array`
+
 ### Service: `common.llm`
+
+**Schema**
+
+- **LLM URL** (`llm.local.serverbase`) — `string`, default `http://localhost:11434/v1`. Base url the model is hosted under.
+- **API key (Token)** (`llm.cloud.apikey`) — `string`. Enter your API key or token
+- **Project (Organization)** (`llm.cloud.project`) — `string`. LLM project or organization name
+- **Location** (`llm.cloud.location`) — `string`. LLM server location
+- **Model source** (`llm.cloud.modelSource`) — `string`
 
 ### Service: `common.remote`
 
+**Schema**
+
+- **Host** (`remote.host`) — `string`, default `pipe.rocketride.ai`
+- **Port** (`remote.port`) — `number`, default `5565`
+- **API key** (`remote.apikey`) — `string`. Enter your API key
+- `remote.local.mode` — `string`, const `local`
+- `remote.remote.mode` — `string`, const `remote`
+- **Processing Mode** (`remote.profile`) — `string`, default `local`
+- `remote.provider` — `string`, const `remote`
+
 ### Service: `common.vector`
+
+**Schema**
+
+- **Host** (`vector.host`) — `string`. Enter the server IP address e.g. Localhost
+- **Port** (`vector.port`) — `number`. Enter the port number
+- **Host** (`vector.cloud.host`) — `string`. Enter the server IP address e.g. Localhost
+- **Port** (`vector.cloud.port`) — `number`. Enter the port number
+- **Host** (`vector.local.host`) — `string`. Enter the server IP address e.g. Localhost
+- **Port** (`vector.local.port`) — `number`. Enter the port number
+- **gRPC Port** (`vector.local.grpc_port`) — `number`. Enter the port number
+- **Collection** (`vector.collection`) — `string`, default `ROCKETRIDE`. Enter the name of the collection
+- **Retrieval Score** (`vector.score`) — `number`, default `0.7`. Minumum retrieval score
+- **API key** (`vector.apikey`) — `string`. Enter your API key
+- **Embedding** (`vectorizer.embedding`)
+- **Vector Store** (`vectorizer.store`)
 
 ### Service: `filesys`
 
-| Property | Value |
-| --- | --- |
-| Class type | source |
-| Capabilities | filesystem, noremote, security, nosaas |
-| Protocol | `filesys://` |
+- **Class type** — source
+- **Capabilities** — filesystem, noremote, security, nosaas
+- **Protocol** — `filesys://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `_source` | `tags` |
+- `_source` → `tags`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| File System | `type`, `actions`, `source.mode`, `filesys.source.parameters`, `include`, `exclude`, `estimation` |
-| File System | `type`, `actions`, `source.mode`, `Pipe.filesys.source.parameters`, `Pipe.include`, `Pipe.exclude` |
+- **File System** — `type`, `actions`, `source.mode`, `filesys.source.parameters`, `include`, `exclude`, `estimation`
+- **File System** — `type`, `actions`, `source.mode`, `Pipe.filesys.source.parameters`, `Pipe.include`, `Pipe.exclude`
+
+**Schema**
+
+- `include` — This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.  Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)  Format for Linux : /file.core.net/foldername
+- `exclude` — This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.  Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)  Format for Linux : /file.core.net/foldername
+- **Exclude external drives** (`excludeExternalDrives`) — `boolean`, default `true`
+- **Exclude typical OS files and directories** (`excludeEnableGlobal`) — `boolean`, default `true`
+- **Exclude symlinks** (`excludeSymlinks`) — `boolean`, default `true`
+- `Pipe.include` — Example Path: /Users/usr/Documents/product-images/*
+- `Pipe.exclude` — Example Path: /Users/usr/Documents/product-images/*
 
 ### Service: `hash`
 
-| Property | Value |
-| --- | --- |
-| Class type | data |
-| Capabilities |  |
-| Protocol | `hash://` |
+- **Class type** — data
+- **Protocol** — `hash://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `tags` | `tags` |
+- `tags` → `tags`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Fingerprint |  |
+- **Fingerprint**
 
 ### Service: `indexer`
 
-| Property | Value |
-| --- | --- |
-| Class type |  |
-| Capabilities | internal |
-| Protocol | `indexer://` |
+- **Class type** — 
+- **Capabilities** — internal
+- **Protocol** — `indexer://`
 
 ### Service: `null`
 
-| Property | Value |
-| --- | --- |
-| Class type |  |
-| Capabilities | internal |
-| Protocol | `null://` |
+- **Class type** — 
+- **Capabilities** — internal
+- **Protocol** — `null://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `source` | `tags` |
+- `source` → `tags`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Null Source | `type`, `actions`, `source.mode`, `null.source.parameters` |
-| Null Target | `type`, `target.mode`, `null.target.parameters` |
+- **Null Source** — `type`, `actions`, `source.mode`, `null.source.parameters`
+- **Null Target** — `type`, `target.mode`, `null.target.parameters`
 
 ### Service: `parse`
 
-| Property | Value |
-| --- | --- |
-| Class type | data |
-| Capabilities |  |
-| Protocol | `parse://` |
+- **Class type** — data
+- **Protocol** — `parse://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `tags` | `text`, `table`, `image`, `video`, `audio` |
+- `tags` → `text`, `table`, `image`, `video`, `audio`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Parse |  |
+- **Parse**
 
 ### Service: `zip`
 
-| Property | Value |
-| --- | --- |
-| Class type | target |
-| Capabilities | internal |
-| Protocol | `zip://` |
+- **Class type** — target
+- **Capabilities** — internal
+- **Protocol** — `zip://`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Zip Stream | `type`, `zip.target.parameters` |
+- **Zip Stream** — `type`, `zip.target.parameters`
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/core](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/core)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

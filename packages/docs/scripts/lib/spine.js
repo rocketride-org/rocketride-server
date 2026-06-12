@@ -37,12 +37,12 @@ const SPINE = [
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
 	},
-	{ label: 'Nodes & Connectors', autogen: NODES_DIR },
+	{ label: 'Nodes', autogen: NODES_DIR },
 	{
 		label: 'Develop',
 		items: [
-			{ id: 'develop/typescript', label: 'TypeScript SDK', mount: true },
-			{ id: 'develop/python', label: 'Python SDK', mount: true }
+			{ id: 'develop/typescript', label: 'TypeScript', mount: true },
+			{ id: 'develop/python', label: 'Python', mount: true }
 		]
 	},
 	{
@@ -140,7 +140,9 @@ function toSidebar() {
 		if (node.items) {
 			return { type: 'category', label: node.label, items: node.items.map(render) };
 		}
-		return node.id;
+		// Leaf: honor the spine label so it (not the mounted doc's front matter)
+		// drives the sidebar entry — the spine is the single source of truth.
+		return node.label ? { type: 'doc', id: node.id, label: node.label } : node.id;
 	}
 	return { docsSidebar: SPINE.map(render) };
 }

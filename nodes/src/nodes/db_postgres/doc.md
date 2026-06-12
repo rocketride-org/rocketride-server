@@ -66,55 +66,81 @@ Generated SQL is validated by running `EXPLAIN` against the live database. If va
 
 ### Service: `json`
 
-| Property | Value |
-| --- | --- |
-| Class type | database, tool |
-| Capabilities | noremote, invoke |
-| Protocol | `db_postgres://` |
+- **Class type** — database, tool
+- **Capabilities** — noremote, invoke
+- **Protocol** — `db_postgres://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `answers` |  |
-| `questions` | `table`, `text`, `answers` |
+- `answers` — ingest lane
+- `questions` → `table`, `text`, `answers`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| PostgreSQL | `postgresdb.profile` |
+- **PostgreSQL** — `postgresdb.profile`
+
+**Schema**
+
+- **PostgreSQL host** (`postgresdb.host`) — `string`, default `localhost`. Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433)
+- **User** (`postgresdb.user`) — `string`, default `postgres`. User to connect to the PostgreSQL server
+- **Password** (`postgresdb.password`) — `string`. Password to connect to the PostgreSQL server
+- **Database name** (`postgresdb.database`) — `string`, default `postgres`. Name of database
+- **Table name** (`postgresdb.table`) — `string`, default `table`. Name of table
+- **Database description** (`postgresdb.db_description`) — `string`. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.
+- **Max validation attempts** (`postgresdb.max_attempts`) — `integer`, default `5`. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL
+- **Allow direct query execution** (`postgresdb.allow_execute`) — `boolean`, default `false`. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.
+- `postgresdb.profile` — `string`, default `default`
 
 ### Service: `supabase`
 
-| Property | Value |
-| --- | --- |
-| Class type | database, tool |
-| Capabilities | noremote, invoke |
-| Protocol | `db_supabase://` |
+- **Class type** — database, tool
+- **Capabilities** — noremote, invoke
+- **Protocol** — `db_supabase://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `answers` |  |
-| `questions` | `table`, `text`, `answers` |
+- `answers` — ingest lane
+- `questions` → `table`, `text`, `answers`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Supabase | `postgresdb.profile` |
+- **Supabase** — `postgresdb.profile`
+
+**Schema**
+
+- **Supabase host** (`postgresdb.host`) — `string`. From the Supabase dashboard (Connect button), including the port. Recommended: the Supavisor pooler (works over IPv4) -&gt; aws-0-&lt;region&gt;.pooler.supabase.com:6543 (transaction) or :5432 (session). The Direct connection (db.&lt;project-ref&gt;.supabase.co:5432) is IPv6-only and will fail to resolve on networks without IPv6.
+- **User** (`postgresdb.user`) — `string`, default `postgres`. Database user. For the pooler (recommended) it MUST include your project ref: postgres.&lt;project-ref&gt; — without the .&lt;project-ref&gt; suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres
+- **Password** (`postgresdb.password`) — `string`. Database password from your Supabase project (Project Settings -&gt; Database)
+- **Database name** (`postgresdb.database`) — `string`, default `postgres`. Name of database (Supabase default is 'postgres')
+- **Table name** (`postgresdb.table`) — `string`, default `table`. Name of table
+- **Database description** (`postgresdb.db_description`) — `string`. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.
+- **Max validation attempts** (`postgresdb.max_attempts`) — `integer`, default `5`. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL
+- **Allow direct query execution** (`postgresdb.allow_execute`) — `boolean`, default `false`. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.
+- `postgresdb.profile` — `string`, default `default`
+
+### Dependencies
+
+- `psycopg2-binary` `==2.9.12`
+
+### Classes
+
+**`IGlobal.py` — `IGlobal(DatabaseGlobalBase)`**
+
+PostgreSQL-specific global state.
+
+**`IInstance.py` — `IInstance(DatabaseInstanceBase)`**
+
+PostgreSQL-specific instance.
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/db_postgres](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_postgres)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

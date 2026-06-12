@@ -36,56 +36,75 @@ There are no preset profiles — all fields are specified directly.
 
 ### Service: `json`
 
-| Property | Value |
-| --- | --- |
-| Class type | llm |
-| Capabilities | invoke |
-| Protocol | `llm_openai_api://` |
+- **Class type** — llm
+- **Capabilities** — invoke
+- **Protocol** — `llm_openai_api://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `questions` | `answers` |
+- `questions` → `answers`
 
 **Profiles**
 
-| Profile | Title | Model | Context | Max output |
-| --- | --- | --- | --- | --- |
-| `custom` |  |  | 32,768 |  |
+- `custom` — context 32,768
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| OpenAI-Compatible API | `openai_api.profile` |
+- **OpenAI-Compatible API** — `openai_api.profile`
+
+**Schema**
+
+- **Model** (`model`) — `string`. Model name (e.g. zai-org/GLM-5, meta-llama/Llama-3-70b)
+- **Base URL** (`base_url`) — `string`. API base URL (e.g. https://api.featherless.ai/v1)
+- **Tokens** (`modelTotalTokens`) — `number`. Total Tokens
+- **Model** (`openai_api.profile`) — `string`, default `custom`. Profile selection
 
 ### Service: `nebius`
 
-| Property | Value |
-| --- | --- |
-| Class type | llm |
-| Capabilities | invoke |
-| Protocol | `llm_nebius://` |
+- **Class type** — llm
+- **Capabilities** — invoke
+- **Protocol** — `llm_nebius://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `questions` | `answers` |
+- `questions` → `answers`
 
 **Profiles**
 
-| Profile | Title | Model | Context | Max output |
-| --- | --- | --- | --- | --- |
-| `llama-3-3-70b` | Llama 3.3 70B Instruct | meta-llama/Llama-3.3-70B-Instruct | 131,072 |  |
-| `qwen3-235b` | Qwen3 235B | Qwen/Qwen3-235B-A22B | 131,072 |  |
-| `deepseek-v3` | DeepSeek V3 | deepseek-ai/DeepSeek-V3 | 131,072 |  |
-| `custom` |  |  | 131,072 |  |
+- `llama-3-3-70b` — Llama 3.3 70B Instruct · model `meta-llama/Llama-3.3-70B-Instruct` · context 131,072
+- `qwen3-235b` — Qwen3 235B · model `Qwen/Qwen3-235B-A22B` · context 131,072
+- `deepseek-v3` — DeepSeek V3 · model `deepseek-ai/DeepSeek-V3` · context 131,072
+- `custom` — context 131,072
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Nebius | `openai_api.profile` |
+- **Nebius** — `openai_api.profile`
+
+**Schema**
+
+- **Model** (`model`) — `string`. Nebius Token Factory model id (e.g. meta-llama/Llama-3.3-70B-Instruct). Full list: https://tokenfactory.nebius.com/models
+- **Base URL** (`base_url`) — `string`. OpenAI-compatible base URL. Defaults to Nebius Token Factory.
+- **Tokens** (`modelTotalTokens`) — `number`. Total Tokens
+- **Model** (`openai_api.profile`) — `string`, default `llama-3-3-70b`. Nebius Token Factory model
+
+### Dependencies
+
+- `openai`
+- `langchain-openai`
+- `langchain-core`
+- `langchain`
+
+### Classes
+
+**`IGlobal.py` — `IGlobal(IGlobalBase)`**
+
+- `validateConfig(self)` — Validate the configuration for OpenAI-compatible API LLM node.
+- `beginGlobal(self)`
+- `endGlobal(self)`
+
+**`IInstance.py` — `IInstance(LLMBase)`**
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/llm_openai_api](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_openai_api)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

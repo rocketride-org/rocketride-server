@@ -38,47 +38,58 @@ In data-flow terms, the Deep Agent consumes `questions` and produces `answers` (
 
 ### Service: `agent`
 
-| Property | Value |
-| --- | --- |
-| Class type | agent, tool |
-| Capabilities | invoke |
-| Protocol | `agent_deepagent://` |
+- **Class type** — agent, tool
+- **Capabilities** — invoke
+- **Protocol** — `agent_deepagent://`
 
 **Data lanes**
 
-| Input | Produces |
-| --- | --- |
-| `questions` | `answers` |
+- `questions` → `answers`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Deep Agent | `agent_deepagent.default` |
+- **Deep Agent** — `agent_deepagent.default`
+
+**Schema**
+
+- **Agent description** (`agent_description`) — `string`. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.
+- **System prompt** (`system_prompt`) — `string`. Instructions that define this agent's role and behaviour. Leave blank to use the default.
+- **Instructions** (`instructions`) — `array`. Additional instructions to guide the agent. Each line is appended to the system prompt.
+- **Advanced Mode** (`advanced_mode`) — `boolean`, default `false`. When enabled, replace the Instructions list with direct Agent Description and System Prompt fields for full control.
 
 ### Service: `subagent`
 
-| Property | Value |
-| --- | --- |
-| Class type | deepagent |
-| Capabilities | invoke |
-| Protocol | `agent_deepagent_subagent://` |
+- **Class type** — deepagent
+- **Capabilities** — invoke
+- **Protocol** — `agent_deepagent_subagent://`
 
 **Profiles**
 
-| Profile | Title | Model |
-| --- | --- | --- |
-| `default` |  |  |
+- `default`
 
 **Configuration sections**
 
-| Section | Fields |
-| --- | --- |
-| Deep Agent Subagent | `agent_deepagent_subagent.default` |
+- **Deep Agent Subagent** — `agent_deepagent_subagent.default`
+
+**Schema**
+
+- **Description** (`description`) — `string`. The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented — this is the only signal the orchestrator uses to pick a sub-agent.
+- **System prompt** (`system_prompt`) — `string`. Instructions that define this sub-agent's role and behaviour. Leave blank to use the default.
+- **Instructions** (`instructions`) — `array`. Additional instructions to guide this sub-agent. Each line is appended to the system prompt.
+- **Advanced Mode** (`advanced_mode`) — `boolean`, default `false`. When enabled, replace the Instructions list with a direct System Prompt field for full control.
+
+### Dependencies
+
+- `deepagents`
+- `langchain`
+- `langchain-core`
+- `pydantic`
+
+### Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub/agent_deepagent](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/agent_deepagent)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->
