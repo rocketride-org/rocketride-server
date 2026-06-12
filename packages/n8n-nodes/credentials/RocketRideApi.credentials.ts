@@ -11,8 +11,7 @@ export class RocketRideApi implements ICredentialType {
 
 	displayName = 'RocketRide API';
 
-	documentationUrl =
-		'https://github.com/kgarg2468/n8n-nodes-rocketride?tab=readme-ov-file#credentials';
+	documentationUrl = 'https://www.npmjs.com/package/n8n-nodes-rocketride#credentials';
 
 	icon: Icon = { light: 'file:rocketride.svg', dark: 'file:rocketride.dark.svg' };
 

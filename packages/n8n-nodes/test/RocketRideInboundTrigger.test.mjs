@@ -59,4 +59,17 @@ describe('RocketRideInboundTrigger.webhook', () => {
 		expect(out.noWebhookResponse).toBe(true);
 		expect(state.responded.code).toBe(401);
 	});
+
+	it('redacts Authorization/Cookie headers from _rocketride metadata', async () => {
+		const { ctx } = makeCtx({
+			params: { secret: 's3cr3t' },
+			body: { ok: true },
+			headers: { authorization: 'Bearer s3cr3t', cookie: 'sid=abc', 'x-keep': '1' },
+		});
+		const out = await RocketRideInboundTrigger.prototype.webhook.call(ctx);
+		const headers = out.workflowData[0][0].json._rocketride.headers;
+		expect(headers.authorization).toBeUndefined();
+		expect(headers.cookie).toBeUndefined();
+		expect(headers['x-keep']).toBe('1');
+	});
 });
