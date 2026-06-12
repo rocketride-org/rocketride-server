@@ -245,17 +245,19 @@ body {
 
 /* Right "on this page" nav: links follow the theme link color (Imperial Indigo
  * light / Horizon Blue dark) in every state — replacing Infima's grey resting
- * color and primary-blue active ramp — so they match the body links. The active
- * (current-section) link is bolded for emphasis. */
-.table-of-contents__link,
-.table-of-contents__link code {
+ * color and primary-blue active ramp — so they match the body links. Infima
+ * injects its TOC color rules with the :not(#\#):not(#\#) hack (specificity
+ * 0,1,2), so a plain .table-of-contents__link (0,1,0) loses; match the hack to
+ * tie on specificity and win by source order. The active link is bolded. */
+.table-of-contents__link:not(#\#):not(#\#),
+.table-of-contents__link:not(#\#):not(#\#) code {
 	color: var(--ifm-link-color);
 }
 
-.table-of-contents__link:hover,
-.table-of-contents__link:hover code,
-.table-of-contents__link--active,
-.table-of-contents__link--active code {
+.table-of-contents__link:hover:not(#\#):not(#\#),
+.table-of-contents__link:hover:not(#\#):not(#\#) code,
+.table-of-contents__link--active:not(#\#):not(#\#),
+.table-of-contents__link--active:not(#\#):not(#\#) code {
 	color: var(--ifm-link-color);
 }
 
