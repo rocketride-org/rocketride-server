@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>PostgreSQL Vector Store - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Vector store node backed by PostgreSQL with the pgvector extension. Stores embedded documents and retrieves them by semantic similarity search. Use this when you want vector storage inside an existing PostgreSQL database rather than a dedicated vector database.

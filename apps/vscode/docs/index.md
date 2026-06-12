@@ -1,11 +1,7 @@
 ---
-title: Overview
+title: Introduction
 sidebar_position: 1
 ---
-
-<head>
-  <title>VS Code Extension - RocketRide Documentation</title>
-</head>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-vscode.png" alt="RocketRide for VS Code" width="900" />

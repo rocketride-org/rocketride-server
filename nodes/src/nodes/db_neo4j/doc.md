@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Neo4j - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Neo4j node with two roles: pipeline node (natural-language questions → Cypher → results via lanes) and tool node (agents call it directly). Read-only — write operations are blocked by design.

@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Accessibility Describe - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Analyzes an image using Google Gemini Vision and produces a structured scene description optimized for blind and visually impaired users. Output covers environment type, hazards with positions, key objects, visible text, people, and navigation guidance — kept under 150 words by default.

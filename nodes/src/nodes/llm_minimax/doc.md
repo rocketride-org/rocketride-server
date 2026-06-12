@@ -4,10 +4,6 @@ date: 2026-05-21
 sidebar_position: 1
 ---
 
-<head>
-  <title>MiniMax - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects [MiniMax](https://www.minimax.io/) models to your pipeline — either via the MiniMax cloud API or via a self-hosted OpenAI-compatible server (vLLM, SGLang, MLX, or Ollama). Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.

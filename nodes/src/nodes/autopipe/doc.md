@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Parse/Process/Embed - RocketRide Documentation</title>
-</head>
-
 :::note
 This is an **internal node**. It is wired automatically by the pipeline engine — most users will not add it manually.
 :::

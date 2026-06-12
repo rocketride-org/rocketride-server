@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Anonymize - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Scans text for sensitive entities (names, emails, phone numbers, organizations, etc.) using a local GLiNER NER model and replaces each detected character with a masking character. Text structure is preserved — only the entity spans are replaced.

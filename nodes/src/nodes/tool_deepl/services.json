@@ -1,0 +1,147 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "DeepL",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_deepl://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_deepl",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "deepl",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "deepl.svg",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes DeepL translation and AI rephrasing as agent tools.", "Translates text into a target language or rewrites it in a chosen style or tone via the DeepL API, returning the result plus the detected source language."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "DeepL",
+				"apikey": "",
+				"targetLang": "EN-US",
+				"formality": "default",
+				"modelType": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_deepl.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "DeepL API key (from https://www.deepl.com/pro-api). A key ending in :fx is a Free-tier key and is routed to api-free.deepl.com automatically.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_deepl.targetLang": {
+			"type": "string",
+			"title": "Default Target Language",
+			"description": "Default target language for translation when the agent does not supply one. Regional variants are allowed (e.g. EN-US, EN-GB, PT-BR, PT-PT, ZH-HANS, ZH-HANT).",
+			"default": "EN-US"
+		},
+		"tool_deepl.formality": {
+			"type": "string",
+			"title": "Formality",
+			"description": "Default formality for translation. Only honored by a subset of target languages; DeepL returns an error for unsupported ones, which the node surfaces.",
+			"default": "default",
+			"enum": [
+				["default", "Default"],
+				["more", "More formal"],
+				["less", "Less formal"],
+				["prefer_more", "Prefer more formal"],
+				["prefer_less", "Prefer less formal"]
+			]
+		},
+		"tool_deepl.modelType": {
+			"type": "string",
+			"title": "Model Type",
+			"description": "Translation model to request. Empty lets DeepL choose its default. quality_optimized favors quality, latency_optimized favors speed, prefer_quality_optimized uses quality where available and otherwise falls back.",
+			"default": "",
+			"enum": [
+				["", "(let DeepL choose)"],
+				["latency_optimized", "Latency optimized"],
+				["quality_optimized", "Quality optimized"],
+				["prefer_quality_optimized", "Prefer quality optimized"]
+			]
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	"apikey" is intentionally a placeholder injected by the test framework
+	//	(see _LLM_MOCK_CREDENTIALS in nodes/test/framework/pipeline.py) so
+	//	beginGlobal succeeds; config validation is tested here, not live calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "DeepL smoke test (placeholder key)",
+				"text": "test text"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "DeepL",
+			"properties": ["type", "tool_deepl.apikey", "tool_deepl.targetLang", "tool_deepl.formality", "tool_deepl.modelType"]
+		}
+	]
+}

@@ -3,10 +3,6 @@ title: "Validate"
 date: 2025-07-29
 ---
 
-<head>
-  <title>validate() Method - RocketRide Documentation</title>
-</head>
-
 - [Overview](#overview)
 - [Method Signature](#method-signature)
 - [Parameters](#parameters)

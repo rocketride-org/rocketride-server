@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>HTTP Request - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Gives agents the ability to make HTTP requests to external APIs and services. Supports all common HTTP methods with flexible authentication, body types, and configurable guardrails for rate limiting, URL whitelisting, and method restrictions.

@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>General Text Preprocessor - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Splits text into chunks for downstream embedding or LLM processing. Uses LangChain text splitters — choose a splitter tuned for the content type (prose, markdown, LaTeX, code-adjacent text). No LLM required.

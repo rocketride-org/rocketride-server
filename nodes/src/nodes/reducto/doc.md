@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Reducto - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Parses documents using the Reducto cloud API, extracting clean Markdown text and structured tables. Handles PDFs, images, scanned documents, and mixed-content files.

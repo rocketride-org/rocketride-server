@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Astra DB - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Vector store node backed by [DataStax Astra DB](https://docs.datastax.com/en/astra/astra-db-vector/). Stores embedded documents and retrieves them by semantic (vector) or keyword (BM25) search.

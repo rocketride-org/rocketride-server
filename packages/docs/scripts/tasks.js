@@ -154,14 +154,23 @@ module.exports = {
 		{ name: 'docs:compile', action: makeCompileAction },
 		{ name: 'docs:dev-start', action: makeDevStartAction },
 
-		// Public actions (have descriptions)
+		// docs:build is intentionally description-less. The aggregate `builder build`
+		// only expands to actions that carry a `description` (see the
+		// `actionObj?.description` gate in scripts/lib/registry.js `listCommands` and
+		// scripts/build.js `expandGlobalCommands`), so omitting one keeps the docs
+		// site out of `builder build` — it is built on its own cadence and deployed
+		// by .github/workflows/docs.yml. CAVEAT: this overloads `description` as both
+		// "public/help-listed" and "part of aggregate build", so adding a description
+		// here to make it discoverable would silently RE-COUPLE it to `builder build`.
+		// Run it explicitly with `builder docs:build`.
 		{
 			name: 'docs:build',
 			action: () => ({
-				description: 'Build docs',
 				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:index', 'docs:compile']
 			})
 		},
+
+		// Public actions (have descriptions)
 		{
 			name: 'docs:dev',
 			action: () => ({

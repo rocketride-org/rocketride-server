@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Chart (Chart.js) - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Tool node that exposes a `generate_chart` function to agents. The agent passes raw data and the node uses the pipeline LLM to produce a valid [Chart.js v4](https://www.chartjs.org/) configuration, returned as a ` ```chartjs ` fenced block that the chat UI renders as an interactive chart.

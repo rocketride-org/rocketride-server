@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Frame Grabber - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Extracts still frames from video using one of three modes: fixed interval, scene transition, or keyframe.

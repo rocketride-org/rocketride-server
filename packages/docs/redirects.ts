@@ -592,6 +592,13 @@ const redirects: RedirectItem[] = [
     "from": [
       "/nodes-overview"
     ]
+  },
+  {
+    "to": "/ide-extensions/overview",
+    "from": [
+      "/ide-extensions/cursor",
+      "/ide-extensions/windsurf"
+    ]
   }
 ];
 

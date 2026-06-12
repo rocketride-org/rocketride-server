@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Image Embedding - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Generates vector embeddings from images using local vision models. Runs on the model server — no API key required. GPU-accelerated when available.

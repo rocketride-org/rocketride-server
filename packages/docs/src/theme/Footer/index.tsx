@@ -39,8 +39,7 @@ const COLUMNS: FooterColumn[] = [
 		items: [
 			{ label: 'Changelog', href: 'https://github.com/rocketride-org/rocketride-server/releases' },
 			{ label: 'Cloud', href: '/cloud' },
-			{ label: 'Cursor', href: '/ide-extensions/cursor' },
-			{ label: 'Windsurf', href: '/ide-extensions/windsurf' },
+			{ label: 'IDE Extensions', href: '/ide-extensions/overview' },
 			{ label: 'Self-hosting', href: '/self-hosting' },
 			{ label: 'GitHub', href: 'https://github.com/rocketride-org/rocketride-server' },
 		],

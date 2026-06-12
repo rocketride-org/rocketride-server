@@ -3,10 +3,6 @@
 title: Python
 ---
 
-<head>
-  <title>Python SDK - RocketRide Documentation</title>
-</head>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-python.png" alt="RocketRide Python SDK" width="900" />
 </p>

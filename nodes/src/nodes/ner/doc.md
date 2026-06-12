@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Named Entity Recognition - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Extracts named entities (people, organizations, locations, dates, etc.) from text using HuggingFace transformer models. Entities are added to document metadata for downstream filtering, search, and analysis. Runs locally — GPU-capable.

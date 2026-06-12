@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>IBM Watson - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects IBM WatsonX foundation models to your pipeline via the IBM Cloud API. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.

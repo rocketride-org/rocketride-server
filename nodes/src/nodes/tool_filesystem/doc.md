@@ -4,10 +4,6 @@ date: 2026-04-16
 sidebar_position: 1
 ---
 
-<head>
-  <title>File System - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Gives agents read/write access to the account-scoped RocketRide file store — the same storage area exposed to the client SDK via `fs_*` methods. All paths are relative to `users/<client_id>/files/`, so files and agent writes via this tool are visible to the client SDK and vice versa. This node has no pipeline lanes — it is connected to agents via the `tool` invoke channel.

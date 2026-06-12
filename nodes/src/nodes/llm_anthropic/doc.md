@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Anthropic - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Connects Anthropic's Claude models to your pipeline. Used primarily as an `llm` invoke connection by agents, vector stores, database nodes, and other nodes that need an LLM. Can also be used directly in a pipeline via lanes.

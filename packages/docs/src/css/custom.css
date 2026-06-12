@@ -116,6 +116,32 @@ html[data-theme='dark']:not(#\#):not(#\#) {
 }
 
 /* ----------------------------------------------------------------------------
+ * MAINTENANCE: Infima specificity coupling (read before upgrading Docusaurus)
+ * ----------------------------------------------------------------------------
+ * Infima ships several of its component color/decoration rules with a build-
+ * injected `:not(#\#):not(#\#)` hack (specificity 2,0,1 for token blocks, 0,1,2
+ * for component rules). To win, the overrides below MATCH that hack rather than
+ * relying on source order alone. This couples them to Infima's current selector
+ * shape: if a Docusaurus/Infima upgrade changes that shape, these stop winning
+ * with NO build error and the styling silently reverts.
+ *
+ * Where Infima reads a CSS variable we override the variable instead (the :root
+ * token blocks above) — that survives specificity changes. The selector fights
+ * below are only for properties Infima hard-codes (e.g. `--ifm-color-primary`
+ * literals for active/hover, custom RocketRide classes with no Infima var).
+ *
+ * Docusaurus is pinned EXACT (`3.8.1`) in package.json to prevent silent drift.
+ * AFTER ANY @docusaurus/* bump, manually re-check these in light AND dark mode:
+ *   - navbar "Home" link + brand-title hover tint
+ *   - breadcrumb active (current page) crumb color
+ *   - right TOC "on this page": resting = body text, active = link color + bold
+ *   - home/quickstart side cards: no underline on hover; accent border
+ *   - quickstart CTA button background
+ *   - no doubled page title (see the .rr-doc-header rule below)
+ * If any reverts, the Infima selector specificity changed; re-match the hack.
+ * ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------------
  * Floating rounded panel on a deep background (Devdocs X look)
  * ------------------------------------------------------------------------- */
 html,
@@ -164,38 +190,18 @@ body {
 	height: 1.75rem;
 }
 
-/* Logo links to rocketride.ai; on hover, tint the mark to the theme accent
- * (indigo light / horizon dark) via a masked overlay — an <img> can't be
- * recolored directly. */
-.navbar__brand {
-	position: relative;
-}
-
-.navbar__brand::before {
-	content: '';
-	position: absolute;
-	left: 0;
-	top: 50%;
-	width: 1.75rem;
-	height: 1.75rem;
-	transform: translateY(-50%);
-	background-color: var(--ifm-link-color);
-	-webkit-mask: url('/img/rocketride-icon-white.svg') center / contain no-repeat;
-	mask: url('/img/rocketride-icon-white.svg') center / contain no-repeat;
-	opacity: 0;
-	transition: opacity 0.15s ease;
-	pointer-events: none;
-}
-
-.navbar__brand:hover::before {
-	opacity: 1;
-}
-
 /* Home link colored like content links (Infima boosts .navbar__link to (2,1,0),
  * so match the hack to win). */
 .navbar__link--colored:not(#\#):not(#\#),
 .navbar__link--colored:not(#\#):not(#\#):hover {
 	color: var(--ifm-link-color);
+}
+
+/* Brand (logo + "RocketRide" title) on the left: tint the title to the link
+ * accent on hover, matching the other navbar links. Double :not(#\#) keeps the
+ * specificity above Infima's navbar rules. */
+.navbar__brand:not(#\#):not(#\#):hover .navbar__title {
+	color: var(--ifm-link-hover-color);
 }
 
 /* GitHub link with live star count (custom-githubStars navbar item). */
@@ -291,6 +297,29 @@ body {
 .rr-view-source:hover {
 	color: var(--ifm-link-color);
 	text-decoration: none;
+}
+
+/* Right "on this page" nav: only the current-section (active) link takes the
+ * theme link color (Imperial Indigo light / Horizon Blue dark) + bold; every
+ * other link is plain body text (black light / white dark), not Infima's grey
+ * resting color or primary-blue active ramp. Infima injects its TOC color rules
+ * with the :not(#\#):not(#\#) hack (specificity 0,1,2), so a plain
+ * .table-of-contents__link (0,1,0) loses; match the hack to tie on specificity
+ * and win by source order. */
+.table-of-contents__link:not(#\#):not(#\#),
+.table-of-contents__link:not(#\#):not(#\#) code {
+	color: var(--ifm-font-color-base);
+}
+
+.table-of-contents__link:hover:not(#\#):not(#\#),
+.table-of-contents__link:hover:not(#\#):not(#\#) code,
+.table-of-contents__link--active:not(#\#):not(#\#),
+.table-of-contents__link--active:not(#\#):not(#\#) code {
+	color: var(--ifm-link-color);
+}
+
+.table-of-contents__link--active {
+	font-weight: 600;
 }
 
 /* ----------------------------------------------------------------------------
@@ -397,9 +426,13 @@ article a {
 	height: 1.15em;
 }
 
-/* Never underline the home side-card links (beat Infima's link-hover rule). */
-.rr-side-card:not(#\#),
-.rr-side-card:not(#\#):hover {
+/* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`
+ * has specificity (2,0,1); match its double `:not(#\#)` to reach (2,2,0) so we
+ * win on the anchor itself. Killing it on the <a> stops the underline from
+ * propagating to the inner title/body/code spans (a descendant text-decoration
+ * cannot remove a line drawn by an ancestor). */
+.rr-side-card:not(#\#):not(#\#),
+.rr-side-card:not(#\#):not(#\#):hover {
 	text-decoration: none;
 }
 
@@ -413,7 +446,9 @@ article a {
 	border-radius: 12px;
 	margin-bottom: 1rem;
 	color: inherit;
-	transition: border-color 0.15s ease, transform 0.15s ease;
+	transition:
+		border-color 0.15s ease,
+		transform 0.15s ease;
 }
 
 .rr-side-card:nth-child(3n + 1) {
@@ -457,6 +492,27 @@ article a {
 	font-size: 0.92rem;
 	line-height: 1.5;
 	color: var(--ifm-color-emphasis-700);
+}
+
+/* Quickstart: hub of linked cards in a responsive 2-column grid. Reuses the
+ * .rr-side-card styling; the grid owns the spacing so the cards' own
+ * margin-bottom is dropped here. Accent cycling still works because the cards
+ * are direct children of the grid. */
+.rr-card-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	margin: 1.75rem 0;
+}
+
+.rr-card-grid .rr-side-card {
+	margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+	.rr-card-grid {
+		grid-template-columns: 1fr;
+	}
 }
 
 /* Home: bottom feature trio (centered icon + title + blurb). */
@@ -595,7 +651,9 @@ article a {
 	border-radius: 50%;
 	border: 1px solid var(--rr-panel-border);
 	color: var(--ifm-color-emphasis-700);
-	transition: color 0.15s ease, border-color 0.15s ease;
+	transition:
+		color 0.15s ease,
+		border-color 0.15s ease;
 }
 
 .rr-footer__social:hover {
@@ -663,7 +721,17 @@ article a {
 	margin-bottom: 1.5rem;
 }
 
-.rr-doc-header + h1 {
+/* CommonMark (.md) wraps the body's leading `# Title` in its own <header>,
+ * while .mdx emits a bare <h1>; hide either so it never duplicates the
+ * custom header's title.
+ * LIMITATION: the adjacent-sibling (`+`) selector only matches when the body's
+ * leading heading is the IMMEDIATE next sibling of .rr-doc-header. A page that
+ * opens with an admonition or imported component before its first H1 will not
+ * match, so its title can render doubled. This is belt-and-suspenders alongside
+ * the site-wide `<head><title>` strip; if you see a doubled title, a
+ * non-adjacent body H1 is the likely cause. */
+.rr-doc-header + h1,
+.rr-doc-header + header {
 	display: none;
 }
 

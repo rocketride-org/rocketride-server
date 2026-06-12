@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Data Extractor - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Reads text or tables and uses an LLM to extract a structured set of fields you define. Results are accumulated across all chunks of a document — the `documents` lane emits one document per extracted row, while the `answers` lane emits the full consolidated table as a single answer.

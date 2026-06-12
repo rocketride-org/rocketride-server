@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Dictionary - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Reads text and uses an LLM to extract a glossary of domain-specific terms, acronyms, and company-specific vocabulary. Each extracted term is emitted as a separate document containing a `{"term": "...", "description": "..."}` JSON object.

@@ -133,6 +133,7 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_apify': {'apikey': 'mock-apify-placeholder-for-tests'},
     'tool_exa_search': {'apikey': 'mock-exa-search-placeholder-for-tests'},
     'tool_tavily': {'apikey': 'mock-tavily-placeholder-for-tests'},
+    'tool_deepl': {'apikey': 'mock-deepl-placeholder-for-tests'},
 }
 
 

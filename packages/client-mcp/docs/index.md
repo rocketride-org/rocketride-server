@@ -2,10 +2,6 @@
 title: "MCP Server"
 ---
 
-<head>
-  <title>RocketRide MCP Server - RocketRide Documentation</title>
-</head>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-mcp.png" alt="RocketRide MCP Server" width="900" />
 </p>
