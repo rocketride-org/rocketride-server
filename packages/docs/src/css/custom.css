@@ -116,6 +116,32 @@ html[data-theme='dark']:not(#\#):not(#\#) {
 }
 
 /* ----------------------------------------------------------------------------
+ * MAINTENANCE: Infima specificity coupling (read before upgrading Docusaurus)
+ * ----------------------------------------------------------------------------
+ * Infima ships several of its component color/decoration rules with a build-
+ * injected `:not(#\#):not(#\#)` hack (specificity 2,0,1 for token blocks, 0,1,2
+ * for component rules). To win, the overrides below MATCH that hack rather than
+ * relying on source order alone. This couples them to Infima's current selector
+ * shape: if a Docusaurus/Infima upgrade changes that shape, these stop winning
+ * with NO build error and the styling silently reverts.
+ *
+ * Where Infima reads a CSS variable we override the variable instead (the :root
+ * token blocks above) — that survives specificity changes. The selector fights
+ * below are only for properties Infima hard-codes (e.g. `--ifm-color-primary`
+ * literals for active/hover, custom RocketRide classes with no Infima var).
+ *
+ * Docusaurus is pinned EXACT (`3.8.1`) in package.json to prevent silent drift.
+ * AFTER ANY @docusaurus/* bump, manually re-check these in light AND dark mode:
+ *   - navbar "Home" link + brand-title hover tint
+ *   - breadcrumb active (current page) crumb color
+ *   - right TOC "on this page": resting = body text, active = link color + bold
+ *   - home/quickstart side cards: no underline on hover; accent border
+ *   - quickstart CTA button background
+ *   - no doubled page title (see the .rr-doc-header rule below)
+ * If any reverts, the Infima selector specificity changed; re-match the hack.
+ * ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------------
  * Floating rounded panel on a deep background (Devdocs X look)
  * ------------------------------------------------------------------------- */
 html,
@@ -667,7 +693,13 @@ article a {
 
 /* CommonMark (.md) wraps the body's leading `# Title` in its own <header>,
  * while .mdx emits a bare <h1>; hide either so it never duplicates the
- * custom header's title. */
+ * custom header's title.
+ * LIMITATION: the adjacent-sibling (`+`) selector only matches when the body's
+ * leading heading is the IMMEDIATE next sibling of .rr-doc-header. A page that
+ * opens with an admonition or imported component before its first H1 will not
+ * match, so its title can render doubled. This is belt-and-suspenders alongside
+ * the site-wide `<head><title>` strip; if you see a doubled title, a
+ * non-adjacent body H1 is the likely cause. */
 .rr-doc-header + h1,
 .rr-doc-header + header {
 	display: none;

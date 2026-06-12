@@ -29,7 +29,8 @@ low). The exact triage and remediation windows per severity are listed in
   (dependencies & containers), Dependabot, and secret scanning.
 - **Two-person control** on dismissing security findings — no single maintainer can wave a
   finding through.
-- **Branch protection** on `develop`: required reviews and status checks before merge.
+- **Branch protection** on `develop`: required reviews and status checks before merge, with
+  admin bypass disabled so the rules apply to everyone, including org owners.
 - **Periodic access reviews** of who can write to the repository.
 
 ## Deployment & data
