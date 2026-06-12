@@ -480,9 +480,10 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
-	// showDashboard={false}: the VS Code host has no home-app destination, so the
-	// Dashboard nav action (onNavigate('dashboard')) is unhandled here. Hide it.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} showDashboard={false} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
+	// No headerSlot: the VS Code host has no home-app destination, so it injects no
+	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
+	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;

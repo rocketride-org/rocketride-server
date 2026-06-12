@@ -28,6 +28,9 @@ packages:
   # Client libraries
   - 'packages/client-typescript'
 
+  # Documentation site
+  - 'packages/docs'
+
   # Applications
   - 'apps/aparavi-ui'
   - 'apps/chat-ui'

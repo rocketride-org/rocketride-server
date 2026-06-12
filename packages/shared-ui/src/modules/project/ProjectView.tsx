@@ -79,6 +79,8 @@ export interface IProjectViewProps {
 	onOpenLink?: (url: string, displayName?: string) => void;
 	/** Called when the user requests a save (Ctrl+S or menu). */
 	onSave?: () => void;
+	/** SaaS-only: export/download the current pipeline. Forwarded to the canvas. */
+	onExport?: () => void;
 	/** Called when the user clears the trace log. */
 	onTraceClear?: () => void;
 	/** When true, the canvas is fully read-only: editing, saving, and run/stop are disabled. */
@@ -172,7 +174,7 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -349,7 +351,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,

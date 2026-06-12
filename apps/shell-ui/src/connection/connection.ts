@@ -309,8 +309,10 @@ export class ConnectionManager implements IConnectionManager {
 	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelClientId = '';
 
-	/** Module-level flag to prevent double bootstrap under React StrictMode. */
-	private bootStarted = false;
+	/** Cached in-flight/settled bootstrap promise — dedupes repeat bootstrap() calls
+	 *  (StrictMode double-invoke in dev, a Shell remount, MF host re-init) so every caller
+	 *  gets the SAME result instead of a null that the shell would misread as "logged out". */
+	private bootPromise: Promise<{ result: ConnectResult; appId: string } | null> | null = null;
 
 	/** One-shot guard: startOAuth always ends in a full-page redirect, so it must
 	 *  never run twice in one page load (double authorize → Zitadel invalidates the
@@ -375,10 +377,22 @@ export class ConnectionManager implements IConnectionManager {
 		workspaceDir?: string;
 		onThemeChange?: (theme: string) => void;
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
-		// Guard against double-execution (React StrictMode dev double-mount)
-		if (this.bootStarted) return null;
-		this.bootStarted = true;
+		// Dedupe: bootstrap can be invoked more than once per page load (StrictMode
+		// double-invoke in dev, a Shell remount, or MF host re-init). Returning null on
+		// the 2nd call made the shell flip to renderPhase='shell' with a null identity —
+		// flashing the logged-out landing page until the real (in-flight) bootstrap
+		// resolved. Hand every caller the SAME promise so they all settle on the real
+		// authenticated result and the shell never sees a spurious null.
+		if (this.bootPromise) return this.bootPromise;
+		this.bootPromise = this._bootstrap(config);
+		return this.bootPromise;
+	}
 
+	private async _bootstrap(config?: {
+		apps?: Array<{ id: string }>;
+		workspaceDir?: string;
+		onThemeChange?: (theme: string) => void;
+	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 
 		// Ensure the transport is attached before any login attempt

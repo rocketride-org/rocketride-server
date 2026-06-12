@@ -99,6 +99,24 @@ The [`n8n/`](n8n/) subfolder has runnable test pipes covering every mode — `n8
 
 ---
 
+### agent-llamaindex.pipe
+
+**Single-agent pipeline** using the LlamaIndex agent framework, backed by Claude.
+
+```
+chat -> LlamaIndex agent -> response
+              |
+        +-----+-----+
+        |           |
+       LLM        HTTP
+     (Claude)    (tool)
+```
+
+- A LlamaIndex ReAct agent answers questions, calling the HTTP request tool when it helps
+- Backed by Anthropic's Claude (Sonnet 4.6) via the `llm` control channel
+
+**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`
+
 ## Getting Started
 
 1. Copy a template to your project directory

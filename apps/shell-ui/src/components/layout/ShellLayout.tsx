@@ -45,6 +45,7 @@ import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
+import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import type { ShellConfig } from '../../workspace/types';
 import { commonStyles } from 'shared/themes/styles';
@@ -256,7 +257,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Derived layout info -------------------------------------------------
 	const hasSidebar = !!activeApp?.components?.Sidebar;
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
-	const showStatusBar = activeManifest?.showStatusBar !== false;
+	// Only show the status bar once the app has actually loaded. During the app-load gap the
+	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
+	// blink in and then get covered by home-ui's AuthTransitionPage overlay — a one-frame
+	// "flash" between the otherwise-identical loading/transition screens.
+	const showStatusBar = activeManifest?.showStatusBar !== false && !!activeApp?.components?.App;
 
 	// --- Render --------------------------------------------------------------
 	return (
@@ -297,7 +302,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 								</button>
 							</div>
 						) : appLoading || !activeApp ? (
-							<div style={styles.appLoading}>Loading...</div>
+							// Same bobbing rocket as the boot LoadingScreen and home-ui's
+							// AuthTransitionPage (all phase-anchored) so the post-login
+							// boot → app-load → transition handoff is one continuous animation
+							// with no "Loading…" text frame flashing between them.
+							<LoadingScreen />
 						) : null}
 					</div>
 				</div>

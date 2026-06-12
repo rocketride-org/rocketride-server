@@ -323,7 +323,7 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
  * sources, or any app-specific concepts.  The hosting container provides
  * entries, statuses, and callbacks.
  */
-export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, onRefresh }) => {
+export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -612,7 +612,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							{dotColor && <div style={S.dot(dotColor)} />}
 							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
 								<button
-									style={S.menuBtn}
+									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
 										setMenuPath(menuPath === file.path ? null : file.path);
@@ -646,6 +646,21 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									>
 										<BxTrash size={16} /> Delete
 									</button>
+									{fileActions?.map((a) => (
+										<button
+											key={a.id}
+											style={S.popupRow}
+											onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+											onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+											onClick={(e) => {
+												e.stopPropagation();
+												setMenuPath(null);
+												a.onSelect(file.path);
+											}}
+										>
+											{a.icon} {a.label}
+										</button>
+									))}
 								</div>
 							)}
 						</div>

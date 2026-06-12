@@ -535,8 +535,12 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 							position: 'fixed',
 							top: flyoutPos.top,
 							left: flyoutPos.left,
-							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
-							minWidth: 140,
+							// Content-driven width so long app names + logos aren't cramped. Grows
+							// to fit the widest row, floored at 160px and capped to the viewport
+							// (the flyout opens rightward from flyoutPos.left, so cap on the right edge).
+							width: 'max-content',
+							minWidth: 160,
+							maxWidth: `calc(100vw - ${flyoutPos.left + 8}px)`,
 							maxHeight: `calc(100vh - ${flyoutPos.top + 8}px)`,
 							overflowY: 'auto',
 							scrollbarWidth: 'thin',

@@ -218,6 +218,14 @@ function makeCopyToServerStaticAction() {
 	};
 }
 
+function makeGenPipelineRefAction() {
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', [path.join(__dirname, 'gen-pipeline-ref.mjs')], { task, cwd: PACKAGE_DIR });
+		},
+	};
+}
+
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
@@ -311,6 +319,12 @@ module.exports = {
 	name: 'client-typescript',
 	description: 'TypeScript Client SDK',
 
+	// Co-located docs mounts gathered by docs:gather.
+	docs: [
+		{ source: 'docs/guide', mount: 'develop/typescript' },
+		{ source: 'docs/reference/pipeline', mount: 'pipeline-reference' }
+	],
+
 	actions: [
 		// Internal actions
 		{ name: 'client-typescript:sync-version', action: makeSyncVersionAction },
@@ -323,13 +337,15 @@ module.exports = {
 		{ name: 'client-typescript:create-package', action: makeCreateNpmPackageAction },
 		{ name: 'client-typescript:sync', action: makeCopyToServerStaticAction },
 		{ name: 'client-typescript:run-jest', action: makeRunJestAction },
+		{ name: 'client-typescript:gen-pipeline-ref', action: makeGenPipelineRefAction },
+		{ name: 'client-typescript:docs-generate', action: () => ({ steps: ['client-typescript:gen-pipeline-ref'] }) },
 
 		// Public actions (have descriptions)
 		{
 			name: 'client-typescript:build',
 			action: () => ({
 				description: 'Build client-typescript',
-				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync'],
+				steps: ['client-typescript:sync-version', 'client-typescript:copy-readme', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
 			}),
 		},
 		{
