@@ -140,9 +140,9 @@ class MonitorCommands(DAPConn):
         # Step 3: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
             conn_org = ''
-            if hasattr(self._account_info, 'organizations') and self._account_info.organizations:
-                first_org = self._account_info.organizations[0]
-                conn_org = first_org.get('id', '') if isinstance(first_org, dict) else getattr(first_org, 'id', '')
+            if hasattr(self._account_info, 'organization') and self._account_info.organization:
+                org = self._account_info.organization
+                conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
             if conn_org != org_id:
                 return
         # Step 4: user scoping

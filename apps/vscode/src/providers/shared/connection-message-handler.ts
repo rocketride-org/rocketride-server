@@ -336,8 +336,8 @@ export class ConnectionMessageHandler {
 	}
 
 	private extractTeams(account: ReturnType<RocketRideClient['getAccountInfo']>): Array<{ id: string; name: string }> {
-		if (!account?.organizations?.length) return [];
-		return account.organizations.flatMap((org) => (org.teams ?? []).map((t) => ({ id: t.id, name: t.name })));
+		if (!account?.organization) return [];
+		return (account.organization.teams ?? []).map((t) => ({ id: t.id, name: t.name }));
 	}
 
 	// =========================================================================

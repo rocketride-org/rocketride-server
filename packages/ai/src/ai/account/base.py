@@ -153,7 +153,7 @@ class AccountBase(ABC):
 
         Args:
             user_id:       Internal user ID from the ConnectResult.
-            organizations: List of org dicts with nested teams (from ConnectResult).
+            organizations: List containing the user's single org dict with nested teams.
 
         Returns:
             List of app manifest dicts.

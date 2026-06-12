@@ -112,7 +112,7 @@ const AccountPage: React.FC = () => {
 	// ── Permission flags ────────────────────────────────────────────────────
 
 	/** Whether the current user is an org admin. */
-	const isOrgAdminFlag = authUser?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
+	const isOrgAdminFlag = authUser?.organization?.permissions?.includes('org.admin') ?? false;
 
 	// Keep profile in sync with server-pushed account updates, bump refresh
 	// signal for env, and bump reload counter to re-fetch the active section
@@ -128,8 +128,8 @@ const AccountPage: React.FC = () => {
 
 	// ── Data loaders ────────────────────────────────────────────────────────
 
-	/** Derives the orgId from the auth user's first organization. */
-	const orgId = authUser?.organizations?.[0]?.id ?? '';
+	/** Derives the orgId from the auth user's organization. */
+	const orgId = authUser?.organization?.id ?? '';
 
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e);

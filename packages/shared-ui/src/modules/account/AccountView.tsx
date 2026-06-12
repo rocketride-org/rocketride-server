@@ -245,8 +245,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// PERMISSION HELPERS
 	// =========================================================================
 
-	/** The primary organization's ID (used for org-scoped env calls). */
-	const orgId = profile?.organizations?.[0]?.id;
+	/** The organization's ID (used for org-scoped env calls). */
+	const orgId = profile?.organization?.id;
 
 	// Build appId → app lookup for display name resolution
 	const appMap = useMemo(() => {
@@ -255,9 +255,9 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		return map;
 	}, [apps]);
 
-	/** True when the current user has org.admin on their primary organization. */
+	/** True when the current user has org.admin on their organization. */
 	const isOrgAdmin = useMemo(() => {
-		return profile?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
+		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
 
 	/**
@@ -267,11 +267,10 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isTeamAdmin = useMemo(() => {
 		return (teamId: string): boolean => {
 			if (isOrgAdmin) return true;
-			const orgs = profile?.organizations ?? [];
-			for (const o of orgs) {
-				for (const t of o.teams ?? []) {
-					if (t.id === teamId && t.permissions?.includes('team.admin')) return true;
-				}
+			const org = profile?.organization;
+			if (!org) return false;
+			for (const t of org.teams ?? []) {
+				if (t.id === teamId && t.permissions?.includes('team.admin')) return true;
 			}
 			return false;
 		};

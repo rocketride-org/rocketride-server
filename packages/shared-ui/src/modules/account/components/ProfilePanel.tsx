@@ -134,7 +134,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	// Prefer the server-side profile value over the cached auth token value.
 	const displayName = profile?.displayName || authUser?.displayName || '\u2014';
 	const email = profile?.email || authUser?.email || '';
-	const orgs = profile?.organizations ?? authUser?.organizations ?? [];
+	const org = profile?.organization ?? authUser?.organization ?? null;
 
 	return (
 		<section>
@@ -170,50 +170,46 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</div>
 			</div>
 
-			{orgs.length > 0 && (
+			{org && (
 				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 					<div style={commonStyles.cardHeader}>
-						<span style={commonStyles.labelUppercase}>Organizations / Workspaces</span>
+						<span style={commonStyles.labelUppercase}>Organization / Workspace</span>
 					</div>
 					<div style={S.rowList}>
-						{orgs.map((o, oi) => (
-							<React.Fragment key={o.id}>
-								{/* Org row */}
-								<div style={{ ...S.rowItem, borderBottom: 'none' }}>
-									<Avatar name={o.name} size={24} square />
+						{/* Org row */}
+						<div style={{ ...S.rowItem, borderBottom: 'none' }}>
+							<Avatar name={org.name} size={24} square />
+							<div style={S.rowInfo}>
+								<div style={S.rowName}>{org.name}</div>
+							</div>
+							{org.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
+						</div>
+						{/* Teams sub-header */}
+						{org.teams.length > 0 && (
+							<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
+								<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
+							</div>
+						)}
+						{/* Team rows — indented under the org */}
+						{org.teams.map((t, i) => {
+							const isDefault = authUser?.defaultTeam === t.id;
+							const isLast = i === org.teams.length - 1;
+							return (
+								<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: 'none' }}>
+									<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
 									<div style={S.rowInfo}>
-										<div style={S.rowName}>{o.name}</div>
+										<div style={S.rowName}>{t.name}</div>
 									</div>
-									{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
+									{isDefault ? (
+										<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
+									) : (
+										<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
+											Set default
+										</button>
+									)}
 								</div>
-								{/* Teams sub-header */}
-								{o.teams.length > 0 && (
-									<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
-										<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
-									</div>
-								)}
-								{/* Team rows — indented under the org */}
-								{o.teams.map((t, i) => {
-									const isDefault = authUser?.defaultTeam === t.id;
-									const isLast = i === o.teams.length - 1;
-									return (
-										<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < orgs.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-											<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
-											<div style={S.rowInfo}>
-												<div style={S.rowName}>{t.name}</div>
-											</div>
-											{isDefault ? (
-												<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
-											) : (
-												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
-													Set default
-												</button>
-											)}
-										</div>
-									);
-								})}
-							</React.Fragment>
-						))}
+							);
+						})}
 					</div>
 				</div>
 			)}

@@ -1065,7 +1065,7 @@ export class AccountProvider {
 			(config.development.connectionMode === 'cloud' && devClient ? devClient : null) ??
 			(config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
 
-		const orgId = accountInfo?.organizations?.[0]?.id;
+		const orgId = accountInfo?.organization?.id;
 		return { client: client ?? undefined, accountInfo: accountInfo ?? undefined, orgId };
 	}
 

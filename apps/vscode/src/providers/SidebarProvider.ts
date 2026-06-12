@@ -367,8 +367,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 */
 	private getTeamsFromClient(client: import('rocketride').RocketRideClient | undefined): Array<{ id: string; name: string }> {
 		const info = client?.getAccountInfo();
-		if (!info?.organizations?.length) return [];
-		return info.organizations[0].teams ?? [];
+		if (!info?.organization) return [];
+		return info.organization.teams ?? [];
 	}
 
 	/** Sends connection state + entries + user identity + teams to the webview. */

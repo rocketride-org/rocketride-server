@@ -184,7 +184,7 @@ export class SettingsProvider {
 						try {
 							const billingClient = getConnectionManager()?.getClient();
 							if (!billingClient) throw new Error('Not connected');
-							const orgId = billingClient.getAccountInfo()?.organizations?.[0]?.id;
+							const orgId = billingClient.getAccountInfo()?.organization?.id;
 							if (!orgId) throw new Error('No organisation found');
 							const result = await billingClient.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, message.priceId as string);
 							panel.webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });

@@ -115,30 +115,28 @@ class Account(AccountBase):
             defaultTeam='local',
             # Single synthetic organisation with org.admin so that
             # resolve_team_permissions expands to the full permission set.
-            organizations=[
-                {
-                    'id': 'local',
-                    'name': 'Local',
-                    'permissions': ['org.admin'],
-                    'teams': [
-                        {
-                            'id': 'local',
-                            'name': 'Development',
-                            'permissions': [
-                                'team.admin',
-                                'read',
-                                'write',
-                                'execute',
-                                'task.control',
-                                'task.data',
-                                'task.monitor',
-                                'task.debug',
-                                'task.store',
-                            ],
-                        }
-                    ],
-                }
-            ],
+            organization={
+                'id': 'local',
+                'name': 'Local',
+                'permissions': ['org.admin'],
+                'teams': [
+                    {
+                        'id': 'local',
+                        'name': 'Development',
+                        'permissions': [
+                            'team.admin',
+                            'read',
+                            'write',
+                            'execute',
+                            'task.control',
+                            'task.data',
+                            'task.monitor',
+                            'task.debug',
+                            'task.store',
+                        ],
+                    }
+                ],
+            },
             # OSS: all apps are on the desktop and free — return full manifest
             # entries so the shell can register MF remotes after auth
             apps=[

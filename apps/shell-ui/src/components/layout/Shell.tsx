@@ -488,7 +488,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	} : config;
 
 	const stripeKey = config.apiConfig.RR_STRIPE_PUBLISHABLE_KEY ?? '';
-	const orgId = identity?.organizations?.[0]?.id ?? '';
+	const orgId = identity?.organization?.id ?? '';
 
 	return (
 		<ShellIdentityContext.Provider value={identity}>
