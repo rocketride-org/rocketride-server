@@ -137,8 +137,9 @@ class IInstance(IInstanceBase):
 
         size = semantic.get('size') or [image.height, image.width]
         h, w = int(size[0]), int(size[1])
-        if not (0 < h <= 8192 and 0 < w <= 8192):
-            warning(f'detect_segment: implausible semantic map size {h}x{w}; skipping overlay')
+        # Bound payload-provided dims so a hostile size can't force a huge allocation.
+        if h <= 0 or w <= 0 or (h * w) > (image.height * image.width * 4):
+            warning(f'detect_segment: invalid semantic size [{h}, {w}], skipping overlay')
             return image
         classes = semantic.get('classes') or {}
 
@@ -146,9 +147,11 @@ class IInstance(IInstanceBase):
         class_arr = None
         if class_map_b64:
             try:
-                raw = np.frombuffer(zlib.decompress(base64.b64decode(class_map_b64)), dtype=np.uint8)
-                if raw.size == h * w:
-                    class_arr = raw.reshape(h, w)
+                # Bounded decompression: cap output at h*w+1 so a zip-bomb payload can't blow up memory.
+                decomp = zlib.decompressobj()
+                raw_bytes = decomp.decompress(base64.b64decode(class_map_b64), max_length=h * w + 1)
+                if len(raw_bytes) == h * w and not decomp.unconsumed_tail:
+                    class_arr = np.frombuffer(raw_bytes, dtype=np.uint8).reshape(h, w)
             except Exception as exc:
                 warning(f'detect_segment: failed to decode class_map: {exc}')
 
