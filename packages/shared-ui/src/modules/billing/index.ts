@@ -21,4 +21,4 @@ export { UpgradeModal } from './components/UpgradeModal';
 export type { UpgradeModalProps } from './components/UpgradeModal';
 
 // ── Types ───────────────────────────────────────────────────────────────────
-export type { BillingDetail, StripePlan, CreditBalance, CreditPack, LedgerTransaction, TransactionsResult, UsageRollup } from './types';
+export type { AppPrice, BillingDetail, StripePlan, CreditBalance, CreditPack, LedgerTransaction, TransactionsResult, UsageRollup } from './types';

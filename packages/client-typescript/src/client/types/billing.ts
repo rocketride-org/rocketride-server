@@ -189,6 +189,9 @@ export interface LedgerTransaction {
 	/** Human-readable context (pipeline name, source, pack_id, etc.). */
 	context: Record<string, any> | null;
 
+	/** Line-item detail (e.g. gpu_memory, cpu_utilization). */
+	description: string | null;
+
 	/** ISO 8601 creation timestamp. */
 	createdAt: string | null;
 }

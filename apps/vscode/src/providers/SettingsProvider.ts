@@ -206,8 +206,9 @@ export class SettingsProvider {
 								priceId: message.priceId,
 							});
 							panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
-						} catch {
-							panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
+						} catch (err: unknown) {
+							const msg = err instanceof Error ? err.message : String(err);
+							panel.webview.postMessage({ type: 'checkout:confirmResult', error: msg });
 						}
 						break;
 					}

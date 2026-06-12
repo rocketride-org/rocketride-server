@@ -339,7 +339,6 @@ const BalanceBreakdown: React.FC<{ balance: CreditBalance | null; transactions: 
 			const p = purchased[resource] ?? 0;
 			const c = consumed[resource] ?? 0;
 			const net = balance?.balances?.[resource] ?? p - c;
-			const total = Math.max(p, c + net, 1);
 			return { resource, purchased: p, consumed: c, net, pct: p > 0 ? (c / p) * 100 : 0 };
 		});
 	}, [balance, transactions]);
@@ -547,7 +546,7 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 										<td style={S.td}>{tx.userId ? (memberNames?.[tx.userId] ?? tx.userId.slice(0, 8)) : '--'}</td>
 										<td style={S.td}><span style={S.typeBadge(tx.type)}>{tx.type}</span></td>
 										<td style={{ ...S.td, textTransform: 'uppercase' }}>{tx.resource}</td>
-										<td style={{ ...S.td, fontSize: 11, color: 'var(--rr-text-secondary)' }}>{(tx as any).description || '--'}</td>
+										<td style={{ ...S.td, fontSize: 11, color: 'var(--rr-text-secondary)' }}>{tx.description || '--'}</td>
 										<td style={{ ...S.tdRight, color: tx.amount >= 0 ? 'var(--rr-color-success)' : 'var(--rr-text-primary)' }}>
 											{tx.amount >= 0 ? '+' : ''}{fmt(tx.amount)}
 										</td>
@@ -626,6 +625,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 
 	return (
 		<>
+			<BalanceBreakdown balance={balance} transactions={transactions} />
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
 			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} memberNames={memberNames} teamNames={teamNames} />
 			<ActiveTasksView activeTasks={activeTasks} />

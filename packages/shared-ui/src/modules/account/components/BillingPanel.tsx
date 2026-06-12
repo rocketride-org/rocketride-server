@@ -368,7 +368,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			{/* Upgrade / change plan modal */}
 			{upgradeTarget && allPlans && onUpgradeSubscription && (
 				<UpgradeModal
-					plans={allPlans}
+					plans={allPlans.filter((p) => p.appId === upgradeTarget.appId)}
 					currentPriceId={upgradeTarget.stripePriceId}
 					currentPlanName={upgradeTarget.planNickname}
 					onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)}

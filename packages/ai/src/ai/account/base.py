@@ -225,7 +225,7 @@ class AccountBase(ABC):
         self,
         org_id: str,
         user_id: str,
-        team_id: str,
+        team_id: str | None,
         resource: str,
         amount: float,
         idempotency_key: str,
@@ -244,7 +244,7 @@ class AccountBase(ABC):
         Args:
             org_id:          Organisation to debit.
             user_id:         User whose task triggered the burn (required for attribution).
-            team_id:         Team the task belongs to (required for attribution).
+            team_id:         Team the task belongs to (None when task has no team scope).
             resource:        Billing bucket (e.g. tokens, video, audio).
             amount:          Positive amount to debit (negated internally).
             idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).

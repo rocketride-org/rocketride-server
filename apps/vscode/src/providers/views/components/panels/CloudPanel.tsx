@@ -10,7 +10,7 @@
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
 import cloudLogoLight from '../../../../../rocketride-light-icon.png';
 import { settingsStyles as S } from '../../Settings/SettingsWebview';
