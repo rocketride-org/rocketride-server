@@ -270,10 +270,18 @@ class IInstance(IInstanceBase):
         deadline = time.monotonic() + cfg.ingest_timeout
         delay = 0.5
         event: Dict[str, Any] = {'status': 'PENDING', 'event_id': event_id}
-        while time.monotonic() < deadline:
-            time.sleep(delay)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(delay, remaining))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                polled = _request_with_retry('GET', url, _headers(cfg))
+                # Clamp the socket timeout to the remaining budget so one slow
+                # poll can't overrun ingest_timeout.
+                polled = _request_with_retry('GET', url, _headers(cfg), timeout=min(_REQUEST_TIMEOUT, remaining))
             except RuntimeError as exc:
                 debug(f'mem0: event poll failed: {exc}')
                 break
@@ -300,7 +308,9 @@ def _headers(cfg: IGlobal) -> Dict[str, str]:
         'accept': 'application/json',
         'content-type': 'application/json',
         'Authorization': f'Token {cfg.api_key}',
-        'Mem0-User-ID': hashlib.md5(cfg.api_key.encode()).hexdigest(),
+        # usedforsecurity=False: this digest is just an opaque caller id, not a
+        # security primitive — without it md5() raises on FIPS-enabled builds.
+        'Mem0-User-ID': hashlib.md5(cfg.api_key.encode(), usedforsecurity=False).hexdigest(),
     }
 
 
@@ -408,6 +418,7 @@ def _request_with_retry(
     params: Optional[Dict[str, Any]] = None,
     max_retries: int = 3,
     idempotent: bool = True,
+    timeout: float = _REQUEST_TIMEOUT,
 ) -> Any:
     """Execute an HTTP request to the Mem0 API with bounded retries (via tenacity).
 
@@ -421,6 +432,9 @@ def _request_with_retry(
         idempotent: When ``True``, retry on 5xx and timeouts. When ``False`` (writes such
             as ingest), retry only on 429 — which means the request was not processed —
             and never on 5xx/timeout, to avoid duplicate side effects.
+        timeout: Per-request socket timeout in seconds. Callers that poll against a
+            deadline (e.g. ingest wait) pass the remaining budget so a single request
+            can't overrun it.
 
     Returns:
         The parsed JSON response body (a dict or a list; ``{}`` when the body is empty).
@@ -439,7 +453,7 @@ def _request_with_retry(
         return False
 
     def _attempt() -> Any:
-        resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=_REQUEST_TIMEOUT)
+        resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=timeout)
         resp.raise_for_status()
         return resp.json() if resp.content else {}
 

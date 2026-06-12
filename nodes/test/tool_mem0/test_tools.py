@@ -132,14 +132,20 @@ from tool_mem0.IInstance import (  # noqa: E402
 )
 from tool_mem0.IGlobal import IGlobal  # noqa: E402
 
-# Pin the input normalizer locally so behavior is deterministic regardless of
-# whatever ``ai.common.utils`` resolved to in this session (real or MagicMock).
-IInstanceMod.normalize_tool_input = _passthrough
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_normalizer(monkeypatch):
+    """Pin the input normalizer to a passthrough per test (scoped + auto-restored).
+
+    Keeps ``remember`` / ``recall`` deterministic regardless of whatever
+    ``ai.common.utils`` resolved to, without leaking the patch across tests.
+    """
+    monkeypatch.setattr(IInstanceMod, 'normalize_tool_input', _passthrough)
 
 
 def _make_global(**overrides):
