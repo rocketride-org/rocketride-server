@@ -17,7 +17,7 @@ See [Pipelines](/concepts/pipelines).
 One vertex of the pipeline graph: a single unit that does one job (call a model,
 embed text, query a store, run a tool). Has a unique `id`, a
 [provider](#provider), and `config`. See
-[Nodes & connectors](/concepts/nodes-connectors).
+[Nodes](/concepts/nodes).
 
 ### Provider
 

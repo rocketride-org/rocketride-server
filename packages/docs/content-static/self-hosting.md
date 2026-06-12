@@ -38,7 +38,7 @@ docker run -p 5565:5565 <rocketride-engine-image>
 Pipelines that call external models or stores need those providers' API keys.
 Supply them as environment variables in the engine's environment (never commit
 them); a node's `config` references the variable rather than the literal secret.
-See the [Nodes & Connectors catalog](/nodes) for each provider's required keys.
+See [Nodes](/nodes) for each provider's required keys.
 
 ## Related
 

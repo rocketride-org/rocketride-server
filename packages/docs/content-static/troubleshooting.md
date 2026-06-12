@@ -38,7 +38,7 @@ Common issues when building and running pipelines, and how to fix them.
 
 The output [lane](/concepts/execution-model) of one node must match the input
 lane of the next. Check both ends against the
-[Nodes & Connectors catalog](/nodes) and fix the mismatched `input` connection.
+[Nodes](/nodes) and fix the mismatched `input` connection.
 
 ## Agent pipeline fails to start
 

@@ -84,7 +84,7 @@ feel live.
 
 - [Agents & tools](/concepts/agents-tools-skills) — control connections in
   depth.
-- [Nodes & connectors](/concepts/nodes-connectors) — what sits on each lane.
+- [Nodes](/concepts/nodes) — what sits on each lane.
 - [WebSocket protocol](/protocols/websocket) — how clients feed and read a run.
 - [Pipeline JSON reference](/pipeline-reference) — the `input`, `lane`, and
   `control` fields.

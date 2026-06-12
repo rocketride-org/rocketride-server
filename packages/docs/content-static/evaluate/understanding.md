@@ -15,13 +15,13 @@ along typed **data lanes** — a node declares which input lanes it consumes and
 lanes it produces, and the engine routes data accordingly. See
 [Pipelines](/concepts/pipelines) and the [Execution model](/concepts/execution-model).
 
-## Nodes & connectors
+## Nodes
 
 **[Nodes](/nodes)** are the building blocks: LLM providers, vector stores, embedding models,
 preprocessors, OCR/NER, web tools, agents, and sources like Chat. Each node ships a schema
 (its config, inputs, and outputs) and runs inside the engine. Connectors are the nodes that
 read from and write to external systems. See
-[Nodes & connectors](/concepts/nodes-connectors) and
+[Nodes](/concepts/nodes) and
 [Agents & tools](/concepts/agents-tools-skills).
 
 ## The runtime engine

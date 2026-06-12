@@ -1,9 +1,9 @@
 ---
-title: Nodes & Connectors
+title: Nodes
 sidebar_position: 3
 ---
 
-# Nodes & connectors
+# Nodes
 
 A [pipeline](/concepts/pipelines) is a graph, and **nodes** are its vertices.
 Every node is one component that does one job: call a model, embed text, query a
@@ -57,15 +57,15 @@ a different provider, or repoint a `store` node at a different collection, and
 the surrounding graph is unchanged.
 
 ## The catalog
-
-Every available provider — 50+ nodes across 13+ LLM providers, 8 vector
-databases, OCR, NER, PII anonymization, transcription, and web tools — is
-documented with its config, inputs, and outputs in the
-**[Nodes & Connectors catalog](/nodes)**.
-
-## Next steps
-
-- [Nodes & Connectors catalog](/nodes) — every provider and its schema.
+ 
+ Every available provider — 50+ nodes across 13+ LLM providers, 8 vector
+ databases, OCR, NER, PII anonymization, transcription, and web tools — is
+ documented with its config, inputs, and outputs in
+ **[Nodes](/nodes)**.
+ 
+ ## Next steps
+ 
+ - [Nodes](/nodes) — every provider and its schema.
 - [Agents & tools](/concepts/agents-tools-skills) — the control-plane nodes.
 - [Execution model](/concepts/execution-model) — how lanes carry data between
   nodes.

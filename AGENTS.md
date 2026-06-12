@@ -8,7 +8,7 @@ Documentation is co-located with the code it documents and is gathered into the
 docs site by `builder docs:build`. When a change alters a public contract, update
 the corresponding co-located doc in the SAME change:
 
-- A node's inputs, outputs, or config schema -> prose in `nodes/src/nodes/<name>/doc.md`.
+- A node's inputs, outputs, or config schema -> prose in `nodes/src/nodes/<name>/README.md`.
   Never hand-edit content between `<!-- ROCKETRIDE:GENERATED:PARAMS START -->` and
   `<!-- ROCKETRIDE:GENERATED:PARAMS END -->`; it is regenerated from `services*.json`
   by `nodes:docs-generate`.

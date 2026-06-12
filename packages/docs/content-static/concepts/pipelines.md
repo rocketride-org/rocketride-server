@@ -15,7 +15,7 @@ Each node in the graph is a **component** with a unique `id` and a `provider`
 that determines its behaviour (for example `webhook`, `response`, or an LLM
 provider). Provider-specific settings live in the component's `config`.
 
-See the [Nodes & Connectors](/nodes) catalog for every available provider.
+See the [Nodes](/nodes) catalog for every available provider.
 
 ## Data lanes vs. invoke connections
 
@@ -47,4 +47,4 @@ reference is generated from the schema source and published at
 
 - [Quickstart](/quickstart) — run your first pipeline.
 - [Pipeline JSON reference](/pipeline-reference) — every field.
-- [Nodes & Connectors](/nodes) — the component catalog.
+- [Nodes](/nodes) — the component catalog.

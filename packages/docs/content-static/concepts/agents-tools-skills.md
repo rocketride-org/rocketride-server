@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Agents & tools
 
-Most [nodes](/concepts/nodes-connectors) pass data along a lane and move on. An
+Most [nodes](/concepts/nodes) pass data along a lane and move on. An
 **agent** is different: it reasons in a loop, deciding which model to call,
 which tools to use, and when it is done. To do that it needs a few helpers wired
 to it — an LLM, optionally tools, and (for some agent types) memory.
@@ -82,7 +82,7 @@ parent. This lets you compose specialists under a coordinator.
 
 ## Next steps
 
-- [Nodes & Connectors catalog](/nodes) — every agent, tool, LLM, and memory
+- [Nodes](/nodes) — every agent, tool, LLM, and memory
   provider, with its `invoke` requirements.
 - [Execution model](/concepts/execution-model) — how control connections run
   alongside data lanes.

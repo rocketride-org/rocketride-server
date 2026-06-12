@@ -33,7 +33,7 @@ const SPINE = [
 		items: [
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
 			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
-			{ id: 'concepts/nodes-connectors', label: 'Nodes & Connectors' },
+			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
 			{ id: 'concepts/execution-model', label: 'Execution Model' }
 		]

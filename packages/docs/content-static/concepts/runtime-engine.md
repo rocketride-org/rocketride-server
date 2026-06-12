@@ -66,6 +66,6 @@ that signal.
 
 - [Execution model](/concepts/execution-model) — how the engine schedules and
   streams a run.
-- [Nodes & connectors](/concepts/nodes-connectors) — the components the engine
+- [Nodes](/concepts/nodes) — the components the engine
   instantiates.
 - [Self-hosting](/self-hosting) — run the engine in your own infrastructure.
