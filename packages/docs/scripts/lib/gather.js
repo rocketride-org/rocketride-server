@@ -277,6 +277,20 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const name = toPosix(rel).split('/').slice(-2)[0]; // nodes/src/nodes/<name>/<file>
 		docByNode.set(name, rel);
 	}
+	// Variant sub-pages: a node may carry one README.md per registerable backend
+	// in a subdirectory (e.g. index_search/elasticsearch/README.md). When present,
+	// the node renders as a folder — the top-level README is the overview index and
+	// each variant becomes a nested page, mirroring the on-disk layout and the
+	// canvas palette's separate tiles.
+	const variantCandidates = await glob('nodes/src/nodes/*/*/README.md', { cwd: projectRoot, nodir: true });
+	const variantsByNode = new Map();
+	for (const rel of variantCandidates.sort()) {
+		const parts = toPosix(rel).split('/'); // nodes/src/nodes/<name>/<variant>/README.md
+		const name = parts[parts.length - 3];
+		const variant = parts[parts.length - 2];
+		if (!variantsByNode.has(name)) variantsByNode.set(name, []);
+		variantsByNode.get(name).push({ variant, rel });
+	}
 	const nodeDocs = [];
 	const stagedCategories = new Set();
 	for (const [name, rel] of [...docByNode.entries()].sort(([a], [b]) => a.localeCompare(b))) {
@@ -296,10 +310,32 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// Emit the per-category sidebar heading (label + order) once.
 		if (!stagedCategories.has(cat.slug)) {
 			stagedCategories.add(cat.slug);
-			await writeFileEnsure(
-				path.join(contentDir, NODES_DIR, cat.slug, '_category_.json'),
-				JSON.stringify({ label: cat.label, position: cat.position, collapsed: true }, null, 2)
-			);
+			await writeFileEnsure(path.join(contentDir, NODES_DIR, cat.slug, '_category_.json'), JSON.stringify({ label: cat.label, position: cat.position, collapsed: true }, null, 2));
+		}
+		const variants = variantsByNode.get(name) || [];
+		if (variants.length) {
+			// Folder layout: the node becomes a category under its classType group,
+			// the top-level README is its index page (flat route preserved via slug),
+			// and each backend variant is a nested page. The category links to the
+			// index so the parent label is clickable.
+			const folderRel = toPosix(path.join(NODES_DIR, cat.slug, name));
+			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
+			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }));
+			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
+			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position });
+			for (const { variant, rel: vrel } of variants) {
+				const vsrcAbs = path.join(projectRoot, vrel);
+				const vcontent = await readFile(vsrcAbs);
+				const vroute = `${route}/${variant}`;
+				claim(vroute, vsrcAbs);
+				nodeDocs.push(vrel);
+				const vExistingTitle = frontMatterTitle(vcontent);
+				const vlabel = vExistingTitle || nodeLabel(variant, '');
+				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }));
+				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
+				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position });
+			}
+			continue;
 		}
 		// Nest the page under its category folder; slug pins the flat route, title
 		// fills in when missing, and the body H1 is dropped to avoid a duplicate
