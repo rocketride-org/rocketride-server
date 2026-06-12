@@ -243,14 +243,24 @@ body {
 	border-left: none !important;
 }
 
-/* Right "on this page" nav: hover/active links follow the link color (Imperial
- * Indigo light / Horizon Blue dark) instead of Infima's --ifm-color-primary
- * blue ramp, matching the sidebar and breadcrumb active states. */
+/* Right "on this page" nav: links follow the theme link color (Imperial Indigo
+ * light / Horizon Blue dark) in every state — replacing Infima's grey resting
+ * color and primary-blue active ramp — so they match the body links. The active
+ * (current-section) link is bolded for emphasis. */
+.table-of-contents__link,
+.table-of-contents__link code {
+	color: var(--ifm-link-color);
+}
+
 .table-of-contents__link:hover,
 .table-of-contents__link:hover code,
 .table-of-contents__link--active,
 .table-of-contents__link--active code {
 	color: var(--ifm-link-color);
+}
+
+.table-of-contents__link--active {
+	font-weight: 600;
 }
 
 /* ----------------------------------------------------------------------------
