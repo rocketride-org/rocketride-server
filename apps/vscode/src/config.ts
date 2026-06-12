@@ -27,6 +27,7 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
+import { isShadowedByWorkspace } from './shared/util/workspaceOverride';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
@@ -422,8 +423,13 @@ export class ConfigManager {
 	 *
 	 * The caller is responsible for explicitly driving connection transitions
 	 * after this method returns (the normal debounced handlers are suppressed).
+	 *
+	 * @returns `shadowedKeys` — the keys whose Global write is masked by a
+	 *   conflicting value in the active workspace's `.vscode/settings.json`, so
+	 *   the change will not take effect in this window. The caller surfaces this
+	 *   to the user instead of a misleading "saved" confirmation.
 	 */
-	public async applyAllSettings(s: SettingsSnapshot): Promise<void> {
+	public async applyAllSettings(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context');
 		}
@@ -431,35 +437,45 @@ export class ConfigManager {
 		this.isBatchApplying = true;
 		try {
 			const wc = vscode.workspace.getConfiguration(this.configSection);
+			const shadowedKeys: string[] = [];
+
+			// Writes the key to the user (Global) target and records it when a
+			// conflicting workspace-level value would mask the write in this window.
+			const write = async (key: string, value: unknown): Promise<void> => {
+				if (isShadowedByWorkspace(wc.inspect(key), value)) {
+					shadowedKeys.push(`${this.configSection}.${key}`);
+				}
+				await wc.update(key, value, vscode.ConfigurationTarget.Global);
+			};
 
 			// --- Development group ---
-			await wc.update('development.connectionMode', s.development.connectionMode, vscode.ConfigurationTarget.Global);
-			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('development.teamId', s.development.teamId, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.debugOutput', s.development.local.debugOutput, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.engineArgs', s.development.local.engineArgs, vscode.ConfigurationTarget.Global);
+			await write('development.connectionMode', s.development.connectionMode);
+			await write('development.hostUrl', s.development.hostUrl);
+			await write('development.teamId', s.development.teamId);
+			await write('development.local.engineVersion', s.development.local.engineVersion);
+			await write('development.local.debugOutput', s.development.local.debugOutput);
+			await write('development.local.engineArgs', s.development.local.engineArgs);
 
 			// --- Deployment group ---
-			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.teamId', s.deployment.teamId, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.debugOutput', s.deployment.local.debugOutput, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.engineArgs', s.deployment.local.engineArgs, vscode.ConfigurationTarget.Global);
+			await write('deployment.connectionMode', s.deployment.connectionMode);
+			await write('deployment.hostUrl', s.deployment.hostUrl);
+			await write('deployment.teamId', s.deployment.teamId);
+			await write('deployment.local.engineVersion', s.deployment.local.engineVersion);
+			await write('deployment.local.debugOutput', s.deployment.local.debugOutput);
+			await write('deployment.local.engineArgs', s.deployment.local.engineArgs);
 
 			// --- Global settings ---
-			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+			await write('defaultPipelinePath', s.defaultPipelinePath);
+			await write('pipelineRestartBehavior', s.pipelineRestartBehavior);
 
 			// --- Integration settings ---
-			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.cursor', s.integrationCursor, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.windsurf', s.integrationWindsurf, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
+			await write('integrations.autoAgentIntegration', s.autoAgentIntegration);
+			await write('integrations.copilot', s.integrationCopilot);
+			await write('integrations.claudeCode', s.integrationClaudeCode);
+			await write('integrations.cursor', s.integrationCursor);
+			await write('integrations.windsurf', s.integrationWindsurf);
+			await write('integrations.claudeMd', s.integrationClaudeMd);
+			await write('integrations.agentsMd', s.integrationAgentsMd);
 
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
@@ -467,6 +483,8 @@ export class ConfigManager {
 
 			// --- Single cache refresh from final state ---
 			await this.refreshConfig();
+
+			return { shadowedKeys };
 		} catch (error) {
 			// Refresh cache even on failure so subsequent reads see persisted writes
 			await this.refreshConfig();

@@ -314,16 +314,34 @@ export class SettingsProvider {
 				return;
 			}
 
+			// Validate: Direct Connect (on-prem) mode requires a Host URL
+			if (snapshot.development.connectionMode === 'onprem' && !snapshot.development.hostUrl?.trim()) {
+				this.showMessage(webview, 'error', 'Please enter a Host URL for the development Direct Connect connection.');
+				return;
+			}
+			if (snapshot.deployment.connectionMode === 'onprem' && !snapshot.deployment.hostUrl?.trim()) {
+				this.showMessage(webview, 'error', 'Please enter a Host URL for the deployment Direct Connect connection.');
+				return;
+			}
+
 			// Step 1: Write everything atomically — ConfigManager suppresses all
 			// intermediate config-change listeners during the batch so no CM reacts
 			// to half-written state (e.g., new API key without new host URL).
-			await this.configManager.applyAllSettings(snapshot);
+			const { shadowedKeys } = await this.configManager.applyAllSettings(snapshot);
 
 			// Mark welcome as dismissed — user has configured settings
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
-			// Step 2: Confirm save to the user immediately — don't wait for engine ops
-			this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
+			// Step 2: Confirm save to the user immediately — don't wait for engine ops.
+			// If any saved key is masked by a conflicting value in this workspace's
+			// .vscode/settings.json, the Global write won't take effect here, so warn
+			// instead of reporting a misleading success (RR-1257).
+			if (shadowedKeys.length > 0) {
+				const isOne = shadowedKeys.length === 1;
+				this.showMessage(webview, 'warning', `Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by this workspace's .vscode/settings.json and won't take effect here. Edit the workspace settings to change ${isOne ? 'it' : 'them'} for this project.`, 'save');
+			} else {
+				this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
+			}
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
 			}
