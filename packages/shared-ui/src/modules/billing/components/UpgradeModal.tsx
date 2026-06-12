@@ -172,20 +172,26 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	// Filter out top-up packs and action-only plans, keep subscription plans
 	const subscriptionPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action),
+		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action && p.isActive !== false),
 		[plans],
 	);
 
 	/** Whether the selected plan differs from the current plan. */
 	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
 
+	/** Normalize amount to monthly cost for comparison across intervals. */
+	const monthlyAmount = (plan: CheckoutPlan) => {
+		if (plan.interval === 'year') return plan.amountCents / 12;
+		return plan.amountCents;
+	};
+
 	/** Determine if the selected plan is an upgrade or downgrade. */
 	const changeDirection = useMemo(() => {
 		if (!selectedPlan) return null;
 		const currentPlan = subscriptionPlans.find((p) => p.stripePriceId === currentPriceId);
 		if (!currentPlan) return 'change';
-		if (selectedPlan.amountCents > currentPlan.amountCents) return 'upgrade';
-		if (selectedPlan.amountCents < currentPlan.amountCents) return 'downgrade';
+		if (monthlyAmount(selectedPlan) > monthlyAmount(currentPlan)) return 'upgrade';
+		if (monthlyAmount(selectedPlan) < monthlyAmount(currentPlan)) return 'downgrade';
 		return 'change';
 	}, [selectedPlan, currentPriceId, subscriptionPlans]);
 

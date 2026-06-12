@@ -149,6 +149,12 @@ export interface CreditBalance {
 	/** Net balance per resource type (positive = remaining, negative = overspent). */
 	balances: Record<string, number>;
 
+	/** Total credits granted (purchased/credited) per resource. */
+	granted: Record<string, number>;
+
+	/** Total credits consumed (debited) per resource. */
+	consumed: Record<string, number>;
+
 	/**
 	 * Human-readable display templates per resource type, from Stripe price metadata.
 	 * Supports ``{amount}`` substitution (e.g. ``"{amount} minutes of Audio"``).

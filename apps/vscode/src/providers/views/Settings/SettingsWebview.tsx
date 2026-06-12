@@ -111,6 +111,7 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'settingsLoaded';
 			settings: SettingsData;
+			isSubscribed?: boolean;
 	  }
 	| {
 			type: 'showMessage';
@@ -453,8 +454,8 @@ export const Settings: React.FC = () => {
 					savedSettingsRef.current = JSON.parse(JSON.stringify(message.settings));
 					setDirty(false);
 					// Subscription status is included in the settingsLoaded payload
-					if ((message as any).isSubscribed !== undefined) {
-						setSubscribed((message as any).isSubscribed);
+					if (message.isSubscribed !== undefined) {
+						setSubscribed(message.isSubscribed);
 					}
 					// Pre-fetch versions from GitHub (cached on backend, shared across all modes)
 					setEngineVersionsLoading(true);

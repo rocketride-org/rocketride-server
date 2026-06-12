@@ -270,7 +270,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		onFetchPlans()
 			.then((fetched) => {
 				// Filter out top-up packs — those are handled by the TopUpModal
-				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup');
+				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup' && p.isActive !== false);
 				setPlans(subscriptionPlans);
 				// Pre-select the first checkout-able plan
 				const first = subscriptionPlans.find((p) => !p.metadata?.action);

@@ -135,7 +135,7 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 
 	// Filter to top-up plans only
 	const topupPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind === 'topup'),
+		() => plans.filter((p) => p.metadata?.kind === 'topup' && p.isActive !== false),
 		[plans],
 	);
 
@@ -162,12 +162,12 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 	};
 
 	return (
-		<div style={S.overlay} onClick={onClose}>
+		<div style={S.overlay} onClick={purchasing ? undefined : onClose}>
 			<div style={S.dialog} onClick={(e) => e.stopPropagation()}>
 				{/* Header */}
 				<div style={S.header}>
 					<div style={S.title}>Add More Capacity</div>
-					<button style={S.close} onClick={onClose}>&#10005;</button>
+					<button style={S.close} onClick={purchasing ? undefined : onClose} disabled={purchasing}>&#10005;</button>
 				</div>
 
 				{success ? (

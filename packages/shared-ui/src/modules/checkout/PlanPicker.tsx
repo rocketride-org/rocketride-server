@@ -35,7 +35,7 @@ function planAction(plan: CheckoutPlan): PlanAction | null {
 
 /** Extract the sort order from plan metadata, defaulting to 500. */
 function planOrder(plan: CheckoutPlan): number {
-	try { return parseInt(plan.metadata?.order, 10) || 500; } catch { return 500; }
+	try { const n = parseInt(plan.metadata?.order, 10); return Number.isFinite(n) ? n : 500; } catch { return 500; }
 }
 
 /** Extract description lines from plan metadata. */
@@ -49,8 +49,9 @@ function planDescription(plan: CheckoutPlan): string[] | null {
 export function planAmount(plan: CheckoutPlan): string {
 	const display = plan.metadata?.displayAmount;
 	if (display) return display;
-	const dollars = (plan.amountCents || 0) / 100;
-	return dollars === Math.floor(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+	const amount = (plan.amountCents || 0) / 100;
+	const symbol = (plan as any).currency?.toUpperCase() === 'EUR' ? '\u20AC' : '$';
+	return amount === Math.floor(amount) ? `${symbol}${amount}` : `${symbol}${amount.toFixed(2)}`;
 }
 
 /**

@@ -587,7 +587,7 @@ const SettingsPage: React.FC = () => {
 				<div style={styles.content as CSSProperties}>
 					<div style={styles.contentInner}>
 						{/* Subscribe prompt for unsubscribed users */}
-						{info && !isSubscribed && (
+						{info && pipeBuilderApp && !isSubscribed && (
 							<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', marginBottom: 16, borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
 								<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
 									Subscribe to unlock pipeline execution and deployment.

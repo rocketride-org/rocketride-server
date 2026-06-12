@@ -45,6 +45,7 @@ interface AccountWebviewMessage {
 	packId?: string;
 	priceId?: string;
 	newPriceId?: string;
+	orgId?: string;
 	subscriptionId?: string;
 }
 
@@ -1014,9 +1015,10 @@ export class AccountProvider {
 				priceId: message.priceId,
 			});
 			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
-		} catch {
-			// Non-fatal -- the webhook will still update the DB
-			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
+		} catch (err: unknown) {
+			// Non-fatal -- the webhook will still update the DB, but surface the error
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: msg });
 		}
 	}
 

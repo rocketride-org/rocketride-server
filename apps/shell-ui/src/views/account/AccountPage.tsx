@@ -101,18 +101,12 @@ const AccountPage: React.FC = () => {
 	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
 	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
 	const [dashboardLoading, setDashboardLoading] = useState(false);
-	const [txPage, setTxPage] = useState(1);
 
 	// ── Refresh signal (bumped by shell:accountUpdate) ─────────────────────
 	const [refreshSignal, setRefreshSignal] = useState(0);
 
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
-
-	// ── Permission flags ────────────────────────────────────────────────────
-
-	/** Whether the current user is an org admin. */
-	const isOrgAdminFlag = authUser?.organization?.permissions?.includes('org.admin') ?? false;
 
 	// Keep profile in sync with server-pushed account updates, bump refresh
 	// signal for env, and bump reload counter to re-fetch the active section
@@ -220,7 +214,6 @@ const AccountPage: React.FC = () => {
 			setTransactions(tx);
 			setUsageByUser(byUser);
 			setUsageByTeam(byTeam);
-			setTxPage(1);
 		} finally {
 			setBillingLoading(false);
 			setDashboardLoading(false);
@@ -231,7 +224,7 @@ const AccountPage: React.FC = () => {
 	const handleTransactionPage = useCallback(async (page: number) => {
 		if (!client || !orgId) return;
 		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
-		if (tx) { setTransactions(tx); setTxPage(page); }
+		if (tx) { setTransactions(tx); }
 	}, [client, orgId]);
 
 	/** Purchase a top-up pack by charging the card on file. */
@@ -468,6 +461,16 @@ const AccountPage: React.FC = () => {
 		await client.account.setEnv(scope, env, scopeId);
 	}, [client]);
 
+	// ── Memoized lookups ────────────────────────────────────────────────────
+	const memberNames = useMemo(
+		() => Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId])),
+		[members],
+	);
+	const teamNames = useMemo(
+		() => Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id])),
+		[teams],
+	);
+
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={accountStyles.root}>
@@ -498,8 +501,8 @@ const AccountPage: React.FC = () => {
 			onUpgradeSubscription={handleUpgradeSubscription}
 			dashboardLoading={dashboardLoading}
 			onTransactionPage={handleTransactionPage}
-			memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
-			teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
+			memberNames={memberNames}
+			teamNames={teamNames}
 			section={section}
 			onSectionChange={setSection}
 			activeTeamId={activeTeamId}

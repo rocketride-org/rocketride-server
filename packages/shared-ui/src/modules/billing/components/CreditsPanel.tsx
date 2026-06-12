@@ -241,8 +241,8 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 					</thead>
 					<tbody>
 						{Object.entries(balance.balances).map(([resource, net]) => {
-							const granted = (balance as any).granted?.[resource] ?? 0;
-							const consumed = (balance as any).consumed?.[resource] ?? 0;
+							const granted = balance.granted?.[resource] ?? 0;
+							const consumed = balance.consumed?.[resource] ?? 0;
 							const label = balance.labels?.[resource] ?? resource;
 							const resourceName = label.replace('{amount}', '').trim() || resource;
 							return (
