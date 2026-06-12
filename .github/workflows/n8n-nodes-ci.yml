@@ -34,8 +34,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install (npm — isolated from the pnpm workspace)
-        run: npm install --no-audit --no-fund
+      - name: Install (npm ci against the committed lockfile — isolated from the pnpm workspace)
+        run: |
+          npm install -g npm@11.5.1
+          npm ci --no-audit --no-fund
 
       - name: Build
         run: npm run build

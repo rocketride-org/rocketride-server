@@ -55,13 +55,13 @@ jobs:
 
       - name: Install + verify
         run: |
-          npm install --no-audit --no-fund
+          npm install -g npm@11.5.1
+          npm ci --no-audit --no-fund
           npm run build
           npm run lint
           npm test
 
       - name: Publish to npm (OIDC trusted publishing + provenance)
         run: |
-          # OIDC trusted publishing requires npm >= 11.5.1; pin it for a deterministic publish.
-          npm install -g npm@11.5.1
+          # npm >= 11.5.1 (required for OIDC trusted publishing) was installed in the step above.
           npm publish --provenance --access public
