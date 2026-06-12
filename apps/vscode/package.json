@@ -549,7 +549,7 @@
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.9.1",
-		"esbuild": "^0.28.0",
+		"esbuild": "^0.28.1",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"typescript": "^5.8.3"
