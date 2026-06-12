@@ -1,0 +1,3 @@
+# LandingAI Agentic Document Extraction (ADE) SDK — provides the LandingAIADE
+# client used by parser.py. Installed at runtime by IGlobal.ensureDependencies().
+landingai-ade

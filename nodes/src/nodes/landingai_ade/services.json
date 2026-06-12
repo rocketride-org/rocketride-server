@@ -1,0 +1,127 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LandingAI ADE",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "landingai_ade://",
+	//
+	// Required:
+	//		Class type of the node - what it does. Documents flow through and are
+	//		transformed into text/tables, so this is a data-flow processor.
+	//
+	"classType": ["data"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this as a new node; no "gpu" because all
+	//		compute happens remotely on LandingAI.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - node dependent.
+	//
+	"path": "nodes.landingai_ade",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths.
+	//
+	"prefix": "landingai_ade",
+	//
+	// Optional:
+	//		Description of this driver (array of strings, joined; </br> for breaks).
+	//
+	"description": ["A document parsing component that uses LandingAI's Agentic Document Extraction (ADE) ", "to convert PDFs, images, and office documents into clean Markdown text and extracted tables. ", "It handles complex layouts, multi-page tables, and mixed text/figure documents."],
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "landingai_ade.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Required:
+	//		Data-flow ports. Consumes the binary document stream (tags lane),
+	//		produces parsed text and tables.
+	//
+	"lanes": {
+		"tags": ["text", "table"]
+	},
+	//
+	// Required:
+	//		Side-panel layout for the service.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LandingAI ADE",
+			"properties": ["landingai_ade.default"]
+		}
+	],
+	//
+	// Required:
+	//		Config schema (RJSF).
+	//
+	"fields": {
+		"landingai_ade.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Your LandingAI Agentic Document Extraction API key. Falls back to the VISION_AGENT_API_KEY environment variable when left blank.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"landingai_ade.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "The Agentic Document Extraction model used to parse documents.",
+			"default": "dpt-2-latest",
+			"enum": [
+				["dpt-2-latest", "DPT-2 (latest)"]
+			]
+		},
+		"landingai_ade.region": {
+			"type": "string",
+			"title": "Region",
+			"description": "Which LandingAI deployment to call. Use EU for the eu-west-1 data-residency endpoint.",
+			"default": "production",
+			"enum": [
+				["production", "US (production)"],
+				["eu", "EU (eu-west-1)"]
+			]
+		},
+		"landingai_ade.default": {
+			"object": "default",
+			"properties": ["landingai_ade.api_key", "landingai_ade.model", "landingai_ade.region"]
+		}
+	},
+	//
+	// Optional:
+	//		Preset profiles; `default` is applied on canvas drop.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model": "dpt-2-latest",
+				"region": "production"
+			}
+		}
+	},
+	"required": ["landingai_ade.api_key"]
+}
