@@ -1,44 +1,101 @@
----
-title: xAI
-date: 2026-04-08
-sidebar_position: 1
----
+# llm_xai
 
-<head>
-  <title>xAI - RocketRide Documentation</title>
-</head>
+A RocketRide LLM node that connects xAI Grok models to a pipeline.
 
 ## What it does
 
-Connects xAI Grok models to your pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
+Provides xAI's Grok models as an `llm` invoke connection for agents and other nodes that need a language model. The node can also be used directly via lanes: send text on the `questions` lane and receive a generated completion on the `answers` lane.
 
-**Lanes:**
+Uses **langchain-xai** (`ChatXAI`) under the hood. The chat client is always initialized with `temperature=0`, and `max_tokens` is set from the selected profile's output-token limit. The default profile is **Grok 3** (`grok-3`).
+
+When the node config is saved, a minimal validation probe (a single-word prompt) is sent to the xAI API to verify the API key and model. Provider and HTTP errors are parsed into a readable `Error <code>: <message>` warning instead of failing silently.
+
+---
+
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Configuration
+### Fields
 
-| Field   | Description                            |
-| ------- | -------------------------------------- |
-| Model   | Grok model to use (see profiles below) |
-| API Key | xAI API key                            |
+| Field              | Type / Default           | Description                                                                         |
+| ------------------ | ------------------------ | ----------------------------------------------------------------------------------- |
+| `profile`          | string, default `grok-3` | Which Grok model profile to use (see Profiles below)                                |
+| `apikey`           | string                   | xAI API key; must begin with `xai-`                                                 |
+| `model`            | string                   | xAI model id (Custom profile only)                                                  |
+| `modelTotalTokens` | number, default `131072` | Total token (context) limit (Custom profile only); must be greater than 0           |
+
+For all built-in profiles, `model`, `modelTotalTokens`, and `modelOutputTokens` are preset and only the API key needs to be supplied. The Custom profile additionally exposes `model` and `modelTotalTokens` so any xAI model id can be used.
+
+---
 
 ## Profiles
 
-| Profile                     | Model                         | Context      |
-| --------------------------- | ----------------------------- | ------------ |
-| Grok 3 _(default)_          | `grok-3`                      | 131,072      |
-| Grok 3 Mini                 | `grok-3-mini`                 | 131,072      |
-| Grok 4                      | `grok-4-0709`                 | 256,000      |
-| Grok 4 Fast                 | `grok-4-fast-reasoning`       | 2,000,000    |
-| Grok 4 Fast Non-Reasoning   | `grok-4-fast-non-reasoning`   | 2,000,000    |
-| Grok 4.1 Fast               | `grok-4-1-fast-reasoning`     | 2,000,000    |
-| Grok 4.1 Fast Non-Reasoning | `grok-4-1-fast-non-reasoning` | 2,000,000    |
-| Grok Code Fast 1            | `grok-code-fast-1`            | 256,000      |
-| Custom                      | _(user-specified)_            | configurable |
+### xAI-hosted
+
+| Profile                       | Model                         | Context (tokens) | Max output (tokens) |
+| ----------------------------- | ----------------------------- | ---------------- | ------------------- |
+| Grok 3 _(default)_            | `grok-3`                      | 131,072          | 131,072             |
+| Grok 3 Mini                   | `grok-3-mini`                 | 131,072          | 131,072             |
+| Grok 4                        | `grok-4-0709`                 | 256,000          | 256,000             |
+| Grok 4 Fast                   | `grok-4-fast-reasoning`       | 2,000,000        | 4,096               |
+| Grok 4 Fast Non-Reasoning     | `grok-4-fast-non-reasoning`   | 2,000,000        | 4,096               |
+| Grok 4.1 Fast                 | `grok-4-1-fast-reasoning`     | 2,000,000        | 4,096               |
+| Grok 4.1 Fast Non-Reasoning   | `grok-4-1-fast-non-reasoning` | 2,000,000        | 4,096               |
+| Grok Code Fast 1              | `grok-code-fast-1`            | 256,000          | 10,000              |
+| Custom Model                  | _(user-specified)_            | configurable     | _(not preset)_      |
+
+### OpenRouter-sourced
+
+These profiles use `modelSource: openrouter` and carry OpenRouter-style model ids. The `apikey` field is also exposed for each of these profiles.
+
+| Profile                    | Model                   | Context (tokens) | Max output (tokens) |
+| -------------------------- | ----------------------- | ---------------- | ------------------- |
+| xAI: Grok 3 Beta           | `grok-3-beta`           | 131,072          | 131,072             |
+| xAI: Grok 3 Mini Beta      | `grok-3-mini-beta`      | 131,072          | 131,072             |
+| xAI: Grok 4 Fast           | `grok-4-fast`           | 2,000,000        | 30,000              |
+| xAI: Grok 4.1 Fast         | `grok-4.1-fast`         | 2,000,000        | 30,000              |
+| xAI: Grok 4.20             | `grok-4.20`             | 2,000,000        | 4,096               |
+| xAI: Grok 4.20 Multi-Agent | `grok-4.20-multi-agent` | 2,000,000        | 4,096               |
+
+---
+
+## Authentication
+
+Provide an xAI API key in the `apikey` field. The key is validated at pipeline start: it must begin with the `xai-` prefix, otherwise the node raises `Invalid XAI API key format, please check your API key.`
+
+The key is also checked at save time with a minimal probe request, so invalid keys, unknown models, or network problems surface as warnings in the UI before the pipeline runs.
+
+---
 
 ## Upstream docs
 
 - [xAI API documentation](https://docs.x.ai/docs/overview)
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `model` | `string` | **Model**<br/>xAI model |  |
+| `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
+| `xai.profile` | `string` | **Model**<br/>LLM model | `"grok-3"` |
+
+## Dependencies
+
+- `langchain-xai`
+- `langchain-core`
+- `langchain`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_xai)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -269,6 +269,36 @@ body {
 	border-left: none !important;
 }
 
+/* Breadcrumb row with a right-aligned "View source" action (node pages).
+ * The stock breadcrumbs keep their own bottom margin; move it to the row so
+ * the link stays vertically centered against the crumbs. */
+.rr-breadcrumbs-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.8rem;
+}
+
+.rr-breadcrumbs-row .theme-doc-breadcrumbs {
+	margin-bottom: 0 !important;
+}
+
+.rr-view-source {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.85rem;
+	font-weight: 500;
+	white-space: nowrap;
+	color: var(--ifm-color-emphasis-600);
+}
+
+.rr-view-source:hover {
+	color: var(--ifm-link-color);
+	text-decoration: none;
+}
+
 /* Right "on this page" nav: only the current-section (active) link takes the
  * theme link color (Imperial Indigo light / Horizon Blue dark) + bold; every
  * other link is plain body text (black light / white dark), not Infima's grey
@@ -301,6 +331,9 @@ body {
 }
 
 .markdown table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
 	border-radius: 12px;
 	overflow: hidden;
 	border: 1px solid var(--rr-panel-border);

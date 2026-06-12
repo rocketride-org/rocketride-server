@@ -1,0 +1,4 @@
+falkordb>=1.6,<2
+# Declared because IInstance imports redis.exceptions directly: falkordb-py
+# has no error hierarchy of its own and re-raises redis-py exceptions verbatim.
+redis>=7.1,<8

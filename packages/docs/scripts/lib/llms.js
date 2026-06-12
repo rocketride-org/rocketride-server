@@ -16,12 +16,25 @@ const SITE_TITLE = 'RocketRide Documentation';
 const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide toolchain.';
 
 function nodeCatalogMarkdown(nodes) {
-	const lines = ['---', 'title: Nodes & Connectors', 'slug: /nodes', 'sidebar_position: 0', '---', '', '# Nodes & Connectors', ''];
+	// Title comes from front matter (theme renders it); no body H1 to avoid a
+	// duplicate heading. The catalog is grouped by category and ordered to match
+	// the sidebar dropdown.
+	const lines = ['---', 'title: Overview', 'slug: /nodes', 'sidebar_position: 0', '---', ''];
 	if (!nodes.length) {
 		lines.push('_No node documentation has been migrated yet._', '');
-	} else {
-		lines.push(`${nodes.length} nodes.`, '');
-		for (const n of [...nodes].sort((a, b) => a.node.localeCompare(b.node))) {
+		return lines.join('\n');
+	}
+	lines.push(`${nodes.length} nodes, grouped by type.`, '');
+	const groups = new Map(); // category label -> { order, items }
+	for (const n of nodes) {
+		const label = n.category || 'Other';
+		if (!groups.has(label)) groups.set(label, { order: n.categoryOrder ?? 999, items: [] });
+		groups.get(label).items.push(n);
+	}
+	const ordered = [...groups.entries()].sort((a, b) => a[1].order - b[1].order || a[0].localeCompare(b[0]));
+	for (const [label, group] of ordered) {
+		lines.push(`## ${label}`, '');
+		for (const n of group.items.sort((a, b) => a.title.localeCompare(b.title))) {
 			lines.push(`- [${n.title}](${n.route})`);
 		}
 		lines.push('');
@@ -91,7 +104,7 @@ async function buildIndex({ contentDir, staticDir, task }) {
 	await writeFileEnsure(path.join(contentDir, 'nodes', 'index.md'), catalog);
 	await writeFileEnsure(path.join(staticDir, 'nodes.md'), catalog);
 	const withCatalog = manifest.filter((e) => e.id !== 'nodes');
-	withCatalog.push({ id: 'nodes', route: '/nodes', title: 'Nodes & Connectors', mdSibling: '/nodes.md' });
+	withCatalog.push({ id: 'nodes', route: '/nodes', title: 'Overview', mdSibling: '/nodes.md' });
 	generated.set('nodes', catalog);
 
 	await writeFileEnsure(path.join(staticDir, 'llms.txt'), llmsIndex(withCatalog));

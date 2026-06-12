@@ -33,7 +33,7 @@ const SPINE = [
 		items: [
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
 			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
-			{ id: 'concepts/nodes-connectors', label: 'Nodes & Connectors' },
+			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
 			{ id: 'concepts/execution-model', label: 'Execution Model' }
 		]
@@ -50,8 +50,8 @@ const SPINE = [
 	{
 		label: 'Develop',
 		items: [
-			{ id: 'develop/typescript', label: 'TypeScript SDK', mount: true },
-			{ id: 'develop/python', label: 'Python SDK', mount: true }
+			{ id: 'develop/typescript', label: 'TypeScript', mount: true },
+			{ id: 'develop/python', label: 'Python', mount: true }
 		]
 	},
 	{
@@ -148,7 +148,9 @@ function toSidebar() {
 		if (node.items) {
 			return { type: 'category', label: node.label, items: node.items.map(render) };
 		}
-		return node.id;
+		// Leaf: honor the spine label so it (not the mounted doc's front matter)
+		// drives the sidebar entry — the spine is the single source of truth.
+		return node.label ? { type: 'doc', id: node.id, label: node.label } : node.id;
 	}
 	return { docsSidebar: SPINE.map(render) };
 }

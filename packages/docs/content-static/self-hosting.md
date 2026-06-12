@@ -5,7 +5,7 @@ title: Self-hosting
 # Self-hosting
 
 Run the RocketRide [engine](/concepts/runtime-engine) on your own
-infrastructure (your laptop, a server, or inside a private network) when you
+infrastructure — your laptop, a server, or inside a private network — when you
 need full control over where data and model calls go. It is the same engine that
 powers [Cloud](/cloud); only the operator changes.
 
@@ -26,7 +26,7 @@ put it behind TLS and authentication.
 
 The fastest path to a local engine is the [VS Code
 extension](/ide-extensions/overview), which manages a runtime for you while you
-build. To run it as a standalone service, for a server or CI, use the
+build. To run it as a standalone service — for a server or CI — use the
 containerized engine and publish port 5565:
 
 ```bash
@@ -38,11 +38,11 @@ docker run -p 5565:5565 <rocketride-engine-image>
 Pipelines that call external models or stores need those providers' API keys.
 Supply them as environment variables in the engine's environment (never commit
 them); a node's `config` references the variable rather than the literal secret.
-See the [Nodes & Connectors catalog](/nodes) for each provider's required keys.
+See [Nodes](/nodes) for each provider's required keys.
 
 ## Related
 
-- [Cloud](/cloud): the managed alternative.
-- [WebSocket protocol](/protocols/websocket): what clients speak to the engine.
-- [Runtime & engine](/concepts/runtime-engine): what the engine does with a
+- [Cloud](/cloud) — the managed alternative.
+- [WebSocket protocol](/protocols/websocket) — what clients speak to the engine.
+- [Runtime & engine](/concepts/runtime-engine) — what the engine does with a
   pipeline.
