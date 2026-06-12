@@ -17,7 +17,9 @@ Saving the node config runs a fast connectivity probe: the index/collection name
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                                  |
 | ----------- | ----------- | -------------------------------------------------------------------------------------------- |
@@ -30,17 +32,11 @@ Saving the node config runs a fast connectivity probe: the index/collection name
 
 The `documents` input lane is only processed in vector store mode; documents arriving in index mode are silently ignored. Documents without an embedding are skipped in vector store mode.
 
----
-
-## Configuration
-
 Index and collection names must be 1-255 characters of lowercase letters, digits, `.`, `_`, or `-`; slashes and spaces are not allowed.
 
 ### Elasticsearch variant
 
 The Deployment Type field selects a connection profile:
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -64,8 +60,6 @@ The Deployment Type field selects a connection profile:
 | `type` | string | Default "vector_database". Elasticsearch operation type |
 | `store_enabled` | boolean | Default true. Enable document storage |
 | `profile` | string | Default "self-managed". Connect to... |
-
-
 
 | Field                   | Type / Default       | Description                                                                                        |
 | ----------------------- | -------------------- | -------------------------------------------------------------------------------------------------- |

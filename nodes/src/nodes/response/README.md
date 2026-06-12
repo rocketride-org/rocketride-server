@@ -42,29 +42,7 @@ All variants are `classType: infrastructure` and register as a `filter`. The gen
 
 ## Configuration
 
-### HTTP Results (generic service)
-
-
-| Field | Type | Description |
-|---|---|---|
-| `laneId` | string |  |
-| `laneName` | string |  |
-| `lanes` | array | Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |
-
-
-Multiple lane-to-key mappings can be added to return several outputs in a single response. When no mapping is configured for a lane, its data is stored under the lane type name as the default key.
-
-### Single-lane variants (Return Answers, Return Text, ...)
-
-| Field      | Type / Default                    | Description |
-|------------|-----------------------------------|-------------|
-| `laneName` | string, defaults to the lane type | The JSON key under which this lane's data appears in the response body (1-32 characters). |
-
-When `laneName` is set at the top level of the node config (the style used by all single-lane variants), it overrides the `lanes` array and every lane type arriving at the node is written under that one key. The per-lane `lanes` mapping only applies when no top-level `laneName` is configured.
-
----
-
-## Lanes
+### Lanes
 
 All lanes are inputs; the node produces no output lanes.
 
@@ -78,6 +56,24 @@ All lanes are inputs; the node produces no output lanes.
 | `audio`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
 | `video`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
 | `image`     | -        | Captured under the configured key (base64-encoded) |
+
+### HTTP Results (generic service)
+
+| Field | Type | Description |
+|---|---|---|
+| `laneId` | string |  |
+| `laneName` | string |  |
+| `lanes` | array | Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |
+
+Multiple lane-to-key mappings can be added to return several outputs in a single response. When no mapping is configured for a lane, its data is stored under the lane type name as the default key.
+
+### Single-lane variants (Return Answers, Return Text, ...)
+
+| Field      | Type / Default                    | Description |
+|------------|-----------------------------------|-------------|
+| `laneName` | string, defaults to the lane type | The JSON key under which this lane's data appears in the response body (1-32 characters). |
+
+When `laneName` is set at the top level of the node config (the style used by all single-lane variants), it overrides the `lanes` array and every lane type arriving at the node is written under that one key. The per-lane `lanes` mapping only applies when no top-level `laneName` is configured.
 
 ---
 

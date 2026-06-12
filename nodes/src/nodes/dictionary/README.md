@@ -12,14 +12,6 @@ The node has no Python package requirements of its own: it relies entirely on th
 
 ---
 
-## Lanes
-
-| Lane in | Lane out    | Description                                                  |
-|---------|-------------|--------------------------------------------------------------|
-| `text`  | `documents` | Extract term/description pairs, emit one document per term   |
-
----
-
 ## Connections
 
 | Connection | Required    | Description                          |
@@ -29,6 +21,12 @@ The node has no Python package requirements of its own: it relies entirely on th
 ---
 
 ## Configuration
+
+### Lanes
+
+| Lane in | Lane out    | Description                                                  |
+|---------|-------------|--------------------------------------------------------------|
+| `text`  | `documents` | Extract term/description pairs, emit one document per term   |
 
 No configuration fields. Connect an LLM and wire text in.
 

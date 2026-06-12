@@ -14,7 +14,9 @@ When both lanes are connected for the same frame, the node calls Gemini once and
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                      |
 |-------------|-------------|----------------------------------------------------------------------------------|
@@ -25,13 +27,9 @@ On the `documents` lane, each incoming `Image` document is replaced by a `Text` 
 
 If inference fails for a document, the node logs a warning and continues with the next one: a single bad frame does not stop the pipeline.
 
----
-
-## Configuration
+### Fields
 
 The node shape exposes a single **Vision Model** profile selector (`image_vision_gemini.profile`); the remaining fields appear once a profile is chosen.
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -41,8 +39,6 @@ The node shape exposes a single **Vision Model** profile selector (`image_vision
 | `systemPrompt` | string | Define the model's role and behavior for image analysis |
 | `prompt` | string | Describe what you want to analyze or extract from the image |
 | `profile` | string | Default "gemini-2_5-flash". Select the Gemini vision model to use |
-
-
 
 The system prompt, when set, is sent to Gemini as the `system_instruction` of every request.
 

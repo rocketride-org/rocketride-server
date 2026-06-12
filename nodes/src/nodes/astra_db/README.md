@@ -18,7 +18,9 @@ Key defaults every user should know:
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -27,19 +29,13 @@ Key defaults every user should know:
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `api_endpoint` | string | Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com |
 | `application_token` | string | Enter the server API application token |
 | `provider` | string | Default "astra_db".  |
-
-
 
 ---
 

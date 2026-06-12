@@ -24,15 +24,15 @@ key is present (secure fields are not decrypted at validate time).
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 The node is configured by picking a model profile and supplying an API key.
 

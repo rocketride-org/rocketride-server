@@ -20,15 +20,15 @@ validated at save time: a misconfigured local server only surfaces at runtime.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 |-------------|-----------|------------------------------------------------------|
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 | Field        | Type / Default                 | Description                                                                     |
 |--------------|--------------------------------|---------------------------------------------------------------------------------|

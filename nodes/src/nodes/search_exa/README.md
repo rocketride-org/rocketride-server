@@ -12,7 +12,9 @@ Result URLs are sanitized before leaving the node. Every `url`, `image`, and `fa
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                                    |
 |-------------|-----------|----------------------------------------------------------------|
@@ -20,10 +22,7 @@ Result URLs are sanitized before leaving the node. Every `url`, `image`, and `fa
 | `questions` | `text`    | Search results as plain text                                   |
 | `questions` | `questions` | Original question passed through unchanged (when a downstream listener is connected) |
 
----
-
-## Configuration
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -33,7 +32,6 @@ Result URLs are sanitized before leaving the node. Every `url`, `image`, and `fa
 | `numResults` | integer | Default 5.  |
 | `includeHighlights` | boolean | Default true.  |
 | `highlightChars` | integer | Default 600.  |
-
 
 The node ships a single `default` profile containing the search settings (`type`, `numResults`, `includeHighlights`, `highlightChars`). The `apikey` field sits outside the profile and is set once per connection config.
 

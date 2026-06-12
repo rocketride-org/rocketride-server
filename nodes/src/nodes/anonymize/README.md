@@ -21,7 +21,9 @@ Note: AI-based detection cannot guarantee 100% accuracy. Review results before u
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane   | Direction | Behaviour |
 |--------|-----------|-----------|
@@ -29,21 +31,15 @@ Note: AI-based detection cannot guarantee 100% accuracy. Review results before u
 
 When an upstream classifier node is present, the node also receives classifications and adjusts its behaviour (see "Entity labels" below).
 
----
-
-## Configuration
+### Fields
 
 The node is configured by choosing a model profile. Each profile exposes the masking character field; the `custom` profile additionally exposes a free-form model name field.
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `anonymizeChar` | string | Character |
 | `model` | string | Gliner model to use for anonymization |
 | `profile` | string | Default "glinerMergedLarge". Anonymize model |
-
-
 
 ---
 

@@ -15,17 +15,15 @@ The output is always `image/png` regardless of the input format. There are no co
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out | Description                                         |
 |---------|----------|-----------------------------------------------------|
 | `image` | `image`  | Receives the raw image, emits the cleaned PNG       |
 
 Images are streamed in chunks using `AVI_ACTION` signals (`BEGIN` / `WRITE` / `END`). The node buffers all `WRITE` chunks, processes the complete image on `END`, then re-emits it as a new `BEGIN` / `WRITE` / `END` sequence. The default pass-through is suppressed so only the cleaned image continues down the pipeline.
-
----
-
-## Configuration
 
 No configuration fields. Drop the node into the pipeline between an image source and an OCR node and it works as-is with no further setup. The node registers a single empty `default` profile.
 

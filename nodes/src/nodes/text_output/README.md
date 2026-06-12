@@ -23,7 +23,9 @@ Requires the `network` capability and is not available in remote (`noremote`) or
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Description                            |
 | ------- | -------------------------------------- |
@@ -31,9 +33,7 @@ Requires the `network` capability and is not available in remote (`noremote`) or
 
 The node is a pure target (`classType: ["target"]`) — it produces no output lanes.
 
----
-
-## Configuration
+### Fields
 
 | Field           | Type / Default      | Description                                                                                          |
 | --------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |

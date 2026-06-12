@@ -16,6 +16,14 @@ Token counts are estimated with a simple word-based approximation (roughly 0.75 
 
 ## Configuration
 
+### Lanes
+
+| Lane in     | Lane out  | Description                                          |
+| ----------- | --------- | ---------------------------------------------------- |
+| `questions` | `answers` | Send a question directly, receive a generated answer |
+
+### Fields
+
 | Field        | Type   | Description                                                         |
 | ------------ | ------ | ------------------------------------------------------------------- |
 | `apikey`     | string | IBM Cloud API key (required)                                        |
@@ -39,14 +47,6 @@ The `location` value must be one of the following known IBM Cloud regions. Any o
 | `au-syd`   | Sydney        |
 | `ca-tor`   | Toronto       |
 | `br-sao`   | Sao Paulo     |
-
----
-
-## Lanes
-
-| Lane in     | Lane out  | Description                                          |
-| ----------- | --------- | ---------------------------------------------------- |
-| `questions` | `answers` | Send a question directly, receive a generated answer |
 
 ---
 

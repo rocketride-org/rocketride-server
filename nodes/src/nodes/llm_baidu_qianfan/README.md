@@ -23,21 +23,19 @@ and other API errors fail immediately with a user-facing message.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane        | Direction | Description                              |
 |-------------|-----------|------------------------------------------|
 | `questions` | input     | Prompts / questions to send to the model |
 | `answers`   | output    | Model completions                        |
 
----
-
-## Configuration
+### Fields
 
 The node is configured through a single **Model** profile selector plus the fields that
 profile exposes.
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -46,8 +44,6 @@ profile exposes.
 | `modelOutputTokens` | number | Maximum generated tokens |
 | `serverbase` | string | Default "https://qianfan.baidubce.com/v2". Qianfan OpenAI-compatible API endpoint. |
 | `profile` | string | Default "ernie-4-5-turbo-128k". Baidu Qianfan model selection |
-
-
 
 ---
 

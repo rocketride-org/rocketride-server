@@ -14,18 +14,16 @@ The extracted text is assembled as Markdown from Reducto's block types: `title` 
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out | Description                               |
 |---------|----------|-------------------------------------------|
 | `data`  | `text`   | Extracted text as Markdown                |
 | `data`  | `table`  | Extracted tables in Markdown table format |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -38,8 +36,6 @@ The extracted text is assembled as Markdown from Reducto's block types: `title` 
 | `options` | string | Options for the Reducto API |
 | `advanced_options` | string | Advanced options for the Reducto API |
 | `experimental_options` | string | Experimental options for the Reducto API |
-
-
 
 The default profile uses Simple mode (`parse_mode: false`).
 

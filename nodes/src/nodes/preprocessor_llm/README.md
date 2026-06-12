@@ -16,25 +16,21 @@ Output chunks are emitted as documents using the LangChain document format (`pag
 
 ## Configuration
 
+### Lanes
 
+| Lane in | Lane out    | Description                                                      |
+|---------|-------------|------------------------------------------------------------------|
+| `text`  | `documents` | Split text into semantically chunked documents via LLM           |
+| `table` | `documents` | Split table content into documents with table metadata preserved |
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `numberOfTokens` | number | Default 384.  |
 | `profile` | string | Default "default".  |
 
-
-
 The node ships a single preconfig profile, `default`, which sets `numberOfTokens: 384`.
-
----
-
-## Lanes
-
-| Lane in | Lane out    | Description                                                      |
-|---------|-------------|------------------------------------------------------------------|
-| `text`  | `documents` | Split text into semantically chunked documents via LLM           |
-| `table` | `documents` | Split table content into documents with table metadata preserved |
 
 ---
 

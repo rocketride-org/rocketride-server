@@ -14,21 +14,7 @@ Both new and edited messages are processed. Unsupported message types (stickers,
 
 ## Configuration
 
-
-| Field | Type | Description |
-|---|---|---|
-| `botToken` | string | Telegram bot token from @BotFather (e.g. 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11) |
-| `mode` | string | Default "polling". Polling works anywhere without a public URL. Webhook requires a public HTTPS endpoint. |
-| `webhookUrl` | string | Public HTTPS URL Telegram will POST updates to (e.g. https://your-server.com/telegram/webhook). Required for webhook mode. |
-
-
-The node tile in the UI shows the currently configured mode.
-
-The monitor info panel shows the last 6 characters of the configured bot token so you can verify which bot is connected without exposing the full secret.
-
----
-
-## Lanes
+### Lanes
 
 The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `audio`, `video`, and `tags`. Each Telegram message type maps to one output lane:
 
@@ -42,6 +28,18 @@ The node is a pipeline source. Its `_source` lane emits to `text`, `image`, `aud
 | Document (PDF, Word, etc.) | `tags` | Written as tagged stream data; connect a Parser node downstream. |
 
 Entry URLs are built as `telegram://<chat_id>/<uuid>` for text messages and `telegram://<chat_id>/<file_id>` for files.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `botToken` | string | Telegram bot token from @BotFather (e.g. 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11) |
+| `mode` | string | Default "polling". Polling works anywhere without a public URL. Webhook requires a public HTTPS endpoint. |
+| `webhookUrl` | string | Public HTTPS URL Telegram will POST updates to (e.g. https://your-server.com/telegram/webhook). Required for webhook mode. |
+
+The node tile in the UI shows the currently configured mode.
+
+The monitor info panel shows the last 6 characters of the configured bot token so you can verify which bot is connected without exposing the full secret.
 
 ---
 

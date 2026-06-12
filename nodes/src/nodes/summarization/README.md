@@ -16,6 +16,16 @@ Output is emitted only on lanes that actually have a downstream listener: plain 
 
 ## Configuration
 
+### Lanes
+
+| Lane in | Lane out | Description |
+|---------|----------|-------------|
+| `text` | `text` | Summarized output as plain text: a summary block, a `Key Points:` bullet list, and an `Entities:` bullet list. Sections that are disabled or empty are omitted. |
+| `text` | `documents` | Summarized output as structured documents: each summary, key-point list, and entity list becomes its own `Doc` with an incrementing `chunkId` in its metadata. |
+
+Both table and plain-text input are accepted; table content is appended to the same accumulator as text and summarized together with it.
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -25,19 +35,7 @@ Output is emitted only on lanes that actually have a downstream listener: plain 
 | `numberOfEntities` | number |  |
 | `profile` | string | Default "default".  |
 
-
 The node ships a single `default` profile (selected via the hidden `summarization.profile` field) that exposes the four fields above.
-
----
-
-## Lanes
-
-| Lane in | Lane out | Description |
-|---------|----------|-------------|
-| `text` | `text` | Summarized output as plain text: a summary block, a `Key Points:` bullet list, and an `Entities:` bullet list. Sections that are disabled or empty are omitted. |
-| `text` | `documents` | Summarized output as structured documents: each summary, key-point list, and entity list becomes its own `Doc` with an incrementing `chunkId` in its metadata. |
-
-Both table and plain-text input are accepted; table content is appended to the same accumulator as text and summarized together with it.
 
 ---
 

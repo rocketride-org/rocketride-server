@@ -12,7 +12,9 @@ Documents must pass through an embedding node before reaching this node; chunks 
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -21,19 +23,13 @@ Documents must pass through an embedding node before reaching this node; chunks 
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `serverName` | string | Default "chroma". Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string |  |
-
-
 
 ---
 

@@ -17,16 +17,25 @@ Audio is written to a temporary WAV file during synthesis and deleted as soon as
 
 ## Configuration
 
+### Lanes
+
+All four input lanes produce output on the **audio** lane.
+
+| Input lane  | What gets synthesized                                                                                                   |
+|-------------|-------------------------------------------------------------------------------------------------------------------------|
+| `text`      | The raw text, as-is.                                                                                                    |
+| `documents` | The `page_content` of each document, joined with newlines. Documents of type `Image`, `Audio`, or `Video` are skipped. |
+| `questions` | The text of every question, joined with spaces.                                                                         |
+| `answers`   | The answer text (via `getText()`).                                                                                      |
+
+### Fields
+
 The node has a single profile, **`kokoro`** (the default), selected by the `profile` field.
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `kokoro_voice` | string | Default "af_heart". Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.). |
 | `profile` | string | Default "kokoro".  |
-
-
 
 ### Voices and language
 
@@ -45,19 +54,6 @@ The language is derived automatically from the **first character** of the voice 
 | `pf_` / `pm_` | Portuguese       | `pf_dora`, `pm_alex`                        |
 
 The full list of voice ids is defined in `services.json`.
-
----
-
-## Lanes
-
-All four input lanes produce output on the **audio** lane.
-
-| Input lane  | What gets synthesized                                                                                                   |
-|-------------|-------------------------------------------------------------------------------------------------------------------------|
-| `text`      | The raw text, as-is.                                                                                                    |
-| `documents` | The `page_content` of each document, joined with newlines. Documents of type `Image`, `Audio`, or `Video` are skipped. |
-| `questions` | The text of every question, joined with spaces.                                                                         |
-| `answers`   | The answer text (via `getText()`).                                                                                      |
 
 ---
 

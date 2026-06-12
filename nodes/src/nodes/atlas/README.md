@@ -14,7 +14,9 @@ Documents must be run through an embedding node before reaching this node. A chu
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 |-------------|-------------|------------------------------------------------------------------|
@@ -23,17 +25,11 @@ Documents must be run through an embedding node before reaching this node. A chu
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `provider` | string | Default "atlas".  |
-
-
 
 Configuration is validated when the pipeline is saved: the host must match the `mongodb+srv://user:pass@cluster.xxxxx.mongodb.net/?...` URI pattern and all field-length and character restrictions listed above are checked at that time.
 

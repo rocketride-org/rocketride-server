@@ -12,7 +12,9 @@ Models are downloaded from HuggingFace on first use. GPU is used automatically w
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Input lane | Output lane | Behaviour |
 |------------|-------------|-----------|
@@ -21,11 +23,7 @@ Models are downloaded from HuggingFace on first use. GPU is used automatically w
 
 When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -35,8 +33,6 @@ When a `documents` listener is attached, the node also emits one document per me
 | `max_seconds` | number | Default 300. The maximum seconds of audio to buffer to process |
 | `vad_level` | number | Default 1. The VAD level to use for silence detection (0-3) |
 | `profile` | string | Default "default".  |
-
-
 
 ### VAD levels
 

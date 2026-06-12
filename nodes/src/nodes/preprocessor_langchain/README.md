@@ -14,18 +14,16 @@ By default chunks are measured by **string length** with a maximum of **512** ch
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out    | Description                              |
 |---------|-------------|------------------------------------------|
 | `text`  | `documents` | Split plain text into document chunks    |
 | `table` | `documents` | Split table content into document chunks |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -37,8 +35,6 @@ By default chunks are measured by **string length** with a maximum of **512** ch
 | `separator` | string | Default ""\n"".  |
 | `model` | string | Default "en_core_web_sm".  |
 | `profile` | string | Default "default".  |
-
-
 
 ### Separator syntax
 

@@ -27,29 +27,7 @@ The default model is `openai/clip-vit-base-patch16`.
 
 ## Configuration
 
-
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Hugging face model to use for embedding |
-| `profile` | string | Default "openai-patch16". Embedding model |
-
-
-
----
-
-## Profiles
-
-| Profile key      | Model                          | Notes                                  |
-|------------------|--------------------------------|----------------------------------------|
-| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
-| `openai-patch32` | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
-| `google16x224`   | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
-| `custom`         | _(user-specified)_             | Any Hugging Face vision model, via `embedding.model` |
-
----
-
-## Lanes
+### Lanes
 
 | Lane in     | Lane out    | Description                              |
 |-------------|-------------|------------------------------------------|
@@ -70,6 +48,24 @@ Raw image bytes are streamed in chunks (begin / write / end). On completion the
 accumulated bytes are decoded, embedded, and wrapped in a new document of type `Image`
 whose `page_content` is the base64-encoded image. Each image in the stream receives a
 unique `chunkId` in its metadata.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Hugging face model to use for embedding |
+| `profile` | string | Default "openai-patch16". Embedding model |
+
+---
+
+## Profiles
+
+| Profile key      | Model                          | Notes                                  |
+|------------------|--------------------------------|----------------------------------------|
+| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
+| `openai-patch32` | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
+| `google16x224`   | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
+| `custom`         | _(user-specified)_             | Any Hugging Face vision model, via `embedding.model` |
 
 ---
 

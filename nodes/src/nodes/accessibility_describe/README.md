@@ -23,18 +23,16 @@ clear error.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane | Direction | Description |
 |------|-----------|-------------|
 | `image` | input | The image to describe (streamed; any image MIME type) |
 | `text` | output | The accessibility-optimized scene description |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -45,8 +43,6 @@ clear error.
 | `prioritizeHazards` | string | Default "high". How aggressively to prioritize hazard detection |
 | `spatialFormat` | string | Default "clock". How to describe spatial positions |
 | `profile` | string | Default "gemini-2.5-flash". Select the Gemini vision model for accessibility descriptions |
-
-
 
 If `accessibility.systemPrompt` or `accessibility.prompt` is left empty, the node falls
 back to a generic `systemPrompt` / `prompt` config value, then to its built-in defaults.

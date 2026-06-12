@@ -26,7 +26,9 @@ only, starting with a letter or underscore.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -35,18 +37,12 @@ only, starting with a letter or underscore.
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `profile` | string | Default "cloud". Connect to... |
 | `provider` | string | Default "milvus".  |
-
-
 
 ### Advanced settings
 

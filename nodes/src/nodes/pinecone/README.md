@@ -14,7 +14,9 @@ The node carries `classType: ["store", "tool"]` and the `invoke` capability. In 
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -25,11 +27,7 @@ The node carries `classType: ["store", "tool"]` and the `invoke` capability. In 
 
 Semantic search requires the incoming question to carry an embedding (bind an embedding node upstream) and returns up to the filter's `limit` (default 25) top matches scored above the configured threshold. Non-zero offsets are not supported for semantic search and raise an error. Keyword search adds a `$contains` metadata filter on document content.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -37,8 +35,6 @@ Semantic search requires the incoming question to carry an embedding (bind an em
 | `serverName` | string | Default "pinecone". Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide. |
 | `profile` | string | Default "pod-based". Connect to... |
 | `provider` | string | Default "pinecone".  |
-
-
 
 ### Collection naming rules
 

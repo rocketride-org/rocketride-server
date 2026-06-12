@@ -31,15 +31,15 @@ errors are not, and are mapped to friendly messages (e.g. `Invalid API key.`).
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 | Field              | Type   | Description                                                                              |
 | ------------------ | ------ | ---------------------------------------------------------------------------------------- |

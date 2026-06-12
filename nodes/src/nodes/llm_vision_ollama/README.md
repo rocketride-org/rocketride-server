@@ -12,7 +12,9 @@ Each inference attempt is capped by a 30-second hard timeout; a timed-out or ret
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                    |
 | ----------- | ----------- | ------------------------------------------------------------------------------ |
@@ -29,13 +31,9 @@ Each incoming `Doc` of type `Image` (its `page_content` is base64-encoded PNG, s
 
 If no analysis prompt is configured, the question text from the request is used; if that is also empty, the prompt defaults to `Describe this image.`
 
----
-
-## Configuration
+### Fields
 
 The node is configured by selecting a profile in the **Vision Model** field (`image_vision_ollama.profile`, default `llama3_2-vision-11b`). All profiles expose the same connection and prompt fields; the **Custom** profile additionally exposes the model name and token limit.
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -44,8 +42,6 @@ The node is configured by selecting a profile in the **Vision Model** field (`im
 | `systemPrompt` | string | Define the model's role and behavior for image analysis |
 | `prompt` | string | Describe what you want to analyze or extract from the image |
 | `profile` | string | Default "llama3_2-vision-11b". Select the Ollama vision model to use |
-
-
 
 ---
 

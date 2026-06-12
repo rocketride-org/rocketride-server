@@ -21,7 +21,16 @@ Key behavior to know:
 
 ## Configuration
 
+### Lanes
 
+| Lane in     | Lane out    | Description                                   |
+|-------------|-------------|-----------------------------------------------|
+| `questions` | `documents` | Reranked documents ordered by relevance score |
+| `questions` | `answers`   | An answer with the reranked documents         |
+
+The `documents` lane is written only when at least one document survives the `min_score` filter. The `answers` lane is **always** written, so downstream nodes receive a result even when every document was filtered out: the answer text is the surviving documents' content joined by blank lines (empty string if none survived).
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -29,8 +38,6 @@ Key behavior to know:
 | `top_n` | number | Number of top results to return |
 | `min_score` | number | Minimum relevance score threshold (0.0-1.0) |
 | `profile` | string | Default "rerank-english-v3.0". Rerank model |
-
-
 
 `top_n` must be a whole number >= 1 (whole-number floats like `5.0` are accepted; booleans and fractional values are rejected). `min_score` must be a number between 0.0 and 1.0.
 
@@ -45,17 +52,6 @@ The **Model** dropdown selects a preconfigured profile:
 | `custom`              | Custom      | free-form `model` field         |
 
 All profiles expose `top_n`, `min_score`, and the API key. The Custom profile additionally exposes the `model` field.
-
----
-
-## Lanes
-
-| Lane in     | Lane out    | Description                                   |
-|-------------|-------------|-----------------------------------------------|
-| `questions` | `documents` | Reranked documents ordered by relevance score |
-| `questions` | `answers`   | An answer with the reranked documents         |
-
-The `documents` lane is written only when at least one document survives the `min_score` filter. The `answers` lane is **always** written, so downstream nodes receive a result even when every document was filtered out: the answer text is the surviving documents' content joined by blank lines (empty string if none survived).
 
 ---
 

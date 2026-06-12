@@ -12,15 +12,13 @@ The implementation is pure Python with no external dependencies (`requirements.t
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out    | Description                                     |
 |---------|-------------|-------------------------------------------------|
 | `text`  | `questions` | Wrap text as a Question and pass it downstream  |
-
----
-
-## Configuration
 
 None. The node has no configurable fields and ships a single empty `default` profile.
 

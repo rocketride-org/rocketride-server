@@ -16,7 +16,9 @@ After the pipeline starts, the Project Log displays the interface URL, the publi
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 Each variant takes the internal `_source` input and emits to its declared output lanes:
 
@@ -29,10 +31,6 @@ Each variant takes the internal `_source` input and emits to its declared output
 - **Web Hook** — data received from the HTTP request, routed by content type.
 - **Chat** — each message submitted via the chat UI becomes a question.
 - **Dropper** — each uploaded file enters the pipeline for processing.
-
----
-
-## Configuration
 
 None. There are no node-specific config fields — the shape exposes only the standard source properties (`source.mode` and an empty `parameters` object), and the single `default` profile is empty. The endpoint URL, public authorization key, and private token are generated automatically when the pipeline starts.
 

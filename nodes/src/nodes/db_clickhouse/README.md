@@ -20,16 +20,6 @@ The node is read-only by default: the natural-language path only ever runs `SELE
 
 ---
 
-## Lanes
-
-| Lane in     | Lane out  | Description                                            |
-|-------------|-----------|--------------------------------------------------------|
-| `questions` | `table`   | Translate question to SQL, execute, return as table    |
-| `questions` | `text`    | Translate question to SQL, execute, return as text     |
-| `questions` | `answers` | Translate question to SQL, execute, return as answers  |
-
----
-
 ## Available tools
 
 When connected to an agent, the node exposes three functions:
@@ -46,7 +36,15 @@ Only `SELECT` is permitted for generated queries.
 
 ## Configuration
 
+### Lanes
 
+| Lane in     | Lane out  | Description                                            |
+|-------------|-----------|--------------------------------------------------------|
+| `questions` | `table`   | Translate question to SQL, execute, return as table    |
+| `questions` | `text`    | Translate question to SQL, execute, return as text     |
+| `questions` | `answers` | Translate question to SQL, execute, return as answers  |
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -60,8 +58,6 @@ Only `SELECT` is permitted for generated queries.
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
 | `profile` | string | Default "default".  |
-
-
 
 The node ships a single `default` profile that pre-sets `database: default`.
 

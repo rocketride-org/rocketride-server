@@ -12,19 +12,6 @@ No third-party Python dependencies (requirements.txt is empty).
 
 ---
 
-## Lanes
-
-| Lane in | Lane out    | Description                                                      |
-| ------- | ----------- | ---------------------------------------------------------------- |
-| `text`  | `answers`   | Extract fields from text, emit as JSON                           |
-| `text`  | `documents` | Extract fields from text, emit one document per row              |
-| `table` | `answers`   | Extract/transform fields from a table, emit as JSON              |
-| `table` | `documents` | Extract/transform fields from a table, emit one document per row |
-
-On close, the `answers` lane (if connected) receives one JSON answer containing the full table. The `documents` lane (if connected) receives one document per extracted row, with the row serialized as JSON in the document content.
-
----
-
 ## Connections
 
 | Connection | Required    | Description                      |
@@ -35,9 +22,20 @@ On close, the `answers` lane (if connected) receives one JSON answer containing 
 
 ## Configuration
 
+### Lanes
+
+| Lane in | Lane out    | Description                                                      |
+| ------- | ----------- | ---------------------------------------------------------------- |
+| `text`  | `answers`   | Extract fields from text, emit as JSON                           |
+| `text`  | `documents` | Extract fields from text, emit one document per row              |
+| `table` | `answers`   | Extract/transform fields from a table, emit as JSON              |
+| `table` | `documents` | Extract/transform fields from a table, emit one document per row |
+
+On close, the `answers` lane (if connected) receives one JSON answer containing the full table. The `documents` lane (if connected) receives one document per extracted row, with the row serialized as JSON in the document content.
+
+### Fields
+
 The node takes a list of fields to extract (`fields`, 1-32 entries). Each entry has:
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -46,8 +44,6 @@ The node takes a list of fields to extract (`fields`, 1-32 entries). Each entry 
 | `defval` | string | Default empty.  |
 | `fields` | array |  |
 | `profile` | string | Default "default".  |
-
-
 
 **Supported types:** `text` (Text), `decimal` (Number), `int` (Integer), `date` (Date), `time` (Time), `datetime` (DateTime), `timestamp` (Timestamp), `binary` (Binary), `json` (JSON), `html` (HTML), `url` (URL), `email` (Email), `phone` (Phone), `ipv4` (IPv4), `ipv6` (IPv6), `uuid` (UUID), `guid` (GUID)
 

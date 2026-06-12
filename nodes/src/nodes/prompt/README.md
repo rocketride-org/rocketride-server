@@ -14,7 +14,9 @@ The node registers as a `filter` with class type `text` and runs as a pure Pytho
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                       |
 | ----------- | ----------- | --------------------------------------------------------------------------------- |
@@ -23,17 +25,11 @@ The node registers as a `filter` with class type `text` and runs as a pure Pytho
 | `table`     | (none)      | Added to the `### Context:` section of the prompt                                 |
 | `questions` | `questions` | Collects question inputs; emits the fully assembled question when the node closes |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `instructions` | array | Multiple instructions to add to questions before sending to LLM |
-
-
 
 Each instruction is added with the name `User Instruction`; when multiple instructions are configured they are numbered (`User Instruction 1`, `User Instruction 2`, and so on). A single string value is also accepted and treated as a one-element list.
 

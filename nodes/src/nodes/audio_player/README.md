@@ -14,6 +14,17 @@ Playback is serialized engine-wide: a shared `threading.Lock` created at node st
 
 ## Configuration
 
+### Lanes
+
+| Lane    | Direction | Behavior                                                             |
+|---------|-----------|----------------------------------------------------------------------|
+| `audio` | input     | Decoded and played through the default output device                 |
+| `video` | input     | Audio track extracted and played; video frames are discarded         |
+
+Neither lane produces downstream output. The node is a sink.
+
+### Fields
+
 No configuration options: the node exposes no fields and uses a single empty `default` profile. Playback settings are fixed in the implementation:
 
 | Parameter   | Value                                              |
@@ -24,17 +35,6 @@ No configuration options: the node exposes no fields and uses a single empty `de
 | Latency     | Low (`latency='low'`, blocksize 1024 frames)       |
 | Chunk size  | 16 KB per queued buffer                            |
 | Queue depth | 32 chunks maximum (~512 KB, roughly 3 s of audio)  |
-
----
-
-## Lanes
-
-| Lane    | Direction | Behavior                                                             |
-|---------|-----------|----------------------------------------------------------------------|
-| `audio` | input     | Decoded and played through the default output device                 |
-| `video` | input     | Audio track extracted and played; video frames are discarded         |
-
-Neither lane produces downstream output. The node is a sink.
 
 ---
 

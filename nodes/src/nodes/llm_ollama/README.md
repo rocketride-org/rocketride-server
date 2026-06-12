@@ -10,27 +10,23 @@ Internally, the node talks to Ollama through its **OpenAI-compatible `/v1` endpo
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 Pick a profile from the dropdown; the profile pre-fills `model`, `serverbase`, and `modelTotalTokens`. All three fields are individually overridable when using the `custom` profile.
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `model` | string | Ollama model |
 | `modelTotalTokens` | number | Total Tokens |
 | `profile` | string | Default "llama3_3". LLM model |
-
-
 
 ---
 

@@ -12,7 +12,9 @@ By default (`language: auto`) the language is detected from the **content** of e
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out    | Description                                         |
 |---------|-------------|-----------------------------------------------------|
@@ -20,21 +22,15 @@ By default (`language: auto`) the language is detected from the **content** of e
 
 Both `writeText` and `writeTable` inputs are processed. Table input marks the resulting documents with `isTable: true` and an incrementing `tableId`. Each emitted document carries an incrementing `chunkId` starting at 0 per object.
 
----
-
-## Configuration
+### Fields
 
 Configuration is profile-based. Select a profile to fix the parsing language, or leave the default `auto` profile to detect the language per file.
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `strlen` | number | Default 512.  |
 | `language` | string | Default "auto".  |
 | `profile` | string | Default "auto".  |
-
-
 
 Note: `strlen` is stored in the configuration and profile but the current splitter determines chunk boundaries purely from syntax nodes. A single large function or class becomes a single chunk regardless of `strlen`.
 

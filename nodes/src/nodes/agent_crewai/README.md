@@ -18,7 +18,9 @@ CrewAI 1.14.x planning and delegation are patched at import time (`crewai_base.p
 
 ---
 
-## Lanes and channels
+## Configuration
+
+### Lanes
 
 | Variant | Lanes | `llm` channel | `tool` channel | `crewai` channel |
 |---|---|---|---|---|
@@ -32,15 +34,9 @@ The Subagent's `classType` is `["crewai"]`: it can only be wired into a Manager'
 
 A Subagent can be connected to multiple Managers simultaneously: each Manager independently includes it in its own hierarchical Crew, enabling shared specialist sub-agents across delegation hierarchies.
 
----
-
-## Configuration
-
 Each variant shows only its description/instructions fields by default. Toggle **Advanced Mode** (`advanced_mode`, default `false`) to expose the CrewAI Agent and Task fields. Blank `goal`, `backstory`, and `expected_output` values fall back to built-in defaults at run time.
 
 ### CrewAI Agent
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -54,8 +50,6 @@ Each variant shows only its description/instructions fields by default. Toggle *
 | `task_description` | string | What this sub-agent does when delegated to by the Manager. The user's request is passed as additional context at run time. Maps to CrewAI Task(description=...). |
 | `expected_output` | string | Description of the expected output format. Maps to CrewAI Task(expected_output=...). |
 | `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
-
-
 
 ### CrewAI Manager
 

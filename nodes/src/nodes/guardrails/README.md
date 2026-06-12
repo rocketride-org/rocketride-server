@@ -14,7 +14,9 @@ Text that is empty or whitespace-only is forwarded without checks.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                           |
 |-------------|-------------|-----------------------------------------------------------------------|
@@ -24,11 +26,7 @@ Text that is empty or whitespace-only is forwarded without checks.
 
 Question text is assembled from both the question objects and any attached context before evaluation. Collected document content resets per pipeline object.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -43,8 +41,6 @@ Question text is assembled from both the question objects and any attached conte
 | `blocked_topics` | array | Keywords for topics that should be rejected |
 | `allowed_topics` | array | If set, input must contain at least one of these keywords |
 | `profile` | string | Default "basic". Guardrails profile |
-
-
 
 ---
 

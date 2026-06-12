@@ -20,7 +20,9 @@ fields.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                           |
 | ----------- | ----------- | ------------------------------------- |
@@ -47,10 +49,6 @@ re-emitted as a new `Image` document with the **original metadata preserved**. D
 are skipped with a warning (not an error) when they are not of type `Image`, have empty
 content, or fail to decode/process — the remaining documents in the batch are still
 processed.
-
----
-
-## Configuration
 
 None. The node's shape defines no properties; the thumbnail size (128×128) is fixed.
 

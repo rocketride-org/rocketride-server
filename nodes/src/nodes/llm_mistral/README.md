@@ -28,15 +28,15 @@ Validation failures surface as warnings with the provider's error detail.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 The node is configured through a single profile selector plus per-profile fields:
 

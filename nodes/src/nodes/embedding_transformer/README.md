@@ -14,7 +14,9 @@ Each encoded item gets two fields set: `embedding` (the vector as a list of floa
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                           |
 | ----------- | ----------- | ----------------------------------------------------- |
@@ -23,11 +25,7 @@ Each encoded item gets two fields set: `embedding` (the vector as a list of floa
 
 The `questions` lane is used when querying a vector store: the store expects an embedded question to compare against stored document vectors.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -36,8 +34,6 @@ The `questions` lane is used when querying a vector store: the store expects an 
 | `document_prefix` | string | Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ') |
 | `query_prefix` | string | Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |
 | `profile` | string | Default "miniLM". Embedding model |
-
-
 
 **Custom model options** (shown when the `custom` profile is selected):
 

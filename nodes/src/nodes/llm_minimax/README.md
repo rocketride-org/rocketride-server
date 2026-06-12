@@ -12,15 +12,15 @@ MiniMax M2-series models return chain-of-thought wrapped in `<think>...</think>`
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 | Field              | Type / Default                              | Description                                                                 |
 | ------------------ | ------------------------------------------- | --------------------------------------------------------------------------- |

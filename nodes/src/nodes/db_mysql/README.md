@@ -14,7 +14,19 @@ Only `SELECT` statements are permitted for queries; all generated SQL passes a w
 
 ## Configuration
 
+### Lanes
 
+| Lane in | Lanes out | Description |
+|---------|-----------|-------------|
+| `questions` | `table`, `text`, `answers` | Translate question to SQL, execute it. Results go to `text` as a string, to `table` as a markdown table (valid queries only), and to `answers` as a markdown table (or the LLM's text response when the question is not a database query). |
+| `answers` | (none) | Parse structured JSON data and insert it into the configured table |
+
+Two special question types are handled on the `questions` lane:
+
+- **`QuestionType.DIALECT`**: emits `{"dialect": "mysql"}` on the `answers` lane so SDK callers can branch on the underlying engine.
+- **`QuestionType.EXECUTE`**: runs the question text as raw SQL, bypassing LLM translation and the safety check. Disabled unless `allow_execute` is on; see the "Direct SQL execution" section below.
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -28,8 +40,6 @@ Only `SELECT` statements are permitted for queries; all generated SQL passes a w
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
 | `profile` | string | Default "default".  |
 
-
-
 The node has a single `default` profile containing all fields above.
 
 ---
@@ -39,20 +49,6 @@ The node has a single `default` profile containing all fields above.
 | Connection | Required | Description |
 |------------|----------|-------------|
 | `llm` | yes (min 1) | LLM used to craft SQL queries from natural-language questions |
-
----
-
-## Lanes
-
-| Lane in | Lanes out | Description |
-|---------|-----------|-------------|
-| `questions` | `table`, `text`, `answers` | Translate question to SQL, execute it. Results go to `text` as a string, to `table` as a markdown table (valid queries only), and to `answers` as a markdown table (or the LLM's text response when the question is not a database query). |
-| `answers` | (none) | Parse structured JSON data and insert it into the configured table |
-
-Two special question types are handled on the `questions` lane:
-
-- **`QuestionType.DIALECT`**: emits `{"dialect": "mysql"}` on the `answers` lane so SDK callers can branch on the underlying engine.
-- **`QuestionType.EXECUTE`**: runs the question text as raw SQL, bypassing LLM translation and the safety check. Disabled unless `allow_execute` is on; see the "Direct SQL execution" section below.
 
 ---
 

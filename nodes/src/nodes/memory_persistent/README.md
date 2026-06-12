@@ -12,18 +12,16 @@ Storage uses a pluggable backend: **Redis** (via the `redis` Python client, `>=6
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
 | `questions` | `questions` | Enriched with session memory context in metadata, then forwarded |
 | `answers`   | `answers`   | Stored in session memory, then passed through                    |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -34,8 +32,6 @@ Storage uses a pluggable backend: **Redis** (via the `redis` Python client, `>=6
 | `session_ttl_hours` | number | Default 0. How long sessions persist before auto-expiry (0 = no expiry) |
 | `max_history` | number | Default 100. Maximum history entries per session before auto-summarization |
 | `auto_summarize` | boolean | Default true. Automatically summarize older history entries when limit is reached |
-
-
 
 ### Profiles
 
@@ -107,7 +103,7 @@ pytest nodes/test/memory_persistent -v
 
 ## Dependencies
 
-- `redis` `>=6.4.0,<8.0.0`
+- `redis`
 
 ## Source
 

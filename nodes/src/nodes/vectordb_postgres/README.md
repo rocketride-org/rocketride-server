@@ -18,7 +18,9 @@ Key behavior to know:
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -27,9 +29,7 @@ Key behavior to know:
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
----
-
-## Configuration
+### Fields
 
 | Field             | Type / Default                          | Description                                            |
 | ----------------- | --------------------------------------- | ------------------------------------------------------ |

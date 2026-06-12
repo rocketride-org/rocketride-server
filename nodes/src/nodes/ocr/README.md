@@ -14,7 +14,9 @@ Animated GIFs are handled frame by frame: each frame is OCR'd individually and t
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out | Description                       |
 | ----------- | -------- | --------------------------------- |
@@ -24,11 +26,7 @@ Animated GIFs are handled frame by frame: each frame is OCR'd individually and t
 
 On the `documents` lane, every incoming document must be of type `Image` (the node raises a `ValueError` otherwise). Each image document is OCR'd and re-emitted as a `Document`-type copy whose `page_content` is the extracted text. The original image documents are not forwarded: if a downstream node needs the images themselves, connect it to the source node directly.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -40,8 +38,6 @@ On the `documents` lane, every incoming document must be of type `Image` (the no
  Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html |
 | `table_engine` | string | Default "doctr". Select the OCR engine used for table text extraction. DocTR is optimized for document tables. EasyOCR and Surya are general-purpose alternatives. |
 | `profile` | string | Default "latin". Select a preconfigured OCR profile optimized for different languages and use cases. |
-
-
 
 The main settings panel exposes `ocr.profile`, `ocr.engine`, `ocr.script_family`, and `ocr.table_engine`. The DocTR architecture fields (`ocr.det_arch`, `ocr.reco_arch`) accept the architectures listed in the [DocTR model docs](https://mindee.github.io/doctr/latest/using_doctr/using_models.html).
 

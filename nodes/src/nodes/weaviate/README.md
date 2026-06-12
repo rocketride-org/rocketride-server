@@ -18,7 +18,9 @@ Key behavior to know:
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
@@ -29,9 +31,7 @@ Key behavior to know:
 
 The node can also render a stored object back to text: given an object id, it rehydrates all chunks in `chunkId` order (fetched in windows of `renderChunkSize`) and streams the joined text to the text lane.
 
----
-
-## Configuration
+### Fields
 
 | Field        | Type / Default                  | Description                                                                                  |
 | ------------ | ------------------------------- | -------------------------------------------------------------------------------------------- |

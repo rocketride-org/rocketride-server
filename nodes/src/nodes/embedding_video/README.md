@@ -18,7 +18,9 @@ Supported containers: MP4 (`video/mp4`), AVI (`video/x-msvideo`), QuickTime (`vi
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out    | Description                                         |
 | ------- | ----------- | --------------------------------------------------- |
@@ -30,11 +32,7 @@ Each output document contains:
 - `embedding`: the frame's embedding vector (list of floats), plus `embedding_model` (the model identifier string)
 - metadata: `time_stamp` (seconds from the start of the video), `frame_number` (frame index in the source), and a per-video `chunkId` counter
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -45,8 +43,6 @@ Each output document contains:
 | `start_time` | number | Default 0.  |
 | `duration` | number | Default 0.  |
 | `maxVideoSizeMB` | number | Default 500. Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected. |
-
-
 
 The extraction window runs from `start_time` to `start_time + duration`, clamped to the actual video length.
 

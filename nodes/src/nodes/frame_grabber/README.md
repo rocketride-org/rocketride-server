@@ -12,18 +12,6 @@ Each output lane is produced only when a downstream node is listening on it, so 
 
 ---
 
-## Lanes
-
-Input lane: `video`. Output lanes:
-
-| Lane out    | Description                                                                                                                                       |
-|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
-| `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
-| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number and `time_stamp` (seconds) in the metadata. |
-
----
-
 ## Modes
 
 The active mode is selected by `grabber.profile` (default: `interval`). Timestamps on all output lanes are relative to the start of the video; the configured start time is factored back into FFmpeg's relative output.
@@ -64,9 +52,19 @@ Extracts only video keyframes (I-frames) using FFmpeg's `select='eq(pict_type,I)
 
 ## Configuration
 
+### Lanes
+
+Input lane: `video`. Output lanes:
+
+| Lane out    | Description                                                                                                                                       |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
+| `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
+| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number and `time_stamp` (seconds) in the metadata. |
+
+### Fields
+
 The `grabber.profile` field selects the active mode and controls which sub-fields are shown in the UI.
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -77,8 +75,6 @@ The `grabber.profile` field selects the active mode and controls which sub-field
 | `max_frames` | number | Default 0.  |
 | `min_scene_gap` | number | Default 0. Minimum time gap between extracted frames. Helps reduce burst detections in high-motion segments. Set to 0 to disable. |
 | `profile` | string | Default "interval".  |
-
-
 
 Each profile has a title defined in `preconfig.profiles`: "Extract video frames at intervals" (interval), "Extract video frames at scene transitions" (transition), and "Extract video frames at keyframes" (key). The `transition` profile also sets `percent` to `0.4` as a profile-level default.
 

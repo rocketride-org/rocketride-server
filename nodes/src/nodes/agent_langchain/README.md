@@ -16,15 +16,22 @@ Failures are graceful: if the agent run raises, the error message is emitted as 
 
 ## Configuration
 
+### Lanes
 
+| Lane        | Direction | Description                                           |
+|-------------|-----------|-------------------------------------------------------|
+| `questions` | in        | Incoming `Question` objects that trigger an agent run |
+| `answers`   | out       | Final answer text produced by the agent               |
+
+The node also streams progress events over the `thinking` SSE lane during a run: agent start, LLM call start/completion/error, tool call start/completion/error, and agent think/finish notifications.
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
 | `instructions` | array | Additional instructions to guide the agent. |
 | `profile` | string | Default "default".  |
-
-
 
 A single `default` profile exists (`agent_langchain.profile`), containing both fields.
 
@@ -36,17 +43,6 @@ A single `default` profile exists (`agent_langchain.profile`), containing both f
 |---------|----------------|---------------------------------------------------------|
 | `llm`   | yes (min: 1)   | LLM the agent thinks with                               |
 | `tool`  | no (min: 0)    | Tools available to the agent (via control-plane invoke) |
-
----
-
-## Lanes
-
-| Lane        | Direction | Description                                           |
-|-------------|-----------|-------------------------------------------------------|
-| `questions` | in        | Incoming `Question` objects that trigger an agent run |
-| `answers`   | out       | Final answer text produced by the agent               |
-
-The node also streams progress events over the `thinking` SSE lane during a run: agent start, LLM call start/completion/error, tool call start/completion/error, and agent think/finish notifications.
 
 ---
 

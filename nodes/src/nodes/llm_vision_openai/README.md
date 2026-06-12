@@ -14,7 +14,9 @@ When both lanes carry the same frame, the node makes only **one** API call per f
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                      |
 |-------------|-------------|----------------------------------------------------------------------------------|
@@ -25,11 +27,7 @@ On the `documents` lane, each incoming `Image` document is replaced by a `Text` 
 
 If inference fails for a document after retries, the node logs a warning and continues with the next document. On the `image` lane, a failure logs a warning and emits nothing for that frame. Empty image frames on the `image` lane are also skipped with a warning.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -39,8 +37,6 @@ If inference fails for a document after retries, the node logs a warning and con
 | `systemPrompt` | string | Define the model's role and behavior for image analysis |
 | `prompt` | string | Describe what you want to analyze or extract from the image |
 | `profile` | string | Default "openai-4-1". Select the OpenAI vision model to use |
-
-
 
 The selected profile supplies the `model` identifier and `modelTotalTokens` context limit. The API key, system prompt, and analysis prompt are configured per profile.
 

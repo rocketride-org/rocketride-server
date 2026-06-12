@@ -14,25 +14,21 @@ Requires an OpenAI API key.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane        | Direction | Description                                                       |
 | ----------- | --------- | ----------------------------------------------------------------- |
 | `documents` | in / out  | Embed document text; attach vector to each chunk for vector store ingestion |
 | `questions` | in / out  | Embed a query string; attach vector for similarity search against a stored index |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `model` | string | OpenAI model to use for embedding |
 | `profile` | string | Default "text-embedding-3-small". OpenAI embedding model |
-
-
 
 Each profile resolves to a `model` name and token limit that the wrapper passes to `OpenAIEmbeddings`.
 

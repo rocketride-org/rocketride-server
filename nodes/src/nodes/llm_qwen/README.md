@@ -12,15 +12,15 @@ When the node configuration is validated, the node performs a live 1-token test 
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 |-------------|-----------|------------------------------------------------------|
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 The main setting is the **profile** (model selection, default `qwen-flash`). Each profile exposes the API key, region, and model-source fields. The `custom` profile additionally exposes the model name and context length.
 

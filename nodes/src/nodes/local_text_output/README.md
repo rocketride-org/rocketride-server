@@ -20,7 +20,9 @@ Safety behavior that applies to every object:
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Description                   |
 | ------- | ----------------------------- |
@@ -28,19 +30,13 @@ Safety behavior that applies to every object:
 
 No output lanes: this is a terminal (target) node.
 
----
-
-## Configuration
+### Fields
 
 Both fields live under the node's `parameters` key (shown as "Destination path" in the UI).
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `exclude` | string | Default "N/A". Which paths to exclude from the output path, if not required put N/A. e.g Users/Downloads/ or N/A |
-
-
 
 On Windows, config validation rejects a `storePath` or `exclude` value that contains any of the characters `< > : " / | ? *`. An `exclude` value of `N/A` is exempt from this check.
 

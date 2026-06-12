@@ -58,6 +58,26 @@ All HTTP and WebSocket requests carry an `Authorization: Bearer <apikey>` header
 
 ## Configuration
 
+### Lanes
+
+`services.client.json` declares no static lanes (`"lanes": {}`); lane wiring is derived
+from the sub-pipeline by `preparePipeline`. At runtime the client forwards these calls
+over the WebSocket when the lane is listed in `input`:
+
+| Lane | Payload | Sent when |
+|------|---------|-----------|
+| `tags` | bytes | `writeTag` -- only if `tags` is in `input` (default) |
+| `text` | string | `writeText` -- only if `text` is in `input` |
+| `words` | string list | `writeWords` -- only if `words` is in `input` |
+| `documents` | document list | `writeDocuments` -- only if `documents` is in `input` |
+
+Lifecycle calls `open`, `closing`, and `close` are always forwarded so the remote
+pipeline tracks the local object lifecycle. Responses from the remote pipeline
+(`writeText`, `writeDocuments`, etc.) are dispatched back into the local pipeline as
+they arrive.
+
+### Fields
+
 Settings live under the node's `remote` configuration block; the sub-pipeline lives
 under `pipeline`.
 
@@ -82,26 +102,6 @@ or the job's task ID is missing.
 |---------|-------------|
 | `local` _(default)_ | Runs the sub-pipeline on the same machine -- components are inlined, no network involved. |
 | `remote` | Runs the sub-pipeline on a separate host. Preset values: `host: localhost`, `port: 5565`, `apikey: xxx` -- override all three before use. |
-
----
-
-## Lanes
-
-`services.client.json` declares no static lanes (`"lanes": {}`); lane wiring is derived
-from the sub-pipeline by `preparePipeline`. At runtime the client forwards these calls
-over the WebSocket when the lane is listed in `input`:
-
-| Lane | Payload | Sent when |
-|------|---------|-----------|
-| `tags` | bytes | `writeTag` -- only if `tags` is in `input` (default) |
-| `text` | string | `writeText` -- only if `text` is in `input` |
-| `words` | string list | `writeWords` -- only if `words` is in `input` |
-| `documents` | document list | `writeDocuments` -- only if `documents` is in `input` |
-
-Lifecycle calls `open`, `closing`, and `close` are always forwarded so the remote
-pipeline tracks the local object lifecycle. Responses from the remote pipeline
-(`writeText`, `writeDocuments`, etc.) are dispatched back into the local pipeline as
-they arrive.
 
 ---
 

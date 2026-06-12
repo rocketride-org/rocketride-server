@@ -24,7 +24,13 @@ and message, truncated to 500 characters.
 
 ## Configuration
 
+### Lanes
 
+| Lane in     | Lane out  | Description                                          |
+|-------------|-----------|------------------------------------------------------|
+| `questions` | `answers` | Send a question directly, receive a generated answer |
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -33,17 +39,7 @@ and message, truncated to 500 characters.
 | `modelTotalTokens` | number | Total Tokens |
 | `profile` | string | Default "llama-3-3-70b". Nebius Token Factory model |
 
-
-
 The generic node has a single `custom` profile: all four fields are specified directly.
-
----
-
-## Lanes
-
-| Lane in     | Lane out  | Description                                          |
-|-------------|-----------|------------------------------------------------------|
-| `questions` | `answers` | Send a question directly, receive a generated answer |
 
 ---
 

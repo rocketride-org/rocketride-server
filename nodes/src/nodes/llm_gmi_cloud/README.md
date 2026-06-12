@@ -22,17 +22,15 @@ when no endpoint URL is configured.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -40,8 +38,6 @@ when no endpoint URL is configured.
 | `modelTotalTokens` | number | Total Tokens |
 | `serverbase` | string | Your GMI Cloud deployment endpoint URL. Deploy the model at console.gmicloud.ai, then paste the provided endpoint URL here. |
 | `profile` | string | Default "deepseek-v3". GMI Cloud LLM model |
-
-
 
 The **custom** profile additionally exposes the raw model fields:
 

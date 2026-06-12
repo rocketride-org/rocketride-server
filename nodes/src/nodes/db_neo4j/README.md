@@ -22,7 +22,20 @@ The node is **read-only by design**: every generated or supplied Cypher statemen
 
 ## Configuration
 
+### Lanes
 
+| Lane in | Lanes out | Description |
+|---------|-----------|-------------|
+| `questions` | `table`, `text`, `answers` | Translate question to Cypher, execute, emit results on each connected lane |
+
+For a normal question, results are emitted as a markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the graph, its text reply is forwarded in place of a query result.
+
+Two special question types are handled on the `questions` lane:
+
+- **`QuestionType.DIALECT`**: emits `{"dialect": "neo4j"}` on the `answers` lane so SDK callers can detect they are talking to a graph database rather than a relational one.
+- **`QuestionType.EXECUTE`**: treats the question text as raw Cypher and runs it without LLM translation or the read-only safety check. Requires `allow_execute: true`; otherwise the request is silently rejected with a warning. Results are capped at 25,000 rows (the query fails if exceeded), and when a write returns no rows the emitted JSON reports `affected_rows` derived from the result summary counters (nodes/relationships created or deleted, properties set).
+
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -37,24 +50,7 @@ The node is **read-only by design**: every generated or supplied Cypher statemen
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. |
 | `profile` | string | Default "default".  |
 
-
-
 The default profile sets `database: neo4j`. Saving the node config runs a connectivity probe (`RETURN 1` against the configured database) and surfaces driver errors (wrong password, unreachable host, bad database name) as warnings before the pipeline starts.
-
----
-
-## Lanes
-
-| Lane in | Lanes out | Description |
-|---------|-----------|-------------|
-| `questions` | `table`, `text`, `answers` | Translate question to Cypher, execute, emit results on each connected lane |
-
-For a normal question, results are emitted as a markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the graph, its text reply is forwarded in place of a query result.
-
-Two special question types are handled on the `questions` lane:
-
-- **`QuestionType.DIALECT`**: emits `{"dialect": "neo4j"}` on the `answers` lane so SDK callers can detect they are talking to a graph database rather than a relational one.
-- **`QuestionType.EXECUTE`**: treats the question text as raw Cypher and runs it without LLM translation or the read-only safety check. Requires `allow_execute: true`; otherwise the request is silently rejected with a warning. Results are capped at 25,000 rows (the query fails if exceeded), and when a write returns no rows the emitted JSON reports `affected_rows` derived from the result summary counters (nodes/relationships created or deleted, properties set).
 
 ---
 
@@ -64,15 +60,11 @@ When connected to an agent, the node exposes three functions namespaced under th
 
 ### Data retrieval
 
-
-
 | Tool | Description |
 |---|---|---|
 | `get_data` | Accepts a natural-language description of the graph data you want, converts it to a safe Cypher MATCH query, executes it against the Neo4J graph database, and returns the result rows. No schema lookup or Cypher knowledge required — just describe what you need. Results may be large — consider using peek or store. |
 | `get_schema` | Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively — only use when get_data fails or returns unexpected results. |
 | `get_cypher` | Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher — for actual data retrieval, use get_data instead. |
-
-
 
 ### Schema inspection
 

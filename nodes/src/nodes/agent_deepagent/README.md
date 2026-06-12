@@ -13,7 +13,9 @@ Sub-agents are optional: with none connected, the Deep Agent behaves as a standa
 
 ---
 
-## Lanes and connections
+## Configuration
+
+### Lanes
 
 **Lanes (Deep Agent only):** `questions` -> `answers`. The Subagent declares no lanes; it is driven by an orchestrator, not by direct questions.
 
@@ -34,15 +36,9 @@ Sub-agents are optional: with none connected, the Deep Agent behaves as a standa
 
 The sub-agent's LLM and tool channels are independent of the orchestrator's. When the orchestrator delegates, the sub-agent's LLM and tool calls are routed back through this node's own channels.
 
----
-
-## Configuration
-
 Both variants use an **Advanced Mode** toggle (default `Off`): when Off, the node is edited through the Instructions list; when On, the prompt fields are exposed directly.
 
 ### Deep Agent
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -51,8 +47,6 @@ Both variants use an **Advanced Mode** toggle (default `Off`): when Off, the nod
 | `instructions` | array | Additional instructions to guide this sub-agent. Each line is appended to the system prompt. |
 | `advanced_mode` | boolean | Default false. When enabled, replace the Instructions list with a direct System Prompt field for full control. |
 | `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
-
-
 
 ### Deep Agent Subagent
 

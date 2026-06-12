@@ -12,7 +12,9 @@ A single shared parser instance is guarded by a lock, so documents are parsed on
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out    | Description                                                       |
 | ------- | ----------- | ----------------------------------------------------------------- |
@@ -24,11 +26,7 @@ Incoming document objects of type `Document`, `PDF`, or `Image` (base64 `page_co
 
 When no file name accompanies the raw bytes, the file type is detected from magic numbers (PDF, DOCX/XLSX, DOC/XLS, JPEG, PNG, GIF, WebP, HTML, XML) and defaults to PDF if unrecognized.
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
@@ -51,7 +49,6 @@ When no file name accompanies the raw bytes, the file type is detected from magi
   "system_prompt_append": "",
   "lvm_model": "anthropic-sonnet-4.0"
 }". Enter configuration options in JSON format. For more information, see: <a href='https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes' target='_blank'>LlamaParse Documentation</a> |
-
 
 **Simple mode options** (shown when `use_advanced_config` is off):
 

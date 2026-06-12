@@ -24,27 +24,7 @@ The same implementation also ships as a Supabase preset (`services.supabase.json
 
 ## Configuration
 
-
-
-| Field | Type | Description |
-|---|---|---|
-| `host` | string | Default "localhost". Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433) |
-| `user` | string | Default "postgres". User to connect to the PostgreSQL server |
-| `password` | string | Password to connect to the PostgreSQL server |
-| `database` | string | Default "postgres". Name of database |
-| `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. |
-| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
-| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
-| `profile` | string | Default "default".  |
-
-
-
-The single `default` profile presets `database` to `postgres`.
-
----
-
-## Lanes
+### Lanes
 
 | Lane in     | Lane out | Description                                                    |
 | ----------- | -------- | -------------------------------------------------------------- |
@@ -59,6 +39,22 @@ Two special question types are handled on the `questions` lane:
 
 - **`QuestionType.DIALECT`**: emits `{"dialect": "postgres"}` on the `answers` lane so SDK callers can branch on the underlying engine.
 - **`QuestionType.EXECUTE`**: runs the question text as raw SQL (read or write, no LLM, no safety check). Gated by `allow_execute`; when disabled the request is logged and dropped. `SELECT` results are capped at 25,000 rows; write statements report `affected_rows`.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `host` | string | Default "localhost". Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433) |
+| `user` | string | Default "postgres". User to connect to the PostgreSQL server |
+| `password` | string | Password to connect to the PostgreSQL server |
+| `database` | string | Default "postgres". Name of database |
+| `table` | string | Default "table". Name of table |
+| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. |
+| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
+| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
+| `profile` | string | Default "default".  |
+
+The single `default` profile presets `database` to `postgres`.
 
 ---
 

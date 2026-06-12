@@ -14,7 +14,9 @@ Each extracted entity carries: `entity_group` (type such as PER, ORG, LOC), `wor
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                                |
 |-------------|-------------|----------------------------------------------------------------------------|
@@ -28,13 +30,9 @@ On the `documents` lane, when **Store in metadata** is on (the default), each do
 
 The original documents are never mutated; enriched copies are written downstream.
 
----
-
-## Configuration
+### Fields
 
 The node is configured by picking a model **profile** (see below). The `custom` profile additionally exposes the model name field.
-
-
 
 | Field | Type | Description |
 |---|---|---|
@@ -43,8 +41,6 @@ The node is configured by picking a model **profile** (see below). The `custom` 
 | `min_confidence` | number | Default 0.9. Minimum confidence score (0.0-1.0) for entity detection |
 | `store_in_metadata` | boolean | Default true. Add extracted entities to document metadata fields |
 | `profile` | string | Default "bertLarge". NER model configuration |
-
-
 
 If no model is configured, the recognizer falls back to `dbmdz/bert-large-cased-finetuned-conll03-english`.
 

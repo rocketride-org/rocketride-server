@@ -24,25 +24,21 @@ immediately instead of at pipeline runtime.
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
-
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `model` | string | Bedrock LLM model name or ARN for custom or provisioned models |
 | `modelTotalTokens` | number | Total Tokens |
 | `profile` | string | Default "meta_llama3_3-70b". LLM model |
-
-
 
 `model` and `modelTotalTokens` only appear when the **Custom** profile is selected; the
 built-in profiles set both for you.

@@ -18,35 +18,7 @@ This node is marked **experimental**.
 
 ## Configuration
 
-The node is configured through a single profile selector plus per-method fields. The selected profile determines the detection method and supplies the defaults shown in the Profiles table below.
-
-
-
-| Field | Type | Description |
-|---|---|---|
-| `method` | string | Default "z_score". Statistical method used for anomaly detection |
-| `sensitivity` | number | Default 2.0. Detection sensitivity threshold (lower = more sensitive) |
-| `windowSize` | integer | Default 100. Number of recent values to consider for statistical calculations |
-| `metric` | string | Default "value". The metadata field name containing the numeric value to monitor |
-| `warningThreshold` | number | Default 2.0. Threshold multiplier for warning-level anomalies |
-| `criticalThreshold` | number | Default 3.0. Threshold multiplier for critical-level anomalies |
-| `profile` | string | Default "z_score". Anomaly detection configuration |
-
-
-
-### Profiles
-
-The `profile` field (UI: "Detection Method") selects a preset that pre-fills `method` and the threshold defaults. The default profile is `z_score`.
-
-| Profile       | Method          | `sensitivity` | `windowSize` | `warningThreshold` | `criticalThreshold` |
-|---------------|-----------------|---------------|--------------|--------------------|---------------------|
-| `z_score`     | Z-Score         | 2.0           | 100          | 2.0                | 3.0                 |
-| `iqr`         | IQR             | 1.5           | 100          | 1.5                | 3.0                 |
-| `rolling_avg` | Rolling Average | 2.0           | 50           | 2.0                | 3.0                 |
-
----
-
-## Lanes
+### Lanes
 
 | Lane        | In → Out                  | Behaviour                                                                                                                      |
 |-------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------|
@@ -77,6 +49,30 @@ Each document is deep-copied before enrichment; documents whose `metadata` is `N
 | `anomaly_details`      | Human-readable diagnostics: method internals, or an explanation of why detection was skipped. |
 
 If the `metric` field is absent from a document's metadata or contains a non-numeric value, the document is marked `normal` with an explanatory `details` string and is never dropped.
+
+### Fields
+
+The node is configured through a single profile selector plus per-method fields. The selected profile determines the detection method and supplies the defaults shown in the Profiles table below.
+
+| Field | Type | Description |
+|---|---|---|
+| `method` | string | Default "z_score". Statistical method used for anomaly detection |
+| `sensitivity` | number | Default 2.0. Detection sensitivity threshold (lower = more sensitive) |
+| `windowSize` | integer | Default 100. Number of recent values to consider for statistical calculations |
+| `metric` | string | Default "value". The metadata field name containing the numeric value to monitor |
+| `warningThreshold` | number | Default 2.0. Threshold multiplier for warning-level anomalies |
+| `criticalThreshold` | number | Default 3.0. Threshold multiplier for critical-level anomalies |
+| `profile` | string | Default "z_score". Anomaly detection configuration |
+
+### Profiles
+
+The `profile` field (UI: "Detection Method") selects a preset that pre-fills `method` and the threshold defaults. The default profile is `z_score`.
+
+| Profile       | Method          | `sensitivity` | `windowSize` | `warningThreshold` | `criticalThreshold` |
+|---------------|-----------------|---------------|--------------|--------------------|---------------------|
+| `z_score`     | Z-Score         | 2.0           | 100          | 2.0                | 3.0                 |
+| `iqr`         | IQR             | 1.5           | 100          | 1.5                | 3.0                 |
+| `rolling_avg` | Rolling Average | 2.0           | 50           | 2.0                | 3.0                 |
 
 ---
 

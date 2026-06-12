@@ -18,7 +18,9 @@ Supported input formats (by MIME type): MP4, MOV (QuickTime), AVI, WebM, MKV, an
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in | Lane out | Description                          |
 | ------- | -------- | ------------------------------------ |
@@ -26,17 +28,13 @@ Supported input formats (by MIME type): MP4, MOV (QuickTime), AVI, WebM, MKV, an
 
 The text result is only emitted when a downstream node is listening on the `text` lane.
 
----
-
-## Configuration
-
+### Fields
 
 | Field | Type | Description |
 |---|---|---|
 | `apikey` | string | TwelveLabs API key. |
 | `instructions` | array | Instructions to guide TwelveLabs when analyzing the video. |
 | `profile` | string | Default "default".  |
-
 
 The node ships a single `default` profile containing both fields.
 

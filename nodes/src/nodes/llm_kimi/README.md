@@ -14,26 +14,22 @@ When the node configuration is saved, cloud Moonshot endpoints (where `serverbas
 
 ---
 
-## Lanes
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out  | Description                                          |
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
----
-
-## Configuration
+### Fields
 
 The UI exposes a single **Model** profile selector; the remaining values are filled in by the selected profile.
-
-
 
 | Field | Type | Description |
 |---|---|---|
 | `model` | string | Kimi (Moonshot) model |
 | `profile` | string | Default "kimi-k2-6". Kimi (Moonshot) LLM model |
-
-
 
 ---
 
