@@ -1,0 +1,108 @@
+{
+	"title": "FalkorDB",
+	"protocol": "tool_falkordb://",
+	"classType": ["tool"],
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_falkordb",
+	"prefix": "falkordb",
+	"icon": "falkordb.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Lets agents query a FalkorDB graph database with Cypher.", "Provides query (read-only by default, server-enforced), list_graphs and get_schema."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "FalkorDB"
+			}
+		}
+	},
+	"fields": {
+		"tool_falkordb.host": {
+			"type": "string",
+			"title": "Host",
+			"description": "FalkorDB host, e.g. localhost or your-instance.falkordb.cloud.",
+			"default": "localhost"
+		},
+		"tool_falkordb.port": {
+			"type": "integer",
+			"title": "Port",
+			"description": "FalkorDB port (Redis protocol).",
+			"default": 6379,
+			"minimum": 1,
+			"maximum": 65535
+		},
+		"tool_falkordb.username": {
+			"type": "string",
+			"title": "Username",
+			"description": "Username, e.g. \"default\" for FalkorDB Cloud. Leave empty for no auth.",
+			"default": "",
+			"optional": true
+		},
+		"tool_falkordb.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Password for the FalkorDB instance. Leave empty for no auth.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"tool_falkordb.tls": {
+			"type": "boolean",
+			"title": "TLS",
+			"description": "Connect with TLS (FalkorDB Cloud TLS endpoints).",
+			"default": false
+		},
+		"tool_falkordb.graph": {
+			"type": "string",
+			"title": "Default Graph",
+			"description": "Graph queried when the agent does not pass one explicitly.",
+			"default": "agent"
+		},
+		"tool_falkordb.allow_writes": {
+			"type": "boolean",
+			"title": "Allow Writes",
+			"description": "Permit CREATE/MERGE/SET/DELETE. When off, queries run via GRAPH.RO_QUERY and the server rejects write clauses.",
+			"default": false
+		},
+		"tool_falkordb.max_rows": {
+			"type": "integer",
+			"title": "Max Rows",
+			"description": "Upper cap on rows returned to the agent per query.",
+			"default": 250,
+			"minimum": 1,
+			"maximum": 25000
+		},
+		"tool_falkordb.query_timeout_ms": {
+			"type": "integer",
+			"title": "Query Timeout (ms)",
+			"description": "Server-side timeout for a single query.",
+			"default": 30000,
+			"minimum": 100,
+			"maximum": 600000
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "FalkorDB smoke test (mock client)",
+				"text": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "FalkorDB",
+			"properties": ["type", "tool_falkordb.host", "tool_falkordb.port", "tool_falkordb.username", "tool_falkordb.password", "tool_falkordb.tls", "tool_falkordb.graph", "tool_falkordb.allow_writes", "tool_falkordb.max_rows", "tool_falkordb.query_timeout_ms"]
+		}
+	]
+}
