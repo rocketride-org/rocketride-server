@@ -41,7 +41,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, stop_after_delay, wait_exponential
 
 from rocketlib import IInstanceBase, tool_function, debug
 
@@ -461,8 +461,11 @@ def _request_with_retry(
 
     try:
         return Retrying(
-            stop=stop_after_attempt(max_retries + 1),
-            wait=wait_exponential(multiplier=2, min=2, max=16),
+            # Bound retries by both attempt count and the caller's time budget so
+            # the backoff can't push a deadline-driven call (e.g. ingest poll)
+            # past `timeout`.
+            stop=stop_after_attempt(max_retries + 1) | stop_after_delay(timeout),
+            wait=wait_exponential(multiplier=2, min=min(2, timeout), max=min(16, timeout)),
             retry=retry_if_exception(_is_retryable),
             reraise=True,
         )(_attempt)

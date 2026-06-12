@@ -112,6 +112,7 @@ def _ensure_tenacity() -> None:
     mod = types.ModuleType('tenacity')
     mod.Retrying = lambda **_kw: lambda fn, *a, **k: fn(*a, **k)
     mod.stop_after_attempt = lambda *a, **k: None
+    mod.stop_after_delay = lambda *a, **k: None
     mod.wait_exponential = lambda *a, **k: None
     mod.retry_if_exception = lambda *a, **k: None
     sys.modules['tenacity'] = mod
