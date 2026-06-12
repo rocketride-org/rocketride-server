@@ -44,6 +44,7 @@ interface AccountWebviewMessage {
 	appId?: string;
 	packId?: string;
 	priceId?: string;
+	newPriceId?: string;
 	subscriptionId?: string;
 }
 
