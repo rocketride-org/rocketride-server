@@ -121,8 +121,14 @@ export class RocketRideInboundTrigger implements INodeType {
 		const body = this.getBodyData();
 		const json: IDataObject =
 			body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : { data: body };
+		// Never copy auth/session headers into workflow data: the Authorization header
+		// carries the shared secret, so exposing it downstream or in execution logs leaks it.
+		const safeHeaders = { ...(this.getHeaderData() as Record<string, unknown>) };
+		delete safeHeaders.authorization;
+		delete safeHeaders.cookie;
+		delete safeHeaders['set-cookie'];
 		json._rocketride = {
-			headers: this.getHeaderData(),
+			headers: safeHeaders,
 			query: this.getQueryData(),
 		} as unknown as IDataObject;
 

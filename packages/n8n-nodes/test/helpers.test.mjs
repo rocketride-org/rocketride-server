@@ -43,6 +43,10 @@ describe('coerceJsonObject', () => {
 		expect(coerceJsonObject(undefined)).toEqual({});
 		expect(coerceJsonObject(42)).toEqual({});
 	});
+	it('rejects arrays — plain objects only', () => {
+		expect(coerceJsonObject([1, 2])).toEqual({});
+		expect(coerceJsonObject('[1,2]')).toEqual({});
+	});
 });
 
 describe('parseRocketRideResponse', () => {

@@ -20,13 +20,15 @@ export interface BuiltBody {
 
 /** Coerce a value that may be a JSON string or an object into a plain object. */
 export function coerceJsonObject(value: unknown): IDataObject {
-	if (value && typeof value === 'object') {
+	if (value && typeof value === 'object' && !Array.isArray(value)) {
 		return value as IDataObject;
 	}
 	if (typeof value === 'string' && value.trim() !== '') {
 		try {
 			const parsed = JSON.parse(value);
-			return parsed && typeof parsed === 'object' ? (parsed as IDataObject) : {};
+			return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+				? (parsed as IDataObject)
+				: {};
 		} catch {
 			return {};
 		}

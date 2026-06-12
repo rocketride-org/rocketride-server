@@ -6,12 +6,12 @@
 	"resources": {
 		"credentialDocumentation": [
 			{
-				"url": "https://github.com/rocketride-org/rocketride-server/tree/develop/packages/n8n-nodes#credentials"
+				"url": "https://www.npmjs.com/package/n8n-nodes-rocketride#credentials"
 			}
 		],
 		"primaryDocumentation": [
 			{
-				"url": "https://github.com/rocketride-org/rocketride-server/tree/develop/packages/n8n-nodes#readme"
+				"url": "https://www.npmjs.com/package/n8n-nodes-rocketride"
 			}
 		]
 	}

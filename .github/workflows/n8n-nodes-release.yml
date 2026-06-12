@@ -5,11 +5,10 @@
 # this package versions on its own cadence (n8n-nodes-vX.Y.Z), not the server's.
 #
 # ONE-TIME SETUP (on npmjs.com, by a maintainer of the npm package):
-#   Package n8n-nodes-rocketride → Settings → Trusted Publisher → GitHub Actions:
+#   Package n8n-nodes-rocketride -> Settings -> Trusted Publisher -> GitHub Actions:
 #     Repository:  rocketride-org/rocketride-server
 #     Workflow:    n8n-nodes-release.yml
 #     Environment: release
-#   (Trusted publishing requires npm >= 11.5.1, which this job installs.)
 #
 # RELEASE: bump packages/n8n-nodes/package.json version, then push a matching tag:
 #   git tag n8n-nodes-v0.1.0 && git push origin n8n-nodes-v0.1.0
@@ -35,9 +34,11 @@ jobs:
       run:
         working-directory: packages/n8n-nodes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -61,6 +62,6 @@ jobs:
 
       - name: Publish to npm (OIDC trusted publishing + provenance)
         run: |
-          # OIDC trusted publishing needs npm >= 11.5.1; Node 20 ships npm 10.x.
-          npm install -g npm@latest
+          # OIDC trusted publishing requires npm >= 11.5.1; pin it for a deterministic publish.
+          npm install -g npm@11.5.1
           npm publish --provenance --access public

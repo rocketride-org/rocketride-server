@@ -55,7 +55,7 @@ Requires n8n **1.94.0+**.
 
 ## Example
 
-Import [`examples/run-pipeline.workflow.json`](examples/run-pipeline.workflow.json) into n8n. To have something to call, deploy a webhook-source pipeline in RocketRide (see [`examples/rocketride-webhook.pipe`](examples/rocketride-webhook.pipe)) and copy its interface URL + `pk_` key into the RocketRide API credential.
+Import [`examples/run-pipeline.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/run-pipeline.workflow.json) into n8n. To have something to call, deploy a webhook-source pipeline in RocketRide (see [`examples/rocketride-webhook.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/rocketride-webhook.pipe)) and copy its interface URL + `pk_` key into the RocketRide API credential.
 
 ## License
 

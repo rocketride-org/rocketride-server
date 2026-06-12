@@ -26,9 +26,11 @@ jobs:
       run:
         working-directory: packages/n8n-nodes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -52,5 +54,15 @@ jobs:
             exit 1
           fi
           echo "Zero runtime dependencies ✓"
-          # Confirm the published tarball is clean (dist + README + LICENSE only).
-          npm pack --dry-run
+          # Enforce the packlist: only dist/**, README.md, LICENSE, package.json may ship.
+          npm pack --dry-run --json > /tmp/n8n-pack.json
+          node -e '
+            const files = require("/tmp/n8n-pack.json")[0].files.map((f) => f.path);
+            const ok = (p) => p.startsWith("dist/") || ["README.md", "LICENSE", "package.json"].includes(p);
+            const extra = files.filter((p) => !ok(p));
+            if (extra.length) {
+              console.error("::error::Unexpected files in tarball: " + extra.join(", "));
+              process.exit(1);
+            }
+            console.log("Tarball OK (" + files.length + " files): dist + README + LICENSE only");
+          '
