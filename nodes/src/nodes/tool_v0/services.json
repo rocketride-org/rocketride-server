@@ -1,6 +1,6 @@
 {
 	//
-	// v0 by Vercel — Generative UI tool node
+	// v0 by Vercel: Generative UI tool node
 	//
 	// Generates React + Tailwind CSS components from natural-language prompts
 	// using the Vercel v0 API. Exposes two tools:

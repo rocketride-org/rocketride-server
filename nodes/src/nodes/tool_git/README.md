@@ -2,7 +2,7 @@
 
 A RocketRide tool node that exposes local git repository operations to an AI agent.
 
-Uses **pygit2 / libgit2** — the libgit2 native library is bundled inside the pygit2 wheel,
+Uses **pygit2 / libgit2**: the libgit2 native library is bundled inside the pygit2 wheel,
 so no host `git` binary is required on the machine running the engine.
 
 ---
@@ -20,7 +20,7 @@ so no host `git` binary is required on the machine running the engine.
 | `safeMode`      | boolean | Default `true`. Blocks force-push and force branch deletion.    |
 | `readOnlyMode`  | boolean | Default `true`. Blocks **all** write operations. Strictly stronger than `safeMode`. |
 
-### repoPath — local path vs remote URL
+### repoPath: local path vs remote URL
 
 `repoPath` is interpreted differently depending on its value:
 
@@ -30,7 +30,7 @@ so no host `git` binary is required on the machine running the engine.
 | **Local path** | The existing directory is opened in place. No copy is made. Changes made by the agent persist on disk. |
 | **Empty** | No repository is opened at startup. The agent must call `clone` or `init` as its first action. |
 
-> **Note:** when using a remote URL with write operations (`push`), ensure `authType` and credentials are configured — the cloned temp repo retains the remote `origin` from the URL.
+> **Note:** when using a remote URL with write operations (`push`), ensure `authType` and credentials are configured, the cloned temp repo retains the remote `origin` from the URL.
 
 ---
 
@@ -99,8 +99,8 @@ so no host `git` binary is required on the machine running the engine.
 
 When `safeMode` is `true` (the default), the following operations raise an error instead of executing:
 
-- **force push** — `push` with `force: true`
-- **force branch deletion** — `branch_delete` with `force: true`
+- **force push**: `push` with `force: true`
+- **force branch deletion**: `branch_delete` with `force: true`
 
 Normal branch deletion (`force: false`) is always permitted regardless of safe mode.
 
@@ -108,7 +108,7 @@ Set `safeMode: false` in the node config to allow force operations.
 
 ### Security note: write scope
 
-Safe mode does **not** restrict file writes. Anything outside the `.git/` directory is fair game for `write_file` — including `.gitignore`, CI configs, build scripts, source files, and lockfiles. Path traversal (`../`) and writes inside `.git/` are blocked, but otherwise the agent has full read/write access to the working tree.
+Safe mode does **not** restrict file writes. Anything outside the `.git/` directory is fair game for `write_file`: including `.gitignore`, CI configs, build scripts, source files, and lockfiles. Path traversal (`../`) and writes inside `.git/` are blocked, but otherwise the agent has full read/write access to the working tree.
 
 When pointing the node at a real repository (rather than a remote URL that auto-clones into a temp directory), treat the agent as a human contributor with commit rights to that tree. If you need stricter scoping, run the agent against a temp clone or a sandboxed working copy.
 

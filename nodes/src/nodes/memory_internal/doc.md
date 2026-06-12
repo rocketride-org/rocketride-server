@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-The backing memory store for the [RocketRide Wave agent](/nodes/agent_rocketride). Only wireable to that agent — connect it via the `memory` invoke channel.
+The backing memory store for the [RocketRide Wave agent](/nodes/agent_rocketride). Only wireable to that agent, connect it via the `memory` invoke channel.
 
 Each wave's tool results are stored here under auto-assigned keys (e.g. `wave-0.r0`). The agent injects structural summaries (field names, array lengths, sample values) into the planning prompt rather than raw data, keeping context lean. `memory.peek` (an executor-provided tool, not part of this node's API) lets the LLM extract specific values on demand via JMESPath; the LLM signals `remove: [...]` to evict keys it no longer needs.
 

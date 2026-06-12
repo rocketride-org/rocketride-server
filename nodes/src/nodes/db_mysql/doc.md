@@ -23,7 +23,7 @@ MySQL node with two roles: pipeline node (natural-language queries via lanes) an
 | `questions` | `table`   | Translate question → SQL → execute, return as table   |
 | `questions` | `text`    | Translate question → SQL → execute, return as text    |
 | `questions` | `answers` | Translate question → SQL → execute, return as answers |
-| `answers`   | —         | Parse structured data and insert into table           |
+| `answers`   | -         | Parse structured data and insert into table           |
 
 Auto-creates the target table on first insert if it doesn't exist.
 
@@ -35,7 +35,7 @@ When connected to an agent, exposes three functions under the configured server 
 | ------------------ | ------------------------------------------------------------------------ |
 | `mysql.get_data`   | Natural language → SQL → execute, returns rows (default 250, max 25 000) |
 | `mysql.get_schema` | Returns tables, columns, types, primary keys, and foreign keys           |
-| `mysql.get_sql`    | Natural language → SQL only — no execution                               |
+| `mysql.get_sql`    | Natural language → SQL only, no execution                               |
 
 Only `SELECT` is permitted for queries. Insert operations use the `answers` lane.
 
@@ -43,12 +43,12 @@ Only `SELECT` is permitted for queries. Insert operations use the `answers` lane
 
 | Field                   | Default     | Description                                                              |
 | ----------------------- | ----------- | ------------------------------------------------------------------------ |
-| Database Description    | —           | Plain-language description of the database, used to guide SQL generation |
+| Database Description    | -           | Plain-language description of the database, used to guide SQL generation |
 | Host                    | `localhost` | MySQL server address                                                     |
 | User                    | `root`      | Database username                                                        |
-| Password                | —           | Database password                                                        |
-| Database                | —           | Database name                                                            |
-| Table                   | —           | Target table name                                                        |
+| Password                | -           | Database password                                                        |
+| Database                | -           | Database name                                                            |
+| Table                   | -           | Target table name                                                        |
 | Max Validation Attempts | `5`         | Retry limit for EXPLAIN-based SQL validation (range 1–20)                |
 
 ## SQL validation

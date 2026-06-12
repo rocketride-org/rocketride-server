@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Connects DeepSeek models to your pipeline — either via the DeepSeek cloud API or locally through Ollama. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
+Connects DeepSeek models to your pipeline, either via the DeepSeek cloud API or locally through Ollama. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
 
 **Lanes:**
 

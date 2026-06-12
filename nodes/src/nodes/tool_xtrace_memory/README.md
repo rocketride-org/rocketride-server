@@ -7,16 +7,16 @@ This is a `tool` node, not the agent's `memory` subsystem. RocketRide's `memory`
 a single, run-scoped scratchpad (e.g. `memory_internal`, `put`/`get`/`peek`) that the agent
 uses internally and excludes from tool discovery. xTrace is different: an external service for
 **long-term, semantic, shared** recall that the agent calls explicitly via tools. It therefore
-*complements* the required short-term memory subsystem rather than replacing it — wire both.
+*complements* the required short-term memory subsystem rather than replacing it, wire both.
 
-Anything one agent remembers can be recalled by another agent pointing at the same org — and,
+Anything one agent remembers can be recalled by another agent pointing at the same org, and,
 via groups, across users.
 
 ## What it does
 
 You send conversation turns; xTrace runs server-side LLM extraction to pull out **facts**
 (and optionally **artifacts**) and **episodes**, embeds them, and stores them in your org's
-memory pool. Later you retrieve the relevant slice with natural-language search — optionally
+memory pool. Later you retrieve the relevant slice with natural-language search, optionally
 LLM-composed into a ready-to-inject context block. That extraction + relevance selection is
 the "reasoning" layer a plain vector store doesn't give you.
 
@@ -29,7 +29,7 @@ the "reasoning" layer a plain vector store doesn't give you.
 
 ## Wiring
 
-This is a `tool` node — wire it to an agent via `control` (class `tool`), alongside the
+This is a `tool` node, wire it to an agent via `control` (class `tool`), alongside the
 agent's required `memory` node:
 
 ```jsonc
@@ -64,10 +64,10 @@ instructions. Point several agents (in one pipe or across runs) at the same `org
 ## Where to get your credentials
 
 Get them from the **Developer Portal: [app.xtrace.ai](https://app.xtrace.ai) → Settings →
-API Keys** — copy your **Org id** and create an **API key (`xtk_…`)**. They are not in
+API Keys**, copy your **Org id** and create an **API key (`xtk_…`)**. They are not in
 `mem.xtrace.ai`.
 
-Every request sends `x-api-key` + `X-Org-Id`. Never commit keys — use node config (encrypted)
+Every request sends `x-api-key` + `X-Org-Id`. Never commit keys, use node config (encrypted)
 or env vars.
 
 > Note: the xTrace Python SDK is on their roadmap; this node talks to the documented HTTP

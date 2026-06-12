@@ -25,4 +25,4 @@ Splits text into semantically coherent chunks using an LLM to detect context bou
 
 | Field                      | Description                                                                                                                                                                                               |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Number of tokens per chunk | Target chunk size for output documents (default `384`). This node does not perform embeddings — set this value to match the input limit of the embedding model that will process these chunks downstream. |
+| Number of tokens per chunk | Target chunk size for output documents (default `384`). This node does not perform embeddings, set this value to match the input limit of the embedding model that will process these chunks downstream. |

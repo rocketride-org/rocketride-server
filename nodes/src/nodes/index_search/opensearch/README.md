@@ -10,14 +10,14 @@ sidebar_position: 1
 
 ## What it does
 
-OpenSearch node with two modes: **Index** (BM25 full-text search) and **Vector Store** (kNN semantic search). Switch between modes with the Store Mode toggle — no pipeline rewiring needed.
+OpenSearch node with two modes: **Index** (BM25 full-text search) and **Vector Store** (kNN semantic search). Switch between modes with the Store Mode toggle, no pipeline rewiring needed.
 
 **Lanes:**
 
 | Lane in     | Lane out    | Description                                            |
 | ----------- | ----------- | ------------------------------------------------------ |
-| `text`      | —           | Ingest raw text (index mode only)                      |
-| `documents` | —           | Ingest pre-embedded documents (vector store mode only) |
+| `text`      | -           | Ingest raw text (index mode only)                      |
+| `documents` | -           | Ingest pre-embedded documents (vector store mode only) |
 | `questions` | `text`      | Search and return matching text                        |
 | `questions` | `documents` | Search and return matching documents                   |
 | `questions` | `answers`   | Search and return matching documents as answers        |
@@ -37,11 +37,11 @@ Documents must be run through an embedding node before reaching this node (vecto
 | Embedding Dimension | vector only | Must match the dimension of your embedding model                  |
 | Retrieval Score     | vector only | Minimum similarity score to include a result (0–1, default `0.5`) |
 
-## Index mode — search options
+## Index mode: search options
 
 | Field                      | Default | Description                                                |
 | -------------------------- | ------- | ---------------------------------------------------------- |
-| Match Operator             | `or`    | `or` — any term, `and` — all terms, `exact` — phrase match |
+| Match Operator             | `or`    | `or`: any term, `and`: all terms, `exact`: phrase match |
 | Slop                       | `0`     | Words allowed between terms in exact phrase match          |
 | Return contextual snippets | off     | Highlight matching passages in results                     |
 | Snippet size               | `250`   | Max characters per highlight snippet                       |

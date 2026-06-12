@@ -16,7 +16,7 @@ Vector store node backed by Weaviate. Stores embedded documents and retrieves th
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+| `documents` | -           | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
@@ -32,7 +32,7 @@ Documents must be run through an embedding node before reaching this node.
 | gRPC Port       | gRPC port for local deployments (default `50051`)                                                       |
 | API Key         | Weaviate Cloud API key (cloud profile only)                                                             |
 | Retrieval Score | Minimum similarity threshold (default `0.5`)                                                            |
-| Collection      | Collection name — must start with an uppercase letter                                                   |
+| Collection      | Collection name: must start with an uppercase letter                                                    |
 
 ## Profiles
 

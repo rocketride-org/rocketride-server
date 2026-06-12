@@ -10,14 +10,14 @@ Transcribes audio or video to text using [OpenAI Whisper](https://github.com/ope
 
 **Lanes:** `audio` → `text`, `video` → `text`
 
-Runs locally via `faster-whisper` — no API key required. Routes to a model server automatically if `--modelserver` is set.
+Runs locally via `faster-whisper`, no API key required. Routes to a model server automatically if `--modelserver` is set.
 
 ## Configuration
 
 | Field               | Default | Description                                                                              |
 | ------------------- | ------- | ---------------------------------------------------------------------------------------- |
 | Model               | `base`  | Whisper model size (see table below)                                                     |
-| `silence_threshold` | `0.25`  | VAD probability threshold — speech below this confidence is treated as silence (0.0–1.0) |
+| `silence_threshold` | `0.25`  | VAD probability threshold: speech below this confidence is treated as silence (0.0–1.0)  |
 | `min_seconds`       | `240`   | Minimum audio (seconds) buffered before looking for a split point                        |
 | `max_seconds`       | `300`   | Maximum audio (seconds) to buffer before forcing transcription                           |
 
@@ -35,4 +35,4 @@ Models are downloaded from HuggingFace on first use. GPU is used automatically w
 
 ## Language
 
-Defaults to English (`en`). Change the `language` config value to transcribe other languages — any language supported by Whisper is accepted.
+Defaults to English (`en`). Change the `language` config value to transcribe other languages, any language supported by Whisper is accepted.

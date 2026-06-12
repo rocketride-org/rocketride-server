@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Connects Perplexity AI Sonar models to your pipeline. Sonar models include real-time web search — responses are grounded in current web content rather than training data alone. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
+Connects Perplexity AI Sonar models to your pipeline. Sonar models include real-time web search: responses are grounded in current web content rather than training data alone. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
 
 **Lanes:**
 

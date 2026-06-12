@@ -51,14 +51,14 @@ Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). K
 | Gemini 3.1 Pro Preview         | `models/gemini-3.1-pro-preview`         | 1,048,576 |
 | Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072   |
 
-**Custom** — specify any Gemini model ID and token limit directly.
+**Custom**: specify any Gemini model ID and token limit directly.
 
 ### Choosing a profile
 
-- **Flash Lite** — fastest and cheapest; good for high-throughput frame pipelines where speed matters more than detail
-- **Flash** — balanced speed and quality; the recommended default for most vision tasks
-- **Pro** — highest quality analysis; use when accuracy is critical and latency is acceptable
-- **3.1 Pro Preview / Flash Image Preview** — latest generation previews; expect higher capability but potential instability as models are still in preview
+- **Flash Lite**: fastest and cheapest; good for high-throughput frame pipelines where speed matters more than detail
+- **Flash**: balanced speed and quality; the recommended default for most vision tasks
+- **Pro**: highest quality analysis; use when accuracy is critical and latency is acceptable
+- **3.1 Pro Preview / Flash Image Preview**: latest generation previews; expect higher capability but potential instability as models are still in preview
 
 ## Upstream docs
 

@@ -31,9 +31,9 @@ Gives agents the ability to make HTTP requests to external APIs and services. Su
 
 | Parameter      | Description                                                                |
 | -------------- | -------------------------------------------------------------------------- |
-| `bearer_token` | Bearer token — added as `Authorization: Bearer ...` header                 |
+| `bearer_token` | Bearer token: added as `Authorization: Bearer ...` header                  |
 | `basic_auth`   | `{username, password}` for HTTP basic auth                                 |
-| `body_json`    | Object or array — serialized as JSON with `Content-Type: application/json` |
+| `body_json`    | Object or array: serialized as JSON with `Content-Type: application/json`  |
 
 **Optional:**
 
@@ -43,8 +43,8 @@ Gives agents the ability to make HTTP requests to external APIs and services. Su
 | `headers`      | Custom request headers                                                   |
 | `path_params`  | Replaces `:param` placeholders in the URL                                |
 | `timeout`      | Request timeout in seconds (default: 30, max: 300)                       |
-| `auth`         | Advanced auth config — bearer, basic, or API key (header or query param) |
-| `body`         | Advanced body config — raw, form_data, or x_www_form_urlencoded          |
+| `auth`         | Advanced auth config: bearer, basic, or API key (header or query param)  |
+| `body`         | Advanced body config: raw, form_data, or x_www_form_urlencoded           |
 
 **Response:**
 
@@ -68,7 +68,7 @@ Gives agents the ability to make HTTP requests to external APIs and services. Su
 | ----------------------- | ----------------------------------------------------------------------------------- |
 | Tool Namespace          | Prefix for the tool name (default: `http`)                                          |
 | Allowed Methods         | Toggle GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS on/off                          |
-| URL Whitelist           | List of regex patterns — restricts which URLs the agent can call. Empty allows all. |
+| URL Whitelist           | List of regex patterns: restricts which URLs the agent can call. Empty allows all.  |
 | Rate Limit (per second) | Token-bucket refill rate per second (default: 10)                                   |
 | Rate Limit (per minute) | Token-bucket refill rate per minute (default: 100)                                  |
 | Max Concurrent Requests | Maximum simultaneous in-flight requests (default: 5)                                |

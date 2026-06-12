@@ -21,12 +21,12 @@ Single-agent node using LangChain's `create_agent`. Receives a question, runs a 
 
 | Field             | Description                                                          |
 | ----------------- | -------------------------------------------------------------------- |
-| Agent Description | What this agent does — used by parent agents to select and invoke it |
+| Agent Description | What this agent does, used by parent agents to select and invoke it  |
 | Instructions      | Additional instructions prepended to the agent's system prompt       |
 
 ## Tool calling
 
-RocketRide's LLM channel is text-only, so this node uses a **JSON envelope protocol** — the LLM is instructed to output `{"type":"tool_call","name":"...","args":{...}}` or `{"type":"final","content":"..."}` on every turn. This means it works with any LLM that can follow JSON instructions, not only those with native function-calling support. Up to 3 retries are attempted when the LLM produces malformed JSON.
+RocketRide's LLM channel is text-only, so this node uses a **JSON envelope protocol**: the LLM is instructed to output `{"type":"tool_call","name":"...","args":{...}}` or `{"type":"final","content":"..."}` on every turn. This means it works with any LLM that can follow JSON instructions, not only those with native function-calling support. Up to 3 retries are attempted when the LLM produces malformed JSON.
 
 ## Using as a tool
 

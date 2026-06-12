@@ -40,7 +40,7 @@ Connects Google Gemini models to your pipeline. Used primarily as an `llm` invok
 | Gemini 2.5 Flash Image     | `models/gemini-2.5-flash-image`         | 98,304       | 32,768       |
 | Custom                     | _(user-specified)_                      | configurable | configurable |
 
-Profiles marked **Image** support image generation output. Deprecated profiles (Gemini 3 Pro, 2.0 Flash, 2.0 Flash Lite) are hidden — use their replacements above.
+Profiles marked **Image** support image generation output. Deprecated profiles (Gemini 3 Pro, 2.0 Flash, 2.0 Flash Lite) are hidden, use their replacements above.
 
 ## Upstream docs
 

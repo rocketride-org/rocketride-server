@@ -24,13 +24,13 @@ Connects GMI Cloud-hosted models to your pipeline via an OpenAI-compatible API. 
 | ------------ | ---------------------------------------------------------------------- |
 | Model        | Model to use (see profiles below)                                      |
 | API Key      | GMI Cloud API key                                                      |
-| Endpoint URL | Deployment endpoint — required for deploy-on-demand models (see below) |
+| Endpoint URL | Deployment endpoint: required for deploy-on-demand models (see below) |
 
 ## Model tiers
 
 GMI Cloud has three tiers:
 
-**Shared (always-on)** — available immediately, API key only:
+**Shared (always-on)**: available immediately, API key only:
 
 | Profile                 | Model                                  | Context |
 | ----------------------- | -------------------------------------- | ------- |
@@ -48,7 +48,7 @@ GMI Cloud has three tiers:
 | Gemini 3 Flash          | `google/gemini-3-flash-preview`        | 128,000 |
 | Gemini 3.1 Flash Lite   | `google/gemini-3.1-flash-lite-preview` | 128,000 |
 
-**Deploy-on-demand** — deploy first at [console.gmicloud.ai](https://console.gmicloud.ai), then paste the provided endpoint URL into the **Endpoint URL** field:
+**Deploy-on-demand**: deploy first at [console.gmicloud.ai](https://console.gmicloud.ai), then paste the provided endpoint URL into the **Endpoint URL** field:
 
 | Profile                  | Model                                               | Context   |
 | ------------------------ | --------------------------------------------------- | --------- |
@@ -61,7 +61,7 @@ GMI Cloud has three tiers:
 | DeepSeek R1 Distill 32B  | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`          | 131,072   |
 | DeepSeek R1 Distill 1.5B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`         | 131,072   |
 
-**Custom** — specify any GMI Cloud model ID, token limit, and endpoint URL directly.
+**Custom**: specify any GMI Cloud model ID, token limit, and endpoint URL directly.
 
 ## Upstream docs
 

@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Analyzes an image using Google Gemini Vision and produces a structured scene description optimized for blind and visually impaired users. Output covers environment type, hazards with positions, key objects, visible text, people, and navigation guidance — kept under 150 words by default.
+Analyzes an image using Google Gemini Vision and produces a structured scene description optimized for blind and visually impaired users. Output covers environment type, hazards with positions, key objects, visible text, people, and navigation guidance, kept under 150 words by default.
 
 **Lanes:** `image` → `text`
 
@@ -14,7 +14,7 @@ Analyzes an image using Google Gemini Vision and produces a structured scene des
 
 | Model                        | Notes                                    |
 | ---------------------------- | ---------------------------------------- |
-| Gemini 2.5 Flash _(default)_ | Fast, efficient — good for real-time use |
+| Gemini 2.5 Flash _(default)_ | Fast, efficient, good for real-time use  |
 | Gemini 2.5 Pro               | Highest quality                          |
 | Gemini 2.0 Flash             | Balanced                                 |
 
@@ -25,7 +25,7 @@ All models use a 1M token context window. Requires a **Google AI API key** from 
 | Field               | Default            | Description                                                                                       |
 | ------------------- | ------------------ | ------------------------------------------------------------------------------------------------- |
 | Vision Model        | `gemini-2.5-flash` | Which Gemini model to use                                                                         |
-| API Key             | —                  | Google AI API key                                                                                 |
+| API Key             | None               | Google AI API key                                                                                 |
 | System Instructions | built-in           | Sets the assistant's overall behavior and priorities                                              |
 | Analysis Prompt     | built-in           | Prompt sent with each image                                                                       |
 | Hazard Priority     | `High`             | `High` always leads with hazards; `Medium` includes them when present; `Low` uses standard order  |

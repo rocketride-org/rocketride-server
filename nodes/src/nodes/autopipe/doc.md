@@ -5,7 +5,7 @@ sidebar_position: 1
 ---
 
 :::note
-This is an **internal node**. It is wired automatically by the pipeline engine — most users will not add it manually.
+This is an **internal node**. It is wired automatically by the pipeline engine, most users will not add it manually.
 :::
 
 ## What it does

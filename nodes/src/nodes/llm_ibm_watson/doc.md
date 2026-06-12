@@ -20,7 +20,7 @@ Connects IBM WatsonX foundation models to your pipeline via the IBM Cloud API. U
 | ---------- | --------------------------------------------------------- |
 | API Key    | IBM Cloud API key                                         |
 | Location   | IBM Cloud region (see below)                              |
-| Model ID   | WatsonX model ID — specified directly, no preset profiles |
+| Model ID   | WatsonX model ID: specified directly, no preset profiles |
 | Project ID | IBM WatsonX project ID                                    |
 
 ### Locations

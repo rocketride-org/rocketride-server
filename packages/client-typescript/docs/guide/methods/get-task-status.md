@@ -40,7 +40,7 @@ const status = await client.getTaskStatus(token);
 
 ## **Returns**
 
-- **Type**: `TASK_STATUS` — a dictionary/object with comprehensive status fields
+- **Type**: `TASK_STATUS`, a dictionary/object with comprehensive status fields
 
 ### Key Fields
 
@@ -153,12 +153,12 @@ console.log('Pipeline complete!');
 
 | State | Value | Description |
 | --- | --- | --- |
-| `NONE` | `0` | Initial state — no resources allocated |
+| `NONE` | `0` | Initial state: no resources allocated |
 | `STARTING` | `1` | Resource allocation and subprocess preparation |
 | `INITIALIZING` | `2` | Subprocess initialization and service startup |
-| `RUNNING` | `3` | Operational — actively processing requests |
+| `RUNNING` | `3` | Operational: actively processing requests |
 | `STOPPING` | `4` | Graceful shutdown in progress |
-| `COMPLETED` | `5` | Finished successfully — resources cleaned up |
+| `COMPLETED` | `5` | Finished successfully: resources cleaned up |
 | `CANCELLED` | `6` | Terminated before completion |
 
 ### State Transitions

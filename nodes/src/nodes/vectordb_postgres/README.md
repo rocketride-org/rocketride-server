@@ -16,7 +16,7 @@ Vector store node backed by PostgreSQL with the pgvector extension. Stores embed
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the table                     |
+| `documents` | -           | Ingest pre-embedded documents into the table                     |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |

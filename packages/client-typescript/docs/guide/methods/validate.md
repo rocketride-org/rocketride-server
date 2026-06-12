@@ -17,7 +17,7 @@ date: 2025-07-29
 
 The `validate()` method checks a pipeline configuration for structural correctness before executing it. It verifies component compatibility, connection integrity, and resolves the execution chain. This is useful for catching configuration errors early, before starting a pipeline.
 
-Authentication is **not required** for validation — the endpoint is public.
+Authentication is **not required** for validation: the endpoint is public.
 
 ## **Method Signature**
 

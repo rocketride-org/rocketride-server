@@ -14,9 +14,9 @@ Each input lane maps to a different section of the rendered prompt. The `questio
 
 | Lane in     | Lane out    | Description                                                                    |
 | ----------- | ----------- | ------------------------------------------------------------------------------ |
-| `documents` | —           | Added to `### Documents:` section of the prompt                                |
-| `text`      | —           | Added to `### Context:` section of the prompt                                  |
-| `table`     | —           | Added to `### Context:` section of the prompt                                  |
+| `documents` | -           | Added to `### Documents:` section of the prompt                                |
+| `text`      | -           | Added to `### Context:` section of the prompt                                  |
+| `table`     | -           | Added to `### Context:` section of the prompt                                  |
 | `questions` | `questions` | Collects inputs; emits the fully assembled Question when `closing()` is called |
 
 ## Configuration
@@ -45,7 +45,7 @@ When the Question is consumed by an LLM or agent, it is rendered in this order:
 
 ## Typical use
 
-The most common use is passing retrieved documents or extracted text alongside a question into an agent or LLM — giving it context it wouldn't otherwise have.
+The most common use is passing retrieved documents or extracted text alongside a question into an agent or LLM, giving it context it wouldn't otherwise have.
 
 **RAG into an LLM:**
 

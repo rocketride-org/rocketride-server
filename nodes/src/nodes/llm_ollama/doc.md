@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Connects locally-hosted Ollama models to your pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes. No API key required — models run on your own hardware.
+Connects locally-hosted Ollama models to your pipeline. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes. No API key required, models run on your own hardware.
 
 **Lanes:**
 
@@ -65,7 +65,7 @@ Connects locally-hosted Ollama models to your pipeline. Used primarily as an `ll
 | Phi 4 14B  | `phi4`    | 16,000  |
 | Mistral 7B | `mistral` | 32,000  |
 
-**Custom** — specify any Ollama model tag, token limit, and server URL directly.
+**Custom**: specify any Ollama model tag, token limit, and server URL directly.
 
 ## Upstream docs
 

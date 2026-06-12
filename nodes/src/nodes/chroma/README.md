@@ -16,7 +16,7 @@ Vector store node backed by [ChromaDB](https://www.trychroma.com/). Stores embed
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+| `documents` | -           | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
@@ -37,7 +37,7 @@ Documents must be run through an embedding node before reaching this node.
 | Profile           | Default port | Description                                |
 | ----------------- | ------------ | ------------------------------------------ |
 | Local _(default)_ | `8330`       | Your own ChromaDB server                   |
-| Cloud             | `443`        | ChromaDB Cloud — requires host and API key |
+| Cloud             | `443`        | ChromaDB Cloud: requires host and API key |
 
 ## Upstream docs
 

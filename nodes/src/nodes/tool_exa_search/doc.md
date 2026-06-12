@@ -2,7 +2,7 @@
 
 Give your agents live web search powered by [Exa](https://exa.ai)'s semantic search.
 
-> Experimental — this node is marked `experimental` and may change.
+> Experimental: this node is marked `experimental` and may change.
 
 ## What it does
 

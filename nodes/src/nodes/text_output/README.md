@@ -2,7 +2,7 @@
 
 ## What it does
 
-Saves your pipeline's text to disk over SMB. Each upstream object becomes a `.txt` file, mirroring the source directory layout under the target path. It's the end of the line — consumes the `text` lane, emits nothing.
+Saves your pipeline's text to disk over SMB. Each upstream object becomes a `.txt` file, mirroring the source directory layout under the target path. It's the end of the line: consumes the `text` lane, emits nothing.
 
 Empty objects are skipped, and so are objects unchanged since the last run, so you don't rewrite the same file twice. Output is UTF-8, and target subdirectories are created for you.
 

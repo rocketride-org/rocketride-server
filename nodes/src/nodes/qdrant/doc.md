@@ -12,7 +12,7 @@ Vector store node backed by Qdrant. Stores embedded documents and retrieves them
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+| `documents` | -           | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |

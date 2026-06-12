@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Gives agents the ability to make and manage AI-powered phone calls via the Bland AI API. Useful for automating outbound calls — scheduling, surveys, follow-ups, or any task that requires a voice interaction.
+Gives agents the ability to make and manage AI-powered phone calls via the Bland AI API. Useful for automating outbound calls: scheduling, surveys, follow-ups, or any task that requires a voice interaction.
 
 ## Tools
 

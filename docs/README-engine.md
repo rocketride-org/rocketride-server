@@ -277,7 +277,7 @@ packages/server/
 
 ## Python Integration
 
-When extending the engine with Python (custom nodes, filter callbacks), Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) must be converted to plain dicts via `.model_dump()` before passing to C++ JSON utilities—passing raw `BaseModel` instances causes crashes. See `ROCKETRIDE_COMMON_MISTAKES.md` (Mistake 19) for details.
+When extending the engine with Python (custom nodes, filter callbacks), Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) must be converted to plain dicts via `.model_dump()` before passing to C++ JSON utilities, passing raw `BaseModel` instances causes crashes. See `ROCKETRIDE_COMMON_MISTAKES.md` (Mistake 19) for details.
 
 ---
 
@@ -289,7 +289,7 @@ When extending the engine with Python (custom nodes, filter callbacks), Pydantic
 - **Java** -- optional, for Tika document processing
 - **vcpkg packages** -- replxx, tinyxml2, breakpad, etc.
 
-### Tika Media Parsing — External Tool Requirements
+### Tika Media Parsing: External Tool Requirements
 
 Tika's `CompositeExternalParser` (auto-registered via `tika-parsers-standard-package`) shells out to external command-line tools for media metadata extraction. These tools must be installed and available on `PATH`:
 
@@ -299,9 +299,9 @@ Tika's `CompositeExternalParser` (auto-registered via `tika-parsers-standard-pac
 | **exiftool** | `video/mp4`, `video/avi`, `video/mpeg`, `video/x-msvideo` | MP4 metadata      |
 | **sox**      | `audio/*` (mp3, wav, ogg, and others)                     | Audio metadata    |
 
-**If these tools are absent, `CompositeExternalParser` throws a `TikaException` that aborts the entire file extraction — including the media stream delivery to Python nodes.** No warning is shown in the engine UI; the exception is caught and silently logged by the Java layer.
+**If these tools are absent, `CompositeExternalParser` throws a `TikaException` that aborts the entire file extraction, including the media stream delivery to Python nodes.** No warning is shown in the engine UI; the exception is caught and silently logged by the Java layer.
 
-When a required tool is missing, the OS fails to start the process, producing an `IOException` which Tika wraps into a `TikaException`. Note that `ExternalParser.check()` is a static utility method and is **not** automatically invoked during parsing — the failure surfaces at process-launch time, not during a pre-flight check.
+When a required tool is missing, the OS fails to start the process, producing an `IOException` which Tika wraps into a `TikaException`. Note that `ExternalParser.check()` is a static utility method and is **not** automatically invoked during parsing, the failure surfaces at process-launch time, not during a pre-flight check.
 
 **To disable external parsers** (when the tools are not installed), add the following to `tika-config.xml`:
 

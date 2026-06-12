@@ -5,7 +5,7 @@ title: CLI Reference
 # CLI Reference
 
 The `rocketride` command-line tool starts pipelines, streams files through them,
-and manages the engine's file store — the same operations the
+and manages the engine's file store: the same operations the
 [SDKs](/develop/typescript) expose, from a terminal. It ships with both the
 [TypeScript](/develop/typescript) and [Python](/develop/python) clients, so
 installing either package puts `rocketride` on your path.
@@ -18,7 +18,7 @@ environment so you can set them once:
 | Option           | Env var             | Default               | Description                                                            |
 | ---------------- | ------------------- | --------------------- | ---------------------------------------------------------------------- |
 | `--uri <uri>`    | `ROCKETRIDE_URI`    | `ws://localhost:5565` | Engine endpoint (see [Cloud](/cloud) / [Self-hosting](/self-hosting)). |
-| `--apikey <key>` | `ROCKETRIDE_APIKEY` | —                     | API token for authentication.                                          |
+| `--apikey <key>` | `ROCKETRIDE_APIKEY` | -                     | API token for authentication.                                          |
 
 Against a [Cloud](/cloud) endpoint use an `https://`/`wss://` URI so the
 connection is encrypted.
@@ -69,7 +69,7 @@ rocketride store write /path/file --file ./local.txt   # write a file
 
 ## Related
 
-- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python) — the
+- [TypeScript SDK](/develop/typescript) · [Python SDK](/develop/python): the
   same operations, in code.
-- [WebSocket protocol](/protocols/websocket) — what the CLI sends to the engine.
-- [Cloud](/cloud) · [Self-hosting](/self-hosting) — where the engine runs.
+- [WebSocket protocol](/protocols/websocket): what the CLI sends to the engine.
+- [Cloud](/cloud) · [Self-hosting](/self-hosting): where the engine runs.

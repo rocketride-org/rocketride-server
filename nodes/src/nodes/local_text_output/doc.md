@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Writes pipeline text output to the local filesystem. Receives text from upstream nodes and saves each object as a `.txt` file, preserving the source directory structure inside the configured output path. This is a sink node — it has no output lane.
+Writes pipeline text output to the local filesystem. Receives text from upstream nodes and saves each object as a `.txt` file, preserving the source directory structure inside the configured output path. This is a sink node, it has no output lane.
 
 Only available in self-hosted deployments (not SaaS).
 

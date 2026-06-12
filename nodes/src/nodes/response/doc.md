@@ -12,14 +12,14 @@ Captures pipeline output and returns it as a structured JSON response. Each lane
 
 | Lane in     | Lane out | Description                       |
 | ----------- | -------- | --------------------------------- |
-| `text`      | —        | Captured under the configured key |
-| `table`     | —        | Captured under the configured key |
-| `documents` | —        | Captured under the configured key |
-| `questions` | —        | Captured under the configured key |
-| `answers`   | —        | Captured under the configured key |
-| `audio`     | —        | Captured under the configured key |
-| `video`     | —        | Captured under the configured key |
-| `image`     | —        | Captured under the configured key |
+| `text`      | -        | Captured under the configured key |
+| `table`     | -        | Captured under the configured key |
+| `documents` | -        | Captured under the configured key |
+| `questions` | -        | Captured under the configured key |
+| `answers`   | -        | Captured under the configured key |
+| `audio`     | -        | Captured under the configured key |
+| `video`     | -        | Captured under the configured key |
+| `image`     | -        | Captured under the configured key |
 
 ## Configuration
 

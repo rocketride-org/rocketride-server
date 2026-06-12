@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Extracts named entities (people, organizations, locations, dates, etc.) from text using HuggingFace transformer models. Entities are added to document metadata for downstream filtering, search, and analysis. Runs locally — GPU-capable.
+Extracts named entities (people, organizations, locations, dates, etc.) from text using HuggingFace transformer models. Entities are added to document metadata for downstream filtering, search, and analysis. Runs locally, GPU-capable.
 
 **Lanes:**
 
@@ -30,7 +30,7 @@ Extracts named entities (people, organizations, locations, dates, etc.) from tex
 | -------------------------------- | --------------------------------------------------- | --------------------------------------------------- |
 | BERT Large (English) _(default)_ | `dbmdz/bert-large-cased-finetuned-conll03-english`  | High accuracy for English                           |
 | BERT Base (English)              | `dslim/bert-base-NER`                               | Balanced performance                                |
-| DistilBERT (Multilingual)        | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual — 100+ languages, fast and lightweight |
+| DistilBERT (Multilingual)        | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual: 100+ languages, fast and lightweight |
 | XLM-RoBERTa (Multilingual)       | `Davlan/xlm-roberta-base-ner-hrl`                   | 100+ languages                                      |
 | DistilBERT NER (English)         | `dslim/distilbert-NER`                              | Lightweight, fast English NER                       |
 | DeBERTa v3 (English)             | `dslim/distilbert-NER`                              | State-of-the-art accuracy                           |

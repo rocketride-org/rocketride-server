@@ -14,7 +14,7 @@ date: 2025-07-29
 
 ## **Overview**
 
-The `terminate()` method stops a running pipeline. This is a graceful termination — the pipeline will complete any item currently being processed but will not accept new data. After termination, the pipeline cannot be restarted; you must start a new one with `use()`.
+The `terminate()` method stops a running pipeline. This is a graceful termination: the pipeline will complete any item currently being processed but will not accept new data. After termination, the pipeline cannot be restarted; you must start a new one with `use()`.
 
 ## **Method Signature**
 

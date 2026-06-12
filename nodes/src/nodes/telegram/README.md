@@ -4,7 +4,7 @@ Turn a Telegram bot into the front door of your pipeline. Messages come in, pipe
 
 ## What it does
 
-A `source` node (`telegram://`) that connects to a bot you create with @BotFather and listens for incoming messages. It handles text and media alike — images, audio, voice, video, and documents — downloading each file (up to Telegram's 20 MB bot limit) and routing it to the matching pipeline lane. Replies go back to the chat that sent them, automatically.
+A `source` node (`telegram://`) that connects to a bot you create with @BotFather and listens for incoming messages. It handles text and media alike (images, audio, voice, video, and documents) downloading each file (up to Telegram's 20 MB bot limit) and routing it to the matching pipeline lane. Replies go back to the chat that sent them, automatically.
 
 Internally it reads from `_source` and emits to these output lanes:
 

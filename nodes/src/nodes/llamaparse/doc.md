@@ -41,7 +41,7 @@ Requires a LlamaIndex API key. Processing happens in the cloud.
 | Cost-effective            | 3            | Text-heavy documents without diagrams |
 | Agentic                   | 10           | Documents with diagrams and images    |
 | Agentic Plus              | 90           | Complex layouts and multi-page tables |
-| Parse with LVM _(legacy)_ | —            | Legacy LVM-based parsing              |
+| Parse with LVM _(legacy)_ | -            | Legacy LVM-based parsing              |
 
 ## LVM models
 
@@ -60,7 +60,7 @@ When **Advanced Configuration** is enabled, supply a raw JSON object instead of 
 
 | Key                              | Type    | Description                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parse_mode`                     | string  | API-level parse mode passed directly to LlamaIndex. Accepted values: `parse_page_with_llm` (cost-effective text parsing), `parse_page_with_agent` (agentic/diagram-aware parsing), `parse_page_with_lvm` (legacy LVM-based parsing). Note: simple-mode aliases (`agentic`, `agentic_plus`, `cost_effective`) are not valid here — they are only mapped in simple mode. |
+| `parse_mode`                     | string  | API-level parse mode passed directly to LlamaIndex. Accepted values: `parse_page_with_llm` (cost-effective text parsing), `parse_page_with_agent` (agentic/diagram-aware parsing), `parse_page_with_lvm` (legacy LVM-based parsing). Note: simple-mode aliases (`agentic`, `agentic_plus`, `cost_effective`) are not valid here, they are only mapped in simple mode. |
 | `system_prompt_append`           | string  | Text appended to the parsing system prompt. In advanced mode, this is honored directly from the JSON payload regardless of simple-mode toggles. In simple mode, only applied in LVM legacy mode (`parse_page_with_lvm`) when **Use Additional Instructions** is on.                                                                                                    |
 | `spreadsheet_extract_sub_tables` | boolean | Extract sub-tables embedded within spreadsheet cells. Corresponds to the **Extract Sub Tables** toggle in simple mode.                                                                                                                                                                                                                                                 |
 | `vendor_multimodal_model_name`   | string  | Vision model used for LVM and agentic modes (e.g. `anthropic-sonnet-4-0`).                                                                                                                                                                                                                                                                                             |

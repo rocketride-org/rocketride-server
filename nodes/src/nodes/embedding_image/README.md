@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Generates vector embeddings from images using local vision models. Runs on the model server — no API key required. GPU-accelerated when available.
+Generates vector embeddings from images using local vision models. Runs on the model server, no API key required. GPU-accelerated when available.
 
 **Lanes:**
 

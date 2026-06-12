@@ -39,7 +39,7 @@ Extract frames when the scene changes by a threshold amount.
 | Field                | Default  | Description                                                     |
 | -------------------- | -------- | --------------------------------------------------------------- |
 | Percentage change    | `40%`    | Pixel change threshold to trigger extraction (10–100%)          |
-| Minimum scene gap    | disabled | Minimum seconds between extractions — prevents burst detections |
+| Minimum scene gap    | disabled | Minimum seconds between extractions: prevents burst detections |
 | Start time (seconds) | `0`      | Where to begin extraction                                       |
 | Duration (seconds)   | `0`      | How long to extract (0 = full video)                            |
 | Max frames           | `0`      | Cap on total frames extracted (0 = unlimited)                   |

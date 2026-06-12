@@ -71,7 +71,7 @@ Connects Amazon Bedrock-hosted models to your pipeline. Used primarily as an `ll
 | Command R+ | `cohere.command-r-plus-v1:0` | 128K tokens |
 | Command R  | `cohere.command-r-v1:0`      | 128K tokens |
 
-**Custom** — specify any Bedrock model ID and token limit directly.
+**Custom**: specify any Bedrock model ID and token limit directly.
 
 ## Upstream docs
 

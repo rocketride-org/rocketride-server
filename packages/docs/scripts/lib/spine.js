@@ -42,6 +42,7 @@ const SPINE = [
 		label: 'Protocols',
 		items: [
 			{ id: 'protocols/websocket', label: 'WebSocket', mount: true },
+			{ id: 'protocols/websocket/observability', label: 'Observability' },
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
 	},

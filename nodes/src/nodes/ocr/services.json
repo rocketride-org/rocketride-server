@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that extracts machine-readable text from images and scanned documents ", "using optical character recognition. It enables the transformation of visual content—such ", "as PDFs, screenshots, and photos—into structured text for further analysis and processing. ", "Supporting various image formats and multilingual text, the component is ideal for digitizing ", "printed materials, enabling search, indexing, and downstream natural language tasks."],
+	"description": ["A component that extracts machine-readable text from images and scanned documents ", "using optical character recognition. It enables the transformation of visual content (such ", "as PDFs, screenshots, and photos) into structured text for further analysis and processing. ", "Supporting various image formats and multilingual text, the component is ideal for digitizing ", "printed materials, enabling search, indexing, and downstream natural language tasks."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -297,7 +297,7 @@
 	//
 	"fulltest": [
 		{
-			// EasyOCR profiles (excluding Japanese) — full text + table assertions
+			// EasyOCR profiles (excluding Japanese): full text + table assertions
 			"profiles": ["latin", "latin-extended", "cyrillic", "arabic", "devanagari", "chinese-simplified", "chinese-traditional", "korean"],
 			"outputs": ["text", "table"],
 			"timeout": 120,
@@ -342,7 +342,7 @@
 			]
 		},
 		{
-			// EasyOCR Japanese — relaxed text assertion (Japanese models may misread English)
+			// EasyOCR Japanese: relaxed text assertion (Japanese models may misread English)
 			"profiles": ["japanese"],
 			"outputs": ["text"],
 			"timeout": 120,
@@ -360,7 +360,7 @@
 			]
 		},
 		{
-			// DocTR engine — text assertions only (no table assertions)
+			// DocTR engine: text assertions only (no table assertions)
 			"profiles": ["doctr"],
 			"outputs": ["text"],
 			"timeout": 180,

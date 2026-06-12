@@ -16,7 +16,7 @@ Vector store node backed by Pinecone. Stores embedded documents and retrieves th
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the index                     |
+| `documents` | -           | Ingest pre-embedded documents into the index                     |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |

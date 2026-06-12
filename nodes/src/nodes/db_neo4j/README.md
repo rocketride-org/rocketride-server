@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Neo4j node with two roles: pipeline node (natural-language questions → Cypher → results via lanes) and tool node (agents call it directly). Read-only — write operations are blocked by design.
+Neo4j node with two roles: pipeline node (natural-language questions → Cypher → results via lanes) and tool node (agents call it directly). Read-only: write operations are blocked by design.
 
 ## Connections
 
@@ -38,7 +38,7 @@ When connected to an agent, exposes three functions under the configured server 
 | ------------------ | ------------------------------------------------------------------------------------------ |
 | `neo4j.get_data`   | Natural language → Cypher → execute, returns rows (default 250, max 25 000)                |
 | `neo4j.get_schema` | Returns node labels, property types, and relationship types; accepts optional label filter |
-| `neo4j.get_cypher` | Natural language → Cypher only — no execution                                              |
+| `neo4j.get_cypher` | Natural language → Cypher only, no execution                                              |
 
 ## Configuration
 
@@ -47,10 +47,10 @@ When connected to an agent, exposes three functions under the configured server 
 | Connection URI          | `neo4j://localhost:7687` | Bolt URI. Use `neo4j+s://` for TLS (e.g. Neo4j Aura)                             |
 | Authentication          | `Username & Password`    | `Username & Password` or `Bearer Token`                                          |
 | User                    | `neo4j`                  | Username (userpass auth only)                                                    |
-| Password                | —                        | Password (userpass auth only)                                                    |
-| Bearer Token            | —                        | Token (bearer auth only)                                                         |
+| Password                | -                        | Password (userpass auth only)                                                    |
+| Bearer Token            | -                        | Token (bearer auth only)                                                         |
 | Database Name           | `neo4j`                  | Target database                                                                  |
-| Graph Description       | —                        | Plain-language description of the graph — helps the LLM generate accurate Cypher |
+| Graph Description       | -                        | Plain-language description of the graph, helps the LLM generate accurate Cypher |
 | Max Validation Attempts | `5`                      | Retry limit for EXPLAIN-based Cypher validation (range 1–20)                     |
 
 ## Cypher validation

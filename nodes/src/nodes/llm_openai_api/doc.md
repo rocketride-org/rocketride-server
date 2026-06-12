@@ -23,7 +23,7 @@ Connects any OpenAI-compatible API endpoint to your pipeline. Use this node for 
 | Tokens   | Maximum context length in tokens                                     |
 | API Key  | Provider API key                                                     |
 
-There are no preset profiles — all fields are specified directly.
+There are no preset profiles, all fields are specified directly.
 
 ## Reference
 

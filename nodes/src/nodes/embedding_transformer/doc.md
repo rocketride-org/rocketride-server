@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Generates text embeddings using local sentence-transformer models. Runs on the model server — no API key required. GPU-accelerated when available.
+Generates text embeddings using local sentence-transformer models. Runs on the model server, no API key required. GPU-accelerated when available.
 
 **Lanes:**
 
@@ -15,7 +15,7 @@ Generates text embeddings using local sentence-transformer models. Runs on the m
 | `documents` | `documents` | Embed document chunks, attach vector to each document |
 | `questions` | `questions` | Embed a question for vector similarity lookup         |
 
-The `questions` lane is used when querying a vector store — the store expects an embedded question to compare against stored document vectors.
+The `questions` lane is used when querying a vector store, the store expects an embedded question to compare against stored document vectors.
 
 ## Configuration
 

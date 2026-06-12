@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Scans text for sensitive entities (names, emails, phone numbers, organizations, etc.) using a local GLiNER NER model and replaces each detected character with a masking character. Text structure is preserved — only the entity spans are replaced.
+Scans text for sensitive entities (names, emails, phone numbers, organizations, etc.) using a local GLiNER NER model and replaces each detected character with a masking character. Text structure is preserved, only the entity spans are replaced.
 
 **Lanes:** `text` → `text`
 
@@ -30,13 +30,13 @@ Output: ████ █████ is a patient at ██ ██████�
 
 ## Models
 
-Models run locally — no API key required. Downloaded from HuggingFace on first use. GPU is supported.
+Models run locally, no API key required. Downloaded from HuggingFace on first use. GPU is supported.
 
 | Profile                                        | Best for                                                      |
 | ---------------------------------------------- | ------------------------------------------------------------- |
-| GLiNER Small / Medium / Large                  | General English PII — use Small for speed, Large for accuracy |
+| GLiNER Small / Medium / Large                  | General English PII (use Small for speed, Large for accuracy) |
 | GLiNER PII Large                               | High-accuracy English PII                                     |
-| GLiNER Merged Large                            | Combined from multiple datasets — broad coverage              |
+| GLiNER Merged Large                            | Combined from multiple datasets (broad coverage)              |
 | GLiNER Multi / Multi PII                       | Multilingual text                                             |
 | Gretel Small / Large                           | Business-oriented NER                                         |
 | GLiNER Korean / Italian / Arabic               | Language-specific                                             |
@@ -44,4 +44,4 @@ Models run locally — no API key required. Downloaded from HuggingFace on first
 | GLiNER Biomed Small / Large                    | Biomedical and clinical text                                  |
 | Custom                                         | Enter any HuggingFace GLiNER model name                       |
 
-> AI-based detection — 100% accuracy is not guaranteed. Review results before use in production.
+> AI-based detection, 100% accuracy is not guaranteed. Review results before use in production.

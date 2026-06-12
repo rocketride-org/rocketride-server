@@ -54,7 +54,7 @@ Connects Mistral AI models to your pipeline. Used primarily as an `llm` invoke c
 | Ministral 3 8B  | `ministral-8b-2512`  | 256,000 |
 | Ministral 3 3B  | `ministral-3b-2512`  | 256,000 |
 
-**Custom** — specify any Mistral model ID and token limit directly.
+**Custom**: specify any Mistral model ID and token limit directly.
 
 ## Upstream docs
 

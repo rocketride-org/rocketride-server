@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Gives agents read/write access to the account-scoped RocketRide file store — the same storage area exposed to the client SDK via `fs_*` methods. All paths are relative to `users/<client_id>/files/`, so files and agent writes via this tool are visible to the client SDK and vice versa. This node has no pipeline lanes — it is connected to agents via the `tool` invoke channel.
+Gives agents read/write access to the account-scoped RocketRide file store: the same storage area exposed to the client SDK via `fs_*` methods. All paths are relative to `users/<client_id>/files/`, so files and agent writes via this tool are visible to the client SDK and vice versa. This node has no pipeline lanes, it is connected to agents via the `tool` invoke channel.
 
 ## Tools
 
@@ -41,7 +41,7 @@ Files land under the configured storage backend (defaults to `~/.rocketlib/store
 <store>/users/<client_id>/files/<path>
 ```
 
-Each account gets its own isolated `files/` directory — the node picks up the current account automatically, no configuration needed.
+Each account gets its own isolated `files/` directory, the node picks up the current account automatically, no configuration needed.
 
 ## Reference
 

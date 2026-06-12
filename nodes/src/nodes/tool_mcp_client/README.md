@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Connects to an external [Model Context Protocol](https://modelcontextprotocol.io/) server and exposes its tools to agent nodes. Agents discover and invoke tools from the connected MCP server during their reasoning loop. This node has no pipeline lanes — it is connected to agents via the `tools` invoke channel.
+Connects to an external [Model Context Protocol](https://modelcontextprotocol.io/) server and exposes its tools to agent nodes. Agents discover and invoke tools from the connected MCP server during their reasoning loop. This node has no pipeline lanes, it is connected to agents via the `tools` invoke channel.
 
 Tools are namespaced as `serverName.toolName` (e.g. `mcp.search_docs`), where `serverName` is set in configuration.
 

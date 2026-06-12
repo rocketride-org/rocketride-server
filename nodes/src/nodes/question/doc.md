@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Wraps incoming text as a `Question` object so it can flow into nodes that expect a `questions` lane — vector stores, LLMs, agents, and the Prompt node. No configuration required.
+Wraps incoming text as a `Question` object so it can flow into nodes that expect a `questions` lane: vector stores, LLMs, agents, and the Prompt node. No configuration required.
 
 **Lanes:**
 

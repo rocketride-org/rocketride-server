@@ -1,13 +1,13 @@
 # index_search
 
-Store your documents and search them back — by keyword (BM25) or by meaning (vectors). Backed by Elasticsearch or OpenSearch.
+Store your documents and search them back: by keyword (BM25) or by meaning (vectors). Backed by Elasticsearch or OpenSearch.
 
 ## What it does
 
-One node, two service variants — **Elasticsearch** and **OpenSearch** — that ingest documents and retrieve them at query time. Each variant runs in one of two modes, set by the **Store Mode** toggle:
+One node, two service variants, **Elasticsearch** and **OpenSearch**, that ingest documents and retrieve them at query time. Each variant runs in one of two modes, set by the **Store Mode** toggle:
 
-- **Index mode** — classic BM25 full-text search over the index, with configurable match operator (`or`, `and`, `exact` phrase) and optional contextual snippet highlighting.
-- **Vector store mode** — semantic similarity search over embedded documents, with a minimum retrieval score threshold.
+- **Index mode**: classic BM25 full-text search over the index, with configurable match operator (`or`, `and`, `exact` phrase) and optional contextual snippet highlighting.
+- **Vector store mode**: semantic similarity search over embedded documents, with a minimum retrieval score threshold.
 
 Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serverless deployments. OpenSearch covers self-managed OpenSearch.
 
@@ -15,8 +15,8 @@ Elasticsearch covers self-managed, Elastic Cloud Hosted, and Elastic Cloud Serve
 
 | Lane in     | Lane out                                | Description                                                       |
 | ----------- | --------------------------------------- | ---------------------------------------------------------------- |
-| `documents` | —                                       | Ingest documents into the index/collection                       |
-| `text`      | —                                       | Ingest raw text                                                  |
+| `documents` | -                                       | Ingest documents into the index/collection                       |
+| `text`      | -                                       | Ingest raw text                                                  |
 | `questions` | `text`, `documents`, `answers`, `questions` | Search and return matches as text, documents, an answer, or enrich the question for downstream nodes |
 
 (The OpenSearch variant produces `text`, `answers`, `documents` from `questions`.) In vector store mode, run documents through an embedding node before they reach this one.

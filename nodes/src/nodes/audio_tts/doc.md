@@ -1,17 +1,17 @@
-# Audio TTS Node (`audio_tts`) — Kokoro
+# Audio TTS Node (`audio_tts`): Kokoro
 
 Text-to-speech node using the **Kokoro-82M** engine.
 
 ## Behavior
 
 - **Input:** `text` lane
-- **Output:** `audio` lane — WAV bytes with MIME `audio/wav`
+- **Output:** `audio` lane: WAV bytes with MIME `audio/wav`
 - **Local:** `kokoro.KPipeline`, spaCy `en_core_web_sm` via `ensure_spacy_en_model()`
 - **`--modelserver`:** `ModelClient` + `KokoroLoader` on the server
 
 ## Configuration
 
-- Profile **`kokoro`** — `kokoro_voice` dropdown in `services.json`
+- Profile **`kokoro`**: `kokoro_voice` dropdown in `services.json`
 - Language code is the **first character** of the voice id (`af_*` → `a`, etc.)
 
 ## Dependencies
@@ -20,7 +20,7 @@ See `requirements.txt`: `numpy`, `kokoro`, `soundfile`.
 
 ## Troubleshooting (`Exception: 1` / wasabi)
 
-If misaki/spaCy initialization fails (e.g. `Exception: 1` or a missing `wasabi` dependency), ensure the spaCy English model is installed — this node downloads `en_core_web_sm` automatically via `ensure_spacy_en_model()`. Verify that `numpy`, `kokoro`, and `soundfile` from `requirements.txt` are installed, and that the model download was not blocked by network restrictions.
+If misaki/spaCy initialization fails (e.g. `Exception: 1` or a missing `wasabi` dependency), ensure the spaCy English model is installed, this node downloads `en_core_web_sm` automatically via `ensure_spacy_en_model()`. Verify that `numpy`, `kokoro`, and `soundfile` from `requirements.txt` are installed, and that the model download was not blocked by network restrictions.
 
 ## Reference
 

@@ -1,7 +1,7 @@
 # Pipeline Nodes
 
-A node is the unit you build pipelines from. Each one does a single job — parse a
-document, call an LLM, store embeddings, transcribe audio — and you chain them
+A node is the unit you build pipelines from. Each one does a single job (parse a
+document, call an LLM, store embeddings, transcribe audio) and you chain them
 together through their service definitions.
 
 Every node is declared in one or more `services*.json` files under
@@ -19,10 +19,10 @@ rather than directories.
 ## How nodes connect
 
 Nodes connect in **two different ways**, and knowing which is which is the
-difference between a pipeline that runs and one that doesn't — whether you wire it
+difference between a pipeline that runs and one that doesn't, whether you wire it
 by hand or hand the job to an LLM.
 
-### 1. Data flow — typed lanes
+### 1. Data flow: typed lanes
 
 Most nodes exchange data over **lanes**. A lane is a typed port: a node declares
 which lane types it **consumes** (inputs) and which it **produces** (outputs) in
@@ -47,9 +47,9 @@ The complete lane-type ontology and who produces / consumes each type:
 A typical RAG flow chains these types end to end:
 `webhook (_source → questions)` → `embedding_openai (questions → questions)` →
 `pinecone (questions → documents)` → `prompt (documents → questions)` →
-`llm_openai (questions → answers)` → `response (answers → —)`.
+`llm_openai (questions → answers)` → `response (answers → -)`.
 
-### 2. Tool binding — agents and tools
+### 2. Tool binding: agents and tools
 
 Nodes whose `classType` is `tool` (and a few infrastructure nodes) **have no data
 lanes**. They do not sit in the data flow. Instead they **attach to an agent node's
@@ -93,8 +93,8 @@ the same `tool_github` or `tool_tavily` can attach to `agent_deepagent`,
 | ------------------- | -------------------- | --------------------------------------------------------- |
 | `agent_rocketride`  | questions → answers  | Native wave-planning agent built on the RocketRide engine |
 | `agent_langchain`   | questions → answers  | Single-agent execution using LangChain                    |
-| `agent_crewai`      | questions → answers  | CrewAI agent — standalone, hierarchical manager, and managed sub-agent variants |
-| `agent_deepagent`   | questions → answers  | Deep Agents — single-agent and managed sub-agent variants |
+| `agent_crewai`      | questions → answers  | CrewAI agent: standalone, hierarchical manager, and managed sub-agent variants |
+| `agent_deepagent`   | questions → answers  | Deep Agents: single-agent and managed sub-agent variants |
 
 ### Agent Tools
 
@@ -107,7 +107,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_tavily`       | Tavily real-time web search                                      |
 | `tool_exa_search`   | Exa semantic web search                                          |
 | `tool_firecrawl`    | Firecrawl web-scraping operations                                |
-| `tool_http_request` | Arbitrary HTTP requests — "curl for agents"                      |
+| `tool_http_request` | Arbitrary HTTP requests, "curl for agents"                      |
 | `tool_github`       | GitHub repository operations                                     |
 | `tool_git`          | Local Git repository operations                                  |
 | `tool_filesystem`   | File-system access                                               |
@@ -194,7 +194,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | ------------------ | ------------------------------------------- | -------------------------------------------- |
 | `audio_transcribe` | audio, video → text                         | Speech-to-text transcription                 |
 | `audio_tts`        | text, documents, questions, answers → audio | Text-to-speech (Kokoro-82M)                  |
-| `audio_player`     | audio, video → —                            | Plays audio on the system output device      |
+| `audio_player`     | audio, video → -                            | Plays audio on the system output device      |
 
 ### Video
 
@@ -207,7 +207,7 @@ channel; they have no data lanes and **bind to an agent** (see
 
 | Service    | Data flow (in → out)                              | Description                                  |
 | ---------- | ------------------------------------------------- | -------------------------------------------- |
-| `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake — chat, dropper, and ADS variants |
+| `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
 | `telegram` | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
 
 > Filesystem and cloud connector sources (Google Drive, OneDrive, SharePoint,
@@ -219,7 +219,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | Service             | Data flow (in → out)                 | Description                                  |
 | ------------------- | ------------------------------------ | -------------------------------------------- |
 | `memory_persistent` | questions, answers → answers, questions | Cross-session persistent memory           |
-| `memory_internal`   | — (agent tool)                       | Run-scoped keyed memory exposed as agent tools |
+| `memory_internal`   | - (agent tool)                       | Run-scoped keyed memory exposed as agent tools |
 
 ### Safety, Reranking & Search
 
@@ -233,17 +233,17 @@ channel; they have no data lanes and **bind to an agent** (see
 
 | Service             | Data flow (in → out)                                          | Description                                  |
 | ------------------- | ------------------------------------------------------------ | -------------------------------------------- |
-| `response`          | text, table, documents, questions, answers, audio, video, image → — | Returns results to the requesting client (per-type variants) |
-| `text_output`       | text → —                                                     | Writes text to the file system               |
-| `local_text_output` | text → —                                                     | Writes text to a local file                  |
-| `remote`            | — (transport)                                                | Forwards data to a remote machine / node (client + server) |
-| `autopipe`          | — (composite)                                                | Combines parse + preprocess + embed in one node |
+| `response`          | text, table, documents, questions, answers, audio, video, image → - | Returns results to the requesting client (per-type variants) |
+| `text_output`       | text → -                                                     | Writes text to the file system               |
+| `local_text_output` | text → -                                                     | Writes text to a local file                  |
+| `remote`            | - (transport)                                                | Forwards data to a remote machine / node (client + server) |
+| `autopipe`          | - (composite)                                                | Combines parse + preprocess + embed in one node |
 
 ---
 
 ## Core module
 
-The `core` module (`nodes/src/nodes/core/`) is not a single node — it registers a
+The `core` module (`nodes/src/nodes/core/`) is not a single node, it registers a
 family of built-in services through several `services.common.*.json` files:
 
 - **Sources / connectors:** local filesystem, S3, Azure Blob, Google Drive,
@@ -258,7 +258,7 @@ standalone catalog nodes.
 
 ## Open items
 
-- `llm_ibm_watson` ships no `services*.json` and is not registered — confirm
+- `llm_ibm_watson` ships no `services*.json` and is not registered, confirm
   whether it is in progress or should be removed.
 
 ---
@@ -297,7 +297,7 @@ standalone catalog nodes.
    }
    ```
 
-   The build pipeline auto-discovers every `nodes/src/nodes/<node>/*.svg` — no
+   The build pipeline auto-discovers every `nodes/src/nodes/<node>/*.svg`, no
    central registry to update. It also inspects each SVG and:
 
    - If the SVG is **monochrome** (one distinct fill/stroke color), it auto-rewrites
@@ -318,4 +318,4 @@ standalone catalog nodes.
 
 ## License
 
-MIT License — see [LICENSE](../LICENSE).
+MIT License, see [LICENSE](../LICENSE).

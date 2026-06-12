@@ -12,7 +12,7 @@ sidebar_position: 3
 4. Drag components from the component palette onto the canvas.
 5. Configure each component's properties in the properties panel.
 6. Connect component outputs to inputs by drawing connections between lanes.
-7. Save the file — changes are auto-saved.
+7. Save the file, changes are auto-saved.
 
 ## Running a Pipeline
 
@@ -46,19 +46,19 @@ If a pipeline is already running on the server:
 
 The visual editor provides:
 
-- **Component palette** — Browse and search available nodes (sources, LLMs, stores, etc.).
-- **Canvas** — Drag-and-drop workspace for arranging components.
-- **Properties panel** — Configure selected component settings (API keys, models, connection strings, etc.).
-- **Lane connections** — Draw lines between component output and input lanes to define data flow.
+- **Component palette**: Browse and search available nodes (sources, LLMs, stores, etc.).
+- **Canvas**: Drag-and-drop workspace for arranging components.
+- **Properties panel**: Configure selected component settings (API keys, models, connection strings, etc.).
+- **Lane connections**: Draw lines between component output and input lanes to define data flow.
 
 ## Monitoring Execution
 
 The **Status** page shows:
 
-- **Component status** — Pending, running, completed, or failed indicators for each component.
-- **Data flow** — Visual representation of data moving through the pipeline.
-- **Metrics** — Completion rates and timing charts.
-- **Errors** — Detailed error messages and logs for failed components.
+- **Component status**: Pending, running, completed, or failed indicators for each component.
+- **Data flow**: Visual representation of data moving through the pipeline.
+- **Metrics**: Completion rates and timing charts.
+- **Errors**: Detailed error messages and logs for failed components.
 
 ## AI-Assisted Development
 

@@ -733,3 +733,12 @@ article a {
 	background: var(--ifm-color-primary);
 	color: #fff;
 }
+
+/* ----------------------------------------------------------------------------
+ * Prev / Next pagination buttons: border takes the theme link color on hover
+ * (not Infima's default primary blue). Border only; labels are unchanged. Match
+ * the :not(#\#):not(#\#) hack to win against Infima's component-rule specificity.
+ * ------------------------------------------------------------------------- */
+.pagination-nav__link:hover:not(#\#):not(#\#) {
+	border-color: var(--ifm-link-color);
+}

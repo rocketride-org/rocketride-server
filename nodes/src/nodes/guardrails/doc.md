@@ -62,9 +62,9 @@ How it reacts is up to the **policy mode**: `block` rejects the offending questi
 
 | Profile | Title | Model |
 | --- | --- | --- |
-| `basic` | Basic — Prompt injection + PII detection |  |
-| `strict` | Strict — All checks enabled, block on violation |  |
-| `custom` | Custom — Configure checks individually |  |
+| `basic` | Basic: Prompt injection + PII detection |  |
+| `strict` | Strict: All checks enabled, block on violation |  |
+| `custom` | Custom: Configure checks individually |  |
 
 **Configuration sections**
 

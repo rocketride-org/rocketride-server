@@ -6,7 +6,7 @@ sidebar_position: 1
 
 ## What it does
 
-Splits text into chunks for downstream embedding or LLM processing. Uses LangChain text splitters — choose a splitter tuned for the content type (prose, markdown, LaTeX, code-adjacent text). No LLM required.
+Splits text into chunks for downstream embedding or LLM processing. Uses LangChain text splitters: choose a splitter tuned for the content type (prose, markdown, LaTeX, code-adjacent text). No LLM required.
 
 **Lanes:**
 

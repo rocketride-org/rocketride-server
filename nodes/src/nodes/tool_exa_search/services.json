@@ -128,7 +128,7 @@
 	},
 	//
 	//	Test configuration for automated node testing.
-	//	"apikey" is intentionally set to a placeholder — config validation is
+	//	"apikey" is intentionally set to a placeholder, config validation is
 	//	tested here, not live API calls.
 	//
 	"test": {

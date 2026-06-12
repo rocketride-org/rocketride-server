@@ -20,8 +20,8 @@ Tool node that exposes a `generate_chart` function to agents. The agent passes r
 
 | Field         | Required | Description                                                                                              |
 | ------------- | -------- | -------------------------------------------------------------------------------------------------------- |
-| `data`        | yes      | Raw data to chart — array of objects or key-value pairs                                                  |
-| `chart_type`  | no       | `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, `bubble` — omit to let the LLM choose |
+| `data`        | yes      | Raw data to chart: array of objects or key-value pairs                                                   |
+| `chart_type`  | no       | `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, `bubble`, omit to let the LLM choose  |
 | `title`       | no       | Chart title                                                                                              |
 | `description` | no       | Natural language description of the desired chart                                                        |
 
@@ -29,11 +29,11 @@ Data is truncated to 200 items / 20KB before being sent to the LLM.
 
 ## Output
 
-A ` ```chartjs ` fenced block containing the Chart.js JSON configuration. The agent should place this verbatim in the answer — the UI renders it as a chart.
+A ` ```chartjs ` fenced block containing the Chart.js JSON configuration. The agent should place this verbatim in the answer, the UI renders it as a chart.
 
 ## Notes
 
-- Output is pure static JSON — no JavaScript callbacks. Values that would normally require callbacks (e.g. formatted tooltip labels) are embedded directly in label strings.
+- Output is pure static JSON: no JavaScript callbacks. Values that would normally require callbacks (e.g. formatted tooltip labels) are embedded directly in label strings.
 - Connect this node to an agent via the `tool` invoke channel.
 
 ## Reference

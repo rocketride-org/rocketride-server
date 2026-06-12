@@ -27,7 +27,7 @@ PostgreSQL node with two roles: pipeline node (natural-language queries via lane
 | `questions` | `table`   | Translate question → SQL → execute, return as table   |
 | `questions` | `text`    | Translate question → SQL → execute, return as text    |
 | `questions` | `answers` | Translate question → SQL → execute, return as answers |
-| `answers`   | —         | Parse structured data and insert into table           |
+| `answers`   | -         | Parse structured data and insert into table           |
 
 Auto-creates the target table on first insert if it doesn't exist.
 
@@ -39,7 +39,7 @@ When connected to an agent, exposes three functions under the configured server 
 | --------------------- | ------------------------------------------------------------------------ |
 | `postgres.get_data`   | Natural language → SQL → execute, returns rows (default 250, max 25 000) |
 | `postgres.get_schema` | Returns tables, columns, types, primary keys, and foreign keys           |
-| `postgres.get_sql`    | Natural language → SQL only — no execution                               |
+| `postgres.get_sql`    | Natural language → SQL only, no execution                               |
 
 Only `SELECT` is permitted for queries. Insert operations use the `answers` lane.
 
@@ -47,10 +47,10 @@ Only `SELECT` is permitted for queries. Insert operations use the `answers` lane
 
 | Field                   | Default     | Description                                                                     |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------- |
-| Database Description    | —           | Plain-language description of the database, used to guide SQL generation        |
+| Database Description    | -           | Plain-language description of the database, used to guide SQL generation        |
 | Host                    | `localhost` | PostgreSQL server address; include port for non-default (e.g. `localhost:5433`) |
 | User                    | `postgres`  | Database username                                                               |
-| Password                | —           | Database password                                                               |
+| Password                | -           | Database password                                                               |
 | Database                | `postgres`  | Database name                                                                   |
 | Table                   | `table`     | Target table name                                                               |
 | Max Validation Attempts | `5`         | Retry limit for EXPLAIN-based SQL validation (range 1–20)                       |

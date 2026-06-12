@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Gives agents full access to the GitHub REST API — files, issues, pull requests, reviews, releases, workflows, search, and more. Useful for agents that manage codebases, triage issues, automate releases, or operate CI/CD pipelines.
+Gives agents full access to the GitHub REST API: files, issues, pull requests, reviews, releases, workflows, search, and more. Useful for agents that manage codebases, triage issues, automate releases, or operate CI/CD pipelines.
 
 ## Tools
 
@@ -60,9 +60,9 @@ Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the c
 
 | Field        | Description                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------- |
-| Token        | GitHub Personal Access Token — requires `repo`, `issues`, `pull_requests`, and `workflows` scopes |
+| Token        | GitHub Personal Access Token: requires `repo`, `issues`, `pull_requests`, and `workflows` scopes  |
 | Default Repo | Fallback repo used when `repo` is not passed to a tool (`owner/repo` format)                      |
-| Read Only    | Block all write operations — prevents file edits, issue creation, PR creation, releases, etc.     |
+| Read Only    | Block all write operations: prevents file edits, issue creation, PR creation, releases, etc.      |
 
 ## Upstream docs
 

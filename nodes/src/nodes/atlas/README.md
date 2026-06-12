@@ -16,7 +16,7 @@ Vector store node backed by [MongoDB Atlas](https://www.mongodb.com/products/pla
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+| `documents` | None        | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
@@ -27,21 +27,21 @@ Documents must be run through an embedding node before reaching this node.
 
 | Field      | Required | Default         | Description                                        |
 | ---------- | -------- | --------------- | -------------------------------------------------- |
-| Host       | yes      | —               | MongoDB Atlas connection URI (`mongodb+srv://...`) |
-| API Key    | yes      | —               | Atlas API key                                      |
+| Host       | yes      | None            | MongoDB Atlas connection URI (`mongodb+srv://...`) |
+| API Key    | yes      | None            | Atlas API key                                      |
 | Database   | yes      | `rocketride_db` | Database name                                      |
-| Collection | yes      | —               | Collection name                                    |
+| Collection | yes      | None            | Collection name                                    |
 | Score      | no       | `0.5`           | Minimum similarity score threshold                 |
 | Similarity | no       | `cosine`        | `cosine`, `euclidean`, or `dotproduct`             |
 
 ## Requirements
 
-Requires a MongoDB Atlas **M10+** cluster or **serverless** instance — vector search indexes are not available on free-tier (M0) clusters. Vector and text search indexes are created automatically on first use.
+Requires a MongoDB Atlas **M10+** cluster or **serverless** instance, vector search indexes are not available on free-tier (M0) clusters. Vector and text search indexes are created automatically on first use.
 
 ## Search modes
 
-- **Semantic** — Atlas Vector Search using the question's embedding (`$vectorSearch` aggregation)
-- **Keyword** — MongoDB full-text search using the question's text (`$text`)
+- **Semantic**: Atlas Vector Search using the question's embedding (`$vectorSearch` aggregation)
+- **Keyword**: MongoDB full-text search using the question's text (`$text`)
 
 ## Upstream docs
 

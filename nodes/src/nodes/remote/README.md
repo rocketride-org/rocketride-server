@@ -31,9 +31,9 @@ Forwards pipeline execution to a separate RocketRide server. The pipeline config
 | Profile           | Description                                                                |
 | ----------------- | -------------------------------------------------------------------------- |
 | Local _(default)_ | Routes to a pipeline on the same machine                                   |
-| Remote server     | Routes to a pipeline on a separate host — requires host, port, and API key |
+| Remote server     | Routes to a pipeline on a separate host: requires host, port, and API key  |
 
 ## Notes
 
-- Self-hosted deployments only — not available on RocketRide Cloud.
+- Self-hosted deployments only, not available on RocketRide Cloud.
 - The remote server must be running a RocketRide instance with the server component enabled.
