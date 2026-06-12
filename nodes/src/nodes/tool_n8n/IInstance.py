@@ -103,16 +103,45 @@ class IInstance(IInstanceBase):
     def _safe_path(workflow: str) -> str:
         """Sanitise an agent-supplied workflow webhook path.
 
-        Rejects anything that could redirect off the configured instance — a URL
-        scheme, an explicit host, or whitespace — so the agent can only choose a
-        path on the configured ``base_url``.
+        Rejects anything that could redirect off the configured instance or
+        smuggle extra request syntax — a URL scheme, an explicit host, whitespace,
+        path traversal (``.``/``..`` segments), or query/fragment/backslash
+        characters — so the agent can only choose a plain path on the configured
+        ``base_url``.
         """
         path = (workflow or '').strip()
         if not path:
             raise ValueError('workflow (webhook path) is required')
-        if '://' in path or any(c.isspace() for c in path):
+        candidate = path.lstrip('/')
+        if (
+            not candidate
+            or '://' in path
+            or any(c.isspace() for c in path)
+            or any(ch in candidate for ch in ('?', '#', '\\'))
+            or candidate in ('.', '..')
+            or '/./' in f'/{candidate}/'
+            or '/../' in f'/{candidate}/'
+        ):
             raise ValueError(f'Invalid workflow path "{path}": provide a plain webhook path, not a URL.')
-        return path.lstrip('/')
+        return candidate
+
+    @staticmethod
+    def _jsonsafe_tool_result(value: Any) -> Any:
+        """Coerce a webhook result to the tool's advertised ``result`` schema
+        (object/array/string/null).
+
+        ``parse_response`` can hand back a binary dict carrying raw ``bytes`` or a
+        bare JSON scalar (``true``/``42``); neither matches the declared schema and
+        the bytes aren't even JSON-serialisable. Binary becomes a JSON-safe
+        descriptor (an agent can't consume raw bytes anyway); scalars are
+        stringified. Objects/arrays/strings/None pass through untouched.
+        """
+        if isinstance(value, dict) and value.get('__rr_binary__'):
+            data = value.get('data') or b''
+            return {'binary': True, 'mime': value.get('mime') or 'application/octet-stream', 'bytes': len(data)}
+        if isinstance(value, bool) or isinstance(value, (int, float)):
+            return json.dumps(value)
+        return value
 
     def _run_webhook(self, workflow: str, payload: Dict[str, Any], *, test_mode: bool, files=None) -> Dict[str, Any]:
         """Trigger a webhook and shape the result (shared by tool + pipeline faces)."""
@@ -215,7 +244,9 @@ class IInstance(IInstanceBase):
         workflow = (args.get('workflow') or self.IGlobal.default_workflow or '').strip()
         payload = args.get('payload') if isinstance(args.get('payload'), dict) else {}
         try:
-            return self._run_webhook(workflow, payload, test_mode=bool(args.get('test_mode')))
+            out = self._run_webhook(workflow, payload, test_mode=bool(args.get('test_mode')))
+            out['result'] = self._jsonsafe_tool_result(out.get('result'))
+            return out
         except ValueError as exc:
             return {'success': False, 'started': False, 'result': None, 'error': str(exc)}
 

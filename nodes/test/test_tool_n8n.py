@@ -226,6 +226,9 @@ def test_safe_path_accepts_plain_paths():
     assert safe('enrich-invoice') == 'enrich-invoice'
     assert safe('/enrich-invoice') == 'enrich-invoice'
     assert safe('a/b-c') == 'a/b-c'
+    # Legitimate multi-segment webhook paths still pass (only leading slashes trimmed).
+    assert safe('webhook/sub/deep') == 'webhook/sub/deep'
+    assert safe('/a/b/c') == 'a/b/c'
 
 
 @pytest.mark.parametrize(
@@ -237,6 +240,17 @@ def test_safe_path_accepts_plain_paths():
         'https://169.254.169.254/latest/meta-data',
         'a path with spaces',
         'path\nwith\nnewlines',
+        # Path traversal / dot segments.
+        '.',
+        '..',
+        '../api/v1/workflows',
+        './x',
+        'a/../b',
+        'a/./b',
+        # Query / fragment / backslash smuggling.
+        'foo?bar=1',
+        'frag#x',
+        'back\\slash',
     ],
 )
 def test_safe_path_rejects_urls_and_whitespace(bad):
@@ -354,6 +368,23 @@ def test_wait_for_execution_ignores_runs_started_before(monkeypatch):
         client.wait_for_execution('http://x', 'key', 'wf', started_after='2026-06-10T00:00:00Z', timeout=10)
 
 
+def test_wait_for_execution_skips_stale_run_across_iso_formats(monkeypatch):
+    # started_after is rendered with a +00:00 offset (our own marker) while n8n
+    # renders startedAt with a trailing Z. A lexicographic compare keeps this stale
+    # run ('Z' > '.'), so this guards the datetime-based comparison: the run started
+    # at 00:00:01.0, before our 00:00:01.5 trigger, and must be ignored.
+    _fake_clock(monkeypatch, step=5.0)
+
+    def fake_call(base_url, api_key, method, path, **kw):
+        if path == '/executions':
+            return {'data': [{'id': 'stale', 'status': 'success', 'startedAt': '2026-06-10T00:00:01Z'}]}
+        raise AssertionError('a run started before started_after must not be fetched')
+
+    monkeypatch.setattr(client, 'call', fake_call)
+    with pytest.raises(ValueError, match='Timed out'):
+        client.wait_for_execution('http://x', 'key', 'wf', started_after='2026-06-10T00:00:01.500000+00:00', timeout=10)
+
+
 # ---------------------------------------------------------------------------
 # IInstance: async branch of _run_webhook
 # ---------------------------------------------------------------------------
@@ -398,6 +429,48 @@ def test_async_sync_short_circuit_when_data_returned(monkeypatch):
     monkeypatch.setattr(instance_mod.n8n_client, 'find_workflow_id_by_path', must_not_poll)
     result = inst._run_webhook('enrich', {}, test_mode=False)
     assert result == {'success': True, 'started': True, 'result': {'value': 42}}
+
+
+# ---------------------------------------------------------------------------
+# IInstance: tool-face result normalization (advertised result schema)
+# ---------------------------------------------------------------------------
+
+
+def test_jsonsafe_tool_result_coerces_scalars_and_binary():
+    norm = instance_mod.IInstance._jsonsafe_tool_result
+    # JSON scalars aren't in the advertised object/array/string/null schema.
+    assert norm(True) == 'true'
+    assert norm(42) == '42'
+    assert norm(3.5) == '3.5'
+    # Binary carries raw bytes (not JSON-serialisable) -> safe descriptor.
+    assert norm({'__rr_binary__': True, 'mime': 'image/png', 'data': b'\x89PNG'}) == {
+        'binary': True,
+        'mime': 'image/png',
+        'bytes': 4,
+    }
+    # Objects / arrays / strings / None pass through untouched.
+    assert norm({'a': 1}) == {'a': 1}
+    assert norm(['x']) == ['x']
+    assert norm('hi') == 'hi'
+    assert norm(None) is None
+
+
+def test_trigger_workflow_normalizes_result_to_schema(monkeypatch):
+    inst = _make_instance(mode='sync')
+
+    # A bare scalar webhook response is stringified so it fits the result schema.
+    monkeypatch.setattr(instance_mod.n8n_client, 'trigger_webhook', lambda *a, **kw: 42)
+    out = inst.trigger_workflow({'workflow': 'enrich'})
+    assert out['success'] is True and out['result'] == '42'
+
+    # A binary webhook response is reduced to a JSON-safe descriptor (no raw bytes).
+    monkeypatch.setattr(
+        instance_mod.n8n_client,
+        'trigger_webhook',
+        lambda *a, **kw: {'__rr_binary__': True, 'mime': 'image/png', 'data': b'\x89PNG'},
+    )
+    out = inst.trigger_workflow({'workflow': 'enrich'})
+    assert out['result'] == {'binary': True, 'mime': 'image/png', 'bytes': 4}
 
 
 def test_async_injects_correlation_id_and_polls(monkeypatch):

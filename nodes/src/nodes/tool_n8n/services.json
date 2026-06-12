@@ -15,9 +15,9 @@
 		"text": ["text", "answers", "table"],
 		"questions": ["answers", "text", "table"],
 		"documents": ["documents", "text", "table"],
-		"image": ["image", "text", "answers"],
-		"audio": ["audio", "text", "answers"],
-		"video": ["video", "text", "answers"]
+		"image": ["image", "text", "answers", "table"],
+		"audio": ["audio", "text", "answers", "table"],
+		"video": ["video", "text", "answers", "table"]
 	},
 	"preconfig": {
 		"default": "default",
@@ -179,7 +179,7 @@
 		}
 	},
 	"test": {
-		"requires": ["ROCKETRIDE_N8N_KEY"],
+		"requires": ["ROCKETRIDE_N8N_KEY", "ROCKETRIDE_N8N_WORKFLOW"],
 		"profiles": ["default"],
 		"cases": [
 			{

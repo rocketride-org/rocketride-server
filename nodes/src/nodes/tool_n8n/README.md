@@ -61,8 +61,9 @@ The agent never chooses the host — every request targets the configured Base U
 | Workflow             | —                       | Webhook path the target workflow listens on (the pipeline step triggers this).     |
 | Payload shape        | `simple`                | Pipeline step body: `simple` → `{"data": text}`; `structured` → `{text, documents:[{content, metadata}]}` (preserves document boundaries/metadata). |
 | Result mode          | `sync`                  | `sync` waits for the webhook response; `async` triggers then polls the execution via the public API (API key required). |
+| Sync timeout         | `30`                    | Max seconds to wait for the webhook response in sync mode (1–3600).                |
 | Async timeout        | `120`                   | Max seconds to wait for an async execution before raising an error (5–3600).      |
-| Webhook auth         | `none`                  | Auth on the workflow's Webhook node (`none` / header / basic) — separate from API key. |
+| Webhook auth         | `none`                  | Auth on the workflow's Webhook node (`none` / `header` / `basic` / `bearer` / `jwt`) — separate from API key. |
 | Verify TLS certificate | `Yes`                 | Leave ON; disable only for a self-signed local n8n over HTTPS.                     |
 | Read-only mode       | `Yes`                   | When ON, blocks write operations (activate/deactivate).                            |
 

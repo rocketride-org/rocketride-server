@@ -85,7 +85,7 @@ chat -> orchestrator agent -> response
 
 **Call an n8n workflow from a RocketRide pipeline** (pairs with `n8n-call-rocketride.workflow.json`).
 
-```
+```text
 webhook -> tool_n8n (triggers n8n workflow "rocketride-demo") -> response
 ```
 

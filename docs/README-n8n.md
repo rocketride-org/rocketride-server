@@ -53,7 +53,7 @@ from RocketRide.)
 
 **Escape hatch — a thin webhook dispatcher** that calls the target via n8n's **Execute Sub-Workflow** node:
 
-```
+```text
 [RR tool_n8n] → POST /webhook/my-dispatch
                   │
 n8n dispatcher: [Webhook] → [Execute Sub-Workflow → target] → [Respond to Webhook]
@@ -88,7 +88,7 @@ for a ready-made Webhook → HTTP Request → Respond to Webhook workflow.
 
 Chain the two directions:
 
-```
+```text
 RR pipeline A: [source] → [tool_n8n: workflow "rocketride-demo"] → [response]
                                   │ POST /webhook/rocketride-demo
 n8n workflow:  [Webhook] → [HTTP Request → RR pipeline B's webhook] → [Respond to Webhook]

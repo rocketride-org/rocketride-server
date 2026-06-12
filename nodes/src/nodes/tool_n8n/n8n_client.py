@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -280,6 +281,25 @@ def find_workflow_id_by_path(
     )
 
 
+def _parse_iso(ts: Any) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp to a tz-aware datetime (UTC when no offset).
+
+    Tolerates a trailing ``Z`` (how n8n renders UTC) as well as ``+00:00`` (how we
+    render ``started_after``), so execution timestamps compare chronologically
+    instead of lexicographically. Returns ``None`` if missing or unparseable.
+    """
+    if not ts:
+        return None
+    s = str(ts)
+    if s.endswith('Z'):
+        s = s[:-1] + '+00:00'
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
 def wait_for_execution(
     base_url: str,
     api_key: str,
@@ -304,6 +324,7 @@ def wait_for_execution(
     deadline = time.monotonic() + timeout
     interval = max(0.5, poll_interval)
     checked: set = set()
+    started_dt = _parse_iso(started_after)
 
     while time.monotonic() < deadline:
         data = call(
@@ -316,9 +337,11 @@ def wait_for_execution(
             eid = summary.get('id')
             if eid in checked:
                 continue
-            if started_after and str(summary.get('startedAt') or '') < started_after:
-                checked.add(eid)
-                continue
+            if started_dt is not None:
+                summary_dt = _parse_iso(summary.get('startedAt'))
+                if summary_dt is not None and summary_dt < started_dt:
+                    checked.add(eid)
+                    continue
             if summary.get('status') not in _FINISHED_STATES:
                 continue  # still running — recheck next round
 
