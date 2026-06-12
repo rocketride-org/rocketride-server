@@ -2,7 +2,7 @@
 	"title": "FalkorDB",
 	"protocol": "tool_falkordb://",
 	"classType": ["tool"],
-	"capabilities": ["invoke"],
+	"capabilities": ["invoke", "experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_falkordb",
