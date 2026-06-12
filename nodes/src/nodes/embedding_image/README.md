@@ -83,30 +83,6 @@ unique `chunkId` in its metadata.
 | `embedding.model` | `string` | **Model name**<br/>Hugging face model to use for embedding |  |
 | `embedding.profile` | `string` | **Model**<br/>Embedding model | `"openai-patch16"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-IGlobal is a subclass of IGlobalBase that manages global lifecycle events for an AI node, such as initialization and cleanup of resources.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize resources needed for the node when the global lifecycle begins. |
-| `endGlobal(self)` | Clean up resources and references when the global lifecycle ends. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-IInstance manages instance-level processing of documents within the node.
-
-| Method | Description |
-|---|---|
-| `writeDocuments(self, documents: List[Doc])` | Process and enrich a list of documents by generating embeddings for image documents. |
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-
 ## Dependencies
 
 - `transformers`

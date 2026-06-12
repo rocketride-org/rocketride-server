@@ -73,30 +73,6 @@ Provide your TwelveLabs API key in the `apikey` field. The key is loaded once wh
 | `twelvelabs.instructions` | `array` | **Instructions**<br/>Instructions to guide TwelveLabs when analyzing the video. |  |
 | `twelvelabs.profile` | `string` |  | `"default"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global configuration for the TwelveLabs node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Load the API key and instructions from configuration once, making them available to all instances. |
-| `endGlobal(self) -> None` | Clear the global configuration. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Instance class for the TwelveLabs node.
-
-| Method | Description |
-|---|---|
-| `beginInstance(self) -> None` | Initialize the instance. |
-| `writeVideo(self, action: int, mimeType: str, buffer: bytes) -> None` | Write video data to the instance. |
-
 ## Dependencies
 
 - `twelvelabs`

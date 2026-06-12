@@ -93,51 +93,6 @@ Set `api_endpoint` to the database's Data API URL and `application_token` to the
 | `astra_db.application_token` | `string` | **Application Token**<br/>Enter the server API application token |  |
 | `astra_db.provider` | `string` |  | const: `"astra_db"` |
 
-## Classes
-
-### `astra_db.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-| Method | Description |
-|---|---|
-| `doesCollectionExist(self, modelName: str = None) -> bool` | Override base class to handle AstraDB-specific collection validation. |
-| `count_documents(self) -> int` | Return the number of documents in the document store. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search using AstraDB's native lexical search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Retrieve documents matching the filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | More efficient implementation using aggregation to get distinct parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the document store. |
-| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
-| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `astrapy`

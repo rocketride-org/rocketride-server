@@ -64,29 +64,6 @@ Set the `apikey` field to your OpenAI API key. The key is resolved per profile, 
 | `openai_embed.model` | `string` | **Model name**<br/>OpenAI model to use for embedding |  |
 | `openai_embed.profile` | `string` | **Model**<br/>OpenAI embedding model | `"text-embedding-3-small"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Represent an instance that processes documents and questions using embeddings.
-
-| Method | Description |
-|---|---|
-| `open(self, obj: Entry)` | Initialize the instance with a given entry. |
-| `writeDocuments(self, documents: List[Doc])` | Encode and processes a list of documents. |
-| `writeQuestions(self, question: Question)` | Encode a single question. |
-
 ## Dependencies
 
 - `openai`

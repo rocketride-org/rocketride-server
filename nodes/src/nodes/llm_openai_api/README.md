@@ -111,24 +111,6 @@ test server with a mocked `langchain_openai`, so no real API key is required.
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Nebius Token Factory model | `"llama-3-3-70b"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the configuration for OpenAI-compatible API LLM node. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

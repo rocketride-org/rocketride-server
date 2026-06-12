@@ -174,26 +174,6 @@ The node detects common key mix-ups at initialization and fails with a specific 
 | `model` | `string` | **Model**<br/>Mistral AI model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the Mistral AI node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Mistral configuration at save-time with a minimal probe. |
-| `beginGlobal(self)` | Initialize the global instance for the Mistral AI node. |
-| `endGlobal(self)` | Clean up the global instance when the node shuts down. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `mistralai`

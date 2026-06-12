@@ -182,41 +182,6 @@ Basic auth (username and password). When basic auth is enabled, an `http://` hos
 | `opensearch.search.highlight.fragment_size` | `number` | **Snippet size (characters)**<br/>Maximum characters in the returned highlight snippet (context window) per hit. | `250` |
 | `opensearch.vstore_label` | `object` | **Vector Store Mode** |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-Global state for the index_search node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Initialize backend (Elasticsearch or OpenSearch) from node config. |
-| `validateConfig(self) -> None` | Validate node config at save-time (fast probe). Backend is auto-detected. |
-| `endGlobal(self) -> None` | Release store or client and clear references. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceTransform`)
-
-Instance transform for index_search: runs search and ingest against Elasticsearch or OpenSearch depending on IGlobal.backend.
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question) -> None` | Run a search for the given question and write results to the pipeline. |
-| `writeDocuments(self, documents: List[Doc]) -> None` | Ingest documents (with embeddings) into the store. Only supported in vstore mode. |
-| `writeText(self, text: str) -> None` | Ingest raw text into the index (text lane in index mode). |
-| `renderObject(self, object: Entry) -> None` | Stream document text to the writeText lane (Elasticsearch only; uses DocumentStoreBase). |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-Endpoint for index_search (Elasticsearch and OpenSearch). No extra config.
-
-_No public methods._
-
 ## Dependencies
 
 - `elasticsearch` `>=8.0.0,<9.0.0`

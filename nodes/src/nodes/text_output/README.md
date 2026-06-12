@@ -99,17 +99,6 @@ tested when the action starts, not during configuration validation.
 
 _No configuration fields._
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
 ## Dependencies
 
 - `cffi`

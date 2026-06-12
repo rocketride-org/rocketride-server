@@ -133,24 +133,6 @@ Automated node tests are declared in `services.json`:
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai.profile` | `string` | **Model**<br/>LLM model | `"openai-5-2"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the configuration for OpenAI LLM node. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

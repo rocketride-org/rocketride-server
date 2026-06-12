@@ -83,28 +83,6 @@ See the [Mistral vision documentation](https://docs.mistral.ai/capabilities/visi
 | `vision.prompt` | `string` | **Analysis Prompt**<br/>Describe what you want to analyze or extract from the image |  |
 | `vision.systemPrompt` | `string` | **System Instructions**<br/>Define the model's role and behavior for image analysis |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-Instance handler for the Mistral Vision AI node.
-
-| Method | Description |
-|---|---|
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents and emit vision model responses as text documents. |
-
 ## Dependencies
 
 - `mistralai`

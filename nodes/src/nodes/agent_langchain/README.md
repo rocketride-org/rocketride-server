@@ -108,26 +108,6 @@ When the run is triggered from the `questions` lane, only `content` is written t
 | `agent_langchain.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` |  |
-| `run_agent(self, input_obj: Any) -> Any` | Invoke this agent as a tool from a parent agent. |
-
 ## Dependencies
 
 - `langchain`

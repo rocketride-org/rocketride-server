@@ -142,24 +142,6 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 | `postgresdb.table` | `string` | **Table name**<br/>Name of table | `"table"` |
 | `postgresdb.user` | `string` | **User**<br/>Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref> — without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres | `"postgres"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `DatabaseGlobalBase`)
-
-PostgreSQL-specific global state.
-
-_No public methods._
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `DatabaseInstanceBase`)
-
-PostgreSQL-specific instance.
-
-_No public methods._
-
 ## Dependencies
 
 - `psycopg2-binary` `==2.9.12`

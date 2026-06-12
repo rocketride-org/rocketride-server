@@ -163,33 +163,6 @@ Obtain a LlamaIndex API key from [cloud.llamaindex.ai](https://cloud.llamaindex.
 | `llamaparse.use_advanced_config` | `boolean` | **Advanced Configuration**<br/>Check to use advanced JSON configuration instead of simple options. | `false` |
 | `llamaparse.use_system_prompt_append` | `boolean` | **Use Additional Instructions**<br/>Check to add custom instructions to the system prompt for LlamaParse. | `false` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate LlamaParse configuration at save-time. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` | Call from engLib, process object startup. |
-| `close(self)` | Call from engLib, process object complete. |
-| `writeTag(self, tag)` | Process data tags from the tag lane. |
-| `extract_tables_from_text(self, text: str)` | Extract tables from parsed text and write them to the table lane. |
-| `extract_tables_from_structured_data(self, structured_data: list)` | Extract tables from structured data and write them to the table lane. |
-| `writeText(self, text: str)` | Call from engLib, process text. |
-| `writeTable(self, table: str)` | Call from engLib, process table data. |
-| `writeDocuments(self, documents: List[Doc])` | Call from engLib, process document objects. |
-
 ## Dependencies
 
 - `llama-parse`

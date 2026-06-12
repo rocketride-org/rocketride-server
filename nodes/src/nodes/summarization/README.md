@@ -62,28 +62,6 @@ Both table and plain-text input are accepted; table content is appended to the s
 | `summarization.numberOfSummaryWords` | `number` | **Number of words in each summary. Set to 0 to disable summaries.** |  |
 | `summarization.profile` | `string` |  | `"default"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `beginInstance(self) -> None` | Begin the instance for processing. |
-| `open(self, object: Entry)` | Initialize the instance for a new object. |
-| `writeText(self, text: str)` | Add the text to the accumulator so we can summarize a document. |
-| `writeTable(self, text: str)` | Add the table to the accumulator so we can summarize a document. |
-| `closing(self)` | Process the accumulated text and extract summaries. |
-
 ## Dependencies
 
 - `langchain`

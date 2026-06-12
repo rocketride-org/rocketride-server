@@ -122,29 +122,6 @@ builder nodes:test-full
 | `anonymize.profile` | `string` | **Model**<br/>Anonymize model | `"glinerMergedLarge"` |
 | `anonymizeChar` | `string` | **Character to use for anonymization**<br/>Character |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` |  |
-| `writeText(self, text: str)` |  |
-| `writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict)` |  |
-| `closing(self)` |  |
-| `close(self)` | Call from engLib, process object startup. |
-
 ## Dependencies
 
 - `gliner`

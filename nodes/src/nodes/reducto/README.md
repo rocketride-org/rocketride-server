@@ -100,39 +100,6 @@ Set `api_key` to a valid Reducto API key. Config validation verifies the key by 
 | `reducto.options` | `string` | **Options**<br/>Options for the Reducto API |  |
 | `reducto.parse_mode` | `boolean` | **Advanced Mode**<br/>Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API. | `false` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global configuration for the Reducto node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize the global configuration. |
-| `validateConfig(self)` | Validate the Reducto node configuration. |
-| `ensureDependencies(self)` | Ensure the dependencies are installed. |
-| `endGlobal(self)` | Clean up resources when global configuration is being destroyed. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Reducto document processor - handles document parsing and content extraction.
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` | Call from engLib, process object startup. |
-| `close(self)` | Call from engLib, process object complete. |
-| `writeTag(self, tag)` | Process data tags from the tag lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `reductoai`

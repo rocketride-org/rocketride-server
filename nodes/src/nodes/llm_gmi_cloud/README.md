@@ -137,26 +137,6 @@ unique endpoint URL it gives you into the **Endpoint URL** field.
 | `model` | `string` | **Model**<br/>GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the GMI Cloud LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate GMI Cloud models at save time. |
-| `beginGlobal(self)` | Initialize the GMI Cloud chat client. |
-| `endGlobal(self)` | Release the chat client. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

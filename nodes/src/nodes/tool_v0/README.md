@@ -106,31 +106,6 @@ when the pipeline ends.
 |---|---|---|---|
 | `tool_v0.apikey` | `string` | **API Key**<br/>Vercel v0 API key | `""` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_v0.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Node instance exposing v0 generative UI as agent tools.
-
-| Method | Description |
-|---|---|
-| `generate_ui(self, args)` | Generate a React UI component from a text prompt via the v0 Platform API. |
-| `refine_ui(self, args)` | Refine a previously generated UI component via the v0 Platform API. |
-
 ## Dependencies
 
 - `requests`

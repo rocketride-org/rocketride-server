@@ -79,30 +79,6 @@ The node also exposes an `embedding.preprocessor` combo field (default `preproce
 | `embedding.query_prefix` | `string` | **Query prefix**<br/>Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |  |
 | `embedding.truncate_dim` | `number` | **Truncate dimensions**<br/>Truncate embeddings to this dimensionality (0 = use model default) |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Represent an instance that processes documents and questions using embeddings.
-
-| Method | Description |
-|---|---|
-| `open(self, obj: Entry)` | Initialize the instance with a given entry. |
-| `writeDocuments(self, documents: List[Doc])` | Encode and processes a list of documents. |
-| `writeQuestions(self, question: Question)` | Encode a single question. |
-| `close(self)` |  |
-
 ## Dependencies
 
 - `numpy`

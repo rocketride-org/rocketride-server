@@ -53,27 +53,6 @@ On stop, the node polls until the queue and the internal playback buffer are bot
 
 _No configuration fields._
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize the global context for the audio player. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `beginInstance(self)` |  |
-| `endInstance(self)` |  |
-| `writeAudio(self, action: int, mimeType: str, buffer: bytes)` |  |
-| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` |  |
-
 ## Dependencies
 
 - `imageio_ffmpeg`

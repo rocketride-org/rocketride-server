@@ -105,50 +105,6 @@ Set `profile` to `cloud`, provide the ChromaDB Cloud `host` and your `apikey`. T
 | `vector.local.host` |  |  | `"localhost"` |
 | `vector.local.port` |  |  | `8330` |
 
-## Classes
-
-### `chroma.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-| Method | Description |
-|---|---|
-| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Retrieve document groups matching a given filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | Retrieve unique parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the ChromaDB collection. |
-| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render the complete document. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `VectorStoreToolMixin, IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
-| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `chromadb-client`

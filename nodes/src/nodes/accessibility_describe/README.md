@@ -122,29 +122,6 @@ error immediately, and a key with the `sk-` prefix is rejected as an OpenAI key.
 | `model` | `string` | **Model**<br/>Google Gemini vision model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the Accessibility Describe node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-Instance handler for the Accessibility Scene Description node.
-
-| Method | Description |
-|---|---|
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-
 ## Dependencies
 
 - `google-genai` `>=1.14.0`

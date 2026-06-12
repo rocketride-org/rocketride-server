@@ -123,51 +123,6 @@ Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdr
 | `vector.local.host` |  |  | `"localhost"` |
 | `vector.local.port` |  |  | `6333` |
 
-## Classes
-
-### `qdrant.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-| Method | Description |
-|---|---|
-| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Given a filter, this will return the document groups matching the filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | Query and return all the unique parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the document store. |
-| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `validateConfig(self)` | Validate Qdrant config at save-time with a fast SDK probe. |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `VectorStoreToolMixin, IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
-| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `grpcio`

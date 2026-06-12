@@ -106,28 +106,6 @@ caller instead of being emitted on the `answers` lane.
 | `agent_llamaindex.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for agent_llamaindex: bootstraps and holds the LlamaIndex driver.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Resolve runtime deps and build the LlamaIndex driver (skipped in CONFIG mode). |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` |  |
-| `run_agent(self, input_obj: Any) -> Any` | Invoke this agent as a tool from a parent agent. |
-
 ## Dependencies
 
 - `llama-index-core`

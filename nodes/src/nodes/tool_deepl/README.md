@@ -102,31 +102,6 @@ For all three defaults the resolution rule is: the agent argument wins, the conf
 | `tool_deepl.modelType` | `string` | **Model Type**<br/>Translation model to request. Empty lets DeepL choose its default. quality_optimized favors quality, latency_optimized favors speed, prefer_quality_optimized uses quality where available and otherwise falls back. | `""` |
 | `tool_deepl.targetLang` | `string` | **Default Target Language**<br/>Default target language for translation when the agent does not supply one. Regional variants are allowed (e.g. EN-US, EN-GB, PT-BR, PT-PT, ZH-HANS, ZH-HANT). | `"EN-US"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_deepl.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Node instance exposing DeepL translation and rephrasing as agent tools.
-
-| Method | Description |
-|---|---|
-| `deepl_translate(self, args)` | Translate text into a target language using the DeepL API. |
-| `deepl_write(self, args)` | Rewrite text in a chosen style or tone using the DeepL Write API. |
-
 ## Dependencies
 
 - `requests`

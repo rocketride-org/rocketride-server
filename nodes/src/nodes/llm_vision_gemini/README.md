@@ -112,31 +112,6 @@ Retry behavior: one retry for transient errors (timeout, connection, `500`/`502`
 | `vision.prompt` | `string` | **Analysis Prompt**<br/>Describe what you want to analyze or extract from the image |  |
 | `vision.systemPrompt` | `string` | **System Instructions**<br/>Define the model's role and behavior for image analysis |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global interface for Gemini Vision node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Gemini configuration at save-time using a minimal API probe. |
-| `beginGlobal(self)` | Initialize the global chat instance. |
-| `endGlobal(self)` | Clean up the global chat instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-Instance handler for the Gemini Vision node.
-
-| Method | Description |
-|---|---|
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` | Handle AVI image protocol for streaming image frames. |
-| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents inline and emit vision model responses as text documents. |
-
 ## Dependencies
 
 - `google-genai` `>=1.14.0`

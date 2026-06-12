@@ -105,31 +105,6 @@ pytest nodes/test/memory_persistent -v
 | `redis_port` | `number` | **Redis Port**<br/>Redis server port | `6379` |
 | `session_ttl_hours` | `number` | **Session TTL (hours)**<br/>How long sessions persist before auto-expiry (0 = no expiry) | `0` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for memory_persistent — holds the store and config.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Initialize the persistent memory store from node configuration. |
-| `endGlobal(self) -> None` | Release resources and close backend connections. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Pipeline instance for the memory_persistent node.
-
-| Method | Description |
-|---|---|
-| `open(self, _obj: Entry) -> None` | Reset per-object state for the current pipeline item. |
-| `writeQuestions(self, question: Question) -> None` | Load session context from memory and attach to question metadata, then forward. |
-| `writeAnswers(self, answer: Answer) -> None` | Store answer text in session memory for future retrieval, then forward. |
-
 ## Dependencies
 
 - `redis` `>=6.4.0,<8.0.0`

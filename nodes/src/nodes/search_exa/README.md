@@ -77,28 +77,6 @@ Exa HTTP errors are mapped to descriptive failures:
 | `search_exa.profile` | `string` | **Profile** | `"default"` |
 | `search_exa.type` | `string` | **Search Type** | `"auto"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Shared runtime state for ``search_exa``.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Initialize the shared Exa backend for runtime execution. |
-| `validateConfig(self) -> None` | Validate user-visible configuration without starting the backend. |
-| `endGlobal(self) -> None` | Release shared runtime state for this node instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question) -> None` |  |
-
 ## Dependencies
 
 - `requests`

@@ -134,33 +134,6 @@ Connectivity and authentication are verified at pipeline start with `verify_conn
 | `neo4jdb.uri` | `string` | **Connection URI**<br/>Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud) | `"neo4j://localhost:7687"` |
 | `neo4jdb.user` | `string` | **User**<br/>Username to authenticate with the Neo4J instance. | `"neo4j"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Neo4J-specific global connection state.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Open the Neo4J driver, verify connectivity, and cache the graph schema. |
-| `endGlobal(self) -> None` | Close the Neo4J driver and release the connection. |
-| `validateConfig(self) -> None` | Test connectivity with a trivial read query; safe to call at save-time. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Neo4J-specific instance state.
-
-| Method | Description |
-|---|---|
-| `get_data(self, args)` | Translate natural language to Cypher and execute. |
-| `get_schema(self, args)` | Return the cached graph schema. |
-| `get_cypher(self, args)` | Translate natural language to Cypher without executing. |
-| `writeQuestions(self, question: Question) -> None` | Translate a natural-language question to Cypher, execute it, emit results. |
-
 ## Dependencies
 
 - `neo4j`

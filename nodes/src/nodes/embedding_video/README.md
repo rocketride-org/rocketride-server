@@ -78,29 +78,6 @@ The extraction window runs from `start_time` to `start_time + duration`, clamped
 | `embedding.profile` | `string` | **Model**<br/>Embedding model for video frames | `"openai-patch16"` |
 | `embedding.start_time` | `number` | **Start time (in seconds) for frame extraction (0=beginning)** | `0` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-IGlobal manages global lifecycle events for the video embedding node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize resources needed for the video embedding node. |
-| `endGlobal(self)` | Clean up resources when the global lifecycle ends. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-IInstance manages instance-level processing of video data for embedding.
-
-| Method | Description |
-|---|---|
-| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` | Handle streaming video data via the AVI action protocol. |
-
 ## Dependencies
 
 - `transformers`

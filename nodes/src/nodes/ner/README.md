@@ -81,33 +81,6 @@ All profiles use `aggregation_strategy: simple` and `min_confidence: 0.9` unless
 | `ner.profile` | `string` | **Model**<br/>NER model configuration | `"bertLarge"` |
 | `ner.store_in_metadata` | `boolean` | **Store entities in document metadata**<br/>Add extracted entities to document metadata fields | `true` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global context for NER node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize the NER recognizer when the pipeline starts. |
-| `endGlobal(self)` | Clean up the NER recognizer when the pipeline ends. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Instance handler for NER node.
-
-| Method | Description |
-|---|---|
-| `open(self, obj: Entry)` | Initialize instance for a new object. |
-| `writeText(self, text: str)` | Process text and extract named entities. |
-| `writeDocuments(self, documents: List[Doc])` | Process documents and extract named entities. |
-| `closing(self)` | Called before close, finalize any pending operations. |
-| `close(self)` | Clean up instance state. |
-
 ## Source
 
 [<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/ner)

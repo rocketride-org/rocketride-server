@@ -86,26 +86,6 @@ To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar-pro"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global interface for Perplexity AI node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Perplexity configuration at save-time with a minimal probe. |
-| `beginGlobal(self)` | Initialize the global chat instance. |
-| `endGlobal(self)` | Clean up the global chat instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

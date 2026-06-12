@@ -94,30 +94,6 @@ No additional OAuth or API key registration is needed beyond the bot token.
 | `telegram.mode` | `string` | **Connection Mode**<br/>Polling works anywhere without a public URL. Webhook requires a public HTTPS endpoint. | `"polling"` |
 | `telegram.webhookUrl` | `string` | **Webhook URL**<br/>Public HTTPS URL Telegram will POST updates to (e.g. https://your-server.com/telegram/webhook). Required for webhook mode. |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-_No public methods._
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-_No public methods._
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointBase`)
-
-IEndpoint for the Telegram Bot source node.
-
-| Method | Description |
-|---|---|
-| `scanObjects(self, _path: str, _scanCallback: Callable[[Dict[str, Any]], None])` | Entry point called by the RocketRide engine to start the node. |
-
 ## Dependencies
 
 - `aiohttp` `>=3.13.5`

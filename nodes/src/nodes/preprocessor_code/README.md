@@ -102,27 +102,6 @@ Because the walk recurses into matched nodes, nested constructs produce overlapp
 | `code.splitter.strlen` | `number` | **Maximum string length** | `512` |
 | `code.splitter.typescript.language` | `string` |  | const: `"typescript"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` |  |
-| `writeTable(self, table: str)` |  |
-| `writeText(self, text: str)` |  |
-
 ## Dependencies
 
 - `tree-sitter`

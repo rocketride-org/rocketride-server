@@ -103,29 +103,6 @@ per-Actor input schemas.
 | `tool_apify.max_items` | `integer` | **Max Items**<br/>Upper cap on items returned per call (agent requests are clamped to this). | `100` |
 | `tool_apify.run_timeout_secs` | `integer` | **Run Timeout (seconds)**<br/>Max seconds an Actor run may take before it is stopped. | `120` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_apify.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `run_actor(self, args)` | Run an Actor and return its dataset items. |
-| `get_dataset_items(self, args)` | Read items from an existing dataset. |
-
 ## Dependencies
 
 - `apify-client` `>=3,<4`

@@ -110,30 +110,6 @@ engine.
 | `tool_tavily.searchDepth` | `string` | **Search Depth**<br/>Tavily search depth | `"advanced"` |
 | `tool_tavily.topic` | `string` | **Topic**<br/>Search topic category | `"general"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_tavily.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Node instance exposing Tavily web search as an agent tool.
-
-| Method | Description |
-|---|---|
-| `tavily(self, args)` | Search the web using the Tavily API. |
-
 ## Dependencies
 
 - `requests`

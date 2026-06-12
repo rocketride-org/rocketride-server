@@ -131,53 +131,6 @@ the number of entities in the collection.
 | `vector.local.host` |  |  | `"localhost"` |
 | `vector.local.port` |  |  | `19530` |
 
-## Classes
-
-### `milvus.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-| Method | Description |
-|---|---|
-| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Retrieve document groups matching a given filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | Retrieve unique parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the document store using batched bulk upsert. |
-| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Given an object id, render the complete document. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-Global interface for the Milvus node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Milvus configuration at save-time with a minimal probe. |
-| `beginGlobal(self)` | Initialize global resources for the Milvus node. |
-| `endGlobal(self)` | Release global resources for the Milvus node. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
-| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `environs`

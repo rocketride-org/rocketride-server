@@ -136,24 +136,6 @@ verify the AWS region first.
 | `model` | `string` | **Model**<br/>Bedrock LLM model name or ARN for custom or provisioned models |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Amazon Bedrock config at save-time using a minimal API probe. |
-| `beginGlobal(self)` | Initialize global filter state by loading deps and creating a Chat instance. |
-| `endGlobal(self)` | Clean up global filter state by clearing the chat instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `langchain-aws`

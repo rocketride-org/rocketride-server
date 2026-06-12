@@ -98,26 +98,6 @@ Local profiles (vLLM / SGLang / MLX / Ollama) have no `apikey` field; local Open
 | `model` | `string` | **Model**<br/>MiniMax model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the MiniMax LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the MiniMax cloud configuration at save time. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

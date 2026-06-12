@@ -71,26 +71,6 @@ If no API key is configured (typical for self-hosted OpenAI-compatible endpoints
 | `kimi.profile` | `string` | **Model**<br/>Kimi (Moonshot) LLM model | `"kimi-k2-6"` |
 | `model` | `string` | **Model**<br/>Kimi (Moonshot) model |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the Kimi (Moonshot) LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate only cloud Kimi (Moonshot) models (API-based) at save time. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

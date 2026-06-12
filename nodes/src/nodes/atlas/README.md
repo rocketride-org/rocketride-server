@@ -68,53 +68,6 @@ Documents can be marked deleted or active in place via `meta.isDeleted`. Filters
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io |  |
 | `vector.database` |  |  | `"rocketride_db"` |
 
-## Classes
-
-### `atlas.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-MongoDB Atlas Vector Store implementation.
-
-| Method | Description |
-|---|---|
-| `count_documents(self) -> int` | Return the number of documents in the store. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform keyword search using MongoDB text search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Perform semantic search using Atlas Vector Search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Get documents matching the filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | Get unique parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the store. |
-| `remove(self, objectIds: List[str]) -> None` | Remove documents by object IDs. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark documents as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark documents as active (not deleted). |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render complete document by combining all chunks. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `validateConfig(self)` | Validate MongoDB config at save-time with optional connection testing. |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, perform a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the document store. |
-| `renderObject(self, object: Entry)` | Output the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `pymongo`

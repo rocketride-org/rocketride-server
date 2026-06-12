@@ -78,30 +78,6 @@ request header.
 | `tool_exa_search.searchType` | `string` | **Search Type**<br/>Type of search to perform | `"auto"` |
 | `tool_exa_search.useAutoprompt` | `boolean` | **Use Autoprompt**<br/>Let Exa optimize the query for better results | `true` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_exa_search.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Node instance exposing Exa semantic web search as an agent tool.
-
-| Method | Description |
-|---|---|
-| `exa_search(self, args)` | Search the web using Exa semantic search. |
-
 ## Dependencies
 
 - `requests`

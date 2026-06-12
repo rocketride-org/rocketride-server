@@ -105,24 +105,6 @@ Rate-limit and connection errors are classified as retryable by the shared chat 
 | `qwen.profile` | `string` | **Model**<br/>Qwen AI model selection | `"qwen-flash"` |
 | `qwen.region` | `string` | **Region**<br/>DashScope regional endpoint. API keys are not interchangeable between regions. | `"us"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the configuration for Qwen LLM node. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

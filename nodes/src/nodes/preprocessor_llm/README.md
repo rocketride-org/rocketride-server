@@ -74,32 +74,6 @@ Chunks whose content is empty after trimming are dropped and never emitted.
 | `preprocessor_llm.numberOfTokens` | `number` | **Number of tokens per document chunk. Needs to match your embedding model.** | `384` |
 | `preprocessor_llm.profile` | `string` |  | `"default"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global configuration class for AI processing tasks.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Initialize global configuration and dependencies. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Instance class for document chunking and processing.
-
-| Method | Description |
-|---|---|
-| `beginInstance(self) -> None` | Begin the instance for processing. |
-| `open(self, object: Entry)` | Initialize the instance for a new object. |
-| `writeText(self, text: str)` | Add the text to the accumulator so we can chunk a document. |
-| `writeTable(self, text: str)` | Add the table to the accumulator so we can chunk a document. |
-| `closing(self)` | Process the accumulated text and extract chunks. |
-
 ## Dependencies
 
 - `langchain`

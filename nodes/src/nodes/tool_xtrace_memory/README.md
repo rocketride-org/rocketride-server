@@ -150,33 +150,6 @@ use node config (encrypted at rest) or env vars.
 | `xtrace_memory.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). Can be passed by the agent per call. | `""` |
 | `xtrace_memory.wait` | `boolean` | **Synchronous ingest**<br/>When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background. | `true` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for xtrace_memory.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Node instance exposing xTrace Memory as agent tools.
-
-| Method | Description |
-|---|---|
-| `beginInstance(self) -> None` |  |
-| `open(self, _obj: Any) -> None` | Anchor a fresh conversation id per client session (no store wipe). |
-| `remember(self, args)` | Ingest conversation turns into xTrace memory. |
-| `recall(self, args)` | Search xTrace memory and return relevant context. |
-
 ## Dependencies
 
 - `requests`

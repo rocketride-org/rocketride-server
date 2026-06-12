@@ -96,30 +96,6 @@ The node maps common API failures to clear messages:
 | `vision.prompt` | `string` | **Analysis Prompt**<br/>Describe what you want to analyze or extract from the image |  |
 | `vision.systemPrompt` | `string` | **System Instructions**<br/>Define the model's role and behavior for image analysis |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global lifecycle handler for the Ollama Vision node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-Instance handler for the Ollama Vision node.
-
-| Method | Description |
-|---|---|
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-| `writeDocuments(self, documents: list[Doc])` | Process incoming image documents and emit vision model responses as text documents. |
-
 ## Dependencies
 
 - `langchain-openai`

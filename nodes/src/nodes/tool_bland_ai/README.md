@@ -104,28 +104,6 @@ invocation reports that the driver is not initialized.
 | `bland_ai.serverName` | `string` | **Server name**<br/>Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call | `"bland"` |
 | `bland_ai.voice` | `string` | **Default Voice**<br/>Default AI voice for calls | `"June"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_bland_ai.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `invoke(self, param: Any) -> Any` |  |
-
 ## Dependencies
 
 - `requests`

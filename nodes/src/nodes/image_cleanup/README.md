@@ -38,25 +38,6 @@ No configuration fields. Drop the node into the pipeline between an image source
 
 _No configuration fields._
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-
 ## Dependencies
 
 - `pillow`

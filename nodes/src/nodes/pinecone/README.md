@@ -117,52 +117,6 @@ Set `apikey` to your Pinecone API key. The key is used during both config valida
 | `pinecone.provider` | `string` |  | const: `"pinecone"` |
 | `pinecone.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide. | `"pinecone"` |
 
-## Classes
-
-### `pinecone.py`
-
-#### class `Store` (bases: `DocumentStoreBase`)
-
-| Method | Description |
-|---|---|
-| `count_documents(self) -> int` | Return the number of vectors in the document store, not the number of documents themselves. |
-| `searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Keyword search. |
-| `searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]` | Semantic search. |
-| `get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]` | Given a filter, return the document groups matching the filter. |
-| `getPaths(self, parent: str \| None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]` | Query and return all the unique parent paths. |
-| `addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None` | Add document chunks to the document store. |
-| `updateRecords(self, objectIds: List[str], metadataUpdates: Dict[str, Any] = None, isDeleteOperation: bool = False) -> None` | Collect the ids of records in a list of objectIds to update or delete the records. |
-| `remove(self, objectIds: List[str]) -> None` | Delete all documents with a matching objectIds from the document store. |
-| `markDeleted(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as deleted. |
-| `markActive(self, objectIds: List[str]) -> None` | Mark the set of documents with the given objectId as active. |
-| `render(self, objectId: str, callback: Callable[[str], None]) -> None` | Render the complete document. |
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalTransform`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialize Pinecone store connection and set up global resources. |
-| `validateConfig(self)` | Validate the configuration for Pinecone vector store. |
-| `endGlobal(self)` | Clean up global resources and release Pinecone store connection. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `VectorStoreToolMixin, IInstanceTransform`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Take a question, performs a search, and writes the results as documents. |
-| `writeDocuments(self, documents: List[Doc])` | Take a list of documents and adds them to the vector store. |
-| `renderObject(self, object: Entry)` | Output all the document text to the writeText lane. |
-
-### `IEndpoint.py`
-
-#### class `IEndpoint` (bases: `IEndpointTransform`)
-
-_No public methods._
-
 ## Dependencies
 
 - `pinecone`

@@ -100,23 +100,6 @@ Pick a profile from the dropdown; the profile pre-fills `model`, `serverbase`, a
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `ollama.profile` | `string` | **Model**<br/>LLM model | `"llama3_3"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `langchain-openai`

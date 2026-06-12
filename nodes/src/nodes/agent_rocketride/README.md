@@ -180,30 +180,6 @@ in the requested style.
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent's planning and responses. |  |
 | `max_waves` | `integer` | **Max Waves**<br/>Maximum number of planning iterations before the synthesis fallback fires. | `10` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Per-pipe global state for the RocketRide Wave agent node.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Create the :class:`RocketRideDriver` that powers the agent loop. |
-| `endGlobal(self) -> None` | Release the agent driver when the pipe closes. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Pipeline instance for the RocketRide Wave agent node.
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question) -> None` | Entry point for the questions lane — runs the wave agent loop. |
-| `run_agent(self, input_obj: Any) -> Any` | Invoke this agent as a tool from a parent agent. |
-
 ## Dependencies
 
 - `jmespath`

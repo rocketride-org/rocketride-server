@@ -95,26 +95,6 @@ unauthorized" both at save-time validation and at runtime.
 | `modelOutputTokens` | `number` | **Output Tokens**<br/>Maximum generated tokens |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the Baidu Qianfan LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the configured Qianfan OpenAI-compatible endpoint at save time. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`

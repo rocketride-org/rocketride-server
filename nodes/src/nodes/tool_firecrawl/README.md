@@ -84,29 +84,6 @@ The key is passed directly to `FirecrawlApp` — no other credentials are needed
 |---|---|---|---|
 | `tool_firecrawl.apikey` | `string` | **API Key**<br/>Firecrawl API key | `""` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_firecrawl.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` |  |
-| `validateConfig(self) -> None` |  |
-| `endGlobal(self) -> None` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `scrape_url(self, args)` | Scrape a single web page. |
-| `map_url(self, args)` | Map a website's URL structure. |
-
 ## Dependencies
 
 - `firecrawl-py`

@@ -153,49 +153,6 @@ The `_IMG2TABLE_V2` flag is set at import time and gates each code path. `extern
 | `ocr.script_family` | `string` | **Script Family**<br/>Select the script family for OCR. This determines which languages are loaded for text recognition. Only applies to EasyOCR engine. | `"latin"` |
 | `ocr.table_engine` | `string` | **Table OCR Engine**<br/>Select the OCR engine used for table text extraction. DocTR is optimized for document tables. EasyOCR and Surya are general-purpose alternatives. | `"doctr"` |
 
-## Classes
-
-### `ocr.py`
-
-#### class `Reader` (bases: `ReaderBase`)
-
-OCR Reader using model server wrappers.
-
-| Method | Description |
-|---|---|
-| `read(self, image_data) -> str` | Read text from an image. |
-
-### `IGlobal.py`
-
-#### class `ModelServerOCR` (bases: `OCRInstance`)
-
-Custom OCR adapter that routes img2table OCR requests to the model server.
-
-| Method | Description |
-|---|---|
-| `ocr(self)` | Lazy-load the OCR engine from model server (or local fallback). |
-| `content(self, document) -> List[List[Tuple]]` | Perform OCR on all images in the document. |
-| `of(self, document) -> Any` | Entry point called by img2table to run OCR on a document. |
-| `to_ocr_dataframe(self, content: List[List]) -> Any` | Convert OCR content to OCRDataframe. |
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` |  |
-| `extract_tables_from_image(self, image_data: bytes, table_callback=None)` | Extract tables from image bytes using img2table and invoke a callback for each table. |
-| `writeImage(self, action: int, mimeType: str, buffer: bytes)` |  |
-| `writeDocuments(self, documents: List[Doc])` |  |
-
 ## Dependencies
 
 - `img2table`

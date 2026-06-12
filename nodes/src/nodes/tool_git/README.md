@@ -210,51 +210,6 @@ pytest nodes/test/tool_git/test_tools.py -v
 | `git.token` | `string` | **Token / Password**<br/>Personal access token or password for HTTPS authentication. Leave empty when using SSH. | `""` |
 | `git.username` | `string` | **Username**<br/>Git username for token-based HTTPS authentication. | `""` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global state for tool_git.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self) -> None` | Initialise the GitRepo instance; clone remote URL or open local path if configured. |
-| `validateConfig(self) -> None` | Emit warnings for invalid authType, missing credentials, or a non-existent local repoPath. |
-| `endGlobal(self) -> None` | Release the repo reference and delete any auto-cloned temp directory. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-RocketRide tool node that exposes git operations to an AI agent via pygit2.
-
-| Method | Description |
-|---|---|
-| `clone(self, args: Dict[str, Any]) -> Any` | Clone a remote repository. |
-| `init(self, args: Dict[str, Any]) -> Any` | Initialise a new empty repository. |
-| `status(self, args: Dict[str, Any]) -> Any` | Working-tree status. |
-| `log(self, args: Dict[str, Any]) -> Any` | Commit history with optional filters. |
-| `show(self, args: Dict[str, Any]) -> Any` | Show full commit details. |
-| `diff(self, args: Dict[str, Any]) -> Any` | Unified diff. |
-| `blame(self, args: Dict[str, Any]) -> Any` | Per-line blame. |
-| `file_at(self, args: Dict[str, Any]) -> Any` | File content at a specific ref. |
-| `write_file(self, args: Dict[str, Any]) -> Any` | Write text content to a file in the working tree. |
-| `stage(self, args: Dict[str, Any]) -> Any` | Stage files for the next commit. |
-| `commit(self, args: Dict[str, Any]) -> Any` | Create a commit from the staged index. |
-| `stash(self, args: Dict[str, Any]) -> Any` | Manage stash entries (push/pop/list/drop). |
-| `branch_list(self, args: Dict[str, Any]) -> Any` | List branches. |
-| `branch_create(self, args: Dict[str, Any]) -> Any` | Create a new branch. |
-| `checkout(self, args: Dict[str, Any]) -> Any` | Check out an existing branch. |
-| `branch_delete(self, args: Dict[str, Any]) -> Any` | Delete a branch. |
-| `merge(self, args: Dict[str, Any]) -> Any` | Merge a branch into the current branch. |
-| `fetch(self, args: Dict[str, Any]) -> Any` | Fetch from a remote. |
-| `pull(self, args: Dict[str, Any]) -> Any` | Fetch then fast-forward merge. |
-| `push(self, args: Dict[str, Any]) -> Any` | Push to a remote. |
-| `grep(self, args: Dict[str, Any]) -> Any` | Regex search across tracked files. |
-| `ls_files(self, args: Dict[str, Any]) -> Any` | List tracked files. |
-
 ## Dependencies
 
 - `pygit2` `>=1.19.2`

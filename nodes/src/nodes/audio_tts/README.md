@@ -77,31 +77,6 @@ If misaki/spaCy initialization fails (for example `Exception: 1` or a missing `w
 | `audio_tts.kokoro_voice` | `string` | **Voice**<br/>Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.). | `"af_heart"` |
 | `audio_tts.profile` | `string` | **TTS profile** | `"kokoro"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Kokoro-only TTS node global state.
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` | Initialise local pipeline or remote client from the node configuration. |
-| `synthesize(self, text: str) -> Dict[str, Any]` | Synthesise ``text`` to a temporary WAV file and return its path. |
-| `endGlobal(self)` | Release the local pipeline and disconnect the remote client, if any. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeDocuments(self, documents)` |  |
-| `writeQuestions(self, question)` |  |
-| `writeAnswers(self, answer)` |  |
-| `writeText(self, text: str)` |  |
-
 ## Dependencies
 
 - `numpy`

@@ -118,24 +118,6 @@ collapsed to a single line.
 | `model` | `string` | **Model**<br/>Anthropic model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Save-time validation for Anthropic. |
-| `beginGlobal(self)` | Initialize the global filter state by loading dependencies and creating a Chat instance. |
-| `endGlobal(self)` | Clean up global filter state by clearing the chat instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `langchain-anthropic`

@@ -89,24 +89,6 @@ The key is also checked at save time with a minimal probe request, so invalid ke
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `xai.profile` | `string` | **Model**<br/>LLM model | `"grok-3"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Save-time validation for xAI using a minimal probe. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `langchain-xai`

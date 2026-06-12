@@ -126,26 +126,6 @@ with a mocked `google.genai`, so no real API key is required. Set `ROCKETRIDE_MO
 | `gemini.outputTokens` | `number` | **Output Tokens**<br/>Maximum number of output tokens |  |
 | `gemini.profile` | `string` | **Model**<br/>Gemini LLM model | `"gemini-3_1-pro-preview"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global interface for Gemini LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate Gemini configuration at save-time using a minimal API probe. |
-| `beginGlobal(self)` | Initialize the global chat instance. |
-| `endGlobal(self)` | Clean up the global chat instance. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `google-genai`

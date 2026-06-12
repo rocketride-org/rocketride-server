@@ -87,33 +87,6 @@ Defaults to English (`en`). Change the `language` config value to transcribe oth
 | `transcribe.silence_threshold` | `number` | **Silence Threshold**<br/>The silence threshold to detect silence in speech (in seconds) | `0.25` |
 | `transcribe.vad_level` | `number` | **VAD Level**<br/>The VAD level to use for silence detection (0-3) | `1` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global configuration and setup for transcription using the model server.
-
-| Method | Description |
-|---|---|
-| `transcribe(self, audio: Any) -> List[SimpleNamespace]` | Transcribe the given audio using the Whisper model. |
-| `beginGlobal(self)` | Initialize the global state. |
-| `endGlobal(self)` | Clean up global state. |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-Instance class responsible for handling audio input and delegating transcription.
-
-| Method | Description |
-|---|---|
-| `beginInstance(self)` | Initialize the instance-level transcription pipeline. |
-| `open(self, object: Entry)` | Open the instance with the provided object. |
-| `writeAudio(self, action: int, mimeType: str, buffer: bytes)` |  |
-| `writeVideo(self, action: int, mimeType: str, buffer: bytes)` |  |
-
 ## Dependencies
 
 - `faster-whisper`

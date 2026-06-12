@@ -93,26 +93,6 @@ Cohere API errors are mapped to a custom exception hierarchy whose class names l
 | `rerank_cohere.profile` | `string` | **Model**<br/>Rerank model | `"rerank-english-v3.0"` |
 | `top_n` | `number` | **Top N**<br/>Number of top results to return |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate the configuration for the Cohere Rerank node. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `writeQuestions(self, question: Question)` | Receive a question with retrieved documents and rerank them by relevance. |
-
 ## Dependencies
 
 - `cohere` `>=6.1.0,<7.0.0`

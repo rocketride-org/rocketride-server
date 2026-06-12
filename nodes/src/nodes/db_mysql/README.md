@@ -114,24 +114,6 @@ This is off by default. Leave it off unless a trusted application explicitly nee
 | `mysql.table` | `string` | **Table name**<br/>Name of table | `"table"` |
 | `mysql.user` | `string` | **User**<br/>User to connect to the MySQL server | `"root"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `DatabaseGlobalBase`)
-
-MySQL-specific global state.
-
-_No public methods._
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `DatabaseInstanceBase`)
-
-MySQL-specific instance.
-
-_No public methods._
-
 ## Dependencies
 
 - `pymysql` `==1.2.0`

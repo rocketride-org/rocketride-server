@@ -116,24 +116,6 @@ Unlike the MySQL/PostgreSQL nodes, this node intentionally does not expose the i
 | `clickhouse.tls` | `boolean` | **Use TLS**<br/>Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific — MySQL/PostgreSQL nodes do not expose this. | `false` |
 | `clickhouse.user` | `string` | **User**<br/>User to connect to the ClickHouse server | `"default"` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `DatabaseGlobalBase`)
-
-ClickHouse-specific global state.
-
-_No public methods._
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `DatabaseInstanceBase`)
-
-ClickHouse-specific instance.
-
-_No public methods._
-
 ## Dependencies
 
 - `clickhouse-sqlalchemy` `==0.3.2`

@@ -165,49 +165,11 @@ function schemaBlock(dir) {
 	return ['## Schema', '', serviceBlocks.join('\n\n')].join('\n');
 }
 
-function classesBlock(dir) {
-	try {
-		const python = process.platform === 'win32' ? 'python' : 'python3';
-		const scriptPath = path.join(HERE, 'extract_node_api.py');
-		const apiJsonStr = execFileSync(python, [scriptPath, dir], { encoding: 'utf8' });
-		const apiData = JSON.parse(apiJsonStr);
-		if (!apiData.files || !apiData.files.length) return '';
-		
-		const lines = ['## Classes', ''];
-		for (const f of apiData.files) {
-			lines.push(`### \`${f.file}\``, '');
-			for (const cls of f.classes) {
-				const basesStr = cls.bases.length ? ` (bases: \`${cls.bases.join(', ')}\`)` : '';
-				lines.push(`#### class \`${cls.name}\`${basesStr}`, '');
-				if (cls.summary) {
-					lines.push(cls.summary, '');
-				}
-				if (cls.methods && cls.methods.length) {
-					lines.push('| Method | Description |', '|---|---|');
-					for (const m of cls.methods) {
-						lines.push(`| \`${esc(m.signature)}\` | ${esc(m.summary)} |`);
-					}
-					lines.push('');
-				} else {
-					lines.push('_No public methods._', '');
-				}
-			}
-		}
-		return lines.join('\n').trim();
-	} catch (e) {
-		console.error(`Error running extract_node_api.py on ${dir}:`, e);
-		return '';
-	}
-}
-
 function generateBlock(dir, name) {
 	const parts = [];
 	
 	const schema = schemaBlock(dir);
 	if (schema) parts.push(schema);
-	
-	const classes = classesBlock(dir);
-	if (classes) parts.push(classes);
 	
 	const deps = dependenciesBlock(dir);
 	if (deps) parts.push(deps);

@@ -120,28 +120,6 @@ This guarantees no emitted chunk exceeds the model's context budget even without
 | `langchain.splitter.strlen` | `number` | **String length** | `512` |
 | `langchain.splitter.tokens` | `number` | **Number of tokens** | `512` |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-| Method | Description |
-|---|---|
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `IInstanceBase`)
-
-| Method | Description |
-|---|---|
-| `open(self, object: Entry)` |  |
-| `writeTable(self, table: str)` |  |
-| `writeText(self, text: str)` |  |
-| `closing(self)` |  |
-
 ## Dependencies
 
 - `langchain`

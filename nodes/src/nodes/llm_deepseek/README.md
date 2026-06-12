@@ -132,26 +132,6 @@ if misconfigured.
 | `deepseek.profile` | `string` | **Model**<br/>Deepseek LLM model | `"cloud-reasoner"` |
 | `model` | `string` | **Model**<br/>Deepseek model |  |
 
-## Classes
-
-### `IGlobal.py`
-
-#### class `IGlobal` (bases: `IGlobalBase`)
-
-Global handler for the DeepSeek LLM node.
-
-| Method | Description |
-|---|---|
-| `validateConfig(self)` | Validate only cloud DeepSeek models (API-based) at save time. |
-| `beginGlobal(self)` |  |
-| `endGlobal(self)` |  |
-
-### `IInstance.py`
-
-#### class `IInstance` (bases: `LLMBase`)
-
-_No public methods._
-
 ## Dependencies
 
 - `openai`
