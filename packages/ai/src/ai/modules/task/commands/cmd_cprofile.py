@@ -157,6 +157,7 @@ class CProfileCommands(DAPConn):
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
         - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "tk_abc", "session": "test" } }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -187,6 +188,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_stop" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -215,6 +217,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_status" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -243,6 +246,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -274,6 +278,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report_tree", "arguments": { "max_depth": 30, "min_pct": 0.5 } }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
