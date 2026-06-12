@@ -331,6 +331,9 @@ body {
 }
 
 .markdown table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
 	border-radius: 12px;
 	overflow: hidden;
 	border: 1px solid var(--rr-panel-border);
