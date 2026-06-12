@@ -445,6 +445,7 @@ def _request_with_retry(
     """
 
     def _is_retryable(exc: BaseException) -> bool:
+        """Return True when the failed attempt is safe to retry under this policy."""
         if isinstance(exc, requests.exceptions.Timeout):
             return idempotent
         if isinstance(exc, requests.exceptions.HTTPError):
@@ -453,6 +454,7 @@ def _request_with_retry(
         return False
 
     def _attempt() -> Any:
+        """Perform one HTTP request and return the parsed JSON body."""
         resp = requests.request(method, url, headers=headers, json=payload, params=params, timeout=timeout)
         resp.raise_for_status()
         return resp.json() if resp.content else {}
@@ -468,5 +470,3 @@ def _request_with_retry(
         status = getattr(getattr(exc, 'response', None), 'status_code', None)
         detail = f' (HTTP {status})' if status else ''
         raise RuntimeError(f'mem0: request failed{detail}: {type(exc).__name__}') from None
-
-    raise RuntimeError('mem0: max retries exceeded')

@@ -38,7 +38,10 @@ _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 't
 
 
 def _tool_function(**_meta):
+    """Stub @tool_function decorator that records metadata and returns the function."""
+
     def wrap(fn):
+        """Attach tool metadata to the wrapped function and return it."""
         fn.__tool_meta__ = _meta
         return fn
 
@@ -46,6 +49,7 @@ def _tool_function(**_meta):
 
 
 def _ensure_rocketlib() -> None:
+    """Install a minimal rocketlib stub so the node imports without the engine."""
     mod = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
     if not hasattr(mod, 'IInstanceBase'):
         mod.IInstanceBase = type('IInstanceBase', (), {})
@@ -62,6 +66,7 @@ def _ensure_rocketlib() -> None:
 
 
 def _passthrough(args, tool_name=None):
+    """Identity stand-in for normalize_tool_input (returns dict args unchanged)."""
     return args if isinstance(args, dict) else {}
 
 
@@ -75,8 +80,11 @@ def _ensure_ai_common() -> None:
     if not hasattr(sys.modules['ai.common.config'], 'Config'):
 
         class _Config:
+            """Minimal Config stub returning an empty node config."""
+
             @staticmethod
             def getNodeConfig(*_a, **_k):
+                """Return an empty config dict."""
                 return {}
 
         sys.modules['ai.common.config'].Config = _Config
@@ -110,6 +118,7 @@ def _ensure_tenacity() -> None:
 
 
 def _ensure_pkg() -> None:
+    """Register a tool_mem0 package pointing at the node source directory."""
     if 'tool_mem0' not in sys.modules:
         pkg = types.ModuleType('tool_mem0')
         pkg.__path__ = [str(_NODE_DIR)]
@@ -149,6 +158,7 @@ def _pin_normalizer(monkeypatch):
 
 
 def _make_global(**overrides):
+    """Build an IGlobal preset with test credentials, scope, and wait settings."""
     glb = IGlobal()
     glb.api_key = 'm0_test'
     glb.base_url = 'https://api.mem0.ai'
@@ -171,6 +181,7 @@ def captured(monkeypatch):
     state = {'calls': [], 'add': {}, 'event': {}, 'search': []}
 
     def fake_request(method, url, headers, *, payload=None, params=None, **kw):
+        """Record the request and return the canned response routed by URL."""
         state['calls'].append(
             {
                 'method': method,
@@ -192,6 +203,7 @@ def captured(monkeypatch):
 
 
 def _instance(glb):
+    """Construct an IInstance bound to the given IGlobal."""
     inst = IInstance()
     inst.IGlobal = glb
     return inst
@@ -203,6 +215,7 @@ def _instance(glb):
 
 
 def test_coerce_messages_variants():
+    """Messages array, content fallback, and role-default normalization."""
     assert _coerce_messages([{'role': 'user', 'content': 'hi'}], None, None) == [{'role': 'user', 'content': 'hi'}]
     assert _coerce_messages(None, 'I am vegetarian', None) == [{'role': 'user', 'content': 'I am vegetarian'}]
     assert _coerce_messages(None, 'noted', 'assistant') == [{'role': 'assistant', 'content': 'noted'}]
@@ -211,6 +224,7 @@ def test_coerce_messages_variants():
 
 
 def test_event_id_of_variants():
+    """Event id parsed from top-level or results-wrapped responses."""
     assert _event_id_of({'event_id': 'e2'}) == 'e2'
     assert _event_id_of({'results': [{'event_id': 'e1', 'status': 'PENDING'}]}) == 'e1'
     assert _event_id_of({'results': []}) == ''
@@ -218,6 +232,7 @@ def test_event_id_of_variants():
 
 
 def test_shape_add_variants():
+    """Terminal SUCCEEDED/FAILED, queued, and synchronous add shapes."""
     # Terminal event payload from _await_event -> succeeded with created memories.
     done = _shape_add({'status': 'SUCCEEDED', 'results': [{'id': 'm1', 'memory': 'x'}]}, 'evt_1')
     assert done == {
@@ -241,6 +256,7 @@ def test_shape_add_variants():
 
 
 def test_shape_results_variants():
+    """Row shaping incl. memory/text fallback and a bare list."""
     rows = _shape_results(
         [
             {'id': 'm1', 'memory': 'User is vegetarian', 'score': 0.91, 'categories': ['food']},
@@ -265,6 +281,7 @@ def test_shape_results_variants():
 
 
 def test_remember_waits_for_event_then_returns_created(captured):
+    """Remember polls the event to terminal and returns the created memories."""
     # add() returns a queued receipt; the node polls the event to a terminal state.
     captured['add'] = {'results': [{'event_id': 'evt_1', 'status': 'PENDING', 'message': 'queued'}]}
     captured['event'] = {'status': 'SUCCEEDED', 'results': [{'id': 'm1', 'memory': 'User is vegetarian'}]}
@@ -300,6 +317,7 @@ def test_remember_waits_for_event_then_returns_created(captured):
 
 
 def test_remember_wait_off_returns_queued(captured):
+    """With wait off, remember returns the queued receipt without polling."""
     captured['add'] = {'results': [{'event_id': 'evt_9', 'status': 'PENDING', 'message': 'queued'}]}
     inst = _instance(_make_global(wait=False))
 
@@ -314,6 +332,7 @@ def test_remember_wait_off_returns_queued(captured):
 
 
 def test_remember_requires_scope(captured):
+    """Remember errors (no HTTP call) when no scope is set."""
     inst = _instance(_make_global(user_id=''))
     out = inst.remember({'content': 'hello'})
     assert out['success'] is False
@@ -322,6 +341,7 @@ def test_remember_requires_scope(captured):
 
 
 def test_remember_requires_content(captured):
+    """Remember errors (no HTTP call) when no messages/content given."""
     inst = _instance(_make_global())
     out = inst.remember({})
     assert out['success'] is False
@@ -334,6 +354,7 @@ def test_remember_requires_content(captured):
 
 
 def test_recall_builds_body_and_shapes_bare_list(captured):
+    """Recall posts top-level ids + top_k and shapes a bare-list response."""
     # mem0 search returns a bare list — _shape_results must tolerate it.
     captured['search'] = [
         {'id': 'm1', 'memory': 'User is vegetarian', 'score': 0.91, 'categories': ['food']},
@@ -358,6 +379,7 @@ def test_recall_builds_body_and_shapes_bare_list(captured):
 
 
 def test_recall_run_id_from_args_passed_top_level(captured):
+    """per-call run_id is added top-level to the search body."""
     captured['search'] = []
     inst = _instance(_make_global())
     out = inst.recall({'query': 'trip', 'run_id': 'run_x'})
@@ -369,6 +391,7 @@ def test_recall_run_id_from_args_passed_top_level(captured):
 
 
 def test_recall_requires_query(captured):
+    """Recall errors (no HTTP call) on an empty query."""
     inst = _instance(_make_global())
     out = inst.recall({'query': '   '})
     assert out['success'] is False
@@ -376,6 +399,7 @@ def test_recall_requires_query(captured):
 
 
 def test_recall_requires_scope(captured):
+    """Recall errors (no HTTP call) when no scope is set."""
     inst = _instance(_make_global(user_id='', agent_id='', run_id='', app_id=''))
     out = inst.recall({'query': 'anything'})
     assert out['success'] is False

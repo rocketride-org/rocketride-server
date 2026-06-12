@@ -41,6 +41,7 @@ class IGlobal(IGlobalBase):
     ingest_timeout: int = _DEFAULT_INGEST_TIMEOUT
 
     def beginGlobal(self) -> None:
+        """Load and validate Mem0 connection config and default scope (once per pipe)."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -73,6 +74,7 @@ class IGlobal(IGlobalBase):
         )
 
     def validateConfig(self) -> None:
+        """Warn (without raising) when required config such as the API key is missing."""
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             api_key = str(cfg.get('api_key') or os.environ.get('MEM0_API_KEY', '')).strip()
@@ -82,4 +84,5 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
+        """Clear the cached API key when the pipe tears down."""
         self.api_key = ''
