@@ -65,6 +65,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 ## Features
 
 - **Pipeline execution** - Start with `use()`, send data via `send()`, `send_files()`, or `pipe()`
+- **Deployments** - Persist pipelines server-side and run them on a cron schedule via `client.deploy`
 - **Chat** - Conversational AI via `chat()` and `Question`
 - **Event streaming** - Real-time events via `on_event` and `set_events()`
 - **File upload** - `send_files()` with progress; streaming with `pipe()`
@@ -242,6 +243,30 @@ result = await pipe.close()
 
 **How it works:** The client opens a pipe with the question MIME type, writes the serialized `Question`, closes the pipe, and returns the server result. The pipeline must support the chat provider.
 
+### Deploy
+
+Accessed via `client.deploy`. A deployment persists a pipeline on the server and runs it on a cron schedule (or on demand with `"manual"`), outliving the client connection. Each deployment is identified by its pipeline's `project_id`.
+
+| Method          | Signature                                                                                                          | Returns                  | Description                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `deploy.add`    | `async def add(self, pipeline: PipelineConfig, *, schedule: str \| None = None) -> DeploymentRecord`               | `DeploymentRecord`       | Persists the pipeline as a deployment and activates it. `schedule`: 5-field cron (`"*/15 * * * *"`), preset (`@hourly`, `@daily`, …), or `"manual"` (default). |
+| `deploy.remove` | `async def remove(self, project_id: str) -> None`                                                                  | -                        | Undeploys and removes the deployment.                                                                                        |
+| `deploy.list`   | `async def list(self) -> list[DeploymentRecord]`                                                                   | `list[DeploymentRecord]` | Returns the authenticated user's deployments.                                                                                |
+| `deploy.status` | `async def status(self, project_id: str) -> DeploymentRecord`                                                      | `DeploymentRecord`       | Gets one deployment record.                                                                                                  |
+| `deploy.update` | `async def update(self, project_id: str, *, pipeline: PipelineConfig \| None = None, schedule: str \| None = None) -> None` | -                        | Replaces the pipeline and/or schedule; omitted parameters stay unchanged.                                                    |
+
+**States:** `state` is `'active'` (scheduled runs fire per cron), `'paused'`, or `'errored'` — scheduled runs could no longer authenticate (e.g. the owner's API key was revoked) and have stopped; remove and re-add the deployment to resume. If a scheduled run is still in progress when the next tick comes due, that tick is skipped — runs of the same deployment never overlap.
+
+**Example:**
+
+```python
+record = await client.deploy.add(my_pipeline, schedule="*/15 * * * *")
+for rec in await client.deploy.list():
+    print(rec["pipeline"]["project_id"], rec["schedule"], rec["state"])
+await client.deploy.update(project_id, schedule="manual")  # pause scheduled runs
+await client.deploy.remove(project_id)
+```
+
 ---
 
 ## DataPipe
@@ -315,6 +340,7 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 - **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
 - **DAPMessage**: Dict with `type`, `seq`, and optional `command`, `arguments`, `body`, `success`, `message`, `event`, `token`, etc.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
+- **DeploymentRecord**: TypedDict with `pipeline`, `schedule`, `state` (`'active' | 'paused' | 'errored'`), `userId`, `createdAt`, `updatedAt` (Unix seconds).
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.
 - **QuestionInstruction**: `{ 'subtitle': str, 'instructions': str }`.
 - **QuestionExample**: `{ 'given': str, 'result': str }`.
