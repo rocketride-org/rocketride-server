@@ -24,7 +24,7 @@ Lets agents query a [FalkorDB](https://www.falkordb.com) graph database with Cyp
 | `params`  | no       | Values for the `$name` placeholders (injection-safe)      |
 | `graph`   | no       | Graph to query (default from config)                      |
 
-Returns `columns`, `rows` (nodes/edges serialized to objects, capped at *Max Rows* with a `truncated` flag) and, when writes are enabled, non-zero write `stats`.
+Returns `columns`, `rows` (nodes/edges serialized to objects, capped at *Max Rows* with a `truncated` flag) and, when writes are enabled, non-zero write `stats`. On a query failure all three tools return `error` instead (with empty `rows`/`columns`, `row_count: 0`, `truncated: false` for `query`).
 
 ### falkordb.list_graphs
 
