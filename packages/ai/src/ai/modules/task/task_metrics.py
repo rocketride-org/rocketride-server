@@ -482,6 +482,18 @@ class TaskMetrics:
         except Exception:
             pass
 
+        # ── Advance last-report tracking state ──────────────────────────
+        # Record current accumulator values so the next report (or any
+        # external consumer) can compute the delta accrued since this report.
+        # This runs unconditionally — even in OSS mode (no org_id) — so that
+        # internal tracking state stays consistent for tests and consumers.
+        self._last_report_cpu_seconds = self._cpu_seconds
+        self._last_report_memory_mb_seconds = self._memory_mb_seconds
+        self._last_report_gpu_memory_mb_seconds = self._gpu_memory_mb_seconds
+        self._last_report_tokens_cpu = self._status.tokens.cpu_utilization
+        self._last_report_tokens_memory = self._status.tokens.cpu_memory
+        self._last_report_tokens_gpu = self._status.tokens.gpu_memory
+
         # ── Write to ledger via account.apply_debit() ────────────────────
         # The account singleton dispatches to the SaaS implementation (UPSERT
         # into credit_ledger) or the OSS no-op depending on the active edition.

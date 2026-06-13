@@ -455,7 +455,7 @@ def test_report_to_billing_system_advances_last_report_state(fake_psutil, no_gpu
     status.tokens.gpu_memory = 5.0
     status.tokens.total = 35.0
 
-    tm._report_to_billing_system()
+    asyncio.run(tm._report_to_billing_system())
 
     # State advanced — the next report's delta starts from these.
     assert tm._last_report_cpu_seconds == 100.0
@@ -469,15 +469,20 @@ def test_report_to_billing_system_advances_last_report_state(fake_psutil, no_gpu
 def test_report_to_billing_system_handles_consecutive_reports(fake_psutil, no_gpu):
     """Second report sees only the delta accrued since the first."""
     tm, _ = _make_metrics(fake_psutil)
-    # First period
-    tm._cpu_seconds = 100.0
-    tm._report_to_billing_system()
-    assert tm._last_report_cpu_seconds == 100.0
 
-    # Second period — accumulators grew by 50
-    tm._cpu_seconds = 150.0
-    tm._report_to_billing_system()
-    assert tm._last_report_cpu_seconds == 150.0
+    async def run():
+        """Run two consecutive billing reports."""
+        # First period
+        tm._cpu_seconds = 100.0
+        await tm._report_to_billing_system()
+        assert tm._last_report_cpu_seconds == 100.0
+
+        # Second period — accumulators grew by 50
+        tm._cpu_seconds = 150.0
+        await tm._report_to_billing_system()
+        assert tm._last_report_cpu_seconds == 150.0
+
+    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------
