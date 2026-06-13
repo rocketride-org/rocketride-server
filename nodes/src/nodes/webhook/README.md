@@ -76,7 +76,7 @@ Both are generated per pipeline; there is nothing to configure on the node.
 |---|---|---|---|
 | `Pipe.source.parameters` |  |  |  |
 
-### Web Hook (`services.webhook.json`)
+### Webhook (`services.webhook.json`)
 
 _No configuration fields._
 
