@@ -168,10 +168,16 @@ def _load_iinstance():
 
 
 _mod = _load_iinstance()
-# Bind the module's `warning` reference to our stub (see tavily test rationale:
-# `from rocketlib import warning` binds at import time, so under the engine's
-# pytest runner the real logger would otherwise be used).
+# Rebind the names the v0 module imported into its own namespace at import time
+# (`from rocketlib import warning`, `from ai.common.utils import post_with_retry,
+# normalize_tool_input`). The import-time sys.modules stubs in _load_iinstance only
+# take effect when those modules weren't already imported — so when a prior test on
+# the same pytest worker imported the REAL `ai.common.utils`/`rocketlib`, the real
+# implementations leak in and `post_with_retry` makes a live network call (HTTP 401).
+# Rebinding here makes the stubbing robust regardless of import order.
 _mod.warning = _stub_warning
+_mod.post_with_retry = _stub_post_with_retry
+_mod.normalize_tool_input = lambda args, **_kw: args if isinstance(args, dict) else {}
 
 _shape_chat = _mod._shape_chat
 IInstance = _mod.IInstance
