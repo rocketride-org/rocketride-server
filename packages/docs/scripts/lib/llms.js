@@ -49,8 +49,8 @@ const OVERVIEW_INTRO = [
 	'embed text, query a vector store, parse a document, or run a tool. You wire nodes',
 	'together and the [engine](/concepts/runtime-engine) runs them.',
 	'',
-	'This page catalogs every node that ships with the toolchain, grouped by type, then',
-	'explains how a node is structured on disk and how the runtime loads and executes it.'
+	'This page explains how a node is structured on disk and how the runtime loads and',
+	'executes it, then catalogs every node that ships with the toolchain, grouped by type.'
 ].join('\n');
 
 const ANATOMY_PROSE = [
@@ -128,6 +128,8 @@ function nodeCatalogMarkdown(nodes) {
 	const ordered = [...groups.entries()].sort((a, b) => a[1].order - b[1].order || a[0].localeCompare(b[0]));
 
 	lines.push(OVERVIEW_INTRO, '');
+	lines.push(ANATOMY_PROSE, '');
+	lines.push(RUNTIME_PROSE, '');
 	lines.push('## Node types', '');
 	lines.push(`${nodes.length} nodes across ${ordered.length} types. Every node declares a`, 'class type in its manifest; the catalog below is grouped by it.', '');
 	for (const [label, group] of ordered) {
@@ -138,8 +140,6 @@ function nodeCatalogMarkdown(nodes) {
 		}
 		lines.push('');
 	}
-	lines.push(ANATOMY_PROSE, '');
-	lines.push(RUNTIME_PROSE, '');
 	return lines.join('\n');
 }
 
