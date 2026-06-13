@@ -10,7 +10,7 @@ When an agent calls the `exa_search` tool, the node runs a real-time search agai
 Exa `/search` REST API and hands back structured results: title, URL, text content,
 relevance score, published date, and author.
 
-Implemented with the **requests** library — no Exa SDK is used. Requests time out after
+Implemented with the **requests** library, no Exa SDK is used. Requests time out after
 30 seconds and are retried up to 3 times with exponential backoff (2 s base delay) on
 rate limits (HTTP 429), server errors (5xx), and timeouts. Failures are returned to the
 agent as a structured `{"success": false, "error": ...}` result rather than raised.
@@ -32,7 +32,7 @@ the `invoke` capability.
 | `includeText` | boolean | Default true. Include full text content in results |
 
 
-The config values act as defaults — the agent can override `num_results`, `type`,
+The config values act as defaults, the agent can override `num_results`, `type`,
 `use_autoprompt`, and `include_text` per call.
 
 ---
@@ -50,7 +50,7 @@ Search the web using Exa semantic search. `query` is the only required parameter
 
 
 Returns an object with `success`, `query`, `num_results`, `results` (array of
-`{title, url, score, published_date, author, text?}` — `text` only when content was
+`{title, url, score, published_date, author, text?}`, `text` only when content was
 requested and returned), and `error` on failure.
 
 ---
@@ -59,7 +59,7 @@ requested and returned), and `error` on failure.
 
 Drop your Exa API key into the **API Key** config field (grab one at https://exa.ai).
 The field is encrypted at rest and masked in the UI. Alternatively, set the
-`EXA_API_KEY` environment variable on the engine host — the config field takes
+`EXA_API_KEY` environment variable on the engine host, the config field takes
 precedence when both are set. The key is sent to the Exa API in the `x-api-key`
 request header.
 

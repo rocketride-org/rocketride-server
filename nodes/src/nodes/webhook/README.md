@@ -1,16 +1,16 @@
 # webhook
 
-A RocketRide source node that lets external input reach a pipeline over HTTP — three variants (Web Hook, Chat, and Dropper) served by a single shared implementation.
+A RocketRide source node that lets external input reach a pipeline over HTTP: three variants (Web Hook, Chat, and Dropper) served by a single shared implementation.
 
 ## What it does
 
 Stands up its own HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
 
-- **Web Hook** (`webhook://`) — a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
-- **Chat** (`chat://`) — serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
-- **Dropper** (`dropper://`) — serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
+- **Web Hook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
+- **Chat** (`chat://`): serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
+- **Dropper** (`dropper://`): serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
 
-The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`). The engine passes the bind address on the command line (`--data_host`, `--data_port`, defaulting to `localhost:5567`); the node loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline. The node keeps running until the pipeline is stopped — the source task completes only when the server exits.
+The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`). The engine passes the bind address on the command line (`--data_host`, `--data_port`, defaulting to `localhost:5567`); the node loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline. The node keeps running until the pipeline is stopped, the source task completes only when the server exits.
 
 After the pipeline starts, the Project Log displays the interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint (the chat link form is `{host}/chat?auth={public_auth}`).
 
@@ -24,15 +24,15 @@ Each variant takes the internal `_source` input and emits to its declared output
 
 | Variant  | Lane in | Lanes out                                            |
 | -------- | ------- | ---------------------------------------------------- |
-| Web Hook | —       | `tags`, `text`, `audio`, `video`, `image`, `questions` |
-| Chat     | —       | `questions`                                          |
-| Dropper  | —       | `tags`                                               |
+| Web Hook | -       | `tags`, `text`, `audio`, `video`, `image`, `questions` |
+| Chat     | -       | `questions`                                          |
+| Dropper  | -       | `tags`                                               |
 
-- **Web Hook** — data received from the HTTP request, routed by content type.
-- **Chat** — each message submitted via the chat UI becomes a question.
-- **Dropper** — each uploaded file enters the pipeline for processing.
+- **Web Hook**: data received from the HTTP request, routed by content type.
+- **Chat**: each message submitted via the chat UI becomes a question.
+- **Dropper**: each uploaded file enters the pipeline for processing.
 
-None. There are no node-specific config fields — the shape exposes only the standard source properties (`source.mode` and an empty `parameters` object), and the single `default` profile is empty. The endpoint URL, public authorization key, and private token are generated automatically when the pipeline starts.
+None. There are no node-specific config fields, the shape exposes only the standard source properties (`source.mode` and an empty `parameters` object), and the single `default` profile is empty. The endpoint URL, public authorization key, and private token are generated automatically when the pipeline starts.
 
 ---
 
@@ -52,8 +52,8 @@ When the server is up, the node emits a ready status to the monitor. Because thi
 
 Two credentials are published to the Project Log on startup:
 
-- **Public authorization key** — passed by clients reaching the public interface (e.g. the `auth` query parameter on the chat URL).
-- **Private token** — the private credential for the endpoint.
+- **Public authorization key**: passed by clients reaching the public interface (e.g. the `auth` query parameter on the chat URL).
+- **Private token**: the private credential for the endpoint.
 
 Both are generated per pipeline; there is nothing to configure on the node.
 

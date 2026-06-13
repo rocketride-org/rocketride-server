@@ -11,7 +11,7 @@ agent can run queries, list the graphs on the server, and inspect a graph's sche
 relationship types, and property keys) to discover the data model before querying.
 
 Queries are **read-only by default**: they run through `GRAPH.RO_QUERY`, so the FalkorDB server
-itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`) — the restriction is enforced
+itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`), the restriction is enforced
 server-side, not by client-side parsing. Turn on **Allow Writes** to let the agent mutate the
 graph.
 
@@ -50,7 +50,7 @@ agent's context.
 
 | Parameter | Required | Description |
 |---|---|---|
-| `cypher` | yes | Cypher query. Reference values as `$name` placeholders — never inline data into the query string. |
+| `cypher` | yes | Cypher query. Reference values as `$name` placeholders, never inline data into the query string. |
 | `params` | no | Object of values for the `$name` placeholders (injection-safe). |
 | `graph` | no | Graph to query. Defaults to the graph configured on the node. |
 
@@ -90,7 +90,7 @@ read-only path.
 docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
 ```
 
-Point the node at `localhost:6379` and ask the agent to `MATCH` away — or to `CREATE` with
+Point the node at `localhost:6379` and ask the agent to `MATCH` away, or to `CREATE` with
 **Allow Writes** turned on.
 
 ---

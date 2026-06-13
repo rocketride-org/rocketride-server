@@ -6,13 +6,13 @@ A RocketRide store node that keeps document embeddings in PostgreSQL with the pg
 
 Stores embedded document chunks in a regular PostgreSQL table with a pgvector `vector` column, then serves retrieval queries against it. Use this when you want vector storage inside an existing PostgreSQL database rather than a dedicated vector database.
 
-Uses **psycopg2** and the **pgvector** Python adapter (`register_vector`). The pgvector extension must already be installed in the target database — the node verifies this at config time by probing `SELECT NULL::vector`.
+Uses **psycopg2** and the **pgvector** Python adapter (`register_vector`). The pgvector extension must already be installed in the target database, the node verifies this at config time by probing `SELECT NULL::vector`.
 
 Key behavior to know:
 
 - **The table is created automatically** (`CREATE TABLE IF NOT EXISTS`) on first ingest, with the vector dimension taken from the incoming embeddings.
 - **Re-ingesting a document replaces it**: before inserting chunks, all existing rows with the same `objectId` are deleted, so updates do not accumulate duplicates.
-- **Documents must be embedded upstream.** Semantic search raises an error if the question carries no embedding — bind an embedding node before this one.
+- **Documents must be embedded upstream.** Semantic search raises an error if the question carries no embedding, bind an embedding node before this one.
 - **A hard minimum similarity floor of `0.20`** is applied to semantic results in addition to the configurable retrieval score; matches below it are always dropped.
 - Soft-deleted rows (`isDeleted = true`) are excluded from search results by default.
 
@@ -46,7 +46,7 @@ Key behavior to know:
 
 The table name must be a valid unquoted PostgreSQL identifier: start with a letter or
 underscore, contain only letters, digits, and underscores, and be at most 63 characters.
-Anything else — spaces, dashes, dots, quotes — is rejected at config validation and at
+Anything else (spaces, dashes, dots, quotes) is rejected at config validation and at
 startup. This is enforced deliberately, because the table name is interpolated into SQL.
 
 ### Similarity metrics and scoring
@@ -60,7 +60,7 @@ The metric selects the pgvector distance operator and how raw distance is conver
 | `l2`            | `<->`    | `1 / (1 + distance)` |
 | `inner_product` | `<#>`    | `-distance`        |
 
-The metric must match how the table was populated — switching metrics on an existing
+The metric must match how the table was populated, switching metrics on an existing
 table changes ranking semantics without re-embedding anything.
 
 ---
@@ -87,7 +87,7 @@ The auto-created table has these columns:
 
 The pgvector extension must be installed in the target PostgreSQL database before
 connecting (`CREATE EXTENSION vector;`). Config validation connects with a 3-second
-timeout, runs `SELECT 1`, and casts `NULL::vector` — a clear provider error is surfaced
+timeout, runs `SELECT 1`, and casts `NULL::vector`, a clear provider error is surfaced
 if the extension is missing or the connection fails.
 
 ---

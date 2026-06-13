@@ -7,7 +7,7 @@ This is a `tool` node, not the agent's `memory` subsystem. RocketRide's `memory`
 a single, run-scoped scratchpad (e.g. `memory_internal`, `put`/`get`/`peek`) that the agent
 uses internally and excludes from tool discovery. Mem0 is different: an external service for
 **long-term, semantic, shared** recall that the agent calls explicitly via tools. It therefore
-*complements* the required short-term memory subsystem rather than replacing it — wire both.
+*complements* the required short-term memory subsystem rather than replacing it, wire both.
 
 Anything one agent remembers can be recalled by another agent pointing at the same project and
 entity ids.
@@ -29,18 +29,18 @@ vector store doesn't give you.
 
 > This node talks to the Mem0 REST API directly with `requests` rather than the `mem0ai` SDK:
 > the SDK hard-pins `openai<1.110`, which is unsatisfiable alongside the engine's OpenAI nodes
-> (`openai>=2.38`). The REST surface is identical — the entity ids
+> (`openai>=2.38`). The REST surface is identical, the entity ids
 > (`user_id` / `agent_id` / `run_id` / `app_id`) go top-level in the JSON body for both calls.
 >
 > Mem0's `add` is **asynchronous**: it queues a background extraction job and returns an
 > `event_id`. By default `remember` then polls `GET /v1/event/{event_id}/` until the job finishes
 > (`SUCCEEDED`/`FAILED`) or `ingest_timeout` elapses, so a following `recall` can actually see the
-> new memory — a synchronous store/recall flow. Turn `wait` off to return immediately on the
+> new memory, a synchronous store/recall flow. Turn `wait` off to return immediately on the
 > `queued` receipt and let extraction run in the background.
 
 ## Wiring
 
-This is a `tool` node — wire it to an agent via `control` (class `tool`), alongside the
+This is a `tool` node: wire it to an agent via `control` (class `tool`), alongside the
 agent's required `memory` node:
 
 ```jsonc
@@ -63,10 +63,10 @@ key) and the same `user_id` to give them one shared brain.
 | `api_key` | yes | Mem0 Platform API key (`m0-…`). Also reads `MEM0_API_KEY`. Stored encrypted. |
 | `user_id` | for scope | Primary, reliable scope key. Required on store/recall unless the agent passes one per call. |
 | `base_url` | no | Optional REST API base URL override for self-hosted / enterprise. Defaults to `https://api.mem0.ai`. |
-| `agent_id` / `app_id` | no | Optional extra scopes. **See the scoping caveat below — these narrow recall and can hide memories on the hosted platform.** |
+| `agent_id` / `app_id` | no | Optional extra scopes. **See the scoping caveat below, these narrow recall and can hide memories on the hosted platform.** |
 | `run_id` | no | Optional session/run scope. Can also be passed by the agent per call. |
 
-> **Scoping caveat — prefer `user_id`.** On the hosted Mem0 platform, a memory added with an
+> **Scoping caveat: prefer `user_id`.** On the hosted Mem0 platform, a memory added with an
 > `agent_id` / `app_id` is stored under the `user_id` but does **not** reliably carry that
 > `agent_id` / `app_id`, while `recall` AND-narrows by every id you set. The net effect: configure
 > an `agent_id` and recalls can silently come back empty even though the memory was stored. Scope
@@ -79,10 +79,10 @@ key) and the same `user_id` to give them one shared brain.
 
 ## Where to get your credentials
 
-Get your key from the **Mem0 dashboard: [app.mem0.ai](https://app.mem0.ai) → API Keys** —
+Get your key from the **Mem0 dashboard: [app.mem0.ai](https://app.mem0.ai) → API Keys**,
 copy your **API key (`m0-…`)**.
 
-Never commit keys — use node config (encrypted) or the `MEM0_API_KEY` env var.
+Never commit keys, use node config (encrypted) or the `MEM0_API_KEY` env var.
 
 ## Reference
 

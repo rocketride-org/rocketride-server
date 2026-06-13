@@ -6,9 +6,9 @@ A RocketRide target node that writes the pipeline's extracted text to an SMB net
 
 Saves your pipeline's text to networked storage over SMB. Each upstream object becomes a
 `.txt` file, mirroring the source directory layout under the store path. It is the end of
-the line — it consumes the `text` lane and emits nothing.
+the line, it consumes the `text` lane and emits nothing.
 
-Uses **smbclient / smbprotocol** — a pure-Python SMB client, so no host SMB mount or
+Uses **smbclient / smbprotocol**: a pure-Python SMB client, so no host SMB mount or
 `smbclient` binary is required on the machine running the engine.
 
 Output is UTF-8, the source file extension is replaced with `.txt`, and target
@@ -31,7 +31,7 @@ Requires the `network` capability and is not available in remote (`noremote`) or
 | ------- | -------------------------------------- |
 | `text`  | Text content to write to the SMB share |
 
-The node is a pure target (`classType: ["target"]`) — it produces no output lanes.
+The node is a pure target (`classType: ["target"]`), it produces no output lanes.
 
 ### Fields
 
@@ -62,8 +62,8 @@ with `anonymizeChar` before the file is written. With `anonymizeAll` enabled, ea
 collapsed to a fixed length (3 masking characters) instead of being masked
 character-for-character.
 
-Changing any anonymization setting — the classify policies, `anonymizeChar`, or
-`anonymizeAll` — changes the settings key the node keeps in its key-value store, which
+Changing any anonymization setting (the classify policies, `anonymizeChar`, or
+`anonymizeAll`) changes the settings key the node keeps in its key-value store, which
 forces **all** objects to be re-transformed on the next run, not just new and changed ones.
 
 ---
@@ -84,7 +84,7 @@ Failed objects record the exception as their completion code instead of writing 
 
 ## Authentication
 
-Authentication is optional — leave `username` and `password` blank for shares that allow
+Authentication is optional, leave `username` and `password` blank for shares that allow
 anonymous/guest access. When credentials are provided, both fields are required and the
 username must use the domain format `DOMAIN\user`. Credentials are registered with the SMB
 client globally at connection time; the connection (and reachability of the share) is

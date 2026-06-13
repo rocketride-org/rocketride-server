@@ -29,7 +29,7 @@ The node also streams progress events over the `thinking` SSE lane during a run:
 
 | Field | Type | Description |
 |---|---|---|
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
+| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
 | `instructions` | array | Additional instructions to guide the agent. |
 | `profile` | string | Default "default".  |
 
@@ -100,7 +100,7 @@ When the run is triggered from the `questions` lane, only `content` is written t
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. | `""` |
+| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `agent_langchain.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. |  |
 

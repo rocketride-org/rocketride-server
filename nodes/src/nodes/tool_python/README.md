@@ -4,11 +4,11 @@ A RocketRide tool node that lets an AI agent execute Python code in a restricted
 
 ## What it does
 
-Gives an agent the ability to run Python scripts directly — for data manipulation, calculations, formatting, and any logic the agent needs to execute rather than describe. The node exposes a single tool, `python.execute`, which takes source code, runs it, and returns captured stdout, error tracebacks, an exit code, and an optional structured result.
+Gives an agent the ability to run Python scripts directly: for data manipulation, calculations, formatting, and any logic the agent needs to execute rather than describe. The node exposes a single tool, `python.execute`, which takes source code, runs it, and returns captured stdout, error tracebacks, an exit code, and an optional structured result.
 
-Uses **RestrictedPython** — code is compiled with `compile_restricted`, which injects runtime guards against attribute/item access escapes, and runs against `safe_builtins` with dangerous builtins removed. Imports are gated by an allowlist: only a default set of safe, pure-computation stdlib modules (plus any extras you configure) can be imported; everything else raises `ImportError`. With the default allowlist there is no network, filesystem, or subprocess access.
+Uses **RestrictedPython**: code is compiled with `compile_restricted`, which injects runtime guards against attribute/item access escapes, and runs against `safe_builtins` with dangerous builtins removed. Imports are gated by an allowlist: only a default set of safe, pure-computation stdlib modules (plus any extras you configure) can be imported; everything else raises `ImportError`. With the default allowlist there is no network, filesystem, or subprocess access.
 
-Execution is bounded by a timeout (**20 seconds by default**, configurable up to 1200) and output is truncated to 50 KB. The node has no lanes — it is attached to an agent as a tool.
+Execution is bounded by a timeout (**20 seconds by default**, configurable up to 1200) and output is truncated to 50 KB. The node has no lanes: it is attached to an agent as a tool.
 
 ---
 
@@ -65,10 +65,10 @@ Execute a Python script and return its output. The tool description shown to the
 
 Code runs in a restricted in-process sandbox built on **RestrictedPython**:
 
-1. **Restricted compilation** — `compile_restricted` transforms the AST to inject runtime guard calls that prevent attribute/item access escapes. Code that violates the compilation policy is rejected with `exit_code: 1`.
-2. **Safe builtins** — RestrictedPython's `safe_builtins` replaces the full `__builtins__`. A curated set of everyday data-work builtins is added back (`dict`, `list`, `set`, `enumerate`, `map`, `filter`, `max`, `min`, `sum`, `print`, `type`, and similar).
-3. **Allowlist-only imports** — a gated `__import__` permits only allowlisted modules (matched on the top-level package name). Everything else raises `ImportError` listing the allowed modules.
-4. **Timeout enforcement** — the script runs in a daemon thread; if it exceeds the timeout the call returns with `timed_out: true` and `exit_code: -1`.
+1. **Restricted compilation**: `compile_restricted` transforms the AST to inject runtime guard calls that prevent attribute/item access escapes. Code that violates the compilation policy is rejected with `exit_code: 1`.
+2. **Safe builtins**: RestrictedPython's `safe_builtins` replaces the full `__builtins__`. A curated set of everyday data-work builtins is added back (`dict`, `list`, `set`, `enumerate`, `map`, `filter`, `max`, `min`, `sum`, `print`, `type`, and similar).
+3. **Allowlist-only imports**: a gated `__import__` permits only allowlisted modules (matched on the top-level package name). Everything else raises `ImportError` listing the allowed modules.
+4. **Timeout enforcement**: the script runs in a daemon thread; if it exceeds the timeout the call returns with `timed_out: true` and `exit_code: -1`.
 
 ### Default allowed modules
 
@@ -78,7 +78,7 @@ Code runs in a restricted in-process sandbox built on **RestrictedPython**:
 
 Modules added via `allowedModules` are merged with the defaults. If an extra allowlisted module is imported but not installed, the node **auto-installs it via pip** (60-second install timeout) and retries the import.
 
-Note that whitelisting extra modules widens the sandbox accordingly — allowing a package like `requests` grants the agent network access through that package. Only the default allowlist guarantees no filesystem, network, or subprocess access.
+Note that whitelisting extra modules widens the sandbox accordingly, allowing a package like `requests` grants the agent network access through that package. Only the default allowlist guarantees no filesystem, network, or subprocess access.
 
 ---
 

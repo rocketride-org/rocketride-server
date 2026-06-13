@@ -4,15 +4,15 @@ A RocketRide tool node that gives an AI agent read/write access to the account-s
 
 ## What it does
 
-Exposes the account file store — the same storage area the client SDK reaches via its
-`fs_*` methods — to an agent as a set of callable tools. All paths are relative to
+Exposes the account file store, the same storage area the client SDK reaches via its
+`fs_*` methods, to an agent as a set of callable tools. All paths are relative to
 `users/<client_id>/files/`, so files written by the agent are visible to the client SDK
 and vice versa. The account is resolved automatically from the `ROCKETRIDE_CLIENT_ID`
-env var injected by the task engine — no account configuration is needed on the node.
+env var injected by the task engine, no account configuration is needed on the node.
 If that env var is missing or the account store fails to initialise, a warning is logged
 and **all** tool methods are hidden from the agent.
 
-The node has no pipeline lanes — it is connected to agents via the `tool` invoke channel.
+The node has no pipeline lanes: it is connected to agents via the `tool` invoke channel.
 
 Every operation is gated by a per-operation allow toggle. Read, write, list, mkdir, and
 stat are **on by default**; **delete is off by default**. Tools whose toggle is disabled
@@ -32,15 +32,15 @@ may touch.
 | `allowList` | boolean | Default true.  |
 | `allowMkdir` | boolean | Default true.  |
 | `allowStat` | boolean | Default true.  |
-| `allowDelete` | boolean | Default false. Destructive — enable only when the agent is trusted to delete account files. |
+| `allowDelete` | boolean | Default false. Destructive, enable only when the agent is trusted to delete account files. |
 | `whitelistPattern` | string | Default empty.  |
-| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics — a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
+| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
 
 
 ### Path whitelist
 
 If `pathWhitelist` is non-empty, the relative path of **every** operation must match at
-least one pattern. Patterns use `re.search` semantics — a partial match anywhere in the
+least one pattern. Patterns use `re.search` semantics, a partial match anywhere in the
 path is enough, so a pattern like `secret` will also match `notsecret/file.txt`. Anchor
 with `^` and `$` if you need a full-path match (e.g. `^docs/.*$`).
 
@@ -85,7 +85,7 @@ invocation as defence-in-depth.
 ### Read size cap
 
 `read_file` accepts `maxBytes` (default **256 KB**, hard ceiling **4 MB**). Files larger
-than the cap are **rejected with an error**, not truncated — use a smaller `maxBytes`
+than the cap are **rejected with an error**, not truncated, use a smaller `maxBytes`
 for sampling, or split the file. The cap exists because the underlying store defaults to
 100 MB per read, which could blow the agent's context window or OOM the engine
 subprocess long before the LLM ever sees the result.
@@ -101,7 +101,7 @@ the default filesystem backend the absolute path is:
 <store>/users/<client_id>/files/<path>
 ```
 
-Each account gets its own isolated `files/` directory — the node picks up the current
+Each account gets its own isolated `files/` directory, the node picks up the current
 account automatically, no configuration needed.
 
 ---
@@ -121,13 +121,13 @@ pytest nodes/test/tool_filesystem/test_read_size_cap.py -v
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `filesystem.allowDelete` | `boolean` | **Delete files**<br/>Destructive — enable only when the agent is trusted to delete account files. | `false` |
+| `filesystem.allowDelete` | `boolean` | **Delete files**<br/>Destructive: enable only when the agent is trusted to delete account files. | `false` |
 | `filesystem.allowList` | `boolean` | **List directories** | `true` |
 | `filesystem.allowMkdir` | `boolean` | **Create directories** | `true` |
 | `filesystem.allowRead` | `boolean` | **Read files** | `true` |
 | `filesystem.allowStat` | `boolean` | **Stat (metadata)** | `true` |
 | `filesystem.allowWrite` | `boolean` | **Write files** | `true` |
-| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics — a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |  |
+| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |  |
 | `filesystem.whitelistPattern` | `string` | **Path Pattern (regex)** | `""` |
 
 ## Source

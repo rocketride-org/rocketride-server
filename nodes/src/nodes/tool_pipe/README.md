@@ -37,7 +37,7 @@ The single `default` profile ships with an empty `tool_description` and
 
 ## Output lanes
 
-The input string the agent passes is written to **every** connected output lane — lanes
+The input string the agent passes is written to **every** connected output lane, lanes
 without a listener are skipped:
 
 | Lane        | Payload sent downstream                              |
@@ -60,7 +60,7 @@ without a listener are skipped:
 | `run_pipe` | Run the connected pipeline with the given input and return its result. |
 
 
-`run_pipe` takes one required parameter, `data` (string) — the input to send to the
+`run_pipe` takes one required parameter, `data` (string): the input to send to the
 pipeline. An empty or missing `data` raises an error. The tool returns an object with a
 single `result` string.
 
@@ -71,9 +71,9 @@ single `result` string.
 After the sub-pipeline completes, the node reads the response value named by
 `return_type`:
 
-- **`text`** — returned as a plain string.
-- **`answers`** — the response is a list; the **first** answer is returned as a string.
-- **`documents`** / **`table`** — list or dict values are JSON-serialised to a string for
+- **`text`**: returned as a plain string.
+- **`answers`**: the response is a list; the **first** answer is returned as a string.
+- **`documents`** / **`table`**: list or dict values are JSON-serialised to a string for
   the agent.
 - A missing value returns an empty string.
 

@@ -1,13 +1,13 @@
 # tool_xtrace_memory
 
-A RocketRide tool node that gives an AI agent long-term, shared memory — `remember` and `recall` — backed by the [xTrace Memory Manager](https://docs.mem.xtrace.ai) service.
+A RocketRide tool node that gives an AI agent long-term, shared memory, `remember` and `recall`, backed by the [xTrace Memory Manager](https://docs.mem.xtrace.ai) service.
 
 ## What it does
 
 Exposes two agent tools backed by the xTrace Memory Manager HTTP API. `remember` sends
 conversation turns to xTrace, which runs server-side LLM extraction to pull out **facts**
 (and optionally **artifacts**) and **episodes**, embeds them, and stores them in your org's
-memory pool. `recall` retrieves the relevant slice with natural-language search — optionally
+memory pool. `recall` retrieves the relevant slice with natural-language search, optionally
 LLM-composed into a ready-to-inject context block. That extraction + relevance selection is
 the "reasoning" layer a plain vector store doesn't give you.
 
@@ -15,17 +15,17 @@ This is a `tool` node, not the agent's `memory` subsystem. RocketRide's `memory`
 a single, run-scoped scratchpad (e.g. `memory_internal`, `put`/`get`/`peek`) that the agent
 uses internally and excludes from tool discovery. xTrace is different: an external service for
 **long-term, semantic, shared** recall that the agent calls explicitly via tools. It therefore
-*complements* the required short-term memory subsystem rather than replacing it — wire both.
+*complements* the required short-term memory subsystem rather than replacing it, wire both.
 
 The store is persistent and shared: it is never cleared when a pipeline or session opens, and
-anything one agent remembers can be recalled by another agent pointing at the same org — and,
+anything one agent remembers can be recalled by another agent pointing at the same org, and,
 via groups, across users.
 
 Uses **requests** + **tenacity** to talk to the documented HTTP API directly (the xTrace
 Python SDK is on their roadmap). Ingest is synchronous by default (`wait` is on): the
 `remember` call waits up to `ingest_timeout` seconds for extraction to finish so the agent
-gets a terminal result. Ingest is a non-idempotent write, so it is retried only on HTTP 429 —
-never on 5xx or timeouts — to avoid duplicate memories; idempotent reads retry on 429, 5xx,
+gets a terminal result. Ingest is a non-idempotent write, so it is retried only on HTTP 429,
+never on 5xx or timeouts, to avoid duplicate memories; idempotent reads retry on 429, 5xx,
 and timeouts with exponential backoff.
 
 ---
@@ -42,7 +42,7 @@ UI until the **Advanced settings** toggle is turned on; the defaults work for mo
 | `org_id` | string | Default empty. xTrace organization id (org_...). Same place as the API key: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys. |
 | `user_id` | string | Default empty. Who this memory belongs to (used to store and recall). Can be passed by the agent per call. |
 | `group_ids` | string | Default empty. Optional. Comma-separated group ids (grp_...) to share memory across users/agents. Leave empty for private memory. |
-| `show_advanced` | boolean | Default false. Show advanced options. The defaults work for most cases — leave off for a simple setup. |
+| `show_advanced` | boolean | Default false. Show advanced options. The defaults work for most cases, leave off for a simple setup. |
 | `base_url` | string | Default "https://api.production.xtrace.ai". xTrace Memory API base URL. Production by default; use https://api.staging.xtrace.ai for staging. |
 | `agent_id` | string | Default empty. Optional agent scope stamped on ingested memories and AND-narrowed on recall. |
 | `app_id` | string | Default empty. Optional app scope stamped on ingested memories and AND-narrowed on recall. |
@@ -62,7 +62,7 @@ The node's prefix is `xtrace`, so the tools surface to the agent as `xtrace.reme
 
 ### remember
 
-`POST /v1/memories` — store conversation turns in shared, persistent memory. xTrace extracts
+`POST /v1/memories`: store conversation turns in shared, persistent memory. xTrace extracts
 facts and episodes server-side so they can be recalled later by this or other agents in the
 same org/group.
 
@@ -78,7 +78,7 @@ Returns `{success, status, job_id, memories_created, error}` where `status` is
 
 ### recall
 
-`POST /v1/memories/search` — search shared memory for context relevant to a query. In compose
+`POST /v1/memories/search`: search shared memory for context relevant to a query. In compose
 mode returns a ready-to-inject context block plus the ranked memories behind it.
 
 | Argument    | Description |
@@ -89,7 +89,7 @@ mode returns a ready-to-inject context block plus the ranked memories behind it.
 | `mode`      | `compose` or `retrieve`. Defaults to the node config `search_mode`. |
 | `limit`     | Max rows to retrieve (1–100). Defaults to the node config `search_limit`. |
 
-Returns `{success, context, results, count, error}` — `context` is the ready-to-inject
+Returns `{success, context, results, count, error}`: `context` is the ready-to-inject
 markdown (compose mode, otherwise empty); `results` rows carry `id`, `type`, `text`, `score`.
 
 At least one scope axis is required by the API: a recall with no `user_id`, no `group_ids`,
@@ -120,11 +120,11 @@ instructions. Point several agents (in one pipe or across runs) at the same `org
 ## Authentication
 
 Get your credentials from the **Developer Portal: [app.xtrace.ai](https://app.xtrace.ai) →
-Settings → API Keys** — copy your **Org id** (`org_…`) and create an **API key** (`xtk_…`).
+Settings → API Keys**, copy your **Org id** (`org_…`) and create an **API key** (`xtk_…`).
 They are not in `mem.xtrace.ai`.
 
 Both can also come from environment variables (`XTRACE_API_KEY`, `XTRACE_ORG_ID`) instead of
-node config. Every request sends the `x-api-key` and `X-Org-Id` headers. Never commit keys —
+node config. Every request sends the `x-api-key` and `X-Org-Id` headers. Never commit keys,
 use node config (encrypted at rest) or env vars.
 
 ---
@@ -146,7 +146,7 @@ use node config (encrypted at rest) or env vars.
 | `xtrace_memory.org_id` | `string` | **Org id**<br/>xTrace organization id (org_...). Same place as the API key: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys. | `""` |
 | `xtrace_memory.search_limit` | `integer` | **Recall limit**<br/>Maximum number of memory rows to retrieve per recall. | `10` |
 | `xtrace_memory.search_mode` | `string` | **Recall mode**<br/>'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only. | `"compose"` |
-| `xtrace_memory.show_advanced` | `boolean` | **Advanced settings**<br/>Show advanced options. The defaults work for most cases — leave off for a simple setup. | `false` |
+| `xtrace_memory.show_advanced` | `boolean` | **Advanced settings**<br/>Show advanced options. The defaults work for most cases, leave off for a simple setup. | `false` |
 | `xtrace_memory.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). Can be passed by the agent per call. | `""` |
 | `xtrace_memory.wait` | `boolean` | **Synchronous ingest**<br/>When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background. | `true` |
 

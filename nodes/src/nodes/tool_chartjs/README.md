@@ -6,13 +6,13 @@ A RocketRide tool node that generates ready-to-render Chart.js v4 chart configur
 
 Exposes a single `generate_chart` tool to an AI agent. The agent passes raw data (an array of objects or key-value pairs) plus an optional chart type, title, or natural-language description; the node prompts the pipeline LLM to produce a valid [Chart.js v4](https://www.chartjs.org/) configuration and returns it as a ` ```chartjs ` fenced block that the chat UI renders as an interactive chart.
 
-The tool is published as `<serverName>.generate_chart` — `chartjs.generate_chart` with the default config. The agent is instructed to place the returned string verbatim in its answer, without wrapping it in additional fences.
+The tool is published as `<serverName>.generate_chart`, `chartjs.generate_chart` with the default config. The agent is instructed to place the returned string verbatim in its answer, without wrapping it in additional fences.
 
 Key safeguards, all enforced in the node:
 
-- **Input truncation** — list data is capped at 200 items and the serialized payload at 20 KB before being sent to the LLM, keeping the prompt manageable.
-- **JSON validation** — the LLM response is parsed; invalid JSON raises an error instead of emitting a broken chart. Any stray markdown fences the LLM adds are stripped before parsing.
-- **Pure static JSON** — the LLM is instructed to emit no JavaScript function callbacks (e.g. `tooltip.callbacks.label`). Values that would normally require callbacks are embedded directly in label strings (e.g. `"Telegraph Voyage — $215.75"`).
+- **Input truncation**: list data is capped at 200 items and the serialized payload at 20 KB before being sent to the LLM, keeping the prompt manageable.
+- **JSON validation**: the LLM response is parsed; invalid JSON raises an error instead of emitting a broken chart. Any stray markdown fences the LLM adds are stripped before parsing.
+- **Pure static JSON**: the LLM is instructed to emit no JavaScript function callbacks (e.g. `tooltip.callbacks.label`). Values that would normally require callbacks are embedded directly in label strings (e.g. `"Telegraph Voyage — $215.75"`).
 
 ---
 
@@ -47,10 +47,10 @@ Generates a Chart.js v4 configuration from data via the pipeline LLM.
 
 | Tool | Description |
 |---|---|---|
-| `generate_chart` | ALWAYS use this tool when the user requests a chart, graph, or visualization. Do NOT generate Chart.js configs manually — call this tool instead. It generates a ready-to-render chart from data. Required: "data" (the raw data to chart). Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), "title" (chart title), "description" (natural language description of desired chart). Returns a ready-to-render string. Place it verbatim in the answer — do NOT wrap it in additional fences. |
+| `generate_chart` | ALWAYS use this tool when the user requests a chart, graph, or visualization. Do NOT generate Chart.js configs manually, call this tool instead. It generates a ready-to-render chart from data. Required: "data" (the raw data to chart). Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), "title" (chart title), "description" (natural language description of desired chart). Returns a ready-to-render string. Place it verbatim in the answer, do NOT wrap it in additional fences. |
 
 
-**Output:** a ` ```chartjs ` fenced block containing the Chart.js JSON configuration (`type`, `data` with `labels` and `datasets`, and `options` with `responsive` and `maintainAspectRatio` set to true). The agent should place this string verbatim in the answer — the UI renders it as a chart.
+**Output:** a ` ```chartjs ` fenced block containing the Chart.js JSON configuration (`type`, `data` with `labels` and `datasets`, and `options` with `responsive` and `maintainAspectRatio` set to true). The agent should place this string verbatim in the answer, the UI renders it as a chart.
 
 ---
 

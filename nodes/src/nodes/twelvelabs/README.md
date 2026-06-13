@@ -48,7 +48,7 @@ Provide your TwelveLabs API key in the `apikey` field. The key is loaded once wh
 
 ## Operational notes
 
-- Each video processed creates and then deletes its own TwelveLabs index — no persistent index is reused, so nothing accumulates in your TwelveLabs account, but indexing happens from scratch on every video.
+- Each video processed creates and then deletes its own TwelveLabs index, no persistent index is reused, so nothing accumulates in your TwelveLabs account, but indexing happens from scratch on every video.
 - Indexing time depends on video length; tasks that take longer than 15 minutes raise `TwelveLabs task timed out`.
 - Videos are currently buffered fully in memory before being written to the temp file, so very large videos increase memory usage accordingly.
 

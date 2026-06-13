@@ -49,7 +49,7 @@ Each variant shows only its description/instructions fields by default. Toggle *
 | `task_config_header` | null |  |
 | `task_description` | string | What this sub-agent does when delegated to by the Manager. The user's request is passed as additional context at run time. Maps to CrewAI Task(description=...). |
 | `expected_output` | string | Description of the expected output format. Maps to CrewAI Task(expected_output=...). |
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
+| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
 
 ### CrewAI Manager
 
@@ -115,7 +115,7 @@ Every CrewAI bus event from a kickoff (crew/task/agent lifecycle, tool usage, LL
 | `advanced_mode` | `boolean` | **Advanced Mode**<br/>Expose CrewAI Agent and Task configuration directly. | `false` |
 | `agent_crewai.agent_config_header` | `null` | **Agent Config** | `null` |
 | `agent_crewai.task_config_header` | `null` | **Task Config** | `null` |
-| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. | `""` |
+| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `backstory` | `string` | **Backstory**<br/>Background context for this agent's persona. Maps to CrewAI Agent(backstory=...). |  |
 | `expected_output` | `string` | **Expected Output**<br/>Description of the expected output format. Maps to CrewAI Task(expected_output=...). |  |
 | `goal` | `string` | **Goal**<br/>What this agent is trying to achieve. Maps to CrewAI Agent(goal=...). |  |

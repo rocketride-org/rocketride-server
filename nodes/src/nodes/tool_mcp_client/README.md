@@ -4,13 +4,13 @@ A RocketRide tool node that connects to an external [Model Context Protocol](htt
 
 ## What it does
 
-Connects to an MCP server over one of three transports — STDIO (local subprocess), Streamable HTTP, or legacy HTTP+SSE — performs the MCP `initialize` handshake, discovers the server's tools via `tools/list` when the pipeline starts, and exposes them to agent nodes. Agents then discover and invoke these tools during their reasoning loop; each call is forwarded to the server as `tools/call` and the raw MCP result is returned.
+Connects to an MCP server over one of three transports (STDIO (local subprocess), Streamable HTTP, or legacy HTTP+SSE), performs the MCP `initialize` handshake, discovers the server's tools via `tools/list` when the pipeline starts, and exposes them to agent nodes. Agents then discover and invoke these tools during their reasoning loop; each call is forwarded to the server as `tools/call` and the raw MCP result is returned.
 
-This node has no pipeline lanes — it is a control-plane tool node, connected to agents via the `tools` invoke channel.
+This node has no pipeline lanes: it is a control-plane tool node, connected to agents via the `tools` invoke channel.
 
 Tools are namespaced as `serverName.toolName` (e.g. `mcp.search_docs`), where `serverName` is set in configuration. Tools are discovered **once at pipeline startup** and cached; a server that adds tools later requires a pipeline restart to pick them up.
 
-The implementation is pure Python standard library (`subprocess`, `urllib`, JSON-RPC 2.0) — no MCP SDK dependency and no extra packages to install. Each request has a 20-second timeout.
+The implementation is pure Python standard library (`subprocess`, `urllib`, JSON-RPC 2.0), no MCP SDK dependency and no extra packages to install. Each request has a 20-second timeout.
 
 ---
 
@@ -76,7 +76,7 @@ Configuration is validated at save time: `commandLine` is required for `stdio`, 
 
 For the HTTP transports (`streamable-http` and `sse`), set `bearer` to send an `Authorization: Bearer <token>` header on every request. The token is stored encrypted and masked in the UI. Arbitrary additional headers (e.g. API-key headers) can be supplied via `headers`; a `bearer` value overrides any `Authorization` key in `headers`.
 
-The STDIO transport has no authentication fields — the subprocess runs locally with the engine's environment.
+The STDIO transport has no authentication fields: the subprocess runs locally with the engine's environment.
 
 ---
 

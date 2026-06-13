@@ -29,7 +29,7 @@ This node is **experimental**.
 
 | Field | Type | Description |
 |---|---|---|
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
+| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
 | `instructions` | array | Additional instructions to guide the agent's planning and responses. |
 | `max_waves` | integer | Default 10. Maximum number of planning iterations before the synthesis fallback fires. |
 | `profile` | string | Default "default".  |
@@ -175,7 +175,7 @@ in the requested style.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. | `""` |
+| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `agent_rocketride.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent's planning and responses. |  |
 | `max_waves` | `integer` | **Max Waves**<br/>Maximum number of planning iterations before the synthesis fallback fires. | `10` |

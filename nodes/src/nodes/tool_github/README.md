@@ -4,7 +4,7 @@ A RocketRide tool node that exposes GitHub repository operations to an AI agent.
 
 ## What it does
 
-Gives an agent full access to the GitHub REST API — files, issues, pull requests,
+Gives an agent full access to the GitHub REST API: files, issues, pull requests,
 reviews, releases, workflows, organizations, users, search, and commit history. Useful
 for agents that manage codebases, triage issues, automate releases, or operate CI/CD
 pipelines.
@@ -14,7 +14,7 @@ API version `2022-11-28`) with Bearer-token auth and a 30-second request timeout
 responses are stripped of noisy fields (`node_id`, `_links`, gravatar data, etc.) so the
 agent gets compact, useful output.
 
-A personal access token is **required** — the pipeline fails to start without one. Write
+A personal access token is **required**: the pipeline fails to start without one. Write
 operations are **allowed by default**; enable **read-only mode** to block every mutating
 tool when the agent should only inspect.
 
@@ -35,7 +35,7 @@ tool when the agent should only inspect.
 Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the configured
 `defaultRepo` is used; if neither is set, the call fails with an error asking for a repo.
 
-> **Note:** `search_code` and `search_issues` also fall back to `defaultRepo` — when a
+> **Note:** `search_code` and `search_issues` also fall back to `defaultRepo`, when a
 > default repo is configured, searches are scoped to it unless the call passes its own
 > `repo`. To search across all accessible repositories, leave `defaultRepo` blank.
 
@@ -120,7 +120,7 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 
 | Tool            | Description                                                       |
 |-----------------|-------------------------------------------------------------------|
-| `review_create` | Submit a PR review — `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`  |
+| `review_create` | Submit a PR review: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`  |
 | `review_list`   | List all reviews on a pull request                                |
 | `review_get`    | Get a single review                                               |
 | `review_update` | Update the body of a pending review                               |
@@ -157,15 +157,15 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | Tool             | Description                                                            |
 |------------------|------------------------------------------------------------------------|
 | `org_list_repos` | List repos in an organization (filter by type)                         |
-| `user_get_repos` | List repos for a user — omit `username` for the authenticated user     |
+| `user_get_repos` | List repos for a user, omit `username` for the authenticated user     |
 | `user_invite`    | Invite a user to an organization by email (role: `admin` · `direct_member` · `billing_manager`) |
 
 ### Search & commits
 
 | Tool            | Description                                                          |
 |-----------------|----------------------------------------------------------------------|
-| `search_code`   | Search code — supports GitHub code search syntax (e.g. `mcp_client transport extension:py`) |
-| `search_issues` | Search issues and PRs — supports GitHub issue search syntax, optional `state` filter |
+| `search_code`   | Search code, supports GitHub code search syntax (e.g. `mcp_client transport extension:py`) |
+| `search_issues` | Search issues and PRs, supports GitHub issue search syntax, optional `state` filter |
 | `commit_list`   | List commits, optionally filtered to a file path or starting ref     |
 | `commit_get`    | Get a single commit with diff stats and per-file patches             |
 
@@ -186,7 +186,7 @@ Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `p
 `workflow_get`, `workflow_get_usage`, `org_list_repos`, `user_get_repos`, `search_code`,
 `search_issues`, `commit_list`, `commit_get`.
 
-Note the default is `false` — a freshly added node can write. Turn read-only mode on
+Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.
 
 ---

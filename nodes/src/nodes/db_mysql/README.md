@@ -35,7 +35,7 @@ Two special question types are handled on the `questions` lane:
 | `password` | string | Password to connect to the MySQL server |
 | `database` | string | Default "database". Name of database |
 | `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. |
+| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
 | `profile` | string | Default "default".  |
@@ -102,7 +102,7 @@ This is off by default. Leave it off unless a trusted application explicitly nee
 |---|---|---|---|
 | `mysql.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `mysql.database` | `string` | **Database name**<br/>Name of database | `"database"` |
-| `mysql.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. | `""` |
+| `mysql.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `mysql.host` | `string` | **MySQL host**<br/>Host name or IP address of the MySQL server | `"localhost"` |
 | `mysql.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL | `5` |
 | `mysql.password` | `string` | **Password**<br/>Password to connect to the MySQL server |  |

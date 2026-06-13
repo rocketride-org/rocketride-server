@@ -1,12 +1,12 @@
 # tool_http_request
 
-A RocketRide tool node that lets an AI agent make HTTP requests to any API endpoint — like curl for agents.
+A RocketRide tool node that lets an AI agent make HTTP requests to any API endpoint, like curl for agents.
 
 ## What it does
 
 Exposes a single agent-callable tool, `http_request`, registered as
 `<serverName>.http_request` (default: `http.http_request`). The agent provides the full
-request — method, URL, headers, query/path parameters, auth, and body — and receives a
+request (method, URL, headers, query/path parameters, auth, and body) and receives a
 structured response containing status, headers, body text, parsed JSON, and timing.
 
 Uses the **requests** library to execute calls. The node has no lanes; it is attached to
@@ -14,11 +14,11 @@ an agent purely as a tool.
 
 Three security guardrails are enforced before every request, all configured on the node:
 
-- **Allowed methods** — per-method toggles. `GET`, `POST`, `PUT`, `PATCH`, `DELETE` are
+- **Allowed methods**: per-method toggles. `GET`, `POST`, `PUT`, `PATCH`, `DELETE` are
   enabled by default; `HEAD` and `OPTIONS` are disabled by default.
-- **URL whitelist** — regex patterns the request URL must match. **Empty by default,
+- **URL whitelist**: regex patterns the request URL must match. **Empty by default,
   which allows all URLs** (config validation emits a warning when the whitelist is empty).
-- **Rate limiting** — token-bucket limits per second and per minute, plus a concurrency
+- **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
   cap. On by default (10/s, 100/min, 5 concurrent).
 
 ---
@@ -47,7 +47,7 @@ The node ships one profile, **Default**, which sets `serverName` to `http`.
 
 Invalid whitelist regexes are skipped with a warning rather than failing the pipeline,
 so a typo in a pattern silently widens (or, if it was the only pattern, removes) the
-restriction — check the logs after editing the whitelist.
+restriction, check the logs after editing the whitelist.
 
 ---
 
@@ -56,7 +56,7 @@ restriction — check the logs after editing the whitelist.
 
 | Tool | Description |
 |---|---|---|
-| `http_request` | Make an HTTP request. Required: "url" and "method". For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}) — it is serialized automatically. For bearer auth, pass "bearer_token" as a string. For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. Optional: "headers", "query_params", "path_params", "timeout" (seconds, default 30, max 300). |
+| `http_request` | Make an HTTP request. Required: "url" and "method". For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}), it is serialized automatically. For bearer auth, pass "bearer_token" as a string. For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. Optional: "headers", "query_params", "path_params", "timeout" (seconds, default 30, max 300). |
 
 
 ### Required parameters
@@ -73,8 +73,8 @@ is only applied when the corresponding advanced field is not also set.
 
 | Parameter      | Description                                                                 |
 |----------------|-----------------------------------------------------------------------------|
-| `body_json`    | JSON object or array, passed directly — serialized automatically and sent as raw `application/json` |
-| `bearer_token` | Token string — sent as an `Authorization: Bearer ...` header                |
+| `body_json`    | JSON object or array, passed directly, serialized automatically and sent as raw `application/json` |
+| `bearer_token` | Token string, sent as an `Authorization: Bearer ...` header                |
 | `basic_auth`   | `{username, password}` for HTTP basic auth                                  |
 
 ### Optional parameters
@@ -133,7 +133,7 @@ The `body` object supports `type`: `none`, `raw`, `form_data`, or `x_www_form_ur
 | `form_data`              | `form_data: {key: value, ...}`  | Sent as a `multipart/form-data` envelope                              |
 | `x_www_form_urlencoded`  | `urlencoded: {key: value, ...}` | Sent as URL-encoded form fields                                       |
 
-For JSON payloads, prefer the `body_json` shortcut — pass the object directly and it is
+For JSON payloads, prefer the `body_json` shortcut, pass the object directly and it is
 serialized and wrapped as raw `application/json` automatically.
 
 ---
@@ -142,9 +142,9 @@ serialized and wrapped as raw `application/json` automatically.
 
 Three independent limits are enforced per node (shared across all calls):
 
-- **Per-second** — token bucket, capacity and refill rate equal to `rateLimitPerSecond`.
-- **Per-minute** — token bucket, capacity `rateLimitPerMinute`, refilling continuously.
-- **Concurrency** — semaphore capped at `maxConcurrentRequests` in-flight requests.
+- **Per-second**: token bucket, capacity and refill rate equal to `rateLimitPerSecond`.
+- **Per-minute**: token bucket, capacity `rateLimitPerMinute`, refilling continuously.
+- **Concurrency**: semaphore capped at `maxConcurrentRequests` in-flight requests.
 
 The limiter does **not** queue or block: when a limit is hit the tool call fails
 immediately with an error telling the agent to retry after a short delay (or to wait

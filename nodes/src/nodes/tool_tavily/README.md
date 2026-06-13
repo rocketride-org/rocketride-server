@@ -8,13 +8,13 @@ Gives an agent live web search. Agents invoke this node via the tool invoke chan
 node performs a search against the Tavily API and returns structured results containing
 titles, URLs, content snippets, and relevance scores.
 
-The node has no pipeline input/output lanes (`lanes` is empty) — it is consumed
+The node has no pipeline input/output lanes (`lanes` is empty): it is consumed
 exclusively by agent runtimes through the `invoke` capability. It is currently marked
 **experimental**.
 
 Implementation calls `https://api.tavily.com/search` over HTTPS using **requests** with
 automatic retry (`post_with_retry`). Every result URL is validated with
-`validate_public_url` before being returned — results pointing at non-public or unsafe
+`validate_public_url` before being returned, results pointing at non-public or unsafe
 URLs are silently dropped. Request failures are returned to the agent as structured
 `{"success": false, "error": ...}` payloads (including the HTTP status when available)
 rather than raised as exceptions.
@@ -93,7 +93,7 @@ ROCKETRIDE_TAVILY_KEY=tvly-...
 ```
 
 The config field takes precedence; the env var is used only when the field is blank.
-Pipeline env vars must be `ROCKETRIDE_`-prefixed — only those are substituted by the
+Pipeline env vars must be `ROCKETRIDE_`-prefixed, only those are substituted by the
 engine.
 
 ---

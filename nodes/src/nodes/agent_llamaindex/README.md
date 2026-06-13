@@ -51,7 +51,7 @@ A single `default` profile with two fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
+| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
 | `instructions` | array | Additional instructions to guide the agent. |
 | `profile` | string | Default "default".  |
 
@@ -98,7 +98,7 @@ caller instead of being emitted on the `answers` lane.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. | `""` |
+| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `agent_llamaindex.profile` | `string` | **Profile** | `"default"` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. |  |
 

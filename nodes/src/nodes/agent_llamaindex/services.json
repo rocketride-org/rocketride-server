@@ -11,7 +11,7 @@
 	"protocol": "agent_llamaindex://",
 	//
 	// Required:
-	//		Class type of the node — agent (runs on the questions lane) and
+	//		Class type of the node: agent (runs on the questions lane) and
 	//		tool (invocable by parent agents via `run_agent`)
 	//
 	"classType": ["agent", "tool"],
@@ -68,7 +68,7 @@
 	},
 	//
 	// Optional:
-	//		Pipe lanes — receives questions and produces answers
+	//		Pipe lanes: receives questions and produces answers
 	//
 	"lanes": {
 		"questions": ["answers"]
@@ -96,7 +96,7 @@
 			"title": "Agent description",
 			"default": "",
 			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

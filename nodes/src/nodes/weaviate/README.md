@@ -10,7 +10,7 @@ Uses the official **weaviate-client** Python SDK (v4 API): `connect_to_local` fo
 
 Key behavior to know:
 
-- **Documents must arrive pre-embedded.** Run them through an embedding node first — the collection is created with `Vectorizer.none()`, so Weaviate never embeds anything itself; the pipeline supplies all vectors. A document without an embedding raises an error on ingest.
+- **Documents must arrive pre-embedded.** Run them through an embedding node first: the collection is created with `Vectorizer.none()`, so Weaviate never embeds anything itself; the pipeline supplies all vectors. A document without an embedding raises an error on ingest.
 - **The collection is created automatically** on first write if it does not exist, with an HNSW vector index using the configured distance metric.
 - **Re-ingesting is idempotent per document.** Before inserting, all existing chunks with the same `objectId` are deleted, then the new chunks are written via Weaviate's dynamic batch API. If any batch objects fail, the node raises an error.
 - **Deletes are soft by default.** Documents can be marked deleted (`isDeleted: true`) and later re-activated; soft-deleted chunks are excluded from every search and get unless the filter explicitly asks for deleted documents. Hard removal by `objectId` is also supported.
@@ -24,7 +24,7 @@ Key behavior to know:
 
 | Lane in     | Lane out    | Description                                                      |
 | ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+| `documents` | -           | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
@@ -36,14 +36,14 @@ The node can also render a stored object back to text: given an object id, it re
 | Field        | Type / Default                  | Description                                                                                  |
 | ------------ | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `host`       | string                          | Weaviate server address. Cloud: `<your-instance-name>.weaviate.cloud`. Local default: `localhost`. Scheme and trailing slashes are stripped automatically. |
-| `port`       | int — `8080` local, `443` cloud | REST port                                                                                     |
-| `grpc_port`  | int — `50051`                   | gRPC port (local profile only)                                                                |
+| `port`       | int: `8080` local, `443` cloud | REST port                                                                                     |
+| `grpc_port`  | int: `50051`                   | gRPC port (local profile only)                                                                |
 | `apikey`     | string                          | API key. Required for cloud; optional for local (used only when non-empty)                    |
-| `score`      | number — `0.5`                  | Minimum retrieval similarity threshold                                                        |
-| `collection` | string — `ROCKETRIDE`           | Collection name — must start with an uppercase letter and contain only letters, numbers, and underscores |
-| `similarity` | string — `cosine`               | Distance metric: `cosine` · `dot` · `l2-squared` · `hamming` · `manhattan`. Any other value raises an error at startup |
-| `renderChunkSize` | int — `33554432`           | Number of chunk ids fetched per window when rendering a full document                          |
-| `mode`       | string (set by profile)         | `local` or `cloud` — selects the connection method                                            |
+| `score`      | number: `0.5`                  | Minimum retrieval similarity threshold                                                        |
+| `collection` | string: `ROCKETRIDE`           | Collection name: must start with an uppercase letter and contain only letters, numbers, and underscores |
+| `similarity` | string: `cosine`               | Distance metric: `cosine` · `dot` · `l2-squared` · `hamming` · `manhattan`. Any other value raises an error at startup |
+| `renderChunkSize` | int: `33554432`           | Number of chunk ids fetched per window when rendering a full document                          |
+| `mode`       | string (set by profile)         | `local` or `cloud`: selects the connection method                                            |
 
 Each ingested chunk is stored with these properties alongside its vector: `content`, `objectId`, `nodeId`, `parent`, `permissionId`, `isDeleted`, `chunkId`, `isTable`, `tableId`, `vectorSize`, `modelName`.
 
@@ -84,7 +84,7 @@ HTTP error responses are surfaced with their status code and the server's `messa
 
 ## Authentication
 
-- **Cloud profile:** set `apikey` to your Weaviate Cloud API key — it is passed as `Auth.api_key` credentials.
+- **Cloud profile:** set `apikey` to your Weaviate Cloud API key, it is passed as `Auth.api_key` credentials.
 - **Local profile:** anonymous by default. If `apikey` is set to a non-empty value, it is sent as API-key credentials to the local instance.
 
 ---

@@ -9,7 +9,7 @@ image stream or Image documents, and outputs the resized result downstream. Usef
 creating lightweight image previews before passing them to a vision LLM, reducing token
 usage and processing time compared to full-resolution images.
 
-Uses **Pillow** (via the shared `ai.common.image.ImageProcessor` helper — the node itself
+Uses **Pillow** (via the shared `ai.common.image.ImageProcessor` helper, the node itself
 declares no extra requirements). Thumbnails are produced by stepwise downscaling (halving
 until the larger side is ≤ 256 px, which avoids aliasing), an aspect-ratio-preserving
 resize, and a final **center crop to exactly 128×128 pixels**. Output is always encoded
@@ -36,10 +36,10 @@ Raw image data arrives as a chunked stream (`BEGIN` / `WRITE` / `END`). The node
 all chunks, loads the complete image once the stream ends, and generates the thumbnail.
 It then emits on whichever output lanes have listeners attached:
 
-- **`documents` listener** — the thumbnail is base64-encoded (PNG) and emitted as a
+- **`documents` listener**: the thumbnail is base64-encoded (PNG) and emitted as a
   single `Doc` of type `Image` with fresh metadata (`chunkId`, `isTable: false`,
   `tableId: 0`, `isDeleted: false`).
-- **`image` listener** — the thumbnail is emitted as raw PNG bytes in a new
+- **`image` listener**: the thumbnail is emitted as raw PNG bytes in a new
   `BEGIN` / `WRITE` / `END` stream, keeping the incoming MIME type.
 
 ### `documents` lane in
@@ -47,7 +47,7 @@ It then emits on whichever output lanes have listeners attached:
 Each incoming `Doc` of type `Image` has its base64 content decoded, thumbnailed, and
 re-emitted as a new `Image` document with the **original metadata preserved**. Documents
 are skipped with a warning (not an error) when they are not of type `Image`, have empty
-content, or fail to decode/process — the remaining documents in the batch are still
+content, or fail to decode/process, the remaining documents in the batch are still
 processed.
 
 None. The node's shape defines no properties; the thumbnail size (128×128) is fixed.

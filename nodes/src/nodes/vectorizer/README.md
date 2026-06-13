@@ -7,20 +7,20 @@ Chunks incoming text and tables, embeds them, and writes the resulting documents
 The vectorizer is an internal (`capabilities: ["internal"]`) filter in the ingestion path,
 registered under the `vectorizer://` protocol. As text and tables flow through, it:
 
-1. Checks whether the current object is flagged for vectorization (`FLAGS.VECTORIZE`) —
+1. Checks whether the current object is flagged for vectorization (`FLAGS.VECTORIZE`),
    objects without the flag pass through untouched, and empty text is skipped.
 2. Splits the text into chunks using the configured preprocessor.
 3. Builds per-chunk document metadata: chunk id, table flag and table id, deletion flag,
    and the object's permission id (`-1` when the object carries none). Chunk and table
    counters reset for every new object.
 4. Computes embeddings for the chunks via the embedding component.
-5. Persists the chunks — either directly to the store (instance mode) or by writing them
+5. Persists the chunks: either directly to the store (instance mode) or by writing them
    downstream to the endpoint store driver (transform mode).
 
 On retrieval (`renderObject`), it pulls previously vectorized content back out of the
 store and feeds it to the text writer, suppressing the default rendering path.
 
-There are no user-facing config fields, no lanes, no profiles, and no `classType` — the
+There are no user-facing config fields, no lanes, no profiles, and no `classType`, the
 engine wires this node up for you rather than you placing it by hand.
 
 ---
@@ -40,7 +40,7 @@ that is present:
 No credentials are configured here; each component carries its own provider config. In
 config open mode, nothing is initialized at all.
 
-`requirements.txt` is intentionally empty — the node relies on the separately installed
+`requirements.txt` is intentionally empty, the node relies on the separately installed
 AI module, which brings its own dependencies.
 
 ---
@@ -49,12 +49,12 @@ AI module, which brings its own dependencies.
 
 Behavior depends on the endpoint's open mode:
 
-- **Instance** — chunks are added directly to the store via `addChunks`. The object's
+- **Instance**: chunks are added directly to the store via `addChunks`. The object's
   `vectorBatchId` is reset to `0` when processing opens and set to `1` on close, marking
   the object as vectorized.
-- **Transform** — chunks are written downstream with `writeDocuments` and the endpoint
+- **Transform**: chunks are written downstream with `writeDocuments` and the endpoint
   store driver handles persistence.
-- **Config** — no preprocessor, embedding, or store is created.
+- **Config**: no preprocessor, embedding, or store is created.
 
 ---
 

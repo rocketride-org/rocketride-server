@@ -65,7 +65,7 @@ Returns `{ success, links }` where `links` is an array of discovered URL strings
 ## Authentication
 
 Set `apikey` to a Firecrawl API key (created at [firecrawl.dev](https://www.firecrawl.dev)).
-The key is passed directly to `FirecrawlApp` — no other credentials are needed.
+The key is passed directly to `FirecrawlApp`, no other credentials are needed.
 
 ---
 

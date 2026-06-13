@@ -7,13 +7,13 @@ A RocketRide tool node that lets an AI agent make and manage AI-powered phone ca
 Gives an agent the ability to place outbound voice calls and work with the results. The
 agent can initiate a call with instructions for the Bland AI voice agent, retrieve the
 call's status, transcript, recording URL, duration, and summary, and run post-call AI
-analysis against a goal and a set of questions. Useful for automating outbound calls —
+analysis against a goal and a set of questions. Useful for automating outbound calls:
 scheduling, surveys, follow-ups, or any task that requires a voice interaction.
 
 Talks to the Bland AI REST API (`https://api.bland.ai/v1`) over HTTPS using **requests**.
 Calls are placed with the `base` model, `wait_for_greeting: true`, and temperature `0.7`.
 
-A Bland AI API key is **required** — the node refuses to start without one. Recording
+A Bland AI API key is **required**: the node refuses to start without one. Recording
 (default **on**) and language (default **en**) are set in the node config and apply to
 every call; the agent cannot override them per call.
 
@@ -32,7 +32,7 @@ every call; the agent cannot override them per call.
 | `language` | string | Default "en".  |
 
 
-The node has no lanes — it is invoked purely as an agent tool.
+The node has no lanes: it is invoked purely as an agent tool.
 
 ---
 
@@ -48,11 +48,11 @@ Initiate an outbound AI phone call. Returns a `call_id` for use with `get_call` 
 | Parameter        | Required | Description                                              |
 |------------------|----------|----------------------------------------------------------|
 | `phone_number`   | yes      | Phone number in E.164 format (e.g. `+14155551234`)       |
-| `task`           | yes      | Instructions for the AI voice agent — what to say, ask, and accomplish |
+| `task`           | yes      | Instructions for the AI voice agent: what to say, ask, and accomplish |
 | `first_sentence` | no       | Opening sentence spoken by the agent                     |
 | `voice`          | no       | Voice ID; overrides the configured default               |
 | `max_duration`   | no       | Max call length in minutes (positive integer); overrides the configured default |
-| `webhook`        | no       | URL to receive call results when the call ends — **must be HTTPS**, otherwise the call is rejected |
+| `webhook`        | no       | URL to receive call results when the call ends, **must be HTTPS**, otherwise the call is rejected |
 
 ### bland.get_call
 
@@ -61,7 +61,7 @@ Get full details for a call: status, transcript, recording URL, duration, and su
 | Parameter             | Required | Description                                            |
 |-----------------------|----------|--------------------------------------------------------|
 | `call_id`             | yes      | The call ID returned by `make_call`                    |
-| `wait_for_completion` | no       | Default `false`. If `true`, polls every 10 seconds until the call completes, up to 5 minutes — recommended in pipelines to avoid manual polling. Raises a timeout error if the call has not completed in time. |
+| `wait_for_completion` | no       | Default `false`. If `true`, polls every 10 seconds until the call completes, up to 5 minutes, recommended in pipelines to avoid manual polling. Raises a timeout error if the call has not completed in time. |
 
 ### bland.analyze_call
 

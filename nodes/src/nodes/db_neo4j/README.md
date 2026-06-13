@@ -45,7 +45,7 @@ Two special question types are handled on the `questions` lane:
 | `password` | string | Password to authenticate with the Neo4J instance. |
 | `token` | string | Bearer token for token-based authentication (e.g. Neo4J Aura cloud). |
 | `database` | string | Default "neo4j". Name of the Neo4J database to connect to. Use 'neo4j' for the default database. |
-| `db_description` | string | Default empty. What is this graph used for? Describe its content and domain — this helps the LLM generate more accurate Cypher queries. |
+| `db_description` | string | Default empty. What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. |
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. |
 | `profile` | string | Default "default".  |
@@ -62,9 +62,9 @@ When connected to an agent, the node exposes three functions namespaced under th
 
 | Tool | Description |
 |---|---|---|
-| `get_data` | Accepts a natural-language description of the graph data you want, converts it to a safe Cypher MATCH query, executes it against the Neo4J graph database, and returns the result rows. No schema lookup or Cypher knowledge required — just describe what you need. Results may be large — consider using peek or store. |
-| `get_schema` | Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively — only use when get_data fails or returns unexpected results. |
-| `get_cypher` | Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher — for actual data retrieval, use get_data instead. |
+| `get_data` | Accepts a natural-language description of the graph data you want, converts it to a safe Cypher MATCH query, executes it against the Neo4J graph database, and returns the result rows. No schema lookup or Cypher knowledge required, just describe what you need. Results may be large, consider using peek or store. |
+| `get_schema` | Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively, only use when get_data fails or returns unexpected results. |
+| `get_cypher` | Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher, for actual data retrieval, use get_data instead. |
 
 ### Schema inspection
 
@@ -118,7 +118,7 @@ Connectivity and authentication are verified at pipeline start with `verify_conn
 | `neo4jdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. | `false` |
 | `neo4jdb.auth_method` | `string` | **Authentication** | `"userpass"` |
 | `neo4jdb.database` | `string` | **Database name**<br/>Name of the Neo4J database to connect to. Use 'neo4j' for the default database. | `"neo4j"` |
-| `neo4jdb.db_description` | `string` | **Graph description**<br/>What is this graph used for? Describe its content and domain — this helps the LLM generate more accurate Cypher queries. | `""` |
+| `neo4jdb.db_description` | `string` | **Graph description**<br/>What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. | `""` |
 | `neo4jdb.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query | `5` |
 | `neo4jdb.password` | `string` | **Password**<br/>Password to authenticate with the Neo4J instance. |  |
 | `neo4jdb.profile` | `string` |  | `"default"` |

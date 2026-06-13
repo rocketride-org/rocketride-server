@@ -6,7 +6,7 @@ Exposes [DeepL](https://www.deepl.com) translation and AI rephrasing as agent to
 
 Agents invoke this node through the tool invoke channel. It exposes two tools: `deepl_translate` (translate text into a target language) and `deepl_write` (rewrite text in a chosen style or tone). Both return the full ordered list of results plus a top-level `text` convenience field holding the first result's text.
 
-Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes — it is consumed exclusively by agent runtimes through the `invoke` capability.
+Because `lanes` is empty (`{}`), this node has no pipeline input/output lanes: it is consumed exclusively by agent runtimes through the `invoke` capability.
 
 ## Setup
 
@@ -59,7 +59,7 @@ Returns `translations[]` (each with `text` and `detected_source_language`, the f
 | `writing_style` | no       | One of `simple`, `business`, `academic`, `casual`, `default`, and their `prefer_*` variants.       |
 | `tone`          | no       | One of `enthusiastic`, `friendly`, `confident`, `diplomatic`, `default`, and their `prefer_*` variants. |
 
-`writing_style` and `tone` are **mutually exclusive** — supplying both is rejected before any HTTP call.
+`writing_style` and `tone` are **mutually exclusive**, supplying both is rejected before any HTTP call.
 
 **Write language restriction:** `deepl_write` supports a narrower target-language set than translate: `de`, `en-GB`, `en-US`, `es`, `fr`, `it`, `ja`, `ko`, `pt-BR`, `pt-PT`, `zh`. An invalid write target is rejected client-side (no HTTP call) with an error naming the valid set.
 

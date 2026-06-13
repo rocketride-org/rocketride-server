@@ -10,13 +10,13 @@ production-ready code, the full set of generated files, and a live preview URL. 
 then iterate with `refine_ui`, sending follow-up instructions to the same v0 chat.
 
 Talks to the **v0 Platform API** (`https://api.v0.dev/v1/chats`) over plain HTTPS using
-**requests** — no Vercel SDK is required. Chats are stateful **server-side**: each
+**requests**, no Vercel SDK is required. Chats are stateful **server-side**: each
 generation returns a `chat_id`, and refinements reuse it, so the agent never has to
 replay prior context.
 
 Requests use a 120-second timeout (generation can take a while) and are retried via the
 shared `post_with_retry` helper. API and transport failures raise rather than returning
-error payloads — the agent framework converts the exception into a structured error for
+error payloads, the agent framework converts the exception into a structured error for
 the model. Response bodies are never logged, even on malformed responses.
 
 This node is marked **experimental**: v0 API availability and behavior may change.
@@ -34,7 +34,7 @@ This node is marked **experimental**: v0 API availability and behavior may chang
 The node fails at pipeline start if `apikey` is empty, and config validation warns
 about a missing key before that.
 
-This node has no lanes — it is invoke-only and is called exclusively through its agent
+This node has no lanes: it is invoke-only and is called exclusively through its agent
 tools.
 
 ---
@@ -57,7 +57,7 @@ Returns:
 | Output | Description |
 |--------|-------------|
 | `success` | `true` on success |
-| `chat_id` | v0 chat ID — pass to `refine_ui` to iterate |
+| `chat_id` | v0 chat ID, pass to `refine_ui` to iterate |
 | `code` | Primary generated React component code (content of the first generated file) |
 | `files` | All generated files as `{name, content}` objects |
 | `demo_url` | Live preview URL for the generated UI |

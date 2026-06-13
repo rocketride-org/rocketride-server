@@ -49,7 +49,7 @@ Two special question types are handled on the `questions` lane:
 | `password` | string | Password to connect to the PostgreSQL server |
 | `database` | string | Default "postgres". Name of database |
 | `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. |
+| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
 | `profile` | string | Default "default".  |
@@ -116,7 +116,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 |---|---|---|---|
 | `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `postgresdb.database` | `string` | **Database name**<br/>Name of database | `"postgres"` |
-| `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. | `""` |
+| `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `postgresdb.host` | `string` | **PostgreSQL host**<br/>Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433) | `"localhost"` |
 | `postgresdb.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL | `5` |
 | `postgresdb.password` | `string` | **Password**<br/>Password to connect to the PostgreSQL server |  |
@@ -130,13 +130,13 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 |---|---|---|---|
 | `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `postgresdb.database` | `string` | **Database name**<br/>Name of database (Supabase default is 'postgres') | `"postgres"` |
-| `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. | `""` |
+| `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `postgresdb.host` | `string` | **Supabase host**<br/>From the Supabase dashboard (Connect button), including the port. Recommended: the Supavisor pooler (works over IPv4) -> aws-0-<region>.pooler.supabase.com:6543 (transaction) or :5432 (session). The Direct connection (db.<project-ref>.supabase.co:5432) is IPv6-only and will fail to resolve on networks without IPv6. |  |
 | `postgresdb.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL | `5` |
 | `postgresdb.password` | `string` | **Password**<br/>Database password from your Supabase project (Project Settings -> Database) |  |
 | `postgresdb.profile` | `string` |  | `"default"` |
 | `postgresdb.table` | `string` | **Table name**<br/>Name of table | `"table"` |
-| `postgresdb.user` | `string` | **User**<br/>Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref> — without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres | `"postgres"` |
+| `postgresdb.user` | `string` | **User**<br/>Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref>, without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres | `"postgres"` |
 
 ## Dependencies
 

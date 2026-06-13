@@ -5,19 +5,19 @@ A RocketRide tool node that gives an AI agent an isolated cloud sandbox for runn
 ## What it does
 
 Gives an agent a remote [Daytona](https://www.daytona.io) sandbox to execute generated code
-and shell commands in — the code runs on Daytona's infrastructure, never on the engine host.
+and shell commands in, the code runs on Daytona's infrastructure, never on the engine host.
 The agent can run code in the configured language, run arbitrary shell commands (install
 packages, build, then run), and move text files in and out of the sandbox.
 
 One ephemeral sandbox is shared across every tool call in the pipeline: files written and
 packages installed by one call are visible to the next. The sandbox is created **lazily** on
-the first tool call — a pipeline that never invokes the tool never provisions (or pays for)
-one — and is deleted when the pipeline shuts down.
+the first tool call, a pipeline that never invokes the tool never provisions (or pays for)
+one, and is deleted when the pipeline shuts down.
 
 A running sandbox bills by the minute, so the node is built to fail safe on cost: the sandbox
 is `ephemeral` with a 1–120 minute inactivity **auto-stop** that deletes it even if the engine
 crashes before cleanup. If an idle gap recycles the sandbox mid-pipeline, the next `run_code`,
-`run_command`, or `upload_file` call transparently creates a fresh one (state resets — re-upload
+`run_command`, or `upload_file` call transparently creates a fresh one (state resets: re-upload
 and reinstall as needed).
 
 ---
@@ -31,7 +31,7 @@ and reinstall as needed).
 | `target` | string | Default empty. Sandbox region, e.g. `us` or `eu`. Leave empty for the organization default. |
 | `snapshot` | string | Default empty. Daytona snapshot to create the sandbox from. Leave empty for the default snapshot. |
 | `language` | string | Default `python`. Language runtime used by `run_code`: `python`, `javascript`, or `typescript`. |
-| `auto_stop_minutes` | integer | Default 5 (1–120). Inactivity stop interval. The sandbox is ephemeral, so stopping also deletes it — this is the cost safety net if cleanup is missed. |
+| `auto_stop_minutes` | integer | Default 5 (1–120). Inactivity stop interval. The sandbox is ephemeral, so stopping also deletes it: this is the cost safety net if cleanup is missed. |
 | `exec_timeout_secs` | integer | Default 120 (1–1200). Maximum seconds a single `run_code` / `run_command` call may take. |
 | `max_output_chars` | integer | Default 50000 (1000–1000000). Output longer than this is truncated before being returned to the agent, protecting its context window. |
 
@@ -42,7 +42,7 @@ and reinstall as needed).
 | Tool | Description |
 |---|---|
 | `run_code` | Execute source code in the sandbox (language from config) and return its output. |
-| `run_command` | Run a shell command in the sandbox — install dependencies, build, then run. |
+| `run_command` | Run a shell command in the sandbox: install dependencies, build, then run. |
 | `upload_file` | Write a text file into the sandbox (creates or overwrites). |
 | `download_file` | Read a text file back from the sandbox. |
 
@@ -88,19 +88,19 @@ file is missing or the sandbox call fails.
 
 A sandbox bills while it runs, so the node bounds the exposure three ways:
 
-- **Lazy creation** — the sandbox is provisioned only when a tool is actually called, never at
+- **Lazy creation**: the sandbox is provisioned only when a tool is actually called, never at
   pipeline start.
-- **Ephemeral + auto-stop** — it stops (and, being ephemeral, deletes itself) after
+- **Ephemeral + auto-stop**: it stops (and, being ephemeral, deletes itself) after
   `auto_stop_minutes` of inactivity, even if the engine dies before cleanup. The interval is
   floored at 1 minute so an abandoned sandbox always shuts itself down.
-- **Explicit teardown** — it is deleted on pipeline shutdown (`endGlobal`).
+- **Explicit teardown**: it is deleted on pipeline shutdown (`endGlobal`).
 
 ## Sandbox lifecycle
 
 The sandbox is shared, so installed packages and uploaded files persist between tool calls
 within a pipeline run. After it sits idle past the auto-stop interval it is recycled
 server-side; the next `run_code`, `run_command`, or `upload_file` call detects the stale handle
-and creates a fresh, empty sandbox automatically. `download_file` does **not** auto-recreate — a
+and creates a fresh, empty sandbox automatically. `download_file` does **not** auto-recreate: a
 404 there is ambiguous between a missing file and an expired sandbox, and a fresh empty sandbox
 could not produce the file either way, so it simply reports the miss.
 
@@ -124,7 +124,7 @@ pytest nodes/test/test_tool_daytona.py -v
 |---|---|---|---|
 | `tool_daytona.api_url` | `string` | **API URL**<br/>Daytona API endpoint. Leave empty for the default cloud (https://app.daytona.io/api); set for self-hosted Daytona. | `""` |
 | `tool_daytona.apikey` | `string` | **API Key**<br/>Daytona API key (app.daytona.io → Keys). | `""` |
-| `tool_daytona.auto_stop_minutes` | `integer` | **Auto-stop (minutes)**<br/>Sandbox stops (and, being ephemeral, deletes itself) after this many minutes of inactivity — the cost safety net if cleanup is missed. | `5` |
+| `tool_daytona.auto_stop_minutes` | `integer` | **Auto-stop (minutes)**<br/>Sandbox stops (and, being ephemeral, deletes itself) after this many minutes of inactivity: the cost safety net if cleanup is missed. | `5` |
 | `tool_daytona.exec_timeout_secs` | `integer` | **Execution Timeout (seconds)**<br/>Max seconds a single run_code/run_command call may take. | `120` |
 | `tool_daytona.language` | `string` | **Language**<br/>Language runtime for run_code in the sandbox. | `"python"` |
 | `tool_daytona.max_output_chars` | `integer` | **Max Output (characters)**<br/>Output longer than this is truncated before being returned to the agent. | `50000` |

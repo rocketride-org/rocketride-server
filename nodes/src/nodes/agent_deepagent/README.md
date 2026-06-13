@@ -42,11 +42,11 @@ Both variants use an **Advanced Mode** toggle (default `Off`): when Off, the nod
 
 | Field | Type | Description |
 |---|---|---|
-| `description` | string | Default empty. The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented — this is the only signal the orchestrator uses to pick a sub-agent. |
+| `description` | string | Default empty. The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented, this is the only signal the orchestrator uses to pick a sub-agent. |
 | `system_prompt` | string | Default empty. Instructions that define this sub-agent's role and behaviour. Leave blank to use the default. |
 | `instructions` | array | Additional instructions to guide this sub-agent. Each line is appended to the system prompt. |
 | `advanced_mode` | boolean | Default false. When enabled, replace the Instructions list with a direct System Prompt field for full control. |
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. |
+| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
 
 ### Deep Agent Subagent
 
@@ -117,7 +117,7 @@ The driver emits SSE `thinking` events throughout a run: host-tool discovery cou
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `advanced_mode` | `boolean` | **Advanced Mode**<br/>When enabled, replace the Instructions list with direct Agent Description and System Prompt fields for full control. | `false` |
-| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly. | `""` |
+| `agent_description` | `string` | **Agent description**<br/>What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. | `""` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide the agent. Each line is appended to the system prompt. |  |
 | `system_prompt` | `string` | **System prompt**<br/>Instructions that define this agent's role and behaviour. Leave blank to use the default. | `""` |
 
@@ -126,7 +126,7 @@ The driver emits SSE `thinking` events throughout a run: host-tool discovery cou
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `advanced_mode` | `boolean` | **Advanced Mode**<br/>When enabled, replace the Instructions list with a direct System Prompt field for full control. | `false` |
-| `description` | `string` | **Description**<br/>The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented — this is the only signal the orchestrator uses to pick a sub-agent. | `""` |
+| `description` | `string` | **Description**<br/>The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented, this is the only signal the orchestrator uses to pick a sub-agent. | `""` |
 | `instructions` | `array` | **Instructions**<br/>Additional instructions to guide this sub-agent. Each line is appended to the system prompt. |  |
 | `system_prompt` | `string` | **System prompt**<br/>Instructions that define this sub-agent's role and behaviour. Leave blank to use the default. | `""` |
 

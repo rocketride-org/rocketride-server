@@ -39,7 +39,7 @@ agent-callable tools.
 | `url` | string | Default empty. Base URL of the Aparavi server, e.g. https://aparavi.example.com |
 | `user` | string | Default empty. Aparavi login username |
 | `password` | string | Aparavi login password |
-| `db_description` | string | Default empty. What is this data used for? Describe its content and purpose — this helps the LLM generate more accurate AQL queries. |
+| `db_description` | string | Default empty. What is this data used for? Describe its content and purpose, this helps the LLM generate more accurate AQL queries. |
 | `profile` | string | Default "default".  |
 
 
@@ -68,7 +68,7 @@ the query, and returns:
 |---|---|---|
 | `get_data` | Translate natural language to AQL, execute against Aparavi, and return rows. |
 | `get_aql` | Convert a natural-language question to an AQL SELECT statement without executing it. Use only when the user explicitly asks to see the query. |
-| `get_schema` | FALLBACK ONLY — returns the fixed column schema for the Aparavi STORE table. Do NOT call this preemptively; only use if get_data fails or returns unexpected results. |
+| `get_schema` | FALLBACK ONLY: returns the fixed column schema for the Aparavi STORE table. Do NOT call this preemptively; only use if get_data fails or returns unexpected results. |
 
 
 
@@ -150,7 +150,7 @@ lifetime of the pipeline and released when it ends.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `aparavi.db_description` | `string` | **Data description**<br/>What is this data used for? Describe its content and purpose — this helps the LLM generate more accurate AQL queries. | `""` |
+| `aparavi.db_description` | `string` | **Data description**<br/>What is this data used for? Describe its content and purpose, this helps the LLM generate more accurate AQL queries. | `""` |
 | `aparavi.password` | `string` | **Password**<br/>Aparavi login password |  |
 | `aparavi.profile` | `string` |  | `"default"` |
 | `aparavi.url` | `string` | **Aparavi Server URL**<br/>Base URL of the Aparavi server, e.g. https://aparavi.example.com | `""` |

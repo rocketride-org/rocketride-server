@@ -52,9 +52,9 @@ Only `SELECT` is permitted for generated queries.
 | `user` | string | Default "default". User to connect to the ClickHouse server |
 | `password` | string | Password to connect to the ClickHouse server |
 | `database` | string | Default "default". Name of database |
-| `tls` | boolean | Default false. Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific — MySQL/PostgreSQL nodes do not expose this. |
+| `tls` | boolean | Default false. Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific, MySQL/PostgreSQL nodes do not expose this. |
 | `table` | string | Default "table". Name of table |
-| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. |
+| `db_description` | string | Default empty. What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. |
 | `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL |
 | `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. |
 | `profile` | string | Default "default".  |
@@ -103,13 +103,13 @@ Unlike the MySQL/PostgreSQL nodes, this node intentionally does not expose the i
 |---|---|---|---|
 | `clickhouse.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `clickhouse.database` | `string` | **Database name**<br/>Name of database | `"default"` |
-| `clickhouse.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries. | `""` |
+| `clickhouse.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `clickhouse.host` | `string` | **ClickHouse host**<br/>Host name or IP address of the ClickHouse server, optionally including a native-protocol port (e.g. localhost:9440). Defaults to port 9000 when none is given. | `"localhost"` |
 | `clickhouse.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL | `5` |
 | `clickhouse.password` | `string` | **Password**<br/>Password to connect to the ClickHouse server |  |
 | `clickhouse.profile` | `string` |  | `"default"` |
 | `clickhouse.table` | `string` | **Table name**<br/>Name of table | `"table"` |
-| `clickhouse.tls` | `boolean` | **Use TLS**<br/>Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific — MySQL/PostgreSQL nodes do not expose this. | `false` |
+| `clickhouse.tls` | `boolean` | **Use TLS**<br/>Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific, MySQL/PostgreSQL nodes do not expose this. | `false` |
 | `clickhouse.user` | `string` | **User**<br/>User to connect to the ClickHouse server | `"default"` |
 
 ## Dependencies
