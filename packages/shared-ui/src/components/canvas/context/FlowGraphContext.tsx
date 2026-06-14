@@ -271,6 +271,23 @@ export interface IFlowGraphProviderProps {
 }
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Stable signature of a project's component content, used to detect echoes of
+ * our own changes independently of docRevision. Two projects with identical
+ * components produce identical signatures regardless of version number.
+ */
+function projectContentSig(project?: { components?: unknown } | null): string {
+	try {
+		return JSON.stringify(project?.components ?? []);
+	} catch {
+		return ' nosig';
+	}
+}
+
+// =============================================================================
 // Provider
 // =============================================================================
 
@@ -305,6 +322,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const lastSentVersion = useRef(-1);
 	/** The project_id we last loaded — used to bypass echo-detection when project identity changes. */
 	const lastLoadedProjectId = useRef<string | undefined>(undefined);
+	/** Content signature of the components currently on the canvas. Echoes of our
+	 *  own edits share this signature and must NOT trigger a reload. */
+	const loadedContentSig = useRef<string>('');
 
 	// --- Derived state -----------------------------------------------------
 
@@ -383,6 +403,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
+			// Register the content we're about to send so its echo (which round-trips
+			// back as currentProject) is recognized and does NOT trigger a reload.
+			loadedContentSig.current = projectContentSig(project);
 			onContentChanged(project);
 		}, 50);
 	}, [onContentChanged, patchToolchainState]);
@@ -402,7 +425,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(changes: NodeChange<FlowNode>[]) => {
 			if (isLocked) return;
 
-			const types = changes.map((c) => c.type);
 			const structural = changes.some((c) => c.type === 'add' || c.type === 'remove');
 			if (structural) {
 				onContentUpdated();
@@ -960,12 +982,21 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		if (!currentProject) return;
 
 		const projectChanged = incomingProjectId !== lastLoadedProjectId.current;
+		const incomingSig = projectContentSig(currentProject);
 
-		// Skip if this is an echo of our own change — but always load when project identity changes
-		if (!projectChanged && incomingVersion === lastSentVersion.current) {
+		// Skip echoes of our own content. We compare component CONTENT rather than
+		// docRevision: rapid edits produce several in-flight versions whose echoes
+		// arrive with docRevisions that never equal our latest lastSentVersion, so a
+		// version-equality guard re-ran loadData on every stale echo — and each load
+		// re-emitted content, bumping the version again: an infinite reload loop that
+		// wiped node measurements (setFlowReady thrash) and ended in "Maximum update
+		// depth exceeded". Content comparison converges; undo/redo still loads because
+		// its content differs from what's currently on the canvas.
+		if (!projectChanged && incomingSig === loadedContentSig.current) {
 			return;
 		}
 
+		loadedContentSig.current = incomingSig;
 		lastSentVersion.current = incomingVersion;
 		lastLoadedProjectId.current = incomingProjectId;
 		const unconfigured = loadData(currentProject);
@@ -1031,6 +1062,20 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		if (!isFlowReady) return;
 
 		const pending = pendingViewportRef.current;
+
+		// Only do work when a viewport restore is actually queued (loadData sets
+		// pendingViewportRef right after a structural load). Previously
+		// updateNodeInternals + the viewport restore ran on EVERY isFlowReady→true
+		// transition. Because updateNodeInternals perturbs node measurements, that
+		// flipped isFlowReady back to false and re-entered this effect — a feedback
+		// loop that runs away to "Maximum update depth exceeded" once the canvas has
+		// nodes to re-measure (reproducible via add → delete → add). With nothing
+		// pending there is nothing to restore, so we clear the loading guard and bail
+		// instead of needlessly re-scanning every node's internals.
+		if (!pending) {
+			isLoadingRef.current = false;
+			return;
+		}
 		pendingViewportRef.current = null;
 
 		// Force ReactFlow to re-scan all handle positions so edges that loaded
@@ -1040,10 +1085,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			updateNodeInternals(nodeIds);
 		}
 
-
 		if (pending === 'fitView') {
 			fitView({ padding: 0.15, duration: 0 });
-		} else if (pending) {
+		} else {
 			setViewport(pending, { duration: 0 });
 		}
 
