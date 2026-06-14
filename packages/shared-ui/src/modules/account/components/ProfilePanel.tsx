@@ -12,7 +12,7 @@
  * the host via callback props.
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ConnectResult, ProfileUpdate } from '../types';
@@ -90,13 +90,13 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 		locale: profile?.locale || authUser?.locale || '',
 	});
 
-	const [editOpen, setEditOpen] = React.useState(false);
-	const [fields, setFields] = React.useState<ProfileUpdate>(fromProfile);
-	const [saving, setSaving] = React.useState(false);
-	const [error, setError] = React.useState<string | null>(null);
+	const [editOpen, setEditOpen] = useState(false);
+	const [fields, setFields] = useState<ProfileUpdate>(fromProfile);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	// Re-sync form fields when the server profile or auth user data is refreshed.
-	React.useEffect(() => {
+	useEffect(() => {
 		setFields(fromProfile());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [profile?.displayName, profile?.email, authUser?.email]);

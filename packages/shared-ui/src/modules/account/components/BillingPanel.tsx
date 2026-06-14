@@ -15,7 +15,7 @@
  * for visual consistency across account tabs.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../../billing/types';
@@ -198,7 +198,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 	const isSubscribed = subscriptions.length > 0;
 	const handleAddCapacity = useCallback(() => setShowTopUpModal(true), []);
 	// Build appId → app lookup for display name resolution
-	const appMap = React.useMemo(() => {
+	const appMap = useMemo(() => {
 		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
 		for (const a of apps ?? []) map[a.id] = a;
 		return map;
