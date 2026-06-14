@@ -102,7 +102,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Web Hook",
+			"title": "Webhook",
 			"properties": ["hideForm", "type", "source.mode", "parameters"]
 		}
 	]

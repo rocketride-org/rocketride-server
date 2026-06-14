@@ -135,8 +135,10 @@ function nodeCatalogMarkdown(nodes) {
 	for (const [label, group] of ordered) {
 		lines.push(`### ${label}`, '');
 		lines.push(CATEGORY_DESCRIPTIONS[label] || `${label} nodes.`, '');
+		lines.push('| Node | Description |');
+		lines.push('| --- | --- |');
 		for (const n of group.items.sort((a, b) => a.title.localeCompare(b.title))) {
-			lines.push(`- [${n.title}](${n.route})`);
+			lines.push(`| [${n.title}](${n.route}) | ${n.description || ''} |`);
 		}
 		lines.push('');
 	}

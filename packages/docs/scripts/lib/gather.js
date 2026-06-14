@@ -64,7 +64,7 @@ const NODE_LABEL_OVERRIDES = {
 	core: 'Core',
 	index_search: 'Index Search',
 	response: 'Response',
-	webhook: 'Web Hook',
+	webhook: 'Webhook',
 	tool_mcp_client: 'MCP Client',
 	llm_ibm_watson: 'IBM Watson',
 };
@@ -79,15 +79,58 @@ function prettifyName(name) {
 		.join(' ');
 }
 
-/** classType + display title for a node, from its first services*.json (static regex, no JSON parse). */
+/** classType + display title + first-sentence description for a node, from its first services*.json (static regex, no JSON parse). */
 async function readNodeMeta(nodeDir) {
 	const svc = (await glob('services*.json', { cwd: nodeDir, nodir: true })).sort()[0];
-	if (!svc) return { classType: '', title: '' };
+	if (!svc) return { classType: '', title: '', description: '' };
 	const text = await readFile(path.join(nodeDir, svc));
 	const ctm = /"classType"\s*:\s*\[([^\]]*)\]/.exec(text);
 	const classType = ctm ? (ctm[1].match(/"([^"]*)"/) || [])[1] || '' : '';
 	const title = (/"title"\s*:\s*"([^"]*)"/.exec(text) || [])[1] || '';
-	return { classType, title };
+	return { classType, title, description: extractDescription(text) };
+}
+
+/** Extract a first-sentence description from a raw services*.json text string. */
+function extractDescription(text) {
+	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
+	if (!m) return '';
+	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
+	const full = parts.map((s) => s.slice(1, -1)).join('').trim();
+	const dot = full.indexOf('. ');
+	return dot >= 0 ? full.slice(0, dot + 1) : full;
+}
+
+/**
+ * Map of service slug -> first-sentence description for all services*.json in a node
+ * directory. Used to resolve descriptions for variant sub-pages.
+ *   services.chat.json  -> slug 'chat'
+ *   services.agent.json -> slug 'agent'
+ */
+async function readServiceDescriptions(nodeDir) {
+	const svcs = await glob('services*.json', { cwd: nodeDir, nodir: true });
+	const map = new Map();
+	for (const svc of svcs) {
+		const slug = svc.replace(/^services\.?/, '').replace(/\.json$/, '');
+		if (!slug) continue;
+		const desc = extractDescription(await readFile(path.join(nodeDir, svc)));
+		if (desc) map.set(slug, desc);
+	}
+	return map;
+}
+
+/**
+ * Find the best description for a variant from the parent node's service description map.
+ * Match order: exact slug, ends-with `_slug`, variant starts-with slug (handles parser/parse).
+ */
+function variantDescription(variant, serviceDescriptions) {
+	if (serviceDescriptions.has(variant)) return serviceDescriptions.get(variant);
+	for (const [slug, desc] of serviceDescriptions) {
+		if (variant.endsWith('_' + slug)) return desc;
+	}
+	for (const [slug, desc] of serviceDescriptions) {
+		if (variant.startsWith(slug)) return desc;
+	}
+	return '';
 }
 
 /** Canvas-style sidebar/page label for a node (override > service title > prettified name). */
@@ -301,7 +344,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		nodeDocs.push(rel);
 		const route = `${NODES_DIR}/${name}`; // flat public route, preserved via slug
 		claim(route, srcAbs);
-		const { classType, title } = await readNodeMeta(nodeDir);
+		const { classType, title, description } = await readNodeMeta(nodeDir);
 		const cat = NODE_CATEGORIES[classType] || FALLBACK_CATEGORY;
 		// Keep an authored front-matter title; only synthesize a canvas name for
 		// the raw-named docs that lack one (e.g. text_output, index_search, core).
@@ -322,7 +365,8 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
 			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }));
 			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
-			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position });
+			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
+			const serviceDescriptions = await readServiceDescriptions(nodeDir);
 			for (const { variant, rel: vrel } of variants) {
 				const vsrcAbs = path.join(projectRoot, vrel);
 				const vcontent = await readFile(vsrcAbs);
@@ -331,9 +375,10 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 				nodeDocs.push(vrel);
 				const vExistingTitle = frontMatterTitle(vcontent);
 				const vlabel = vExistingTitle || nodeLabel(variant, '');
+				const vdescription = variantDescription(variant, serviceDescriptions);
 				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }));
 				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
-				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position });
+				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position, description: vdescription });
 			}
 			continue;
 		}
@@ -343,7 +388,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const destAbs = path.join(contentDir, NODES_DIR, cat.slug, `${name}.md`);
 		await writeFileEnsure(destAbs, stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }));
 		await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
-		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position });
+		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 	}
 
 	// 3. Declared per-package mounts.

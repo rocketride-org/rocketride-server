@@ -60,6 +60,76 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant
 
+## How pipelines become tools
+
+Every pipeline you start in RocketRide is automatically registered as an MCP
+tool by the server — no extra configuration required.
+
+When you start a pipeline (via the VS Code extension, the CLI, or an SDK), the
+engine assigns it a **task token**. The MCP server discovers all running tasks
+for your API key and exposes each one as a callable tool. The tool name is
+derived from the pipeline name; the tool schema is derived from the pipeline's
+input lanes.
+
+```
+You start a pipeline          →  engine assigns a task token
+                                    ↓
+rocketride-mcp discovers it   →  registers it as an MCP tool
+                                    ↓
+Claude calls the tool         →  MCP server forwards the request to the pipeline
+                                    ↓
+Pipeline processes it         →  result streamed back to Claude
+```
+
+Stop the pipeline and the tool disappears from the next tool-list refresh.
+Start a new pipeline and it appears automatically.
+
+## Worked example
+
+**1. Start the MCP server** (if not already running via a client config):
+
+```bash
+export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_AUTH=your-api-key
+rocketride-mcp
+```
+
+**2. Start a pipeline** — for example, a simple chat pipeline (`chat.pipe`):
+
+```json
+{
+  "nodes": [
+    { "id": "source_1", "provider": "webhook" },
+    {
+      "id": "llm_1", "provider": "llm_openai",
+      "config": { "profile": "openai-4o-mini", "apikey": "${OPENAI_API_KEY}" },
+      "input": [{ "lane": "questions", "from": "source_1" }]
+    },
+    { "id": "target_1", "provider": "response",
+      "input": [{ "lane": "answers", "from": "llm_1" }] }
+  ]
+}
+```
+
+```bash
+rocketride start --pipeline ./chat.pipe
+```
+
+**3. Ask Claude to use it.** Open Claude Desktop (configured with the
+`mcpServers` block above) and type:
+
+> Use the RocketRide pipeline to answer: what is the boiling point of water?
+
+Claude discovers the tool, calls it with the question, and returns the answer
+streamed from your pipeline.
+
+**4. Inspect resources** — Claude can also list your pipelines and check server
+status using MCP resources:
+
+> Show me the available RocketRide pipelines.
+
+This reads `rocketride://pipelines` and returns the list of running tasks.
+
 ## Installation
 
 ```bash

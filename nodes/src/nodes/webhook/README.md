@@ -1,12 +1,12 @@
 # webhook
 
-A RocketRide source node that lets external input reach a pipeline over HTTP: three variants (Web Hook, Chat, and Dropper) served by a single shared implementation.
+A RocketRide source node that lets external input reach a pipeline over HTTP: three variants (Webhook, Chat, and Dropper) served by a single shared implementation.
 
 ## What it does
 
 Stands up its own HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
 
-- **Web Hook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
+- **Webhook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
 - **Chat** (`chat://`): serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
 - **Dropper** (`dropper://`): serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
 
@@ -24,11 +24,11 @@ Each variant takes the internal `_source` input and emits to its declared output
 
 | Variant  | Lane in | Lanes out                                            |
 | -------- | ------- | ---------------------------------------------------- |
-| Web Hook | -       | `tags`, `text`, `audio`, `video`, `image`, `questions` |
+| Webhook  | -       | `tags`, `text`, `audio`, `video`, `image`, `questions` |
 | Chat     | -       | `questions`                                          |
 | Dropper  | -       | `tags`                                               |
 
-- **Web Hook**: data received from the HTTP request, routed by content type.
+- **Webhook**: data received from the HTTP request, routed by content type.
 - **Chat**: each message submitted via the chat UI becomes a question.
 - **Dropper**: each uploaded file enters the pipeline for processing.
 
@@ -42,7 +42,7 @@ When the server is up, the node emits a ready status to the monitor. Because thi
 
 | Variant  | Status message                                          |
 | -------- | ------------------------------------------------------- |
-| Web Hook | `Webhook ready - system is ready to accept requests`    |
+| Webhook  | `Webhook ready - system is ready to accept requests`    |
 | Chat     | `Chat ready - system is ready to accept questions`      |
 | Dropper  | `Dropper ready - system is ready to process files`      |
 

@@ -35,7 +35,20 @@ const SPINE = [
 			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
 			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
-			{ id: 'concepts/execution-model', label: 'Execution Model' }
+			{ id: 'concepts/execution-model', label: 'Execution Model' },
+			{ id: 'concepts/error-handling', label: 'Error Handling' },
+			{ id: 'concepts/performance', label: 'Performance' },
+			{ id: 'concepts/security-model', label: 'Security Model' },
+			{ id: 'concepts/advanced-agents', label: 'Advanced Agents' },
+			{ id: 'concepts/best-practices', label: 'Best Practices' }
+		]
+	},
+	{
+		label: 'Examples',
+		items: [
+			{ id: 'examples/rag-pipeline', label: 'RAG Pipeline' },
+			{ id: 'examples/webhook-pipeline', label: 'Webhook Pipeline' },
+			{ id: 'examples/document-extraction', label: 'Document Extraction' }
 		]
 	},
 	{
@@ -47,6 +60,14 @@ const SPINE = [
 		]
 	},
 	{ label: 'Nodes', autogen: NODES_DIR },
+	{
+		label: 'Integrations',
+		items: [
+			{ id: 'integrations/anthropic', label: 'Anthropic' },
+			{ id: 'integrations/qdrant', label: 'Qdrant' },
+			{ id: 'integrations/postgres', label: 'PostgreSQL' }
+		]
+	},
 	{
 		label: 'Develop',
 		items: [
