@@ -54,6 +54,14 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 	const [hovered, setHovered] = useState(false);
 	const { setEdges } = useReactFlow();
 
+	// ReactFlow can render an edge for a frame before its connected nodes have been
+	// measured — at which point sourceX/Y and targetX/Y are NaN, and getBezierPath
+	// produces an invalid `<path d="MNaN,NaN…">` (a console error every frame). Bail
+	// until the endpoints are real numbers; ReactFlow re-renders the edge once the
+	// nodes report their measured size. (Hooks above run unconditionally — this early
+	// return is after them, so rules-of-hooks are respected.)
+	if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) return null;
+
 	// Invoke edges run vertically (top-to-bottom) so the offset is applied
 	// to Y instead of X. Detect by checking the source handle ID.
 	const isInvokeEdge = sourceHandleId?.toLowerCase().includes('invoke');

@@ -188,10 +188,9 @@ class MiscCommands(DAPConn):
                 # Determine org and team IDs from account info
                 org_id = ''
                 team_id = getattr(self._account_info, 'defaultTeam', '') or ''
-                for org in getattr(self._account_info, 'organizations', []):
+                org = getattr(self._account_info, 'organization', None)
+                if org:
                     org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
-                    if org_id:
-                        break
                 merged_env = await account.get_merged_env(
                     user_id=self._account_info.userId,
                     org_id=org_id,

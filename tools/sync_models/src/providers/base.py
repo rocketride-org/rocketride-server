@@ -349,6 +349,19 @@ class CloudProvider(ABC):
         discovery_source: str | None = next((s for s in model_sources if _discovery_available(s)), None)
 
         # --- Fetch api_models from primary_source ---
+        # If the provider SDK isn't bundled (e.g. running through the engine without
+        # `pip install -r tools/requirements.txt`) fall back to the next available source.
+        if primary_source == 'provider':
+            try:
+                self.make_client(api_key)
+            except ImportError as e:
+                report.warning = f'Provider SDK unavailable ({e}); falling back to OpenRouter.'
+                primary_source = next((s for s in model_sources if s != 'provider' and _enrichment_available(s)), None)
+                if primary_source is None:
+                    report.error = f'No fallback source available: {e}'
+                    return report
+                if discovery_source == 'provider':
+                    discovery_source = primary_source if allow_fallback_discovery else None
         try:
             if primary_source == 'provider':
                 client = self.make_client(api_key)
@@ -499,7 +512,7 @@ class CloudProvider(ABC):
         """
         seen: Dict[str, Dict[str, Any]] = {}  # native_id → entry
 
-        for bare_id, (ctx, _out, _name, _exp) in get_openrouter_cache().items():
+        for bare_id, (ctx, _out, _name, _exp, _reasoning) in get_openrouter_cache().items():
             # Apply the same two-step conversion as _fetch_litellm_models():
             # 1. normalize_model_id() — handles raw ID quirks (e.g. dots→hyphens for Anthropic)
             # 2. litellm_to_native_model_id() — converts to the native format stored in

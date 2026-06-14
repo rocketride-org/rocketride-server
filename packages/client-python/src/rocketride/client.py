@@ -28,7 +28,7 @@ Use this client to connect to RocketRide services, execute pipelines, chat with 
 
 Basic Usage:
     # Connect and execute a pipeline
-    client = RocketRideClient(uri="http://localhost:8080")
+    client = RocketRideClient(uri="http://localhost:5565")
     result = await client.connect("your_api_key")
     token = await client.use(filepath="pipeline.json")
     await client.send(token, "Hello, world!")
@@ -101,7 +101,7 @@ class RocketRideClient(
     and can be used as a context manager for automatic connection handling.
 
     Args:
-        uri (str, optional): Service URI of the RocketRide server (e.g., "http://localhost:8080").
+        uri (str, optional): Service URI of the RocketRide server (e.g., "http://localhost:5565").
             If not provided, uses ROCKETRIDE_URI environment variable or default service.
         auth (str, optional): Your API key or access token for authentication.
             If not provided, uses ROCKETRIDE_APIKEY environment variable. Required at connect time.
@@ -113,7 +113,7 @@ class RocketRideClient(
 
     Example:
         # Explicit connection management
-        client = RocketRideClient(uri="http://localhost:8080")
+        client = RocketRideClient(uri="http://localhost:5565")
         result = await client.connect("your_api_key")  # returns ConnectResult
         try:
             token = await client.use(filepath="my_pipeline.json")
@@ -140,7 +140,7 @@ class RocketRideClient(
         Create a new RocketRide client instance.
 
         Args:
-            uri: WebSocket URI of your RocketRide server (e.g., "ws://localhost:8080").
+            uri: WebSocket URI of your RocketRide server (e.g., "ws://localhost:5565").
                 Optional; uses ROCKETRIDE_URI from env or .env if empty.
             auth: Your API key or access token. Optional; uses ROCKETRIDE_APIKEY from env or .env if empty.
             **kwargs: Additional options:

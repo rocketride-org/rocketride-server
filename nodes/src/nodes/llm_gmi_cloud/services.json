@@ -77,9 +77,9 @@
 	//
 	// Notes:
 	// GMI Cloud has two model tiers:
-	//   Shared (always-on): DeepSeek, GPT, Claude, Gemini — available immediately at the
+	//   Shared (always-on): DeepSeek, GPT, Claude, Gemini, available immediately at the
 	//   shared endpoint; only an API key is required.
-	//   Deploy-on-demand: Llama, Qwen — must be deployed first in the GMI Cloud console
+	//   Deploy-on-demand: Llama, Qwen, must be deployed first in the GMI Cloud console
 	//   (console.gmicloud.ai), after which a unique endpoint URL is provided. Enter that
 	//   URL in the "Endpoint URL" field that appears for these profiles.
 	"preconfig": {

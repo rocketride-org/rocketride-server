@@ -21,7 +21,7 @@ Hierarchical [CrewAI](https://docs.crewai.com/) manager node. Fans out to all co
 | `llm`    | yes         | LLM for the manager agent and planning    |
 | `crewai` | yes (min 1) | Connected `CrewAI Subagent` nodes (min 1) |
 
-The `crewai` channel accepts only `CrewAI Subagent` nodes. `CrewAI Agent` nodes cannot be used as sub-agents — their `classType` does not include `crewai`. The Manager itself also cannot be nested under another Manager (it lacks `classType: "crewai"`); cross-Manager composition is supported via `tool.run_agent` instead.
+The `crewai` channel accepts only `CrewAI Subagent` nodes. `CrewAI Agent` nodes cannot be used as sub-agents, their `classType` does not include `crewai`. The Manager itself also cannot be nested under another Manager (it lacks `classType: "crewai"`); cross-Manager composition is supported via `tool.run_agent` instead.
 
 ## Configuration
 

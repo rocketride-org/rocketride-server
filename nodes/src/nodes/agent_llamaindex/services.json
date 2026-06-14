@@ -1,0 +1,133 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LlamaIndex",
+	//
+	// Required:
+	//		The endpoint protocol
+	//
+	"protocol": "agent_llamaindex://",
+	//
+	// Required:
+	//		Class type of the node: agent (runs on the questions lane) and
+	//		tool (invocable by parent agents via `run_agent`)
+	//
+	"classType": ["agent", "tool"],
+	//
+	// Required:
+	//		Capability flags that change engine behavior for this node
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Factory registration type (filter, endpoint, or ignored)
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The executable/script path for this node
+	//
+	"path": "nodes.agent_llamaindex",
+	//
+	// Required:
+	//		The prefix used when converting URLs <=> paths
+	//
+	"prefix": "agent",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Single-agent execution using LlamaIndex's ReAct loop.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "llamaindex.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Control-plane channels this agent invokes: an LLM (required) and
+	//		tools (optional) made available during its reasoning loop
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		}
+	},
+	//
+	// Optional:
+	//		Pipe lanes: receives questions and produces answers
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	// Optional:
+	//		Configuration profiles used by the driver
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"agent_description": "",
+				"instructions": []
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions for this service
+	//
+	"fields": {
+		"agent_description": {
+			"type": "string",
+			"title": "Agent description",
+			"default": "",
+			"optional": true,
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the agent.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"agent_llamaindex.default": { "object": "default", "properties": ["agent_description", "instructions"] },
+		"agent_llamaindex.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [{ "value": "default", "properties": ["agent_llamaindex.default"] }]
+		}
+	},
+	//
+	// Required:
+	//		Defines the configuration shape (sections + fields) shown in the UI
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LlamaIndex",
+			"properties": ["agent_description", "instructions"]
+		}
+	]
+}

@@ -834,10 +834,10 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Returns the ID of the user's primary organization.
+	 * Returns the ID of the user's organization.
 	 */
 	getOrgId(): string | undefined {
-		return this._connectResult?.organizations?.[0]?.id;
+		return this._connectResult?.organization?.id;
 	}
 
 	/**

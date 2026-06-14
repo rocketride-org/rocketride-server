@@ -118,7 +118,7 @@
 		"default": "basic",
 		"profiles": {
 			"basic": {
-				"title": "Basic — Prompt injection + PII detection",
+				"title": "Basic: Prompt injection + PII detection",
 				"policy_mode": "warn",
 				"enable_prompt_injection": true,
 				"enable_content_safety": false,
@@ -131,7 +131,7 @@
 				"allowed_topics": []
 			},
 			"strict": {
-				"title": "Strict — All checks enabled, block on violation",
+				"title": "Strict: All checks enabled, block on violation",
 				"policy_mode": "block",
 				"enable_prompt_injection": true,
 				"enable_content_safety": true,
@@ -144,7 +144,7 @@
 				"allowed_topics": []
 			},
 			"custom": {
-				"title": "Custom — Configure checks individually",
+				"title": "Custom: Configure checks individually",
 				"policy_mode": "warn",
 				"enable_prompt_injection": true,
 				"enable_content_safety": true,
@@ -173,15 +173,15 @@
 			"enum": [
 				[
 					"block",
-					"Block — Reject on violation"
+					"Block: Reject on violation"
 				],
 				[
 					"warn",
-					"Warn — Log and continue"
+					"Warn: Log and continue"
 				],
 				[
 					"log",
-					"Log — Silent logging only"
+					"Log: Silent logging only"
 				]
 			]
 		},
@@ -229,7 +229,7 @@
 			"enum": [
 				[
 					"",
-					"None — No format check"
+					"None: No format check"
 				],
 				[
 					"json",

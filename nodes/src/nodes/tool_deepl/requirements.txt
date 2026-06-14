@@ -1,0 +1,5 @@
+# tool_deepl talks to the DeepL REST API over plain HTTP using the shared
+# post_with_retry helper (ai.common.utils), so `requests` is the only runtime
+# dependency. It is already a transitive dep of the engine; pinned here so the
+# node's dependency surface is self-describing. No new third-party packages.
+requests

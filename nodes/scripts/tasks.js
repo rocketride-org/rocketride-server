@@ -218,6 +218,14 @@ function makeRunPytestAction(options = {}) {
     };
 }
 
+function makeDocsGenerateAction() {
+    return {
+        run: async (ctx, task) => {
+            await execCommand('node', [path.join(__dirname, 'gen-node-tables.mjs')], { task, cwd: PACKAGE_DIR });
+        }
+    };
+}
+
 function makeRunContractTestsAction() {
     return {
         run: async (ctx, task) => {
@@ -272,11 +280,12 @@ module.exports = {
         { name: 'nodes:start-server', action: makeStartTestServerAction },
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
+        { name: 'nodes:docs-generate', action: makeDocsGenerateAction },
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
             description: 'Build nodes',
-            steps: ['server:build', 'nodes:sync']
+            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },

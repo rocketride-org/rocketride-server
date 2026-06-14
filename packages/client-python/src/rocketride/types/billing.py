@@ -95,36 +95,39 @@ class PlanAction(TypedDict):
     label: str
 
 
-class StripePlan(TypedDict):
+class AppPrice(TypedDict):
     """
-    Stripe plan/price row for a given product, returned by the ``prices``
-    subcommand. Used in the checkout plan picker.
+    App pricing tier row from the ``app_prices`` table.
+
+    Returned by the ``prices`` subcommand. Used in the checkout plan picker.
 
     Attributes:
-        priceId: Stripe price_* identifier.
-        label: Human-readable label shown in the plan selector (e.g. "Starter", "Pro").
-        amount: Display price string (e.g. "$29", "$290", "Free", "Custom").
-        cents: Price in USD cents.
-        currency: ISO currency code.
-        interval: Billing interval: "month", "year", "one_time", or empty for non-recurring plans.
-        description: Feature description lines from Stripe price metadata, or None.
-        action: Alternative click action (link/mailto). None means normal checkout.
-        order: Sort order for card positioning. Lower values appear first. Defaults to 500.
-        credits: Credit grants config from Stripe price metadata, or None.
-        labels: Display templates for credit resource types, or None.
+        id: Internal price UUID.
+        appId: App identifier.
+        stripePriceId: Stripe price_* identifier.
+        nickname: Human-readable tier label (e.g. "Starter", "Pro").
+        amountCents: Price in smallest currency unit (e.g. cents for USD).
+        currency: ISO 4217 currency code.
+        interval: Billing interval: "month", "year", or "one_time".
+        metadata: Full plan metadata (description, action, order, kind, credits, etc.).
+        isActive: Whether the price is active.
+        createdAt: ISO 8601 creation timestamp, or None.
     """
 
-    priceId: str
-    label: str
-    amount: str
-    cents: int
+    id: str
+    appId: str
+    stripePriceId: str
+    nickname: str
+    amountCents: int
     currency: str
     interval: Literal['month', 'year', 'one_time', '']
-    description: NotRequired[list[str] | None]
-    action: NotRequired[PlanAction | None]
-    order: NotRequired[int]
-    credits: NotRequired[dict[str, dict[str, int]] | None]
-    labels: NotRequired[dict[str, str] | None]
+    metadata: NotRequired[dict | None]
+    isActive: bool
+    createdAt: str | None
+
+
+# Backward compatibility alias
+StripePlan = AppPrice
 
 
 # =============================================================================
@@ -134,23 +137,19 @@ class StripePlan(TypedDict):
 
 class CreditBalance(TypedDict):
     """
-    Multi-resource credit balance for an organisation's wallet.
+    Net credit balance for an organisation, grouped by resource.
 
-    Returned by the ``credits_balance`` subcommand. Each field is a dict
-    keyed by resource type (e.g. ``{"tokens": 4200, "video": 80}``).
+    Returned by the ``credits_balance`` subcommand. Balance is computed from
+    ``SUM(amount) GROUP BY resource`` on the credit ledger.
 
     Attributes:
-        balances: Current unspent balances per resource type.
-        lifetimePurchased: Total purchased per resource type.
-        lifetimeConsumed: Total consumed per resource type.
+        balances: Net balance per resource type (positive = remaining, negative = overspent).
         labels: Human-readable display templates per resource type, from Stripe
             price metadata. Supports ``{amount}`` substitution. Falls back to
             the raw resource key when a label is not configured.
     """
 
-    balances: dict[str, int]
-    lifetimePurchased: dict[str, int]
-    lifetimeConsumed: dict[str, int]
+    balances: dict[str, float]
     labels: dict[str, str]
 
 
@@ -174,3 +173,67 @@ class CreditPack(TypedDict):
     usdCents: int
     credits: int
     nickname: str
+
+
+# =============================================================================
+# TRANSACTION TYPES
+# =============================================================================
+
+
+class LedgerTransaction(TypedDict):
+    """
+    A single ledger transaction row returned by the ``transactions`` subcommand.
+
+    Attributes:
+        id: Auto-increment row ID.
+        type: Transaction type (purchase, usage, credit, refund, etc.).
+        resource: Resource type (e.g. cpu_utilization, gpu_memory, tokens).
+        amount: Signed amount (positive for credits, negative for debits).
+        idempotencyKey: Namespaced dedup key.
+        userId: User who triggered the transaction, or None.
+        teamId: Team context, or None.
+        context: Human-readable audit context, or None.
+        createdAt: ISO 8601 creation timestamp, or None.
+    """
+
+    id: int
+    type: str
+    resource: str
+    amount: float
+    idempotencyKey: str
+    userId: str | None
+    teamId: str | None
+    context: dict | None
+    createdAt: str | None
+
+
+class TransactionsResult(TypedDict):
+    """
+    Paginated result from the ``transactions`` subcommand.
+
+    Attributes:
+        transactions: Transaction rows for the current page.
+        total: Total matching rows (for pagination).
+        page: Current page number (1-based).
+        pageSize: Rows per page.
+    """
+
+    transactions: list[LedgerTransaction]
+    total: int
+    page: int
+    pageSize: int
+
+
+class UsageRollup(TypedDict):
+    """
+    Per-user or per-team consumption rollup row.
+
+    Returned by ``usage_by_user`` / ``usage_by_team`` subcommands.
+
+    Attributes:
+        id: User or team ID (or '__none__' for unattributed).
+        credits: Consumption per resource type (absolute values).
+    """
+
+    id: str
+    credits: dict[str, float]

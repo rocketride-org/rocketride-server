@@ -47,8 +47,8 @@
 			"description": "When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read.",
 			"default": false,
 			"enum": [
-				[true, "Yes — read only"],
-				[false, "No — allow writes"]
+				[true, "Yes: read only"],
+				[false, "No: allow writes"]
 			]
 		}
 	},

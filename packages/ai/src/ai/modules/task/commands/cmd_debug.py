@@ -214,15 +214,14 @@ class DebugCommands(DAPConn):
             args = request.get('arguments') or {}
             team_id = args.get('teamId') or self._account_info.defaultTeam
 
-            # Resolve org_id by walking the organizations/teams tree.
+            # Resolve org_id from the user's single organization.
             org_id: Optional[str] = None
-            for org in self._account_info.organizations or []:
+            org = self._account_info.organization
+            if org:
                 for team in org.get('teams', []):
                     if team.get('id') == team_id:
                         org_id = org.get('id', '')
                         break
-                if org_id is not None:
-                    break
             if org_id is None:
                 raise PermissionError(
                     f'Team {team_id!r} does not belong to any organisation for user {self._account_info.userId!r}'

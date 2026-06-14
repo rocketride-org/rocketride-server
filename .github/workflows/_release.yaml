@@ -307,27 +307,10 @@ jobs:
 
       # --- Tag and GitHub Release ---
       #
-      # IMPORTANT: tag push uses WORKFLOW_PAT (a Personal Access Token with
-      # `repo` + `workflow` scopes) instead of the default GITHUB_TOKEN.
-      #
-      # GitHub rejects any tag push from GITHUB_TOKEN whose target commit
-      # modifies files under `.github/workflows/`, with the error:
-      #
-      #   refusing to allow a GitHub App to create or update workflow
-      #   `.github/workflows/<file>` without `workflows` permission
-      #
-      # `workflows` is a token-level scope, not a YAML permission, so the
-      # only fix is to swap to a credential that has it. WORKFLOW_PAT is
-      # that credential. Without this, every nightly that lands on a
-      # workflow-touching commit silently bricks the prerelease pipeline:
-      # the cleanup job runs first and deletes existing -prerelease tags,
-      # then all 5 prerelease creation jobs fail to push the new ones,
-      # leaving the repo with zero prereleases until the next clean
-      # commit.
       # Mint a short-lived GitHub App installation token for the tag push. The
       # tag points at a commit whose tree contains workflow files, so the
       # pushing identity needs Workflows:write — GITHUB_TOKEN can't, and an App
-      # token removes the long-lived PAT that silently expires. The App
+      # token avoids a long-lived PAT that silently expires. The App
       # (RELEASE_BOT_APP_ID) is installed on this repo with Contents:write +
       # Workflows:write; the token lives only for this job.
       - name: Generate release-bot token

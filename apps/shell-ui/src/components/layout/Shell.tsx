@@ -50,6 +50,8 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID } from '../../constants';
+import { registerAndMapApps } from '../../lib/appLoader';
+import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
 // STYLES
@@ -182,23 +184,36 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Connection state ──────────────────────────────────────────────────
 	const { client, isConnected, statusMessage } = useShellConnection();
 
-	// ── Apps — probe catalog + post-auth desktop metadata ─────────────────
-	// MF remotes are registered once at bootstrap from the probe — they
-	// never change after auth. Post-auth, ConnectResult.apps only adds
-	// desktop metadata (appStatus, onDesktop) onto existing probe entries.
+	// ── Apps — probe catalog + post-auth merge ────────────────────────────
+	// The pre-auth probe registers public MF remotes. Post-auth, the
+	// ConnectResult may include additional apps the user is entitled to
+	// (e.g. apps gated by requiredPermissions). Those need to be registered
+	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
 		if (!identity?.apps?.length) return config.apps;
 
-		// Index desktop metadata by app id for fast lookup
-		const desktopById = new Map(
-			(identity.apps as Array<{ id: string; appStatus?: string; onDesktop?: boolean }>)
-				.map((a) => [a.id, a]),
-		);
+		// Index ConnectResult apps by id
+		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
+		const identityById = new Map(identityApps.map((a) => [a.id, a]));
+
 		// Overlay desktop metadata onto probe entries
-		return config.apps.map((a) => {
-			const da = desktopById.get(a.id);
+		const probeIds = new Set(config.apps.map((a) => a.id));
+		const merged = config.apps.map((a) => {
+			const da = identityById.get(a.id);
 			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
 		});
+
+		// Register and append apps that were NOT in the probe (e.g. permission-gated)
+		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.entry && a.moduleId);
+		if (newApps.length > 0) {
+			const registered = registerAndMapApps(newApps);
+			for (const app of registered) {
+				const da = identityById.get(app.id);
+				merged.push(da ? { ...app, appStatus: da.appStatus, onDesktop: da.onDesktop } : app);
+			}
+		}
+
+		return merged;
 	}, [identity?.apps, config.apps]);
 
 	// =====================================================================
@@ -473,7 +488,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	} : config;
 
 	const stripeKey = config.apiConfig.RR_STRIPE_PUBLISHABLE_KEY ?? '';
-	const orgId = identity?.organizations?.[0]?.id ?? '';
+	const orgId = identity?.organization?.id ?? '';
 
 	return (
 		<ShellIdentityContext.Provider value={identity}>

@@ -53,6 +53,13 @@ interface ConnectionSettingsProps {
 	/** Whether the probed server supports SaaS/OAuth. */
 	isSaas?: boolean;
 	teams?: Array<{ id: string; name: string }>;
+	/** Whether the user has an active subscription. */
+	isSubscribed?: boolean;
+	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
+	onFetchPlans?: () => Promise<any[]>;
+	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
+	onCheckoutSuccess?: () => void;
 	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
@@ -180,6 +187,11 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 						sudoPasswordInput={props.sudoPasswordInput}
 						onSudoPasswordChange={props.onSudoPasswordChange}
 						onSudoSubmit={props.onSudoSubmit}
+						isSubscribed={props.isSubscribed}
+						onFetchPlans={props.onFetchPlans}
+						onCreateCheckout={props.onCreateCheckout}
+						onConfirmPending={props.onConfirmPending}
+						onCheckoutSuccess={props.onCheckoutSuccess}
 					/>
 				</div>
 			</div>

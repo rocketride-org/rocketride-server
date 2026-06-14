@@ -236,6 +236,12 @@ export interface InviteMemberParams {
 
 	/** Organization-level role to assign (e.g. "admin" or "member"). */
 	role: string;
+
+	/**
+	 * Optional team assignments to create when the invite is accepted.
+	 * Each entry specifies a team ID and the permissions to grant.
+	 */
+	teamAssignments?: Array<{ teamId: string; permissions: string[] }>;
 }
 
 /** Parameters for adding or updating a team member. */

@@ -12,6 +12,8 @@
  * as one prop.
  */
 
+import type { ReactNode } from 'react';
+
 // =============================================================================
 // VIRTUAL FILE SYSTEM
 // =============================================================================
@@ -174,6 +176,25 @@ export interface ExplorerConfig {
 // =============================================================================
 
 /**
+ * A custom action injected by the host into a file row's kebab menu.
+ *
+ * The Explorer is action-agnostic: it renders whatever actions the host
+ * supplies and calls `onSelect(path)` when one is chosen. SaaS hosts use this
+ * for features (e.g. Export/Download) that must stay out of the VS Code
+ * bundle — hosts that omit `fileActions` show only the built-in rename/delete.
+ */
+export interface ExplorerFileAction {
+	/** Stable identifier; also used as the React key. */
+	id: string;
+	/** Menu item label. */
+	label: string;
+	/** Optional leading icon node. */
+	icon?: ReactNode;
+	/** Invoked with the row's file path when the item is chosen. */
+	onSelect: (path: string) => void;
+}
+
+/**
  * Props for the Explorer component.
  */
 export interface IExplorerProps {
@@ -212,6 +233,12 @@ export interface IExplorerProps {
 	 * Optional — when absent, no action buttons are shown on children.
 	 */
 	onChildAction?: (action: 'run' | 'stop', filePath: string, childId: string, documentId?: string) => void;
+
+	/**
+	 * Host-injected extra actions appended to each file row's kebab menu
+	 * (e.g. Export). Optional — omitted hosts (VS Code) show only rename/delete.
+	 */
+	fileActions?: ExplorerFileAction[];
 
 	/** Called when the user clicks the refresh button. */
 	onRefresh: () => void;

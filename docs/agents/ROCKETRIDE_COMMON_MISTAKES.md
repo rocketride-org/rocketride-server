@@ -1343,7 +1343,7 @@ dictToJson(question)  # ERROR: C++ engine crash (pyjson.hpp)
 ```
 
 **Why This Happens:**
-The C++ engine's JSON utilities expect plain Python dicts. Pydantic `BaseModel` instances are not directly serializable by the engine's `dictToJson` and similar functions—passing them causes a crash.
+The C++ engine's JSON utilities expect plain Python dicts. Pydantic `BaseModel` instances are not directly serializable by the engine's `dictToJson` and similar functions, passing them causes a crash.
 
 **Solution:**
 

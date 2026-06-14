@@ -23,11 +23,16 @@
 
 """
 Anthropic binding for the ChatLLM.
+
+Extended-thinking streaming is handled globally via
+``ai.common.llm_native_stream`` (``_native_stream_provider = 'anthropic'``).
 """
 
 from typing import Any, Dict
+
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_native_stream import build_anthropic_thinking_kwargs, gate_model_name
 from langchain_anthropic import ChatAnthropic
 
 
@@ -52,6 +57,7 @@ class Chat(ChatBase):
 
         # Get the model
         model = config.get('model')
+        model_gate = gate_model_name(str(model) if model is not None else '')
 
         # Get the API key, don't save it
         apikey = (config.get('apikey') or '').strip()
@@ -65,12 +71,22 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the LLM
-        self._llm = ChatAnthropic(
-            model=model,
-            api_key=apikey,
-            max_tokens=self._modelOutputTokens,
-            custom_get_token_ids=_estimate_token_ids,
-        )
+        kwargs: Dict[str, Any] = {
+            'model': model,
+            'api_key': apikey,
+            'max_tokens': self._modelOutputTokens,
+            'custom_get_token_ids': _estimate_token_ids,
+        }
+        if self._is_reasoning:
+            kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens))
+
+        self._extended_thinking = bool(kwargs.get('thinking'))
+        # Only route through the native handler when thinking is actually on;
+        # non-reasoning models stay on the default LangChain path.
+        if self._extended_thinking:
+            self._native_stream_provider = 'anthropic'
+
+        self._llm = ChatAnthropic(**kwargs)
 
         # Save our chat class into the bag
         bag['chat'] = self

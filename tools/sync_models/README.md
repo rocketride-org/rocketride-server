@@ -1,4 +1,4 @@
-# sync_models — LLM Model List Sync Tool
+# sync_models: LLM Model List Sync Tool
 
 Fetches available models from provider APIs, smoke-tests new ones, and merges
 the results into `nodes/src/nodes/*/services.json` profile lists.
@@ -36,10 +36,10 @@ The `--models` flag forwards arguments directly to `sync_models.py`.
 | `--provider PROVIDER`        | Sync one or more specific providers (repeatable)                                                                                                                                                                                                                                                                                                |
 | `--all`                      | Sync all registered providers                                                                                                                                                                                                                                                                                                                   |
 | `--apply`                    | Write changes to disk. Without this flag runs in **dry-run mode**                                                                                                                                                                                                                                                                               |
-| `--model-source SOURCE`      | Source to consult for model lists and token data. Repeatable. Values: `provider`, `openrouter`, `litellm`. Order matters — first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: `provider openrouter litellm` (in that order).                                                        |
-| `--enable-discovery`         | Allow new model profiles to be added to `services.json`. Default off — without this flag, the sync only enriches existing profiles' token data and deprecation status. Never adds or removes profile keys.                                                                                                                                      |
-| `--allow-fallback-discovery` | Permit `openrouter`/`litellm` to act as discovery sources for providers whose API key is missing. Requires `--enable-discovery`. Default off — strict mode skips discovery for providers without keys (existing profiles still enriched). Use only when you intentionally want to introduce model IDs the native runtime SDK may not recognise. |
-| `--no-config-overrides`      | Ignore `token_limit_overrides` and `model_output_tokens.overrides` from the config file — token limits come entirely from live data sources                                                                                                                                                                                                     |
+| `--model-source SOURCE`      | Source to consult for model lists and token data. Repeatable. Values: `provider`, `openrouter`, `litellm`. Order matters, first listed source has highest enrichment priority and is the preferred discovery source. Default if omitted: `provider openrouter litellm` (in that order).                                                        |
+| `--enable-discovery`         | Allow new model profiles to be added to `services.json`. Default off, without this flag, the sync only enriches existing profiles' token data and deprecation status. Never adds or removes profile keys.                                                                                                                                      |
+| `--allow-fallback-discovery` | Permit `openrouter`/`litellm` to act as discovery sources for providers whose API key is missing. Requires `--enable-discovery`. Default off, strict mode skips discovery for providers without keys (existing profiles still enriched). Use only when you intentionally want to introduce model IDs the native runtime SDK may not recognise. |
+| `--no-config-overrides`      | Ignore `token_limit_overrides` and `model_output_tokens.overrides` from the config file, token limits come entirely from live data sources                                                                                                                                                                                                     |
 | `--pr-body`                  | Print a GitHub PR body (markdown). Also writes to `GITHUB_ENV` for CI                                                                                                                                                                                                                                                                           |
 
 Validation: `--model-source` may not list duplicate values. `--allow-fallback-discovery` requires `--enable-discovery`.
@@ -95,7 +95,7 @@ Set keys in a `.env` file in the repo root or export them in the shell.
 Pick primary source  →  fetch model list  →  discovery gate  →  smoke test (provider-discovered new models only)  →  merge  →  services.json
 ```
 
-1. **Pick primary source** — walk `--model-source` in order, take the first source whose prerequisite is satisfied for this provider:
+1. **Pick primary source**: walk `--model-source` in order, take the first source whose prerequisite is satisfied for this provider:
 
    - `provider`: provider API key env var is set.
    - `openrouter`: OpenRouter cache loaded (no auth required).
@@ -103,10 +103,10 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 
    If none qualify, the provider is skipped with a warning.
 
-2. **Fetch model list** — call the source's API or read its database.
-3. **Discovery gate** — if `--enable-discovery` is off, drop new models from the list (only existing profiles get enriched). If discovery is on but no source qualifies for discovery (because the provider key is missing and `--allow-fallback-discovery` is off), drop new models too and flag the provider as `discovery_skipped` in the report.
-4. **Smoke test** — only when (a) discovery is on, (b) the discovery source is `provider`, (c) the API key is set. New models are smoke-tested via the native API. Discovery from `openrouter` or `litellm` skips smoke testing — there is no client to invoke.
-5. **Merge** — smart merge into `preconfig.profiles`:
+2. **Fetch model list**: call the source's API or read its database.
+3. **Discovery gate**: if `--enable-discovery` is off, drop new models from the list (only existing profiles get enriched). If discovery is on but no source qualifies for discovery (because the provider key is missing and `--allow-fallback-discovery` is off), drop new models too and flag the provider as `discovery_skipped` in the report.
+4. **Smoke test**: only when (a) discovery is on, (b) the discovery source is `provider`, (c) the API key is set. New models are smoke-tested via the native API. Discovery from `openrouter` or `litellm` skips smoke testing, there is no client to invoke.
+5. **Merge**: smart merge into `preconfig.profiles`:
    - New model, smoke passed → add profile
    - Existing model → update token limits if authoritative data differs; preserve title and other manual fields
    - Model no longer in API → mark `"deprecated": true` (only by sources authoritative for the profile's `modelSource`)
@@ -114,10 +114,10 @@ Pick primary source  →  fetch model list  →  discovery gate  →  smoke test
 
 ### Token limit resolution (priority order)
 
-1. `token_limit_overrides` in `sync_models.config.json` — always wins.
+1. `token_limit_overrides` in `sync_models.config.json`, always wins.
 2. First available source listed in `--model-source`, in the order given. Default order is `provider` → `openrouter` → `litellm`.
 3. `default_context_window` in provider config.
-4. `16384` — global last resort (flagged as `?` estimated in output).
+4. `16384`, global last resort (flagged as `?` estimated in output).
 
 The same priority applies to output tokens: `model_output_tokens.overrides` → first source in `--model-source` order with data → `model_output_tokens.defaults.chat` (or `defaults.embedding` for embedding providers).
 
@@ -125,8 +125,8 @@ The same priority applies to output tokens: `model_output_tokens.overrides` → 
 
 The sync has two distinct modes:
 
-- **Enrichment-only (default)** — refreshes `modelTotalTokens`, `modelOutputTokens`, `modelSource` provenance, and `deprecated`/`migration` fields on profiles already in `services.json`. Never adds or removes profile keys. Safe to run anywhere; no API key required.
-- **Discovery (with `--enable-discovery`)** — additionally adds new profiles found in the configured sources. The discovery source for each provider is the first `--model-source` entry whose prerequisite is satisfied (and which is permitted for discovery — see below).
+- **Enrichment-only (default)**: refreshes `modelTotalTokens`, `modelOutputTokens`, `modelSource` provenance, and `deprecated`/`migration` fields on profiles already in `services.json`. Never adds or removes profile keys. Safe to run anywhere; no API key required.
+- **Discovery (with `--enable-discovery`)**: additionally adds new profiles found in the configured sources. The discovery source for each provider is the first `--model-source` entry whose prerequisite is satisfied (and which is permitted for discovery, see below).
 
 **Strict discovery (default when `--enable-discovery` is set)**: only the `provider` source can introduce new profiles. If the provider's API key is missing, that provider runs enrichment-only and the report shows `discovery skipped — set ROCKETRIDE_APIKEY_<PROVIDER>`. This is the production-safe mode: profiles in `services.json` only ever come from the native API, so they are guaranteed to be invokable through the native SDK.
 
@@ -153,12 +153,12 @@ The sync has two distinct modes:
 | `+`    | New model added                              |
 | `~`    | Existing model updated (token limits)        |
 | `-`    | Model deprecated (`"deprecated": true` set)  |
-| `!`    | New model skipped — smoke test failed        |
-| `?`    | Token limit is an estimate — verify manually |
+| `!`    | New model skipped, smoke test failed        |
+| `?`    | Token limit is an estimate, verify manually |
 
 ---
 
-## Configuration — `tools/sync_models/src/sync_models.config.json`
+## Configuration: `tools/sync_models/src/sync_models.config.json`
 
 ### Top-level keys
 
@@ -194,7 +194,7 @@ The sync has two distinct modes:
 
 LiteLLM sometimes has stale or incorrect context window data (e.g. it confuses
 `max_output_tokens` with `max_tokens` for Anthropic models). Use
-`token_limit_overrides` to pin the correct value — it always wins:
+`token_limit_overrides` to pin the correct value, it always wins:
 
 ```json
 "token_limit_overrides": {
@@ -253,7 +253,7 @@ entries are silently dropped, making the profile eligible for normal deprecation
 ```
 
 Use a far-future date (e.g. 100 years) for profiles that must never be deprecated
-(e.g. `"custom"`). Use a 6-month horizon for workaround protections — once the expiry
+(e.g. `"custom"`). Use a 6-month horizon for workaround protections, once the expiry
 passes the sync tool will automatically re-evaluate the profile against the provider API.
 
 ---
@@ -272,7 +272,7 @@ pip install -r tools/sync_models/requirements.txt
 | `anthropic`                | Anthropic client                                                         |
 | `google-genai`             | Gemini client (`from google import genai`)                               |
 | `litellm`                  | Model database for token limit lookup                                    |
-| `json5`                    | Parsing `services.json` files (JSON5 — supports `//` comments)           |
+| `json5`                    | Parsing `services.json` files (JSON5: supports `//` comments)           |
 | `python-dotenv`            | `.env` file loading                                                      |
 | `pytest`, `pytest-asyncio` | Test runner                                                              |
 
@@ -295,7 +295,7 @@ pytest tools/sync_models/test/test_sync_live.py
 `.github/workflows/sync-models.yml` runs every Monday at 05:00 UTC and on
 manual dispatch. It:
 
-1. Runs a dry-run first (`python tools/sync_models/src/sync_models.py --all --enable-discovery`) — fails fast if the script errors.
+1. Runs a dry-run first (`python tools/sync_models/src/sync_models.py --all --enable-discovery`), fails fast if the script errors.
 2. Runs with `--apply --pr-body` to write changes and capture the report.
 3. Opens a PR via `peter-evans/create-pull-request` with the report as the body.
 

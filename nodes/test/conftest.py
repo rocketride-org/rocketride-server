@@ -29,22 +29,23 @@ Running tests:
 """
 
 import os
-import sys
 import asyncio
 import pytest
 import pytest_asyncio
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Add project paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / 'dist' / 'server'))
+# Derive paths from the engine executable (dist/server/engine.exe)
+# so they resolve correctly whether rocketride-server is standalone or a submodule.
+import sys
 
-# Load environment variables
+_ENGINE_DIR = Path(sys.executable).resolve().parent
+
+# Load environment variables from the build output root (next to the engine).
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(PROJECT_ROOT / '.env')
+    load_dotenv(_ENGINE_DIR / '.env')
 except ImportError:
     pass  # dotenv is optional
 
@@ -274,6 +275,7 @@ def pytest_generate_tests(metafunc):
             'index_search',
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
+            'tool_mem0',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 
