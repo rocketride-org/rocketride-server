@@ -10,14 +10,18 @@ Public surface:
   configuration values.
 - ``normalize_bound_tools``, ``langchain_messages_to_transcript`` —
   helpers for LangChain-based agent drivers.
+- ``decode_data_url`` — decode an uploaded ``data-url`` value to (bytes, mime).
+- ``guess_filename`` — derive a typed ``upload.<ext>`` filename from a buffer
+  via the optional ``filetype`` package (lazy; node-provided dependency).
 
 Implementations live in submodules (``string_utils``, ``tool_args``,
-``config_utils``, ``agent_tools``); this package re-exports them so the
-canonical import path is ``from ai.common.utils import <name>``.
+``config_utils``, ``agent_tools``, ``file_utils``); this package re-exports them
+so the canonical import path is ``from ai.common.utils import <name>``.
 """
 
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
 from .config_utils import config_int, parse_bool
+from .file_utils import decode_data_url, guess_filename
 from .http_retry import post_with_retry
 from .string_utils import safe_str
 from .tool_args import (
@@ -35,6 +39,8 @@ from .url_utils import validate_public_url
 
 __all__ = [
     'config_int',
+    'decode_data_url',
+    'guess_filename',
     'langchain_messages_to_transcript',
     'normalize_bound_tools',
     'normalize_tool_input',

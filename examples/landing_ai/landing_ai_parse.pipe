@@ -1,0 +1,100 @@
+{
+  "name": "Landing.ai Parse — document to text + tables",
+  "description": "Drop a PDF or image; Landing.ai ADE parses it into Markdown text and tables.",
+  "components": [
+    {
+      "id": "dropper_1",
+      "provider": "dropper",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper"
+      },
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "landing_ai_parse_1",
+      "provider": "landing_ai_parse",
+      "config": {
+        "default": {
+          "model": "dpt-2-latest",
+          "region": "production",
+          "api_key": ""
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "dropper_1"
+        }
+      ]
+    },
+    {
+      "id": "response_text_1",
+      "provider": "response_text",
+      "config": {
+        "laneName": "text"
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 120
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "landing_ai_parse_1"
+        }
+      ]
+    },
+    {
+      "id": "response_table_1",
+      "provider": "response_table",
+      "config": {
+        "laneName": "table"
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 280
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "table",
+          "from": "landing_ai_parse_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 3
+}
