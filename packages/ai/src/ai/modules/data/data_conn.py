@@ -28,11 +28,14 @@ from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
 from rocketlib import (
+    APERR,
+    AVI_ACTION,
+    Ec,
+    Entry,
+    IInvokeTool,
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
-    Entry,
-    AVI_ACTION,
     monitorCompleted,
     monitorFailed,
 )
@@ -414,6 +417,7 @@ class DataConn(DAPConn):
         - open: Initialize a new data pipe for processing
         - write: Write data to a specific lane of an active pipe (resets activity timer)
         - close: Close and finalize a pipe, returning processing results (resets activity timer)
+        - tool: Invoke a @tool_function on a pipeline node (optionally using an open pipe)
 
         Args:
             request (Dict[str, Any]): The extended command request containing:
@@ -442,6 +446,8 @@ class DataConn(DAPConn):
             return await self._write(request, args)
         elif subcmd == 'close':
             return await self._close(request, args)
+        elif subcmd == 'tool':
+            return await self._tool(request, args)
         else:
             raise ValueError(f'Invalid subcommand {subcmd}')
 
@@ -746,6 +752,85 @@ class DataConn(DAPConn):
             if conn_pipe.semaphore_acquired:
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
+
+    async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Invoke a @tool_function on a pipeline node.
+
+        Dispatches an IInvokeTool.Invoke through the control plane, bypassing
+        the Question/Answer data lane entirely.  If ``pipe_id`` is provided the
+        caller's already-open pipe is reused; otherwise a pipe is borrowed from
+        the endpoint pool for the duration of the call.
+
+        Args:
+            request: The DAP request envelope.
+            args: Parsed arguments containing:
+                - tool (str, required): Name of the @tool_function to invoke.
+                - nodeId (str, optional): Target node ID.  When empty the
+                  control plane broadcasts to all tool-lane nodes; the first
+                  node that owns the tool handles the call.
+                - input (dict, optional): Arguments forwarded to the tool.
+                - pipe_id (int, optional): Pipe ID of an already-open pipe.
+
+        Returns:
+            DAP response with ``body.result`` set to the tool's return value.
+
+        Raises:
+            ValueError: If ``tool`` is missing, ``pipe_id`` is invalid, or no
+                node handles the requested tool.
+        """
+        tool_name = args.get('tool')
+        if not tool_name:
+            raise ValueError('tool is required')
+
+        node_id = args.get('nodeId', '')
+        tool_input = args.get('input', {})
+        pipe_id = args.get('pipe_id', None)
+
+        def tool_sync():
+            # Use caller's open pipe if provided, otherwise borrow one
+            if pipe_id is not None:
+                conn_pipe = self._pipe_map.get(pipe_id)
+                if not conn_pipe or not conn_pipe.is_open:
+                    raise ValueError(f'Pipe {pipe_id} is not open')
+                pipe = conn_pipe.pipe
+                borrowed = False
+            else:
+                pipe = self._target.getPipe()
+                borrowed = True
+
+            try:
+                # Walk the filter chain (pipe.next) to find the target node
+                # by its component ID.  Each node in the chain is an
+                # IFilterInstance with invoke() available.
+                node = pipe
+                while node is not None:
+                    if node.pipeType.id == node_id:
+                        break
+                    node = node.next
+                else:
+                    raise ValueError(f'Node "{node_id}" not found in pipeline')
+
+                # Get the Python IInstance from the C++ filter and call
+                # invoke() directly — bypasses the C++ control dispatcher
+                # which requires controller map entries.
+                py_instance = node.pyInstance
+                param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+                try:
+                    py_instance.invoke(param)
+                except APERR as e:
+                    if e.ec == Ec.PreventDefault:
+                        raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
+                    raise
+
+                return param.output
+
+            finally:
+                if borrowed:
+                    self._target.putPipe(pipe)
+
+        result = await asyncio.to_thread(tool_sync)
+        return self.build_response(request, body={'result': result})
 
     # =========================================================================
     # CPROFILE COMMANDS

@@ -551,6 +551,12 @@ class Task(DAPBase):
             arguments=args,
             token=args.get('token'),
         )
+
+        # Propagate subprocess failures so callers don't silently
+        # receive success for a failed operation.
+        if self._data_client.did_fail(response):
+            raise RuntimeError(response.get('message', 'Data request failed'))
+
         return response
 
     async def _terminated(self) -> None:

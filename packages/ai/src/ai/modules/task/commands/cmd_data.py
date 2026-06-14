@@ -151,6 +151,7 @@ class DataCommands(DAPConn):
             # build_response constructs a fresh envelope keyed off the inbound
             # request so request_seq matches what the chat client sent.  Mirrors
             # the same pattern task_conn.request uses for the debug channel.
+
             return self.build_response(
                 request,
                 body=subprocess_response.get('body'),
