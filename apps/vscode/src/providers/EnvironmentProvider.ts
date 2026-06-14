@@ -282,7 +282,7 @@ export class EnvironmentProvider {
 		const isSaas = capabilities.includes('saas');
 
 		// Extract org info and permissions
-		const org = resolved?.accountInfo?.organizations?.[0];
+		const org = resolved?.accountInfo?.organization;
 		const orgId = org?.id;
 		const orgPermissions: string[] = org?.permissions ?? [];
 		const isOrgAdmin = orgPermissions.includes('org.admin');

@@ -377,7 +377,7 @@ def test_collect_tool_methods_namespaces_with_server_name() -> None:
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='myvdb'))
     methods = instance._collect_tool_methods()
 
-    assert set(methods.keys()) == {'myvdb.search', 'myvdb.upsert', 'myvdb.delete'}
+    assert set(methods.keys()) == {'myvdb.search', 'myvdb.upsert', 'myvdb.delete', 'myvdb.list', 'myvdb.stats'}
     # Each value is a callable bound to the fake instance
     for bound in methods.values():
         assert callable(bound)
@@ -390,6 +390,8 @@ def test_collect_tool_methods_uses_provider_fallback() -> None:
     assert 'chroma.search' in methods
     assert 'chroma.upsert' in methods
     assert 'chroma.delete' in methods
+    assert 'chroma.list' in methods
+    assert 'chroma.stats' in methods
 
 
 def test_collect_tool_methods_default_when_no_globals() -> None:
@@ -400,7 +402,13 @@ def test_collect_tool_methods_default_when_no_globals() -> None:
     orphan.IGlobal = None
     methods = orphan._collect_tool_methods()
     # Falls all the way back to 'vectordb'
-    assert set(methods.keys()) == {'vectordb.search', 'vectordb.upsert', 'vectordb.delete'}
+    assert set(methods.keys()) == {
+        'vectordb.search',
+        'vectordb.upsert',
+        'vectordb.delete',
+        'vectordb.list',
+        'vectordb.stats',
+    }
 
 
 def test_two_instances_different_server_names_do_not_collide() -> None:

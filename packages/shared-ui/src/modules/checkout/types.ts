@@ -42,45 +42,39 @@ export interface PlanAction {
 /**
  * A single plan card shown in the CheckoutModal plan picker.
  *
- * Plans come from Stripe via the server's ``prices`` subcommand.
- * The ``action`` field (from Stripe price metadata) determines what
- * happens when the user clicks the card — checkout or navigate away.
+ * Mirrors the ``app_prices`` DB row shape returned by ``_price_to_dict``.
+ * The UI reads display fields from ``metadata`` (description, action, order, etc.).
  */
 export interface CheckoutPlan {
+	/** Internal price UUID. */
+	id: string;
+
+	/** App identifier. */
+	appId: string;
+
 	/** Stripe price_* identifier. Passed to the checkout session creation. */
-	priceId: string;
+	stripePriceId: string;
 
-	/** Human-readable label shown in the plan selector (e.g. "Monthly", "Annual"). */
-	label: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro", "3,700 tokens"). */
+	nickname: string;
 
-	/** Billing interval — used for the toggle and to group plans. Empty or 'one_time' for non-recurring. */
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
+
+	/** ISO 4217 currency code. */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
 	interval: 'month' | 'year' | 'one_time' | '';
 
-	/** Display price string (e.g. "$29 / mo", "$276 / yr", "Free", "Custom"). */
-	amount: string;
+	/** Full plan metadata from the app manifest (description, action, order, kind, credits, labels, seats, features, etc.). */
+	metadata?: Record<string, any> | null;
 
-	/** Feature description lines from Stripe price metadata, displayed on the plan card. */
-	description?: string[] | null;
+	/** Whether the price is active. */
+	isActive: boolean;
 
-	/**
-	 * Alternative click action. When present, clicking the card opens
-	 * a link or mailto instead of proceeding to Stripe checkout.
-	 * Plans without an action go through the normal checkout flow.
-	 */
-	action?: PlanAction | null;
-
-	/**
-	 * Sort order for card positioning.  Lower values appear first.
-	 * Spaced 100 apart by convention (Free=100, Starter=200, …, Enterprise=900).
-	 * Defaults to 500 when not set in Stripe metadata.
-	 */
-	order?: number;
-
-	/** Credit grants config from Stripe price metadata, or null. */
-	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
-
-	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-	creditLabels?: Record<string, string> | null;
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
 }
 
 // =============================================================================

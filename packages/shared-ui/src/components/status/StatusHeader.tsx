@@ -214,8 +214,8 @@ export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipe
 		>
 			{btn.label}
 			{isSubscribed === false && btn.action === 'run' && (
-				<span style={{ marginLeft: 4, verticalAlign: 'super', display: 'inline-block' }}>
-					<PadlockIcon size={12} />
+				<span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+					<PadlockIcon size={18} />
 				</span>
 			)}
 		</button>

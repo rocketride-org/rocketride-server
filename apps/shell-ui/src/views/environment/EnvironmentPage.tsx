@@ -40,11 +40,11 @@ const EnvironmentPage: React.FC = () => {
 	const [envs, setEnvs] = useState<Record<string, Record<string, string> | undefined>>({});
 
 	// ── Permission flags ────────────────────────────────────────────────
-	const orgId = authUser?.organizations?.[0]?.id;
-	const teamId = (authUser as any)?.defaultTeamId ?? authUser?.organizations?.[0]?.teams?.[0]?.id;
-	const isOrgAdmin = authUser?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
+	const orgId = authUser?.organization?.id;
+	const teamId = (authUser as any)?.defaultTeamId ?? authUser?.organization?.teams?.[0]?.id;
+	const isOrgAdmin = authUser?.organization?.permissions?.includes('org.admin') ?? false;
 	const isTeamAdmin = teamId
-		? (authUser?.organizations?.[0]?.teams?.find((t: any) => t.id === teamId)?.permissions?.includes('team.admin') ?? false)
+		? (authUser?.organization?.teams?.find((t: any) => t.id === teamId)?.permissions?.includes('team.admin') ?? false)
 		: false;
 
 	// ── Single slot config ──────────────────────────────────────────────

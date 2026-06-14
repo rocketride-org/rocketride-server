@@ -383,6 +383,8 @@ interface SettingsSection {
  * This page handles UI-only settings (trace level, preferences).
  *
  */
+const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
+
 const SettingsPage: React.FC = () => {
 	const { appManifest, settings, updateSetting } = useWorkspace();
 	const { client, isConnected } = useShellConnection();
@@ -390,6 +392,17 @@ const SettingsPage: React.FC = () => {
 	const [saved, setSaved] = useState(false);
 	const [search, setSearch] = useState('');
 	const [selectedNav, setSelectedNav] = useState<string | null>(null);
+
+	// ── Subscription status ─────────────────────────────────────────────
+	const info = client?.getAccountInfo();
+	const pipeBuilderApp = (info?.apps ?? []).find((a: any) => a.id === PIPE_BUILDER_APP_ID);
+	const isSubscribed = pipeBuilderApp?.appStatus === 'subscribed' || pipeBuilderApp?.appStatus === 'trialing';
+
+	/** Opens the checkout modal via the shell:subscribe event. */
+	const handleSubscribe = useCallback(() => {
+		if (!pipeBuilderApp) return;
+		ConnectionManager.getInstance().emit('shell:subscribe', { app: pipeBuilderApp });
+	}, [pipeBuilderApp]);
 
 	// ── Services from cached catalog ─────────────────────────────────────
 	const [services, setServices] = useState<Record<string, unknown>>({});
@@ -573,6 +586,17 @@ const SettingsPage: React.FC = () => {
 				{/* ── Content area ────────────────────────────────── */}
 				<div style={styles.content as CSSProperties}>
 					<div style={styles.contentInner}>
+						{/* Subscribe prompt for unsubscribed users */}
+						{info && pipeBuilderApp && !isSubscribed && (
+							<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', marginBottom: 16, borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
+								<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
+									Subscribe to unlock pipeline execution and deployment.
+								</span>
+								<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
+									Subscribe to Pipe Builder
+								</button>
+							</div>
+						)}
 						{!hasAny && (
 							<div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 14 }}>
 								{query ? 'No settings match your search.' : 'No settings defined.'}

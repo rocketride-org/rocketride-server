@@ -15,7 +15,7 @@ import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
 // Component
 // =============================================================================
 
-const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, onBlur, onFocus, options, formContext }) => {
+const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, onBlur, onFocus, options, schema, formContext }) => {
 	const [controlledValue, setControlledValue] = useState(value ?? '');
 
 	useEffect(() => {
@@ -90,6 +90,8 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				disabled={disabled || readonly}
 				error={!!rawErrors?.length}
 				variant="outlined"
+				InputLabelProps={{ shrink: true }}
+				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
 			/>
 			{envKeys.length > 0 && (
 				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />

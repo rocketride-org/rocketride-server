@@ -4,18 +4,21 @@
 // =============================================================================
 
 /**
- * PlanPicker — shared plan card grid with interval toggle.
+ * PlanPicker -- shared plan card grid with interval toggle.
  *
  * Renders subscription plans as side-by-side cards grouped by billing
- * interval (Monthly / Annual).  Plans with an ``action`` field render
- * as non-selectable cards with a CTA link/button instead of a radio
- * selection.  Plans with ``interval === 'one_time'`` or no interval
+ * interval (Monthly / Annual).  Plans with a ``metadata.action`` field
+ * render as non-selectable cards with a CTA link/button instead of a
+ * radio selection.  Plans with ``interval === 'one_time'`` or no interval
  * are always visible regardless of the toggle.
  *
+ * Top-up packs (``metadata.kind === 'topup'``) are excluded -- they are
+ * shown on the billing dashboard instead.
+ *
  * Used by:
- *   - **CheckoutModal** — passes ``selectedPlan`` / ``onSelectPlan``
+ *   - **CheckoutModal** -- passes ``selectedPlan`` / ``onSelectPlan``
  *     and a "Continue" button via the ``footer`` slot.
- *   - **PricingPage** — display-only, no selection or footer needed.
+ *   - **PricingPage** -- display-only, no selection or footer needed.
  */
 
 import React, { useState, useMemo, useCallback, useEffect, type CSSProperties } from 'react';
@@ -24,6 +27,32 @@ import type { CheckoutPlan, PlanAction } from './types';
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/** Extract the action descriptor from plan metadata, if present. */
+function planAction(plan: CheckoutPlan): PlanAction | null {
+	return (plan.metadata?.action as PlanAction) ?? null;
+}
+
+/** Extract the sort order from plan metadata, defaulting to 500. */
+function planOrder(plan: CheckoutPlan): number {
+	try { const n = parseInt(plan.metadata?.order, 10); return Number.isFinite(n) ? n : 500; } catch { return 500; }
+}
+
+/** Extract description lines from plan metadata. */
+function planDescription(plan: CheckoutPlan): string[] | null {
+	const d = plan.metadata?.description;
+	if (Array.isArray(d)) return d;
+	return null;
+}
+
+/** Format amountCents as a display price string, respecting metadata.displayAmount override. */
+export function planAmount(plan: CheckoutPlan): string {
+	const display = plan.metadata?.displayAmount;
+	if (display) return display;
+	const amount = (plan.amountCents || 0) / 100;
+	const symbol = (plan as any).currency?.toUpperCase() === 'EUR' ? '\u20AC' : '$';
+	return amount === Math.floor(amount) ? `${symbol}${amount}` : `${symbol}${amount.toFixed(2)}`;
+}
 
 /**
  * Builds the href for a plan action (link URL or mailto: URI).
@@ -40,7 +69,7 @@ function actionHref(action: PlanAction): string {
 }
 
 /**
- * Default handler for action plan clicks — opens link in new tab or mailto.
+ * Default handler for action plan clicks -- opens link in new tab or mailto.
  *
  * @param _plan  - The plan that was clicked (unused, kept for signature).
  * @param action - The action descriptor with type and url.
@@ -91,15 +120,15 @@ const S = {
 		display: 'grid',
 		gridTemplateColumns: count <= 2
 			? `repeat(${count}, 1fr)`
-			: `repeat(auto-fit, minmax(180px, 1fr))`,
-		gap: 14,
-		marginBottom: 20,
+			: `repeat(auto-fit, minmax(150px, 1fr))`,
+		gap: 10,
+		marginBottom: 16,
 	}),
 
 	planCard: (selected: boolean): CSSProperties => ({
 		display: 'flex',
 		flexDirection: 'column',
-		borderRadius: 12,
+		borderRadius: 10,
 		border: `2px solid ${selected ? 'var(--rr-brand)' : 'var(--rr-border)'}`,
 		background: 'var(--rr-bg-paper)',
 		cursor: 'pointer',
@@ -109,13 +138,13 @@ const S = {
 	}),
 
 	cardHead: (selected: boolean): CSSProperties => ({
-		padding: '18px 16px 14px',
+		padding: '12px 12px 10px',
 		background: selected ? 'var(--rr-bg-list-active)' : 'var(--rr-bg-titleBar-inactive)',
 		textAlign: 'center',
 	}),
 
 	cardTier: {
-		fontSize: 11,
+		fontSize: 10,
 		fontWeight: 700,
 		letterSpacing: 1.2,
 		textTransform: 'uppercase' as const,
@@ -124,38 +153,38 @@ const S = {
 	} as CSSProperties,
 
 	cardPrice: {
-		fontSize: 26,
+		fontSize: 22,
 		fontWeight: 700,
 		color: 'var(--rr-text-primary)',
-		margin: '6px 0 0',
+		margin: '4px 0 0',
 	} as CSSProperties,
 
 	cardInterval: {
-		fontSize: 12,
+		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
-		marginTop: 2,
+		marginTop: 1,
 	} as CSSProperties,
 
 	cardFeatures: {
 		flex: 1,
-		padding: '12px 16px 16px',
+		padding: '8px 12px 12px',
 		display: 'flex',
 		flexDirection: 'column' as const,
-		gap: 6,
+		gap: 3,
 	} as CSSProperties,
 
 	featureLine: {
-		fontSize: 12,
+		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
-		lineHeight: 1.5,
+		lineHeight: 1.4,
 		display: 'flex',
 		alignItems: 'baseline',
-		gap: 8,
+		gap: 6,
 	} as CSSProperties,
 
 	featureCheck: {
 		color: 'var(--rr-color-success)',
-		fontSize: 13,
+		fontSize: 11,
 		fontWeight: 700,
 		flexShrink: 0,
 	} as CSSProperties,
@@ -163,13 +192,13 @@ const S = {
 	// ── Action button inside a card (for link/mailto plans) ──────────────
 	cardAction: {
 		display: 'block',
-		margin: '8px 16px 16px',
-		padding: '8px 0',
+		margin: '6px 12px 12px',
+		padding: '6px 0',
 		borderRadius: 6,
 		border: '1px solid var(--rr-border)',
 		background: 'transparent',
 		color: 'var(--rr-text-primary)',
-		fontSize: 13,
+		fontSize: 12,
 		fontWeight: 600,
 		textAlign: 'center' as const,
 		textDecoration: 'none',
@@ -194,10 +223,10 @@ const S = {
  * Props for the PlanPicker component.
  */
 export interface PlanPickerProps {
-	/** Plans to display. Plans with ``action`` render as non-selectable CTA cards. */
+	/** Plans to display. Plans with ``metadata.action`` render as non-selectable CTA cards. */
 	plans: CheckoutPlan[];
 
-	/** True while plans are loading — shows a placeholder. */
+	/** True while plans are loading -- shows a placeholder. */
 	loading?: boolean;
 
 	/** Currently selected checkout-able plan (controlled). */
@@ -253,17 +282,15 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// ── Derived data ─────────────────────────────────────────────────────
 
 	// Show toggle only when a non-action nickname appears at BOTH month and year.
-	// e.g. "Starter" at month + year → toggle.  "Monthly" + "Annual" → no toggle.
 	const showToggle = useMemo(() => {
 		const byNickname = new Map<string, Set<string>>();
 		for (const p of plans) {
-			if (p.action) continue;
+			if (planAction(p)) continue;
 			if (p.interval !== 'month' && p.interval !== 'year') continue;
-			const set = byNickname.get(p.label) ?? new Set();
+			const set = byNickname.get(p.nickname) ?? new Set();
 			set.add(p.interval);
-			byNickname.set(p.label, set);
+			byNickname.set(p.nickname, set);
 		}
-		// Toggle if any nickname has both intervals
 		for (const intervals of byNickname.values()) {
 			if (intervals.size > 1) return true;
 		}
@@ -271,12 +298,11 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	}, [plans]);
 
 	// Plans visible at the current interval, sorted by order ascending.
-	// When toggle is hidden, show ALL plans (both intervals side by side).
 	const visiblePlans = useMemo(() => {
 		const filtered = showToggle
 			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval)
 			: plans;
-		return [...filtered].sort((a, b) => (a.order ?? 500) - (b.order ?? 500));
+		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
 
 	// ── Handlers ─────────────────────────────────────────────────────────
@@ -286,17 +312,17 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		(newInterval: 'month' | 'year') => {
 			setInterval(newInterval);
 
-			// Try to keep the same tier selected (match by label)
-			if (selectedPlan && !selectedPlan.action && onSelectPlan) {
+			// Try to keep the same tier selected (match by nickname)
+			if (selectedPlan && !planAction(selectedPlan) && onSelectPlan) {
 				const sameTier = plans.find(
-					(p) => p.label === selectedPlan.label && p.interval === newInterval && !p.action
+					(p) => p.nickname === selectedPlan.nickname && p.interval === newInterval && !planAction(p)
 				);
 				if (sameTier) {
 					onSelectPlan(sameTier);
 					return;
 				}
 				// Fall back to first billable plan at new interval
-				const first = plans.find((p) => p.interval === newInterval && !p.action);
+				const first = plans.find((p) => p.interval === newInterval && !planAction(p));
 				if (first) onSelectPlan(first);
 			}
 		},
@@ -334,16 +360,16 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			{/* Plan cards grid */}
 			<div style={S.planGrid(visiblePlans.length)} role="radiogroup" aria-label="Subscription plans">
 				{visiblePlans.map((plan) => {
-					const isAction = !!plan.action;
-					const selected = !isAction && selectedPlan?.priceId === plan.priceId;
-					const desc = plan.description;
+					const action = planAction(plan);
+					const isAction = !!action;
+					const selected = !isAction && selectedPlan?.stripePriceId === plan.stripePriceId;
+					const desc = planDescription(plan);
 
 					return (
 						<div
-							key={plan.priceId}
+							key={plan.stripePriceId || plan.id}
 							style={S.planCard(selected)}
 							onClick={() => {
-								// Only select billable plans
 								if (!isAction && onSelectPlan) onSelectPlan(plan);
 							}}
 							onKeyDown={(e) => {
@@ -358,8 +384,8 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 						>
 							{/* Card header: tier name, price, interval */}
 							<div style={S.cardHead(selected)}>
-								<div style={S.cardTier}>{plan.label}</div>
-								<div style={S.cardPrice}>{plan.amount}</div>
+								<div style={S.cardTier}>{plan.nickname}</div>
+								<div style={S.cardPrice}>{planAmount(plan)}</div>
 								{plan.interval && plan.interval !== 'one_time' && (
 									<div style={S.cardInterval}>
 										per {plan.interval === 'month' ? 'month' : 'year'}
@@ -380,19 +406,19 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 							)}
 
 							{/* Action button for link/mailto plans */}
-							{plan.action && (
+							{action && (
 								<a
-									href={actionHref(plan.action)}
-									target={plan.action.type === 'link' ? '_blank' : undefined}
-									rel={plan.action.type === 'link' ? 'noopener noreferrer' : undefined}
+									href={actionHref(action)}
+									target={action.type === 'link' ? '_blank' : undefined}
+									rel={action.type === 'link' ? 'noopener noreferrer' : undefined}
 									style={S.cardAction}
 									onClick={(e) => {
 										e.stopPropagation();
 										e.preventDefault();
-										onActionClick(plan, plan.action!);
+										onActionClick(plan, action);
 									}}
 								>
-									{plan.action.label}
+									{action.label}
 								</a>
 							)}
 						</div>

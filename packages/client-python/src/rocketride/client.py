@@ -58,7 +58,7 @@ from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
 from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .types.client import DAPMessage, ServerInfoResult
@@ -255,6 +255,19 @@ class RocketRideClient(
         super().__init__(transport=None, module=module, **kwargs)
 
     # =========================================================================
+    # ASYNC CONTEXT MANAGER
+    # =========================================================================
+
+    async def __aenter__(self):
+        """Enter async context."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        await self.disconnect()
+
+    # =========================================================================
     # CALL — PUBLIC DAP COMMAND INTERFACE
     # =========================================================================
 
@@ -305,6 +318,42 @@ class RocketRideClient(
             self._on_trace(self.TRACE_SUCCESS, response)
 
         return response.get('body') or {}
+
+    async def tool(self, *, token: str, tool: str, node_id: str = '', input: dict = None, timeout: float = None) -> Any:
+        """
+        Invoke a @tool_function on a pipeline node.
+
+        Sends a ``tool`` subcommand through the DAP data connection.  The
+        server borrows a pipeline instance from the pool, dispatches the tool
+        call through the control plane, and returns the result directly -- no
+        Question, Answer, or SSE overhead.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            tool: Name of the @tool_function to invoke (e.g. ``'search'``,
+                ``'list'``, ``'execute'``).
+            node_id: Target node ID.  When empty the call broadcasts to all
+                tool-lane nodes; the first node that owns the tool handles it.
+            input: Arguments forwarded to the tool function.
+            timeout: Optional per-request timeout in ms.
+
+        Returns:
+            The tool's return value (typically a dict).
+
+        Raises:
+            RuntimeError: If the server signals failure or no node handles the
+                requested tool.
+        """
+        result = await self.call(
+            'rrext_process',
+            token=token,
+            timeout=timeout,
+            subcommand='tool',
+            tool=tool,
+            nodeId=node_id,
+            input=input or {},
+        )
+        return result.get('result')
 
     # =========================================================================
     # NAMESPACED API ACCESSORS

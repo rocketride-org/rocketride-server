@@ -1074,3 +1074,75 @@ class VectorStoreToolMixin:
 
         store.remove(clean_ids)
         return {'success': True, 'deleted_count': len(clean_ids)}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'parent': {
+                    'type': 'string',
+                    'description': 'Optional parent path filter. Only return paths under this parent.',
+                },
+                'offset': {
+                    'type': 'integer',
+                    'description': 'Number of results to skip (default 0).',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': 'Maximum number of results to return (default 1000).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'paths': {
+                    'type': 'object',
+                    'description': 'Map of unique parent paths to their object IDs.',
+                },
+                'success': {'type': 'boolean'},
+            },
+        },
+        description='List unique document paths stored in this vector database.',
+    )
+    def list(self, args):
+        """List unique document paths in this vector store."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        parent = args.get('parent', None)
+        try:
+            offset = int(args.get('offset', 0))
+            limit = int(args.get('limit', 1000))
+        except (TypeError, ValueError):
+            return {'success': False, 'error': 'offset and limit must be valid integers'}
+
+        paths = store.getPaths(parent=parent, offset=offset, limit=limit)
+        return {'success': True, 'paths': paths}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {},
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'count': {'type': 'integer', 'description': 'Total number of documents.'},
+                'model': {'type': 'string', 'description': 'Embedding model name.'},
+                'vector_size': {'type': 'integer', 'description': 'Embedding vector dimension.'},
+                'success': {'type': 'boolean'},
+            },
+        },
+        description='Return statistics about this vector store collection.',
+    )
+    def stats(self, args):
+        """Return collection statistics for this vector store."""
+        store = self._vectordb_store()
+
+        return {
+            'success': True,
+            'count': store.count_documents(),
+            'model': store.modelName,
+            'vector_size': store.vectorSize,
+        }

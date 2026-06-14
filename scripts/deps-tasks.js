@@ -61,12 +61,20 @@ async function hashDependencies(filePath) {
 async function getPackageJsonHashes(root) {
     const files = await findPackageJsonFiles(root);
     const hashes = {};
-    
+
     for (const file of files) {
         const relativePath = path.relative(root, file);
         hashes[relativePath] = await hashDependencies(file);
     }
-    
+
+    // Include pnpm-workspace.yaml — adding/removing workspace entries must
+    // trigger pnpm install even when no package.json content changed.
+    const workspaceYaml = path.join(root, 'pnpm-workspace.yaml');
+    if (await exists(workspaceYaml)) {
+        const content = await readFile(workspaceYaml, null);
+        hashes['pnpm-workspace.yaml'] = crypto.createHash('md5').update(content).digest('hex');
+    }
+
     return hashes;
 }
 

@@ -34,7 +34,7 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
@@ -291,6 +291,16 @@ export default function Canvas(): ReactElement {
 	const editable = !isLocked;
 	const isPanMode = navigationMode === NavigationMode.DRAG;
 
+	// Stable snapGrid reference. `projectLayout` can be rebuilt with a fresh
+	// snapGridSize array even when the values are unchanged; passing that array
+	// straight to <ReactFlow> makes StoreUpdater re-sync the store every render →
+	// "Maximum update depth exceeded". Memoizing on the actual numbers keeps the
+	// array reference stable until a value really changes.
+	const snapGrid = useMemo<[number, number]>(
+		() => (projectLayout.snapGridSize as [number, number] | undefined) ?? DEFAULT_SNAP_GRID,
+		[projectLayout.snapGridSize?.[0], projectLayout.snapGridSize?.[1]]
+	);
+
 	// --- Annotation shortcut -----------------------------------------------
 	const addAnnotation = useCallback(() => {
 		addNode(
@@ -447,7 +457,7 @@ export default function Canvas(): ReactElement {
 				defaultViewport={DEFAULT_VIEWPORT}
 				proOptions={PRO_OPTIONS}
 				snapToGrid={projectLayout.snapToGrid ?? true}
-				snapGrid={projectLayout.snapGridSize ?? DEFAULT_SNAP_GRID}
+				snapGrid={snapGrid}
 			>
 				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
 			</ReactFlow>
