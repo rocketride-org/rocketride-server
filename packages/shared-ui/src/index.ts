@@ -40,6 +40,7 @@ export { default as MonitorView } from './modules/server';
 export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
+export { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
