@@ -82,6 +82,7 @@ python_functions = ["test_*"]
 timeout = 600
 addopts = [
     "-v",
+    "-ra",  # summary section reports reasons for skipped/xfailed/failed tests
     "--tb=short",
     "--strict-markers",
 ]

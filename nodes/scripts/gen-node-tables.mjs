@@ -205,6 +205,14 @@ function resolveDocPath(dir) {
 }
 
 function main() {
+	// Only regenerate docs on the develop branch to avoid polluting feature
+	// branch diffs with source-link changes (branch name is in the URL).
+	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], '');
+	if (branch && branch !== 'develop') {
+		console.log(`nodes:docs-generate skipped (branch: ${branch}, only runs on develop)`);
+		return;
+	}
+
 	// Optional CLI args restrict generation to the named node(s); no args = all.
 	const only = new Set(process.argv.slice(2));
 	let updated = 0;

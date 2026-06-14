@@ -38,7 +38,7 @@
  * are not persisted.
  */
 
-import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { IProjectLayout, ICanvasPreferences } from '../types';
 
@@ -211,19 +211,26 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 		updateProjectLayout({ isLocked: !internalIsLocked });
 	}, [isReadonly, updateProjectLayout, internalIsLocked]);
 
-	// --- Context value (stable references via useCallback) -----------------
+	// --- Context value -----------------------------------------------------
+	// Memoized so consumers (notably Canvas → <ReactFlow>) don't re-render on
+	// every provider render. An unmemoized value here made the canvas re-render
+	// continuously, feeding React Flow's StoreUpdater and amplifying the
+	// measurement feedback loop into "Maximum update depth exceeded".
 
-	const value: IFlowPreferencesContext = {
-		navigationMode,
-		setNavigationMode,
-		isReadonly,
-		isLocked,
-		toggleLock,
-		projectLayout,
-		updateProjectLayout,
-		getPreference,
-		setPreference,
-	};
+	const value = useMemo<IFlowPreferencesContext>(
+		() => ({
+			navigationMode,
+			setNavigationMode,
+			isReadonly,
+			isLocked,
+			toggleLock,
+			projectLayout,
+			updateProjectLayout,
+			getPreference,
+			setPreference,
+		}),
+		[navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, updateProjectLayout, getPreference, setPreference]
+	);
 
 	return <FlowPreferencesContext.Provider value={value}>{children}</FlowPreferencesContext.Provider>;
 }

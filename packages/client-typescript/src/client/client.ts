@@ -256,6 +256,45 @@ export class DataPipe {
 			}
 		}
 	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node using this pipe.
+	 *
+	 * The call reuses this pipe's existing pipeline instance, avoiding the
+	 * overhead of borrowing a new one from the pool.
+	 *
+	 * @param tool - Name of the @tool_function to invoke
+	 * @param nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                 tool-lane nodes; the first node that owns the tool handles it.
+	 * @param input - Arguments forwarded to the tool function
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the pipe is not open or no node handles the tool
+	 */
+	async tool<T = any>(tool: string, nodeId = '', input: Record<string, unknown> = {}): Promise<T> {
+		if (!this._opened) {
+			throw new Error('Pipe is not open');
+		}
+
+		const request = this._client.buildRequest('rrext_process', {
+			arguments: {
+				subcommand: 'tool',
+				tool,
+				nodeId,
+				input,
+				pipe_id: this._pipeId,
+			},
+			token: this._token,
+		});
+
+		const response = await this._client.request(request);
+
+		if (this._client.didFail(response)) {
+			const msg = response.message || `Tool "${tool}" invocation failed.`;
+			throw new Error(msg);
+		}
+
+		return (response.body as any)?.result as T;
+	}
 }
 
 /**
@@ -834,10 +873,10 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Returns the ID of the user's primary organization.
+	 * Returns the ID of the user's organization.
 	 */
 	getOrgId(): string | undefined {
-		return this._connectResult?.organizations?.[0]?.id;
+		return this._connectResult?.organization?.id;
 	}
 
 	/**
@@ -2629,6 +2668,42 @@ export class RocketRideClient extends DAPClient {
 
 		// Unwrap the body envelope
 		return (response.body ?? response) as T;
+	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node.
+	 *
+	 * Sends a `tool` subcommand through the DAP data connection.  The server
+	 * borrows a pipeline instance from the pool, dispatches the tool call
+	 * through the control plane, and returns the result directly — no
+	 * Question, Answer, or SSE overhead.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access
+	 * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
+	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                         tool-lane nodes; the first node that owns the tool handles it.
+	 * @param options.input - Arguments forwarded to the tool function
+	 * @param options.timeout - Optional per-request timeout in ms
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the server signals failure or no node handles the requested tool
+	 */
+	async tool<T = any>(options: {
+		token: string;
+		tool: string;
+		nodeId?: string;
+		input?: Record<string, unknown>;
+		timeout?: number;
+	}): Promise<T> {
+		const result = await this.call<{ result: T }>('rrext_process', {
+			subcommand: 'tool',
+			tool: options.tool,
+			nodeId: options.nodeId ?? '',
+			input: options.input ?? {},
+		}, {
+			token: options.token,
+			timeout: options.timeout,
+		});
+		return result.result;
 	}
 }
 

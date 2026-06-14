@@ -31,11 +31,11 @@ import { IIconProps } from './types';
  * @param props - Standard icon props for controlling size.
  */
 const PadlockIcon: FunctionComponent<IIconProps> = ({ size }) => {
+	const s = size ?? 24;
 	return (
-		<svg xmlns="http://www.w3.org/2000/svg" width={size ?? 24} height={size ?? 24} viewBox="0 0 93.63 122.88">
-			<path fill="#fbd734" fillRule="evenodd" d="M6,47.51H87.64a6,6,0,0,1,6,6v63.38a6,6,0,0,1-6,6H6a6,6,0,0,1-6-6V53.5a6,6,0,0,1,6-6Z" />
-			<path fill="#36464e" fillRule="evenodd" d="M41.89,89.26l-6.47,16.95H58.21L52.21,89a11.79,11.79,0,1,0-10.32.24Z" />
-			<path fill="#36464e" fillRule="evenodd" d="M83.57,47.51H72.22V38.09a27.32,27.32,0,0,0-7.54-19,24.4,24.4,0,0,0-35.73,0,27.32,27.32,0,0,0-7.54,19v9.42H10.06V38.09A38.73,38.73,0,0,1,20.78,11.28a35.69,35.69,0,0,1,52.07,0A38.67,38.67,0,0,1,83.57,38.09v9.42Z" />
+		<svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 62 62">
+			<circle cx="30.6" cy="32.4" r="25.8" fill="#ffd200" stroke="#c88f1e" strokeWidth="2" />
+			<path fill="#fff" d="M30.212 15.639c-5.4.17-8.98 2.766-8.98 8.122v5.467h-1.216c-.892 0-1.62.614-1.62 1.383v14.37c0 .77.728 1.384 1.62 1.384h21.99c.892 0 1.598-.614 1.598-1.384V30.612c0-.77-.706-1.383-1.598-1.383h-1.238l.023-5.378c0-5.686-3.887-8.141-9.769-8.211-.274-.003-.544-.009-.81 0zm.54 3.593c.1-.003.213 0 .316 0 6.526 0 6.026 4.642 6.122 6.025v3.972H24.9v-3.95c-.023-1.372-.404-5.906 5.852-6.047z" />
 		</svg>
 	);
 };

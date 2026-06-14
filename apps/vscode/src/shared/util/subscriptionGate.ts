@@ -38,11 +38,9 @@ export function isSubscribed(client: RocketRideClient | undefined, appId: string
 	const capabilities: string[] = info.capabilities ?? [];
 	if (!capabilities.includes('saas')) return true;
 
-	// Check ConnectResult.apps for the desktop app entry
+	// Subscribed only if the app has an active or trialing subscription.
+	// past_due means payment failed — lock until resolved.
 	const entry = (info.apps ?? []).find((a) => a.id === appId);
 	if (!entry) return false;
-
-	// Allow launch for free, subscribed, trialing, and unsubscribed (paywall base features)
-	const allowed = ['free', 'subscribed', 'trialing', 'unsubscribed'];
-	return !!entry.appStatus && allowed.includes(entry.appStatus);
+	return entry.appStatus === 'subscribed' || entry.appStatus === 'trialing';
 }

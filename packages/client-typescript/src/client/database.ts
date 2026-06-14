@@ -26,13 +26,11 @@
  * Database API namespace for the RocketRide TypeScript SDK.
  *
  * Exposes `client.database.query(...)` for issuing raw SQL or Cypher directly
- * against a database pipeline, bypassing the LLM translation layer that the
- * default `client.chat(...)` flow uses.
+ * against a database pipeline node via the `execute` tool function, bypassing
+ * the LLM translation layer that the default `client.chat(...)` flow uses.
  */
 
 import type { RocketRideClient } from './client.js';
-import type { PIPELINE_RESULT } from './types/index.js';
-import { Question, QuestionType } from './schema/Question.js';
 
 // =============================================================================
 // DIALECT ENUM
@@ -66,23 +64,22 @@ export class DatabaseApi {
 	constructor(private readonly client: RocketRideClient) {}
 
 	/**
-	 * Execute a raw SQL or Cypher statement against a database pipeline.
+	 * Execute a raw SQL or Cypher statement against a database pipeline node.
 	 *
-	 * Sends a Question with `type=QuestionType.EXECUTE` so the database node
-	 * treats `sql` as the literal statement to run — no LLM call, no
-	 * `is_sql_safe` / `_is_cypher_safe` gating.
+	 * Invokes the `execute` tool function on the target database node,
+	 * bypassing LLM translation and SQL safety checks.
 	 *
 	 * @param options.token - Pipeline token for authentication and resource access.
 	 * @param options.sql - Raw SQL or Cypher statement to execute.
-	 * @param options.onSSE - Optional streaming callback (matches `chat`).
-	 * @returns The pipeline response. The `answers` lane carries a JSON-encoded
-	 *   payload of shape `{"rows": [...], "affected_rows": N}`.
+	 * @param options.nodeId - Target database node ID.  When empty the call
+	 *   broadcasts to all tool-lane nodes; the first database node handles it.
+	 * @returns Object with `rows` (array of row objects) and `affected_rows` (number).
 	 */
 	async query(options: {
 		token: string;
 		sql: string;
-		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
-	}): Promise<PIPELINE_RESULT> {
+		nodeId?: string;
+	}): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
@@ -90,49 +87,40 @@ export class DatabaseApi {
 			throw new Error('sql must be a non-empty string');
 		}
 
-		const question = new Question({ type: QuestionType.EXECUTE });
-		question.addQuestion(options.sql);
-		return this.client.chat({ token: options.token, question, onSSE: options.onSSE });
+		return this.client.tool({
+			token: options.token,
+			tool: 'execute',
+			nodeId: options.nodeId,
+			input: { sql: options.sql },
+		});
 	}
 
 	/**
-	 * Discover the underlying database engine for a pipeline.
+	 * Discover the underlying database engine for a pipeline node.
 	 *
-	 * Sends a `Question(type=DIALECT)`; the database node replies on the
-	 * `answers` lane with `{"dialect": "<engine>"}`. Use this to branch on
-	 * dialect-specific SQL or to assert you're not pointed at the wrong kind
-	 * of database (e.g. Neo4j when you expected Postgres).
+	 * Invokes the `dialect` tool function on the target database node.
 	 *
 	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.nodeId - Target database node ID.  When empty the call
+	 *   broadcasts to all tool-lane nodes; the first database node handles it.
 	 * @returns The dialect reported by the node.
-	 * @throws If `token` is empty, the pipeline returns no answer, or the
-	 *   response is not a recognized dialect.
+	 * @throws If `token` is empty or the response is not a recognized dialect.
 	 */
-	async dialect(options: { token: string }): Promise<DatabaseDialect> {
+	async dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
 
-		const question = new Question({ type: QuestionType.DIALECT });
-		question.addQuestion('dialect');
-		const result = await this.client.chat({ token: options.token, question });
-
-		const answers = (result as { answers?: string[] })?.answers;
-		if (!answers || answers.length === 0) {
-			throw new Error('Pipeline returned no dialect answer; is the endpoint a database node?');
-		}
-
-		let payload: { dialect?: string };
-		try {
-			payload = JSON.parse(answers[0]);
-		} catch {
-			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
-		}
+		const result = await this.client.tool<{ dialect?: string }>({
+			token: options.token,
+			tool: 'dialect',
+			nodeId: options.nodeId,
+		});
 
 		const known = Object.values(DatabaseDialect) as string[];
-		if (!payload.dialect || !known.includes(payload.dialect)) {
-			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
+		if (!result?.dialect || !known.includes(result.dialect)) {
+			throw new Error(`Unexpected dialect response from pipeline: ${JSON.stringify(result)}`);
 		}
-		return payload.dialect as DatabaseDialect;
+		return result.dialect as DatabaseDialect;
 	}
 }

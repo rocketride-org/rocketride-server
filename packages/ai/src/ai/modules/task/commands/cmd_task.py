@@ -151,15 +151,14 @@ class TaskCommands(DAPConn):
             # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
             team_id = args.get('teamId') or self._account_info.defaultTeam
 
-            # Resolve org_id by walking the organizations/teams tree.
+            # Resolve org_id from the user's single organization.
             org_id = ''
-            for org in self._account_info.organizations or []:
+            org = self._account_info.organization
+            if org:
                 for team in org.get('teams', []):
                     if team.get('id') == team_id:
                         org_id = org.get('id', '')
                         break
-                if org_id:
-                    break
 
             # Build merged environment for pipeline variable resolution.
             # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).

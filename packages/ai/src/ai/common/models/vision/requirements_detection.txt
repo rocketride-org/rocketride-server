@@ -1,0 +1,4 @@
+# contract-check: skip-install  reason: rf-detr + timm pull a large tree; PR lane skips, nightly --install-all verifies.
+# Detection-specific extras, installed after the shared requirements_vision.txt base.
+timm
+rfdetr; python_version >= "3.10"

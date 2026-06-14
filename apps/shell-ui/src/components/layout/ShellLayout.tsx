@@ -282,9 +282,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
 					<div style={styles.clientArea}>
-						{subGateActive ? (
-							<div style={styles.appLoading}>Subscription required</div>
-						) : activeApp?.components?.App ? (
+						{activeApp?.components?.App ? (
 							<AppErrorBoundary key={activeAppId} appName={appName}>
 								<activeApp.components.App
 									isConnected={isConnected}

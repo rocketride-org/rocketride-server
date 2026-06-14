@@ -1,0 +1,8 @@
+# contract-check: skip-install  reason: rtmlib + onnxruntime-gpu pull a large tree; PR lane skips, nightly --install-all verifies.
+# Pose-specific deps (onnxruntime, NOT transformers — this loader is non-torch).
+# GPU wheel on Linux/Windows (CUDA-12 build, CPU fallback when no GPU); plain
+# wheel on macOS (CoreML/MPS; no gpu wheel exists). numpy is a base engine dep.
+rtmlib>=0.0.13
+onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
+onnxruntime==1.20.1; platform_system == 'Darwin'
+Pillow

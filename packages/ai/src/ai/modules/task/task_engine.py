@@ -551,6 +551,12 @@ class Task(DAPBase):
             arguments=args,
             token=args.get('token'),
         )
+
+        # Propagate subprocess failures so callers don't silently
+        # receive success for a failed operation.
+        if self._data_client.did_fail(response):
+            raise RuntimeError(response.get('message', 'Data request failed'))
+
         return response
 
     async def _terminated(self) -> None:
@@ -1600,6 +1606,8 @@ class Task(DAPBase):
                     user_id=getattr(_control, 'userId', '') if _control else '',
                     team_id=getattr(_control, 'teamId', '') if _control else '',
                     org_id=getattr(_control, 'orgId', '') if _control else '',
+                    pipeline_name=self._task_name or '',
+                    source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

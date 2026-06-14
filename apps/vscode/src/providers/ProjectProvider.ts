@@ -516,7 +516,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					try {
 						const billingClient = this.connectionManager.getClient();
 						if (!billingClient) throw new Error('Not connected');
-						const orgId = billingClient.getAccountInfo()?.organizations?.[0]?.id;
+						const orgId = billingClient.getAccountInfo()?.organization?.id;
 						if (!orgId) throw new Error('No organisation found');
 						const result = await billingClient.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, data.priceId as string);
 						webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });

@@ -22,7 +22,9 @@ so the canonical import path is ``from ai.common.utils import <name>``.
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
 from .config_utils import config_int, parse_bool
 from .file_utils import decode_data_url, guess_filename
+from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
 from .http_retry import post_with_retry
+from .image_utils import colorize_depth, decode_ndarray, encode_ndarray, image_to_bytes
 from .string_utils import safe_str
 from .tool_args import (
     normalize_tool_input,
@@ -38,9 +40,13 @@ from .tool_args import (
 from .url_utils import validate_public_url
 
 __all__ = [
+    'colorize_depth',
     'config_int',
     'decode_data_url',
     'guess_filename',
+    'decode_ndarray',
+    'encode_ndarray',
+    'image_to_bytes',
     'langchain_messages_to_transcript',
     'normalize_bound_tools',
     'normalize_tool_input',
@@ -49,10 +55,13 @@ __all__ = [
     'optional_int',
     'optional_str',
     'parse_bool',
+    'pick_torch_device',
+    'pick_torch_dtype',
     'require_bool',
     'require_dict',
     'require_int',
     'require_str',
+    'resolve_pipeline_device',
     'safe_str',
     'validate_public_url',
     'validate_tool_input_schema',
