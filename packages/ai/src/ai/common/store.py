@@ -1111,8 +1111,11 @@ class VectorStoreToolMixin:
         store = self._vectordb_store()
 
         parent = args.get('parent', None)
-        offset = int(args.get('offset', 0))
-        limit = int(args.get('limit', 1000))
+        try:
+            offset = int(args.get('offset', 0))
+            limit = int(args.get('limit', 1000))
+        except (TypeError, ValueError):
+            return {'success': False, 'error': 'offset and limit must be valid integers'}
 
         paths = store.getPaths(parent=parent, offset=offset, limit=limit)
         return {'success': True, 'paths': paths}

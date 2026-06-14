@@ -787,12 +787,20 @@ class DataConn(DAPConn):
         tool_input = args.get('input', {})
         pipe_id = args.get('pipe_id', None)
 
+        # Resolve conn_pipe in async scope so we can set in_use before
+        # dispatching to the thread (mirrors _write pattern).
+        conn_pipe = None
+        if pipe_id is not None:
+            conn_pipe = self._pipe_map.get(pipe_id)
+            if not conn_pipe or not conn_pipe.is_open:
+                raise ValueError(f'Pipe {pipe_id} is not open')
+            if conn_pipe.has_failed:
+                raise ValueError(f'Pipe {pipe_id} has failed')
+            self._reset_pipe_activity(conn_pipe)
+
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one
-            if pipe_id is not None:
-                conn_pipe = self._pipe_map.get(pipe_id)
-                if not conn_pipe or not conn_pipe.is_open:
-                    raise ValueError(f'Pipe {pipe_id} is not open')
+            if conn_pipe is not None:
                 pipe = conn_pipe.pipe
                 borrowed = False
             else:
@@ -800,37 +808,55 @@ class DataConn(DAPConn):
                 borrowed = True
 
             try:
-                # Walk the filter chain (pipe.next) to find the target node
-                # by its component ID.  Each node in the chain is an
-                # IFilterInstance with invoke() available.
-                node = pipe
-                while node is not None:
-                    if node.pipeType.id == node_id:
-                        break
-                    node = node.next
+                # Walk the filter chain to find candidate node(s).
+                # When node_id is provided, match exactly.
+                # When empty, broadcast to all nodes — first handler wins.
+                if node_id:
+                    node = pipe
+                    while node is not None:
+                        if node.pipeType.id == node_id:
+                            break
+                        node = node.next
+                    else:
+                        raise ValueError(f'Node "{node_id}" not found in pipeline')
+                    candidates = [node]
                 else:
-                    raise ValueError(f'Node "{node_id}" not found in pipeline')
+                    candidates = []
+                    node = pipe
+                    while node is not None:
+                        candidates.append(node)
+                        node = node.next
 
-                # Get the Python IInstance from the C++ filter and call
-                # invoke() directly — bypasses the C++ control dispatcher
-                # which requires controller map entries.
-                py_instance = node.pyInstance
-                param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
-                try:
-                    py_instance.invoke(param)
-                except APERR as e:
-                    if e.ec == Ec.PreventDefault:
-                        raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
-                    raise
+                # Invoke the tool on the first node that handles it.
+                for node in candidates:
+                    py_instance = getattr(node, 'pyInstance', None)
+                    if py_instance is None:
+                        continue
+                    param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+                    try:
+                        py_instance.invoke(param)
+                        return param.output
+                    except APERR as e:
+                        if e.ec == Ec.PreventDefault:
+                            continue
+                        raise
 
-                return param.output
+                raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
 
             finally:
                 if borrowed:
                     self._target.putPipe(pipe)
 
-        result = await asyncio.to_thread(tool_sync)
-        return self.build_response(request, body={'result': result})
+        # Execute in thread, marking pipe as in-use so the zombie detector skips it
+        if conn_pipe is not None:
+            conn_pipe.in_use = True
+        try:
+            result = await asyncio.to_thread(tool_sync)
+            return self.build_response(request, body={'result': result})
+        finally:
+            if conn_pipe is not None:
+                conn_pipe.in_use = False
+                self._reset_pipe_activity(conn_pipe)
 
     # =========================================================================
     # CPROFILE COMMANDS
