@@ -459,14 +459,23 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 					</button>
 				) : (
 					<>
-						<div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+						<button
+							title="Go to home"
+							aria-label="Go to home"
+							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' })}
+							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+						>
 							<AppSwitcherButton collapsed={collapsed} />
-						</div>
+						</button>
 						<button
 							title="Collapse sidebar"
 							aria-label="Collapse sidebar"
 							onClick={toggleCollapse}
-							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
 						>
 							<BxDockLeft size={18} />
 						</button>
