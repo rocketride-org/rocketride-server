@@ -13,10 +13,17 @@ Public surface:
 - ``decode_data_url`` — decode an uploaded ``data-url`` value to (bytes, mime).
 - ``guess_filename`` — derive a typed ``upload.<ext>`` filename from a buffer
   via the optional ``filetype`` package (lazy; node-provided dependency).
+- ``pick_torch_device``, ``pick_torch_dtype``, ``resolve_pipeline_device`` —
+  select a Torch device/dtype for local-inference nodes.
+- ``post_with_retry`` — HTTP POST with retry/backoff.
+- ``colorize_depth``, ``decode_ndarray``, ``encode_ndarray``, ``image_to_bytes``
+  — image/ndarray (de)serialization helpers.
+- ``validate_public_url`` — reject non-public/SSRF-prone URLs.
 
 Implementations live in submodules (``string_utils``, ``tool_args``,
-``config_utils``, ``agent_tools``, ``file_utils``); this package re-exports them
-so the canonical import path is ``from ai.common.utils import <name>``.
+``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``,
+``http_retry``, ``image_utils``, ``url_utils``); this package re-exports them so
+the canonical import path is ``from ai.common.utils import <name>``.
 """
 
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools

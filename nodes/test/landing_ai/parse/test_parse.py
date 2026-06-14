@@ -17,6 +17,8 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 # Resolve repo locations from this file: nodes/test/landing_ai/parse/test_parse.py
 _TEST_ROOT = Path(__file__).resolve().parents[2]  # nodes/test
 # Import the node package as top-level `landing_ai` from source, so relative
@@ -46,6 +48,7 @@ def _import_scoped():
 
 
 Parser, LandingAIADE = _import_scoped()
+_parse_mod = importlib.import_module('landing_ai.parse.parse')
 
 
 def _make_parser() -> Parser:
@@ -101,6 +104,20 @@ def test_parse_without_api_key_returns_empty() -> None:
 
     assert text == ''
     assert tables == []
+
+
+def test_parse_reraises_sdk_errors(monkeypatch) -> None:
+    """parse() should log and propagate SDK failures, not return empty output."""
+    parser = _make_parser()
+
+    class _Boom:
+        def parse(self, **kwargs):
+            raise RuntimeError('sdk down')
+
+    monkeypatch.setattr(_parse_mod, 'build_client', lambda *a, **k: _Boom())
+
+    with pytest.raises(RuntimeError, match='sdk down'):
+        parser.parse(b'mock bytes', 'invoice.pdf')
 
 
 def test_map_response_filters_table_chunks() -> None:
