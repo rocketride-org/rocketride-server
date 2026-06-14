@@ -151,16 +151,14 @@ class IGlobal(IGlobalTransform):
             # Import Qdrant client after depends
             from qdrant_client import QdrantClient  # type: ignore
 
-            # Build URL directly from user inputs; support hosts that already include scheme
-            lower_host = host.lower()
-            if lower_host.startswith('http://') or lower_host.startswith('https://'):
+            # Build URL from host/port.
+            # If the host already includes a scheme (http:// or https://), use it as-is.
+            # Otherwise, infer from the profile: cloud -> https://, local -> http://.
+            if '://' in host:
                 url = f'{host}:{port_int}'
             else:
-                # Prefer http for localhost/127.*, otherwise use https for cloud/443
-                is_local = host == 'localhost' or host.startswith('127.')
-                scheme = 'http'
-                if not is_local and (str(port_int) == '443' or host.endswith('.qdrant.io')):
-                    scheme = 'https'
+                profile = (self.glb.connConfig.get('profile', '') or '').lower()
+                scheme = 'https' if profile == 'cloud' else 'http'
                 url = f'{scheme}://{host}:{port_int}'
 
             # Create client - REST only (prefer_grpc=False); validation-timeout is 10s

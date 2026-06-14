@@ -188,7 +188,7 @@ class DataMixin(DAPClient):
                     f'{msg}\n\n'
                     'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"
-                    '- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n'
+                    '- Pipeline source must be chat, webhook, or dropper\n'
                     '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
                 )
                 response = dict(response)

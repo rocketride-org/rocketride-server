@@ -33,7 +33,7 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Callable, cast, Dict, Any
+from typing import List, Callable, Dict, Any
 from uuid import uuid4
 import sys
 import numpy as np
@@ -125,10 +125,15 @@ class Store(DocumentStoreBase):
         else:
             raise Exception('The metric you provided in the config.json does not match required qdrant configurations')
 
+        # If the host already includes a scheme, use it as-is.
+        # Otherwise, infer from the profile: cloud -> https://, local -> http://.
         if '://' in self.host:
             url = f'{self.host}:{self.port}'
         else:
-            url = f'http://{self.host}:{self.port}'
+            profile = (connConfig.get('profile', '') or '').lower()
+            scheme = 'https' if profile == 'cloud' else 'http'
+            url = f'{scheme}://{self.host}:{self.port}'
+
         self.client = QdrantClient(url=url, api_key=self.apikey, prefer_grpc=False, timeout=60)
         return
 
@@ -331,8 +336,8 @@ class Store(DocumentStoreBase):
         # Get the collection info
         info: types.CollectionInfo = self.client.get_collection(collection_name=self.collection)
 
-        # Get the vector parameters
-        return info.vectors_count
+        # vectors_count was renamed to points_count in newer qdrant-client versions
+        return getattr(info, 'points_count', None) or getattr(info, 'vectors_count', 0)
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
@@ -450,15 +455,21 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return {}
 
-        # Build the base
-        must: List[models.Condition] = [FieldCondition(key='meta.chunkId', match=models.MatchValue(value=0))]
+        # Build the base: chunk 0 only, exclude the internal schema document
+        must: List[models.Condition] = [
+            FieldCondition(key='meta.chunkId', match=models.MatchValue(value=0)),
+            FieldCondition(key='meta.isDeleted', match=models.MatchValue(value=False)),
+        ]
+        must_not: List[models.Condition] = [
+            FieldCondition(key='meta.objectId', match=models.MatchValue(value='schema')),
+        ]
 
         # If parent specified, match on it
         if parent is not None:
             must.append(FieldCondition(key='meta.parent', match=models.MatchText(text=parent)))
 
-        # Build a filter to just ask for chunk 0
-        filter = Filter(must=must)
+        # Build filter excluding schema docs
+        filter = Filter(must=must, must_not=must_not)
 
         # Build up the path list
         paths: Dict[str, str] = {}
@@ -480,14 +491,15 @@ class Store(DocumentStoreBase):
             if payload is None:
                 continue
 
-            # Get the info
-            metadata = cast(DocMetadata, payload['meta'])
+            # Get the info — payload['meta'] is a plain dict from Qdrant, not a DocMetadata
+            metadata = payload.get('meta', {})
 
-            # Get the parent
-            parent = metadata.parent
+            # Get the parent and objectId
+            parent = metadata.get('parent', '/')
+            object_id = metadata.get('objectId', '')
 
             # Add it
-            paths[parent] = metadata.objectId
+            paths[parent] = object_id
 
         # And return what we found
         return paths

@@ -470,12 +470,14 @@ class TaskConn(
 
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
         # For all other auth types, resolve permissions against the task's team.
+        # sys.admin bypasses all team permission checks.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            perms = resolve_task_permissions(self._account_info, control.teamId)
-            if not perms:
-                raise PermissionError('Access denied: no permissions for this task')
-            if permissions and permissions not in perms:
-                raise PermissionError(f'Permission {permissions!r} denied for this task')
+            if 'sys.admin' not in (self._account_info.sysPermissions or []):
+                perms = resolve_task_permissions(self._account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Access denied: no permissions for this task')
+                if permissions and permissions not in perms:
+                    raise PermissionError(f'Permission {permissions!r} denied for this task')
 
         return control.task
 

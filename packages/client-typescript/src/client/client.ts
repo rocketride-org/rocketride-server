@@ -140,7 +140,7 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const base = response.message || 'Failed to open a data pipe.';
-			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
 			throw new PipeException({ ...response, message: msg });
 		}
 
@@ -1496,8 +1496,9 @@ export class RocketRideClient extends DAPClient {
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;
 
-			// Create pipe instance
-			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
+			// Create pipe instance — no provider filter so chat() works with chat, webhook,
+			// and dropper sources. The rocketride-question MIME type routes to the 'questions' lane.
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', undefined, onSSE);
 
 			try {
 				// Open the communication channel to the AI
