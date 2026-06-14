@@ -137,5 +137,5 @@
 			}
 		}
 	},
-	"required": ["landing_ai_parse.api_key"]
+	"required": []
 }

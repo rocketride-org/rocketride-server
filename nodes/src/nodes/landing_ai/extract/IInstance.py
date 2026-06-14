@@ -51,11 +51,6 @@ class IInstance(IInstanceBase):
         if text:
             self.markdown_parts.append(text)
 
-    def writeTable(self, text: str):
-        """Accumulate tabular Markdown arriving on the table lane."""
-        if text:
-            self.markdown_parts.append(text)
-
     def closing(self):
         """Run extraction over the accumulated Markdown and write the results."""
         markdown = '\n\n'.join(self.markdown_parts).strip()

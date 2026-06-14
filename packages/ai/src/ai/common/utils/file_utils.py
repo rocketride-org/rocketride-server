@@ -23,7 +23,7 @@ def decode_data_url(value: str) -> Tuple[bytes, Optional[str]]:
         meta = header[len('data:') :]
         mime = meta.split(';', 1)[0] or None
         if ';base64' in meta:
-            return base64.b64decode(payload), mime
+            return base64.b64decode(payload, validate=True), mime
         # Non-base64 data-urls are URL-encoded text
         return unquote(payload).encode('utf-8'), mime
 

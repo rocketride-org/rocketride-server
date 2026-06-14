@@ -143,5 +143,5 @@
 			}
 		}
 	},
-	"required": ["landing_ai_extract.api_key", "landing_ai_extract.schema_file"]
+	"required": ["landing_ai_extract.schema_file"]
 }

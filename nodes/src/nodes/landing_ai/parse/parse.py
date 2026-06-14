@@ -56,9 +56,11 @@ class Parser(ReaderBase):
         return text
 
     def parse(self, file_data: bytes, file_name: Optional[str] = None) -> Tuple[str, List[str]]:
-        """Parse ``file_data`` with ADE -> (markdown, tables); ("", []) on missing key/empty/error.
+        """Parse ``file_data`` with ADE -> (markdown, tables).
 
-        ADE infers the type from ``file_name``; a name is sniffed from the bytes when absent.
+        Returns ("", []) when no key is configured or the document is empty; a
+        parse failure is logged and re-raised. ADE infers the type from
+        ``file_name``; a name is sniffed from the bytes when absent.
         """
         if not self._api_key:
             error('Landing.ai Parse: no API key configured')
