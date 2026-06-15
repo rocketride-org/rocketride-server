@@ -28,7 +28,6 @@
 	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--ifm-heading-font-family: var(--ifm-font-family-base);
 	--ifm-code-font-size: 92%;
-	--ifm-heading-font-weight: 500;
 
 	/* Light mode: Horizon darkened for contrast on white */
 	--ifm-color-primary: #1f9fd0;
@@ -94,6 +93,10 @@
 :root:not(#\#):not(#\#) {
 	--ifm-background-color: #ffffff;
 	--ifm-background-surface-color: #f5f7fb;
+	/* Infima build-injects --ifm-heading-font-weight: var(--ifm-font-weight-bold)
+	 * at (2,0,1), beating our plain :root — match the hack so headings render at
+	 * the intended 500. */
+	--ifm-heading-font-weight: 500;
 	/* Infima also boosts its .navbar/.footer element rules to (2,1,0), so they
 	 * win over class overrides — feed their tokens the surface color instead, so
 	 * navbar and footer paint identically. */
