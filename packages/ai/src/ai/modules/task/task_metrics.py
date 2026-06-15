@@ -359,10 +359,10 @@ class TaskMetrics:
         """
         Accumulate current sample into totals.
 
-        Peaks and averages are always tracked (dashboard visibility).
-        Billing accumulators and token updates are suppressed until the
-        pipeline signals serviceUp (via set_service_up), so users are not
-        charged for startup time (model loading, dependency installation).
+        Peaks are always tracked for dashboard visibility. Averages and
+        billing accumulators are suppressed until the pipeline signals
+        serviceUp (via set_service_up), so users are not charged for
+        startup time (model loading, dependency installation).
 
         Args:
             interval: Time elapsed since last sample (seconds)

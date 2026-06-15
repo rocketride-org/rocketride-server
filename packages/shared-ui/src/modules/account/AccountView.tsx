@@ -780,7 +780,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames]
 	);
 
 	// =========================================================================
