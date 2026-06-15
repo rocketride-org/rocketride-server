@@ -28,7 +28,7 @@
 	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--ifm-heading-font-family: var(--ifm-font-family-base);
 	--ifm-code-font-size: 92%;
-	--ifm-heading-font-weight: 650;
+	--ifm-heading-font-weight: 500;
 
 	/* Light mode: Horizon darkened for contrast on white */
 	--ifm-color-primary: #1f9fd0;
@@ -180,12 +180,6 @@ body {
 	transition: none !important;
 }
 
-.navbar__title {
-	font-weight: 700;
-	letter-spacing: -0.01em;
-	color: var(--ifm-heading-color);
-}
-
 .navbar__logo {
 	height: 1.75rem;
 }
@@ -195,13 +189,6 @@ body {
 .navbar__link--colored:not(#\#):not(#\#),
 .navbar__link--colored:not(#\#):not(#\#):hover {
 	color: var(--ifm-link-color);
-}
-
-/* Brand (logo + "RocketRide" title) on the left: tint the title to the link
- * accent on hover, matching the other navbar links. Double :not(#\#) keeps the
- * specificity above Infima's navbar rules. */
-.navbar__brand:not(#\#):not(#\#):hover .navbar__title {
-	color: var(--ifm-link-hover-color);
 }
 
 /* GitHub link with live star count (custom-githubStars navbar item). */
@@ -452,12 +439,15 @@ article a {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.5rem;
+	overflow: hidden;
 }
 
 .rr-quickstart-btn:not(#\#):not(#\#),
 .rr-quickstart-btn:not(#\#):not(#\#):hover {
-	background-color: var(--ifm-link-color);
-	border-color: var(--ifm-link-color);
+	background: linear-gradient(135deg, var(--rr-horizon) 0%, var(--rr-amethyst) 100%);
+	background-color: var(--rr-amethyst);
+	background-clip: padding-box;
+	border: 0;
 	color: #fff;
 }
 
@@ -468,6 +458,8 @@ article a {
 .rr-quickstart-btn__icon {
 	width: 1.15em;
 	height: 1.15em;
+	position: relative;
+	top: 0.15em;
 }
 
 /* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`

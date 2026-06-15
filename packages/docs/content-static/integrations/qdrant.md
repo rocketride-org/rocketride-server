@@ -1,6 +1,6 @@
 ---
 title: Qdrant
-sidebar_position: 2
+sidebar_position: 6
 ---
 
 # Qdrant

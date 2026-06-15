@@ -64,8 +64,11 @@ const SPINE = [
 		label: 'Integrations',
 		items: [
 			{ id: 'integrations/anthropic', label: 'Anthropic' },
-			{ id: 'integrations/qdrant', label: 'Qdrant' },
-			{ id: 'integrations/postgres', label: 'PostgreSQL' }
+			{ id: 'integrations/aparavi-aql', label: 'Aparavi AQL' },
+			{ id: 'integrations/firecrawl', label: 'Firecrawl' },
+			{ id: 'integrations/neo4j', label: 'Neo4j' },
+			{ id: 'integrations/postgres', label: 'PostgreSQL' },
+			{ id: 'integrations/qdrant', label: 'Qdrant' }
 		]
 	},
 	{
