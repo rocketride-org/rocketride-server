@@ -219,22 +219,6 @@ await pipe.write(b'{"key": "value2"}')
 result = await pipe.close()
 ```
 
-### Tools
-
-| Method | Signature                                                                                                     | Returns | Description                                                                                                                                                            |
-| ------ | ------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tool` | `async def tool(self, *, token: str, tool: str, node_id: str = '', input: dict = None, timeout: float = None) -> Any` | `Any`   | Invokes a node's `@tool_function` directly (no agent). `node_id` empty broadcasts to all tool-lane nodes; the first that owns `tool` handles it. Returns the tool's value. |
-
-**Example - call a node tool directly:**
-
-```python
-# List collections exposed by a database node, then read one's stats
-collections = await client.tool(token=token, tool="list")
-stats = await client.tool(token=token, tool="stats", node_id="qdrant_1", input={"collection": "docs"})
-```
-
-`DataPipe` exposes the same call without a token: `await pipe.tool(tool="list", node_id="", input=None)`.
-
 ### Events
 
 | Method       | Signature                                                                | Returns | Description                                                                                                                                                          |

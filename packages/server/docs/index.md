@@ -116,45 +116,6 @@ commands:
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.
 
-## Invoking a node tool
-
-Besides feeding data, you can call a node's `@tool_function` directly, the same
-capability an agent would invoke, but on demand. Send a `tool` subcommand on the
-`rrext_process` command over the data connection. The engine borrows a pipeline
-instance from the pool, dispatches the call to the node that owns the tool, and
-returns the tool's value.
-
-```json
-{
-	"type": "request",
-	"seq": 8,
-	"command": "rrext_process",
-	"arguments": {
-		"subcommand": "tool",
-		"token": "$ROCKETRIDE_APIKEY",
-		"tool": "list",
-		"nodeId": "",
-		"input": {}
-	}
-}
-```
-
-- **`tool`** (required): name of the `@tool_function` to invoke (e.g. `list`,
-  `stats`, `execute`).
-- **`nodeId`** (optional): target node id. When empty, the call broadcasts to all
-  tool-lane nodes and the first node that owns the tool handles it.
-- **`input`** (optional): arguments forwarded to the tool.
-
-The successful response carries the tool's return value in `body.result`:
-
-```json
-{ "type": "response", "seq": 9, "request_seq": 8, "command": "rrext_process", "success": true, "body": { "result": { "collections": ["docs"] } } }
-```
-
-If `tool` is missing, the `nodeId` is invalid, or no node handles the tool, the
-response comes back with `success: false` and a `message`. The SDKs wrap this as
-`client.tool(...)` ([TypeScript](/develop/typescript) / [Python](/develop/python)).
-
 ## Keepalive & timeouts
 
 The connection is long-lived: a task stays open while it streams. The SDK
