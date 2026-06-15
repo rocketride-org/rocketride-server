@@ -232,6 +232,47 @@ body {
 	color: var(--ifm-font-color-base);
 }
 
+/* Discord link (custom-discord navbar item), icon only, next to GitHub. */
+.navbar-discord {
+	display: inline-flex;
+	align-items: center;
+}
+
+.navbar-discord__icon {
+	width: 1.1rem;
+	height: 1.1rem;
+	flex-shrink: 0;
+	color: var(--ifm-font-color-base);
+	transition: color 0.15s ease;
+}
+
+.navbar-discord:hover .navbar-discord__icon {
+	color: var(--ifm-link-hover-color);
+}
+
+/* Search box themed to the brand (local search uses Infima's .navbar__search-input;
+   background-color, not background, so Infima's search-glyph image is preserved). */
+.navbar__search-input {
+	background-color: var(--ifm-color-emphasis-100);
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 999px;
+	color: var(--ifm-font-color-base);
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease,
+		background-color 0.15s ease;
+}
+
+.navbar__search-input::placeholder {
+	color: var(--ifm-color-emphasis-600);
+}
+
+.navbar__search-input:focus {
+	outline: none;
+	border-color: var(--ifm-color-primary);
+	box-shadow: 0 0 0 3px rgba(65, 182, 230, 0.25);
+}
+
 /* ----------------------------------------------------------------------------
  * Sidebar
  * ------------------------------------------------------------------------- */
@@ -666,7 +707,7 @@ article a {
 
 .rr-footer__columns {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
+	grid-template-columns: repeat(4, 1fr);
 	gap: 2rem;
 }
 
