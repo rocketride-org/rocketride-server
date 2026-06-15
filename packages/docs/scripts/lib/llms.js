@@ -110,6 +110,26 @@ const RUNTIME_PROSE = [
 	'pipeline uses is a config edit, not a code change.'
 ].join('\n');
 
+/**
+ * Escape a value for a Markdown table cell: collapse newlines to spaces and
+ * escape pipe characters so a stray `|` or line break in a title/description
+ * cannot break the column layout.
+ * @param {unknown} value - raw cell value.
+ * @return {string} a single-line, pipe-safe string.
+ */
+function tableCell(value) {
+	return String(value ?? '')
+		.replace(/\r?\n/g, ' ')
+		.replace(/\|/g, '\\|')
+		.trim();
+}
+
+/**
+ * Render the generated node catalog page: authored framing prose followed by a
+ * per-category Markdown table of every node (linked title + description).
+ * @param {Array<object>} nodes - manifest node entries (title, route, description, category).
+ * @return {string} the full Markdown document for the /nodes overview page.
+ */
 function nodeCatalogMarkdown(nodes) {
 	// Title comes from front matter (theme renders it); no body H1 to avoid a
 	// duplicate heading. Authored prose frames a catalog that is generated from
@@ -138,7 +158,7 @@ function nodeCatalogMarkdown(nodes) {
 		lines.push('| Node | Description |');
 		lines.push('| --- | --- |');
 		for (const n of group.items.sort((a, b) => a.title.localeCompare(b.title))) {
-			lines.push(`| [${n.title}](${n.route}) | ${n.description || ''} |`);
+			lines.push(`| [${tableCell(n.title)}](${n.route}) | ${tableCell(n.description)} |`);
 		}
 		lines.push('');
 	}

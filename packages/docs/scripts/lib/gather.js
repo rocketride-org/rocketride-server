@@ -110,7 +110,10 @@ async function readServiceDescriptions(nodeDir) {
 	const svcs = await glob('services*.json', { cwd: nodeDir, nodir: true });
 	const map = new Map();
 	for (const svc of svcs) {
-		const slug = svc.replace(/^services\.?/, '').replace(/\.json$/, '');
+		// Strip `.json` before the `services` prefix so the base manifest
+		// (`services.json`) yields an empty slug and is skipped; stripping the
+		// prefix first would leave `json`.
+		const slug = svc.replace(/\.json$/, '').replace(/^services\.?/, '');
 		if (!slug) continue;
 		const desc = extractDescription(await readFile(path.join(nodeDir, svc)));
 		if (desc) map.set(slug, desc);
@@ -120,17 +123,27 @@ async function readServiceDescriptions(nodeDir) {
 
 /**
  * Find the best description for a variant from the parent node's service description map.
- * Match order: exact slug, ends-with `_slug`, variant starts-with slug (handles parser/parse).
+ * Match order: exact slug, then ends-with `_slug`, then variant starts-with slug. Within
+ * each tier the longest matching slug wins, so overlapping slugs (e.g. `parse`/`parser`)
+ * resolve deterministically regardless of Map insertion order.
+ * @param {string} variant - variant name to resolve a description for.
+ * @param {Map<string, string>} serviceDescriptions - slug -> description map.
+ * @return {string} the matched description, or '' if none match.
  */
 function variantDescription(variant, serviceDescriptions) {
 	if (serviceDescriptions.has(variant)) return serviceDescriptions.get(variant);
-	for (const [slug, desc] of serviceDescriptions) {
-		if (variant.endsWith('_' + slug)) return desc;
-	}
-	for (const [slug, desc] of serviceDescriptions) {
-		if (variant.startsWith(slug)) return desc;
-	}
-	return '';
+	const longestMatch = (pred) => {
+		let best = null;
+		let bestLen = -1;
+		for (const [slug, desc] of serviceDescriptions) {
+			if (pred(slug) && slug.length > bestLen) {
+				best = desc;
+				bestLen = slug.length;
+			}
+		}
+		return best;
+	};
+	return longestMatch((slug) => variant.endsWith('_' + slug)) ?? longestMatch((slug) => variant.startsWith(slug)) ?? '';
 }
 
 /** Canvas-style sidebar/page label for a node (override > service title > prettified name). */
@@ -182,6 +195,11 @@ function stageNodeMarkdown(content, { slug, title }) {
 	return `---\n${merged.join('\n')}\n---\n\n${body}`;
 }
 
+/**
+ * Normalize a filesystem path to forward slashes for use in doc ids and routes.
+ * @param {string} p - a path that may contain platform-specific separators.
+ * @return {string} the path with `/` separators.
+ */
 function toPosix(p) {
 	return p.split(path.sep).join('/');
 }
@@ -251,6 +269,17 @@ async function clearGeneratedStatic(staticDir) {
 	}
 }
 
+/**
+ * Stage one doc file into the assembled content tree and write its raw pre-MDX
+ * sibling for the LLM surface.
+ * @param {object} args
+ * @param {string} args.srcAbs - absolute source path.
+ * @param {string} args.destAbs - absolute destination path in the content tree.
+ * @param {string} args.siblingAbs - absolute path for the raw `.md` sibling.
+ * @param {string} args.content - raw file content (for the sibling).
+ * @param {'copy'|'symlink'} args.mode - copy or symlink the source into place.
+ * @return {Promise<void>}
+ */
 async function stageFile({ srcAbs, destAbs, siblingAbs, content, mode }) {
 	await mkdir(path.dirname(destAbs));
 	if (mode === 'symlink') {
@@ -421,10 +450,27 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	return manifest;
 }
 
+/**
+ * Whether a doc id already resolves to a file (`.md`/`.mdx`, or an `index` under
+ * a directory of that id) in the assembled content tree.
+ * @param {string} contentDir - assembled content directory.
+ * @param {string} id - doc id to probe.
+ * @return {Promise<boolean>}
+ */
 async function docExists(contentDir, id) {
 	return (await exists(path.join(contentDir, `${id}.md`))) || (await exists(path.join(contentDir, `${id}.mdx`))) || (await exists(path.join(contentDir, id, 'index.md'))) || (await exists(path.join(contentDir, id, 'index.mdx')));
 }
 
+/**
+ * Write placeholder pages for every spine slot that still lacks authored or
+ * generated content, so unresolved sidebar links do not break the build.
+ * @param {object} args
+ * @param {string} args.contentDir - assembled content directory.
+ * @param {string} args.staticDir - directory for raw `.md` siblings.
+ * @param {Map<string, string>} args.routes - id -> staged file path, updated in place.
+ * @param {Array<object>} args.manifest - manifest entries, appended in place.
+ * @return {Promise<void>}
+ */
 async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	const titles = docTitles();
 	for (const id of allDocIds()) {
