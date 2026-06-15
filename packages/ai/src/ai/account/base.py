@@ -98,6 +98,25 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
+    def get_billing_rates(self) -> dict[str, float]:
+        """
+        Return billing rates (metric_key -> tokens_per_unit).
+
+        OSS default: empty dict (no billing).
+        SaaS override: returns the cached rates loaded from the
+        metrics_conversions DB table.
+        """
+        return {}
+
+    async def reload_billing_rates(self) -> dict[str, float]:
+        """
+        Reload billing rates from the DB.
+
+        OSS default: no-op, returns empty dict.
+        SaaS override: reloads from the metrics_conversions table.
+        """
+        return {}
+
     async def get_merged_env(self, user_id: str, org_id: str, team_id: str | None) -> dict[str, str]:
         """
         Build the merged ROCKETRIDE_* environment for a user.

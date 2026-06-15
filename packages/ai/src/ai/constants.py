@@ -38,21 +38,9 @@ CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to st
 # =============================================================================
 CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing API
 
-# =============================================================================
-# Billing Rates (tokens per resource-hour)
-# =============================================================================
-CONST_RATE_VCPU_HOUR = 1020  # tokens per vCPU-hour
-CONST_RATE_MEMORY_GB_HOUR = 100  # tokens per memory GB-hour
-CONST_RATE_GPU_GB_HOUR = 2140  # tokens per GPU GB-hour
-CONST_RATE_GPU_INFERENCE_SECOND = 0.594  # tokens per GPU-second of inference
-
-# =============================================================================
-# Custom Node Billing Rates (counter_name → tokens per unit)
-# =============================================================================
-CONST_CUSTOM_BILLING_RATES: dict[str, float] = {
-    'pagesProcessed': 5.0,  # tokens per page
-    # Add more as nodes are created
-}
+# Billing rates are loaded from the metrics_conversions DB table at startup
+# and cached in Account._billing_rates. See Account.get_billing_rates().
+# Admins manage rates via the Billing Rates page in the admin UI.
 
 # =============================================================================
 # Task Engine Configuration

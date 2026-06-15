@@ -26,11 +26,6 @@ from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
     CONST_BILLING_REPORT_INTERVAL,
     CONST_METRICS_STOP_TIMEOUT,
-    CONST_RATE_VCPU_HOUR,
-    CONST_RATE_MEMORY_GB_HOUR,
-    CONST_RATE_GPU_GB_HOUR,
-    CONST_RATE_GPU_INFERENCE_SECOND,
-    CONST_CUSTOM_BILLING_RATES,
 )
 
 if TYPE_CHECKING:
@@ -411,37 +406,51 @@ class TaskMetrics:
         """
         Update cumulative token usage from resource accumulators.
 
+        Rates are loaded from the DB-backed billing rates cache
+        (Account.get_billing_rates) so admins can adjust pricing at
+        runtime. All time-based metrics use milliseconds; memory
+        metrics use GB-seconds.
+
         Calculates tokens from:
-        - OS-level resource usage (CPU-seconds, memory MB-seconds, GPU MB-seconds)
-        - Subprocess-reported GPU inference timing (from >MET* protocol)
-        - Subprocess-reported custom counters (from >MET* protocol)
+        - OS-level resource usage (CPU ms, memory GB-sec, GPU memory GB-sec)
+        - Subprocess-reported GPU inference timing (from >MET* protocol, ms)
+        - Subprocess-reported timers/counters with matching DB rate keys
         """
-        # Convert OS-level accumulators to billable resource-hours
-        vcpu_hours = self._cpu_seconds / 3600
-        memory_gb_hours = self._memory_mb_seconds / 1024 / 3600
-        gpu_gb_hours = self._gpu_memory_mb_seconds / 1024 / 3600
+        from ai.account import account
 
-        # OS-level token charges
-        cpu_tokens = vcpu_hours * CONST_RATE_VCPU_HOUR
-        memory_tokens = memory_gb_hours * CONST_RATE_MEMORY_GB_HOUR
-        gpu_tokens = gpu_gb_hours * CONST_RATE_GPU_GB_HOUR
+        rates = account.get_billing_rates()
 
-        # GPU inference tokens (subprocess-reported, timer in milliseconds)
+        # OS-level: convert accumulators to rate-table units
+        cpu_ms = self._cpu_seconds * 1000.0
+        memory_gb_sec = self._memory_mb_seconds / 1024.0
+        gpu_memory_gb_sec = self._gpu_memory_mb_seconds / 1024.0
+
+        # OS-level token charges (rate is tokens-per-unit from DB)
+        cpu_tokens = cpu_ms * rates.get('cpu_compute', 0.0)
+        memory_tokens = memory_gb_sec * rates.get('cpu_memory', 0.0)
+        gpu_memory_tokens = gpu_memory_gb_sec * rates.get('gpu_memory', 0.0)
+
+        # GPU inference tokens (subprocess-reported timer in ms)
         gpu_inference_ms = self._subprocess_timers.get('gpu', 0.0)
-        gpu_inference_seconds = gpu_inference_ms / 1000.0
-        gpu_inference_tokens = gpu_inference_seconds * CONST_RATE_GPU_INFERENCE_SECOND
+        gpu_inference_tokens = gpu_inference_ms * rates.get('gpu_compute', 0.0)
 
-        # Custom counter tokens (subprocess-reported, rate table lookup)
+        # Subprocess-reported timers and counters: apply any matching DB rate
         custom_tokens: dict[str, float] = {}
+        for timer_name, timer_ms in self._subprocess_timers.items():
+            if timer_name == 'gpu':
+                continue  # already handled above as gpu_compute
+            rate = rates.get(timer_name, 0.0)
+            if rate > 0:
+                custom_tokens[timer_name] = round(timer_ms * rate, 1)
         for counter_name, counter_value in self._subprocess_counters.items():
-            rate = CONST_CUSTOM_BILLING_RATES.get(counter_name)
-            if rate is not None:
+            rate = rates.get(counter_name, 0.0)
+            if rate > 0:
                 custom_tokens[counter_name] = round(counter_value * rate, 1)
 
         # Update status tokens in-place
         self._status.tokens.cpu_utilization = round(cpu_tokens, 1)
         self._status.tokens.cpu_memory = round(memory_tokens, 1)
-        self._status.tokens.gpu_memory = round(gpu_tokens, 1)
+        self._status.tokens.gpu_memory = round(gpu_memory_tokens, 1)
         self._status.tokens.gpu_inference = round(gpu_inference_tokens, 1)
         self._status.tokens.custom = custom_tokens
         self._status.tokens.total = round(

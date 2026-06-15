@@ -109,6 +109,27 @@ def no_gpu(monkeypatch):
     monkeypatch.setitem(sys.modules, 'pynvml', None)  # importing None raises
 
 
+# Default billing rates matching the DB seed defaults (all time units in ms).
+_TEST_BILLING_RATES = {
+    'cpu_compute': 0.000283,  # tokens per ms
+    'cpu_memory': 0.005,  # tokens per GB-sec
+    'gpu_compute': 0.000594,  # tokens per ms
+    'gpu_memory': 0.3,  # tokens per GB-sec
+    'gpu_preprocess': 0.0,
+    'gpu_postprocess': 0.0,
+    'gpu_queue_wait': 0.0,
+    'gpu_inference_count': 0.0,
+}
+
+
+@pytest.fixture(autouse=True)
+def mock_billing_rates(monkeypatch):
+    """Mock account.get_billing_rates() so _update_tokens() uses test rates."""
+    mock_account = MagicMock()
+    mock_account.get_billing_rates.return_value = _TEST_BILLING_RATES
+    monkeypatch.setitem(sys.modules, 'ai.account', MagicMock(account=mock_account))
+
+
 def _make_metrics(fake_psutil, pid=1234, sample_interval=1.0, callback=None):
     """
     Build a TaskMetrics with mocked psutil and a fresh TASK_STATUS namespace.
@@ -418,24 +439,25 @@ def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
 # ---------------------------------------------------------------------------
 
 
-def test_update_tokens_converts_resource_seconds_to_token_rates(fake_psutil, no_gpu):
-    """Tokens = resource-hours * per-hour rate; total = sum of components."""
+def test_update_tokens_converts_resource_accumulators_via_db_rates(fake_psutil, no_gpu):
+    """Tokens = raw_value * DB rate; total = sum of components."""
     tm, status = _make_metrics(fake_psutil)
     # Inject accumulators directly to bypass arithmetic noise.
-    tm._cpu_seconds = 3600.0  # 1 vCPU-hour
-    tm._memory_mb_seconds = 1024 * 3600.0  # 1 GB-hour
-    tm._gpu_memory_mb_seconds = 1024 * 3600.0  # 1 GB-hour
+    # 1000 CPU-seconds = 1_000_000 ms * 0.000283 tokens/ms = 283 tokens
+    tm._cpu_seconds = 1000.0
+    # 1024 MB-sec = 1 GB-sec * 0.005 tokens/GB-sec = 0.005 tokens
+    tm._memory_mb_seconds = 1024.0
+    # GPU memory not available (no_gpu fixture)
+    tm._gpu_memory_mb_seconds = 0.0
 
     tm._update_tokens()
 
-    assert status.tokens.cpu_utilization == round(task_metrics.CONST_RATE_VCPU_HOUR, 1)
-    assert status.tokens.cpu_memory == round(task_metrics.CONST_RATE_MEMORY_GB_HOUR, 1)
-    assert status.tokens.gpu_memory == round(task_metrics.CONST_RATE_GPU_GB_HOUR, 1)
-    # Total is the rounded sum.
-    expected_total = round(
-        status.tokens.cpu_utilization + status.tokens.cpu_memory + status.tokens.gpu_memory,
-        1,
-    )
+    expected_cpu = round(1000.0 * 1000.0 * _TEST_BILLING_RATES['cpu_compute'], 1)
+    expected_mem = round(1.0 * _TEST_BILLING_RATES['cpu_memory'], 1)
+    assert status.tokens.cpu_utilization == expected_cpu
+    assert status.tokens.cpu_memory == expected_mem
+    assert status.tokens.gpu_memory == 0.0
+    expected_total = round(expected_cpu + expected_mem, 1)
     assert status.tokens.total == expected_total
 
 
