@@ -205,11 +205,12 @@ function resolveDocPath(dir) {
 }
 
 function main() {
-	// Only regenerate docs on the develop branch to avoid polluting feature
-	// branch diffs with source-link changes (branch name is in the URL).
+	// Only regenerate docs on release-track branches to avoid polluting feature
+	// branch diffs with source-link changes (branch name is baked into URLs).
 	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], '');
-	if (branch && branch !== 'develop') {
-		console.log(`nodes:docs-generate skipped (branch: ${branch}, only runs on develop)`);
+	const allowed = new Set(['main', 'stage', 'develop']);
+	if (branch && !allowed.has(branch)) {
+		console.log(`nodes:docs-generate skipped (branch: ${branch}, only runs on ${[...allowed].join('/')})`);
 		return;
 	}
 

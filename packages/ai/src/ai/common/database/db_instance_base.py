@@ -280,7 +280,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         result = self._executeRawQuery(sql.strip())
         if result is None:
-            return {'rows': [], 'affected_rows': 0}
+            raise RuntimeError('SQL execution failed (check server logs for details)')
 
         # Sanitize rows for JSON serialization
         rows = [self._sanitize_row(row) for row in result['rows']]

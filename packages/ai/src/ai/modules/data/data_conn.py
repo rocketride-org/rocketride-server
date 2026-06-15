@@ -798,14 +798,18 @@ class DataConn(DAPConn):
                 raise ValueError(f'Pipe {pipe_id} has failed')
             self._reset_pipe_activity(conn_pipe)
 
+        # Acquire semaphore when borrowing a pipe (no pipe_id) to prevent
+        # tool traffic from saturating the endpoint beyond threadCount.
+        borrowed = conn_pipe is None
+        if borrowed:
+            await self._pipe_sem.acquire()
+
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
-                borrowed = False
             else:
                 pipe = self._target.getPipe()
-                borrowed = True
 
             try:
                 # Walk the filter chain to find candidate node(s).
@@ -857,6 +861,8 @@ class DataConn(DAPConn):
             if conn_pipe is not None:
                 conn_pipe.in_use = False
                 self._reset_pipe_activity(conn_pipe)
+            if borrowed:
+                self._pipe_sem.release()
 
     # =========================================================================
     # CPROFILE COMMANDS

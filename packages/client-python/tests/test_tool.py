@@ -119,17 +119,18 @@ class TestPipeBoundTool:
         pipe = await client.pipe(tool_pipeline, {}, 'text/plain')
         await pipe.open()
 
-        result = await pipe.tool(
-            tool='execute',
-            node_id='tool_python_1',
-            input={'code': 'result = list(range(5))'},
-        )
+        try:
+            result = await pipe.tool(
+                tool='execute',
+                node_id='tool_python_1',
+                input={'code': 'result = list(range(5))'},
+            )
 
-        assert result is not None
-        assert result.get('exit_code') == 0
-        assert result.get('result') == [0, 1, 2, 3, 4]
-
-        await pipe.close()
+            assert result is not None
+            assert result.get('exit_code') == 0
+            assert result.get('result') == [0, 1, 2, 3, 4]
+        finally:
+            await pipe.close()
 
     @pytest.mark.asyncio
     async def test_before_open_raises(self, client: RocketRideClient, tool_pipeline: str):

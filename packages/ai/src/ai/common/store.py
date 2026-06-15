@@ -742,47 +742,6 @@ class VectorStoreToolMixin:
     #
     # Override ``_collect_tool_methods`` so that our bare Python method
     # names ``search``/``upsert``/``delete`` are exposed to the engine as
-    # namespaced tool names like ``pinecone.search``. The descriptor
-    # builder in ``IInstanceBase`` uses the dict key as the outbound
-    # ``descriptor['name']``, and the dispatcher looks up the inbound
-    # ``tool_name`` in the same dict — so namespacing both sides with one
-    # override is sufficient. We still delegate collection to ``super()``
-    # so that any further @tool_function methods added in subclasses are
-    # picked up (and namespaced) automatically.
-
-    # def _collect_tool_methods(self) -> Dict[str, Callable]:
-    #     # Delegate to IInstanceBase (or any intermediate mixin) to discover
-    #     # all @tool_function methods via MRO walking. Fall back to a local
-    #     # walk when this mixin is instantiated outside an IInstance chain
-    #     # (e.g. in unit tests) so ``super()`` wouldn't resolve the method.
-    #     try:
-    #         collected = super()._collect_tool_methods()  # type: ignore[misc]
-    #     except AttributeError:
-    #         collected = {}
-    #         for attr_name in dir(type(self)):
-    #             attr = getattr(type(self), attr_name, None)
-    #             if attr is not None and hasattr(attr, '__tool_meta__'):
-    #                 collected[attr_name] = getattr(self, attr_name)
-
-    #     server = self._vectordb_server_name()
-
-    #     # Only namespace methods that actually live on VectorStoreToolMixin —
-    #     # other @tool_function methods a subclass defines should keep their
-    #     # own conventions unless the subclass explicitly opts in.
-    #     owned = set()
-    #     for attr_name in vars(VectorStoreToolMixin):
-    #         attr = getattr(VectorStoreToolMixin, attr_name, None)
-    #         if attr is not None and hasattr(attr, '__tool_meta__'):
-    #             owned.add(attr_name)
-
-    #     namespaced: Dict[str, Callable] = {}
-    #     for name, method in collected.items():
-    #         if name in owned:
-    #             namespaced[f'{server}.{name}'] = method
-    #         else:
-    #             namespaced[name] = method
-    #     return namespaced
-
     # --- Tool methods ------------------------------------------------------
 
     @tool_function(
@@ -1195,6 +1154,9 @@ class VectorStoreToolMixin:
             }
             for doc in docs
         ]
+
+        # Sort by chunkId for deterministic pagination order
+        chunks.sort(key=lambda c: c.get('chunkId', 0))
 
         return {'success': True, 'chunks': chunks, 'total': len(chunks)}
 

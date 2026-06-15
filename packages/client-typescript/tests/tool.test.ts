@@ -144,16 +144,18 @@ describe('Tool Operations', () => {
 			const pipe = await client.pipe(pipelineToken, {}, 'text/plain');
 			await pipe.open();
 
-			const result = await pipe.tool<{
-				exit_code: number;
-				result: number[];
-			}>('execute', 'tool_python_1', { code: 'result = list(range(5))' });
+			try {
+				const result = await pipe.tool<{
+					exit_code: number;
+					result: number[];
+				}>('execute', 'tool_python_1', { code: 'result = list(range(5))' });
 
-			expect(result).toBeDefined();
-			expect(result.exit_code).toBe(0);
-			expect(result.result).toEqual([0, 1, 2, 3, 4]);
-
-			await pipe.close();
+				expect(result).toBeDefined();
+				expect(result.exit_code).toBe(0);
+				expect(result.result).toEqual([0, 1, 2, 3, 4]);
+			} finally {
+				await pipe.close();
+			}
 		}, TEST_CONFIG.timeout);
 
 		it('before open throws', async () => {
