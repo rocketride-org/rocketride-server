@@ -25,7 +25,6 @@ import type { CreditBalance, CreditPack } from '../types';
 const S = {
 	/** Outer container card. */
 	container: {
-		marginTop: 24,
 		padding: 20,
 		background: 'var(--rr-bg-paper)',
 		border: '1px solid var(--rr-border)',

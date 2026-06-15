@@ -659,27 +659,6 @@ class Task(DAPBase):
         except Exception as e:
             self.debug_message(f'Error cleaning up metrics: {e}')
 
-        # Reset metrics and tokens to zero after task termination
-        try:
-            # Reset current metrics
-            self._status.metrics.cpu_percent = 0.0
-            self._status.metrics.cpu_memory_mb = 0.0
-            self._status.metrics.gpu_memory_mb = 0.0
-
-            # Reset peak metrics
-            self._status.metrics.peak_cpu_percent = 0.0
-            self._status.metrics.peak_cpu_memory_mb = 0.0
-            self._status.metrics.peak_gpu_memory_mb = 0.0
-
-            # Reset average metrics
-            self._status.metrics.avg_cpu_percent = 0.0
-            self._status.metrics.avg_cpu_memory_mb = 0.0
-            self._status.metrics.avg_gpu_memory_mb = 0.0
-
-            self.debug_message('Metrics and tokens reset to zero')
-        except Exception as e:
-            self.debug_message(f'Error resetting metrics and tokens: {e}')
-
         try:
             # Clean up temporary files
             if self._tmpfile:
@@ -1044,6 +1023,11 @@ class Task(DAPBase):
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
             self._status.serviceUp = service_up
+
+            # Gate billing accumulation on pipeline readiness so users
+            # are not charged for startup time (model loading, deps, etc.)
+            if self._task_metrics:
+                self._task_metrics.set_service_up(service_up)
 
             if service_up:
                 self._status.state = TASK_STATE.RUNNING.value

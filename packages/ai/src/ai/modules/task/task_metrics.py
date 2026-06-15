@@ -154,6 +154,11 @@ class TaskMetrics:
         self._last_report_tokens_gpu_inference: float = 0.0
         self._last_report_tokens_custom: dict[str, float] = {}
 
+        # Billing gate: when True, billing accumulators and token updates are
+        # suppressed until set_service_up(True) is called. Resource metrics
+        # (peaks, averages) are still tracked so the dashboard shows live usage.
+        self._billing_gated: bool = True
+
         # Subprocess-reported metrics (absolute snapshots from >MET* protocol)
         self._subprocess_counters: dict[str, float] = {}
         self._subprocess_timers: dict[str, float] = {}
@@ -212,6 +217,16 @@ class TaskMetrics:
             self._gpu_available = False
             self._gpu_count = 0
             self._pynvml_available = False
+
+    def set_service_up(self, value: bool) -> None:
+        """Signal that the pipeline is ready (or no longer ready) to accept data.
+
+        When the pipeline signals serviceUp, billing accumulation begins.
+        Resource metrics (peaks, averages) are tracked regardless of this flag.
+        """
+        if value and self._billing_gated:
+            debug('[TaskMetrics] Pipeline ready — billing accumulation started')
+        self._billing_gated = not value
 
     def _sample_cpu_memory(self) -> None:
         """
@@ -349,20 +364,15 @@ class TaskMetrics:
         """
         Accumulate current sample into totals.
 
+        Peaks and averages are always tracked (dashboard visibility).
+        Billing accumulators and token updates are suppressed until the
+        pipeline signals serviceUp (via set_service_up), so users are not
+        charged for startup time (model loading, dependency installation).
+
         Args:
             interval: Time elapsed since last sample (seconds)
         """
-        # Update billing accumulators (internal)
-        # Use raw CPU percent (unnormalized) for accurate vCPU-seconds billing
-        self._sample_count += 1
-        self._duration_seconds += interval
-        self._cpu_seconds += self._cpu_percent_raw * interval / 100.0
-        self._memory_mb_seconds += self._status.metrics.cpu_memory_mb * interval
-
-        if self._gpu_available:
-            self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
-
-        # Track peaks (user-facing)
+        # Track peaks (user-facing — always, regardless of billing gate)
         self._status.metrics.peak_cpu_percent = max(
             self._status.metrics.peak_cpu_percent, self._status.metrics.cpu_percent
         )
@@ -373,7 +383,21 @@ class TaskMetrics:
             self._status.metrics.peak_gpu_memory_mb, self._status.metrics.gpu_memory_mb
         )
 
-        # Calculate averages (user-facing)
+        # Billing accumulators and token updates — only after serviceUp
+        if self._billing_gated:
+            return
+
+        # Update billing accumulators (internal)
+        # Use raw CPU percent (unnormalized) for accurate vCPU-seconds billing
+        self._sample_count += 1
+        self._duration_seconds += interval
+        self._cpu_seconds += self._cpu_percent_raw * interval / 100.0
+        self._memory_mb_seconds += self._status.metrics.cpu_memory_mb * interval
+
+        if self._gpu_available:
+            self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
+
+        # Calculate averages (user-facing — billing period only)
         if self._duration_seconds > 0:
             self._status.metrics.avg_cpu_percent = (self._cpu_seconds / self._duration_seconds) * 100
             self._status.metrics.avg_cpu_memory_mb = self._memory_mb_seconds / self._duration_seconds
@@ -647,3 +671,58 @@ class TaskMetrics:
         # Send final billing report on shutdown (captures any remaining incremental usage)
         async with self._metrics_lock:
             await self._report_to_billing_system()
+
+        # Audit the final frozen usage totals for this task
+        await self._audit_task_usage()
+
+    async def _audit_task_usage(self) -> None:
+        """
+        Write a single audit log entry with the final frozen token totals
+        for this task.  Called once at task completion after the last
+        billing UPSERT has been written.
+
+        No-op in OSS (account.audit is a no-op) or when there is no org.
+        """
+        if not self.org_id:
+            return
+
+        tokens = self._status.tokens
+        total = tokens.total
+        if total <= 0:
+            return
+
+        try:
+            from ai.account import account
+
+            # Build per-resource breakdown from the frozen token counters
+            usage = {}
+            if tokens.cpu_utilization > 0:
+                usage['cpu_utilization'] = round(tokens.cpu_utilization, 2)
+            if tokens.cpu_memory > 0:
+                usage['cpu_memory'] = round(tokens.cpu_memory, 2)
+            if tokens.gpu_memory > 0:
+                usage['gpu_memory'] = round(tokens.gpu_memory, 2)
+            if tokens.gpu_inference > 0:
+                usage['gpu_inference'] = round(tokens.gpu_inference, 2)
+            for key, val in (tokens.custom or {}).items():
+                if val > 0:
+                    usage[key] = round(val, 2)
+
+            await account.audit(
+                user_id=self.user_id,
+                source='billing',
+                reason='task_usage',
+                request_data={
+                    'task_id': self.task_id,
+                    'pipeline': self.pipeline_name,
+                    'source': self.source_name,
+                    'duration_seconds': round(self._duration_seconds, 1),
+                },
+                response_data={
+                    'tokens_total': round(total, 2),
+                    'usage': usage,
+                },
+                org_id=self.org_id,
+            )
+        except Exception as e:
+            debug(f'[TaskMetrics] Error writing usage audit: {e}')

@@ -168,12 +168,10 @@ const S = {
 
 	/** Toggle button (active / inactive) — matches commonStyles.cardHeaderButton sizing. */
 	toggle: (active: boolean): CSSProperties => ({
+		...commonStyles.buttonSecondary,
 		...commonStyles.cardHeaderButton,
-		border: '1px solid var(--rr-border)',
-		background: active ? 'var(--rr-brand)' : 'var(--rr-bg-default)',
+		background: active ? 'var(--rr-brand)' : 'var(--rr-bg-paper)',
 		color: active ? '#fff' : 'var(--rr-text-secondary)',
-		cursor: 'pointer',
-		font: 'inherit',
 	}),
 
 	/** Pagination row. */

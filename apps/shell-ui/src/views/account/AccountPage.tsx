@@ -27,7 +27,7 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, CSSProperties } from 'react';
 import { AccountView } from 'shared';
 import type {
 	ConnectResult,
