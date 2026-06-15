@@ -44,12 +44,17 @@ reaches the engine.
 ## Endpoint authentication
 
 When a Webhook, Chat, or Dropper source node starts, the engine generates two
-credentials and logs them to the Project Log:
+credentials and writes them to the Project Log:
 
-- **Public authorization key** — presented by external callers in the
+- **Public authorization key** - presented by external callers in the
   `Authorization: Bearer <key>` header. Safe to share with trusted API clients.
-- **Private token** — the internal credential for the endpoint. Used by the SDK
+- **Private token** - the internal credential for the endpoint. Used by the SDK
   to connect to a running task via `--token`. Do not share this publicly.
+
+The Project Log is local to the operator who started the pipeline (it is not a
+shared or exportable log), so the private token is only visible to that
+operator. Retrieve it from your own Project Log when you need to connect a client
+with `--token`.
 
 Both are generated fresh each time the pipeline starts. There is no persistent
 credential to rotate — stopping and restarting the pipeline issues new
@@ -75,7 +80,7 @@ treat the file as a secret.
 Do not commit `.pipe` files containing embedded credentials to version control.
 Add them to `.gitignore`:
 
-```
+```gitignore
 *.pipe
 ```
 

@@ -67,7 +67,21 @@ cd rocketride-engine
 ## Set up and start listening
 
 Both options leave you with a runtime directory (the extracted archive, or
-`dist/server/`). From inside it, start the engine:
+`dist/server/`).
+
+On Linux, install the runtime dependencies (`libc++1`, `libc++abi1`, `libgomp1`)
+before starting:
+
+```bash
+# Debian / Ubuntu
+sudo apt install libc++1 libc++abi1 libgomp1
+# Fedora / RHEL
+sudo dnf install libcxx libcxxabi libgomp
+# Alpine
+sudo apk add libc++ libgomp
+```
+
+From inside the runtime directory, start the engine:
 
 ```bash
 # Linux / macOS
@@ -80,8 +94,6 @@ engine.exe ./ai/eaas.py --host=0.0.0.0
 The engine now listens for the [WebSocket protocol](/protocols/websocket) on port
 **5565**. Use `--host=127.0.0.1` to bind to localhost only.
 
-On Linux the runtime needs `libc++1`, `libc++abi1`, and `libgomp1` installed.
-
 ### Alternative: full stack with Docker (Option B only)
 
 If you cloned the repo and want the engine plus its bundled data stores
@@ -90,13 +102,13 @@ running the binary directly. Requires Docker Engine >= 24.0 and Docker Compose v
 >= 2.17:
 
 ```bash
+./builder build server       # the Compose image is built from dist/server/
 cd docker
-cp .env.example .env        # change every password before non-local use
-docker compose up engine    # engine + its required PostgreSQL
+cp .env.example .env         # change every password before non-local use
+docker compose up engine     # engine + its required PostgreSQL
 ```
 
-`docker compose up` (no service) starts all vector stores too. The image is built
-from `dist/server/`, so run `./builder build server` first.
+`docker compose up` (no service) starts all vector stores too.
 
 ## Verify it is running
 

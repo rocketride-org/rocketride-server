@@ -32,15 +32,15 @@ especially for large documents.
 ## Vector store batching
 
 Vector stores (Qdrant, Pinecone, Milvus, Weaviate, etc.) accumulate chunks and
-flush them in batches rather than upserting one at a time. The default flush
-thresholds are:
+flush them in batches rather than upserting one at a time. A batch flushes when
+it reaches either a chunk-count limit or a payload-size limit, whichever comes
+first. The exact thresholds are backend-specific: for example, Qdrant flushes at
+500 points or its payload limit, while Pinecone and Milvus use different
+chunk-count defaults.
 
-- **500 chunks**, or
-- **32 MiB of payload** — whichever comes first.
-
-For small documents that produce fewer than 500 chunks, the flush happens at
-pipeline completion. For large document sets, flushing starts mid-run and
-reduces peak memory.
+For small documents that produce few chunks, the flush happens at pipeline
+completion. For large document sets, flushing starts mid-run and reduces peak
+memory.
 
 Batch size affects throughput: larger batches reduce round-trip overhead but
 increase memory usage per run. The defaults suit most workloads.

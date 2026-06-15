@@ -69,9 +69,10 @@ pipeline level.
 ### Fallback LLM profiles
 
 If your primary model is unavailable, swap the `profile` to a fallback. Some
-teams maintain two `.pipe` files — one using a premium model profile, one using
-a cheaper or locally-hosted fallback — and switch between them via the `--pipeline`
-flag.
+teams maintain two `.pipe` files, one using a premium model profile and one using
+a cheaper or locally-hosted fallback, and switch between them by passing the
+chosen file to the `rocketride` CLI's `--pipeline` flag (`rocketride start
+--pipeline ./fallback.pipe`).
 
 ### Guardrails as a safety net
 

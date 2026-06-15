@@ -12,11 +12,11 @@ production agent pipelines.
 ## Multi-agent hierarchies
 
 A manager agent can invoke a specialist agent as a tool. The specialist is just
-another pipeline — it has its own source, its own nodes, and its own response
+another pipeline; it has its own source, its own nodes, and its own response
 target. The manager calls it the same way it calls any other tool: by sending a
 question and receiving an answer.
 
-```
+```text
 manager-pipeline.pipe
   source_1 (webhook)
   agent_1 (agent_rocketride)   ← manager
@@ -82,7 +82,7 @@ Place a [`guardrails`](/nodes/guardrails) node on the `answers` lane **between
 the agent and the response target** to validate outputs before they reach the
 caller:
 
-```
+```text
 agent_1 → (answers lane) → guardrails_1 → target_1 (response)
 ```
 

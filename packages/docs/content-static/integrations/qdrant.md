@@ -90,13 +90,16 @@ immediately, using whichever vectors are already in the collection.
 ## Agent tools
 
 When connected to an agent via a control connection, the `qdrant` node exposes
-three tools:
+three tools. Tool names are namespaced by the node's `serverName` config (default
+`qdrant`), so they appear to the agent as `qdrant.search` etc. Change `serverName`
+when running multiple Qdrant nodes in one pipeline so their tool names do not
+collide.
 
 | Tool | What it does |
 | --- | --- |
-| `search` | Semantic similarity search over the collection. Returns the top-K chunks with scores and metadata. |
-| `upsert` | Insert or update a document by ID. The agent provides the text; the node embeds and stores it. |
-| `delete` | Remove a document from the collection by ID. |
+| `qdrant.search` | Semantic similarity search over the collection. Returns the top-K chunks with scores and metadata. |
+| `qdrant.upsert` | Insert or update a document by ID. The agent provides the text; the node embeds and stores it. |
+| `qdrant.delete` | Remove a document from the collection by ID. |
 
 The agent calls these tools in its reasoning loop — useful when the agent needs
 to both answer questions and update the knowledge base during the same session.

@@ -55,7 +55,7 @@ rocketride start --pipeline ./chat.pipe
 
 Output:
 
-```
+```text
 Webhook ready - system is ready to accept requests
   URL:  http://localhost:5567/task/data
   Auth: <public-auth-key>
@@ -82,7 +82,7 @@ Response:
 ## Use the Chat UI variant
 
 Swap `webhook` for `chat` to get a browser-based chat window instead of a raw
-HTTP endpoint — no `curl` required:
+HTTP endpoint, no `curl` required:
 
 ```json
 { "id": "source_1", "provider": "chat" }
@@ -90,12 +90,15 @@ HTTP endpoint — no `curl` required:
 
 Restart the pipeline. The engine prints a chat URL:
 
-```
+```text
 Chat ready - system is ready to accept questions
   URL: http://localhost:5567/chat?auth=<public-auth-key>
 ```
 
-Open that URL in a browser and start typing.
+Open that URL in a browser and start typing. The `?auth=` query parameter is a
+convenience for the browser; the endpoint also accepts the key in an
+`Authorization: Bearer <public-auth-key>` header, the same scheme the webhook
+endpoint uses.
 
 ## Add a system prompt
 

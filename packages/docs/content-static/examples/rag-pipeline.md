@@ -92,7 +92,7 @@ rocketride start --pipeline ./rag.pipe
 
 The engine prints the webhook URL and public auth key:
 
-```
+```text
 Webhook ready - system is ready to accept requests
   URL:  http://localhost:5567/task/data
   Auth: abc123...
