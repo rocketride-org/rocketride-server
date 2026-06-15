@@ -40,10 +40,11 @@ def _import_scoped():
         base_mod = importlib.import_module('landing_ai.landing_ai_base')
     finally:
         sys.path[:] = saved
-    return extract_mod.Extractor, base_mod, landingai_ade.LandingAIADE
+    return extract_mod, base_mod, landingai_ade.LandingAIADE
 
 
-Extractor, _base_mod, LandingAIADE = _import_scoped()
+_extract_mod, _base_mod, LandingAIADE = _import_scoped()
+Extractor = _extract_mod.Extractor
 decode_data_url = _base_mod.decode_data_url
 load_schema_from_data_url = _base_mod.load_schema_from_data_url
 resolve_api_key = _base_mod.resolve_api_key
@@ -56,6 +57,7 @@ def _make_extractor(schema=None, strict=False) -> Extractor:
     extractor._region = 'production'
     extractor._strict = strict
     extractor._schema = schema or {'type': 'object', 'properties': {'summary': {'type': 'string'}}}
+    extractor._schema_error = None
     return extractor
 
 
@@ -86,6 +88,42 @@ def test_load_schema_rejects_invalid_json() -> None:
 
     with pytest.raises(ValueError):
         load_schema_from_data_url('not json at all {{{')
+
+
+def test_load_schema_rejects_non_object() -> None:
+    """A valid-JSON-but-not-an-object upload should be rejected."""
+    import pytest
+
+    with pytest.raises(ValueError, match='must be a JSON object'):
+        load_schema_from_data_url('[1, 2, 3]')
+
+
+def test_load_schema_rejects_bad_base64() -> None:
+    """An undecodable base64 data-url should become a clean ValueError, not binascii.Error."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        load_schema_from_data_url('data:application/json;base64,@@@not-base64@@@')
+
+
+def test_load_schema_rejects_oversized() -> None:
+    """A schema larger than the cap should be rejected before json parsing."""
+    import pytest
+
+    oversized = '{"x":"' + ('a' * (3 * 1024 * 1024)) + '"}'  # ~3 MB > 2 MB cap
+
+    with pytest.raises(ValueError, match='too large'):
+        load_schema_from_data_url(oversized)
+
+
+def test_load_schema_rejects_deeply_nested() -> None:
+    """Pathologically nested JSON (under the size cap) should not crash, just raise ValueError."""
+    import pytest
+
+    deep = '[' * 50000 + ']' * 50000  # ~100 KB, but blows the recursion limit when parsed
+
+    with pytest.raises(ValueError):
+        load_schema_from_data_url(deep)
 
 
 # --- extraction mapping ---------------------------------------------------
@@ -122,6 +160,33 @@ def test_extract_empty_markdown_returns_empty() -> None:
     """extract() should short-circuit on empty markdown."""
     extractor = _make_extractor()
     assert extractor.extract('   ') == {}
+
+
+def test_extract_reraises_sdk_errors(monkeypatch) -> None:
+    """extract() should log and propagate SDK failures, not return empty output."""
+    import pytest
+
+    extractor = _make_extractor()
+
+    class _Boom:
+        def extract(self, **kwargs):
+            raise RuntimeError('sdk down')
+
+    monkeypatch.setattr(_extract_mod, 'build_client', lambda *a, **k: _Boom())
+
+    with pytest.raises(RuntimeError, match='sdk down'):
+        extractor.extract('# md content')
+
+
+def test_extract_raises_on_deferred_schema_error() -> None:
+    """A schema error captured at init should surface when extract() runs."""
+    import pytest
+
+    extractor = _make_extractor()
+    extractor._schema_error = 'uploaded schema is not valid JSON'
+
+    with pytest.raises(ValueError, match='not valid JSON'):
+        extractor.extract('# md content')
 
 
 # --- credential resolution ------------------------------------------------

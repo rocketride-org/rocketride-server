@@ -22,6 +22,7 @@
 # =============================================================================
 
 import json
+import traceback
 from typing import Any, Dict, Optional
 
 from rocketlib import debug, warning, error
@@ -33,22 +34,36 @@ class Extractor:
     """Wraps the ADE ``extract`` API: parsed Markdown + JSON Schema -> structured fields."""
 
     def __init__(self, provider: str, connConfig: Dict[str, Any]):
-        """Build the extractor from config; raises ValueError on a missing/invalid schema."""
+        """Build the extractor from config; a bad/missing schema is deferred to ``extract()``."""
         config = get_node_config(provider, connConfig)
         self._api_key: Optional[str] = resolve_api_key(config)
         self._region: str = config.get('region') or 'production'
         if self._region not in ('production', 'eu'):
             self._region = 'production'
         self._strict: bool = bool(config.get('strict', False))
-        self._schema: Dict[str, Any] = load_schema_from_data_url(config.get('schema_file', ''))
+
+        # Capture (don't raise) a schema error here so beginGlobal doesn't crash the
+        # whole pipeline on a bad upload; extract() raises it at run time instead.
+        self._schema: Dict[str, Any] = {}
+        self._schema_error: Optional[str] = None
+        try:
+            self._schema = load_schema_from_data_url(config.get('schema_file', ''))
+        except ValueError as e:
+            self._schema_error = str(e)
 
         debug(
             f'Landing.ai Extract: initialized (strict={self._strict}, region={self._region}, '
-            f'schema_keys={list(self._schema.keys())})'
+            f'schema_error={self._schema_error}, schema_keys={list(self._schema.keys())})'
         )
 
     def extract(self, markdown: str) -> Any:
-        """Run ADE Extract over ``markdown`` -> extracted data (``{}`` on missing key/empty/error)."""
+        """Run ADE Extract over ``markdown`` -> extracted data.
+
+        Returns ``{}`` when no key is configured or the markdown is empty; a bad
+        schema or a failed API call is logged and re-raised.
+        """
+        if self._schema_error:
+            raise ValueError(f'Landing.ai Extract: {self._schema_error}')
         if not self._api_key:
             error('Landing.ai Extract: no API key configured')
             return {}
@@ -62,12 +77,10 @@ class Extractor:
             # schema must be a JSON string — a dict gets flattened to multipart keys and 422s.
             response = client.extract(markdown=markdown, schema=json.dumps(self._schema), strict=self._strict)
             return self._map_response(response)
-        except Exception as e:  # noqa: BLE001 — surface as empty result, log details
+        except Exception as e:  # noqa: BLE001 — log, then re-raise so the failure isn't silently empty
             error(f'Landing.ai Extract: extraction failed: {e}')
-            import traceback
-
             debug(f'Landing.ai Extract: traceback: {traceback.format_exc()}')
-            return {}
+            raise
 
     def _map_response(self, response: Any) -> Any:
         """Pull ``response.extraction`` off an ADE ExtractResponse."""

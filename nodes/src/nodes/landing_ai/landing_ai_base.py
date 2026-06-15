@@ -30,6 +30,8 @@ from typing import Any, Dict, Optional
 from ai.common.config import Config
 from ai.common.utils import decode_data_url
 
+_MAX_SCHEMA_BYTES = 2 * 1024 * 1024
+
 
 def ensure_dependencies() -> None:
     """Install the shared landing_ai dependencies (requirements.txt sits next to this module)."""
@@ -83,14 +85,28 @@ def validate_credentials(config: Dict[str, Any]) -> Optional[str]:
 
 
 def load_schema_from_data_url(value: str) -> Dict[str, Any]:
-    """Decode an uploaded JSON Schema data-url into a dict; raise ValueError if invalid."""
+    """Decode an uploaded JSON Schema data-url into a dict.
+
+    Normalizes every unusable upload (missing, undecodable, oversized, malformed,
+    or not a JSON object) into a single ``ValueError`` so callers guard one type.
+    The schema content is treated as opaque — it is only re-serialized and sent to
+    ADE, never read for field values or written to disk.
+    """
     if not value:
         raise ValueError('Landing.ai Extract: no extraction schema uploaded')
 
-    raw, _mime = decode_data_url(value)
     try:
+        raw, _mime = decode_data_url(value)
+    except Exception as e:  # noqa: BLE001 — bad base64/data-url -> uniform ValueError
+        raise ValueError(f'Landing.ai Extract: could not decode the uploaded schema: {e}')
+
+    if len(raw) > _MAX_SCHEMA_BYTES:
+        raise ValueError(f'Landing.ai Extract: uploaded schema is too large ({len(raw)} bytes > {_MAX_SCHEMA_BYTES})')
+
+    try:
+        # RecursionError guards against pathologically nested JSON that slips under the size cap.
         schema = json.loads(raw.decode('utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
         raise ValueError(f'Landing.ai Extract: uploaded schema is not valid JSON: {e}')
 
     if not isinstance(schema, dict):

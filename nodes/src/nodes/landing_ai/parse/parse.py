@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from ai.common.reader import ReaderBase
@@ -80,8 +81,6 @@ class Parser(ReaderBase):
             return self._map_response(response)
         except Exception as e:  # noqa: BLE001 — log, then re-raise so the failure isn't silently empty
             error(f'Landing.ai Parse: error parsing document: {e}')
-            import traceback
-
             debug(f'Landing.ai Parse: traceback: {traceback.format_exc()}')
             raise
 
