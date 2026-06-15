@@ -775,7 +775,10 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     if not os.path.exists(excludes_path):
         with open(excludes_path, 'w', encoding='utf-8') as f:
             f.write('uv\n')
-    args.extend(['--excludes', excludes_path])
+    # uv splits --excludes on whitespace, so an absolute path with a space (macOS
+    # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
+    # -c is parsed as a single value and is unaffected. See #1256.
+    args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
 
     # Only add constraints if the file exists and has content
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
@@ -882,7 +885,8 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     if not os.path.exists(excludes_path):
         with open(excludes_path, 'w', encoding='utf-8') as f:
             f.write('uv\n')
-    uv_args.extend(['--excludes', excludes_path])
+    # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
+    uv_args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
 
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         uv_args.extend(['-c', _get_constraints_path()])
