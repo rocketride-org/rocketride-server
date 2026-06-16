@@ -54,13 +54,8 @@ class IGlobal(IGlobalBase):
             backend = DEFAULT_BACKEND
 
         prompt = (config.get('prompt') or conn.get('detect.prompt') or conn.get('prompt') or '').strip()
-        # The UI confidence slider lands in connConfig under its prefixed key
-        # (detect.threshold); getNodeConfig does not merge it into the bare
-        # `threshold`, so read the prefixed key first (preserving a valid 0.0)
-        # and fall back to the profile default.
-        raw_threshold = conn.get('detect.threshold')
-        if raw_threshold is None:
-            raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
+        # Check threshold
+        raw_threshold = conn.get('detect.threshold', config.get('threshold', DEFAULT_THRESHOLD))
         try:
             threshold = float(raw_threshold)
         except (TypeError, ValueError):
