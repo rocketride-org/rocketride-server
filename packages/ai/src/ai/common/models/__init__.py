@@ -46,6 +46,8 @@ from .vision import (
     DepthEstimator,
     DetectorLoader,
     Detector,
+    CaptionerLoader,
+    Captioner,
     BackgroundRemoverLoader,
     BackgroundRemover,
     PoseEstimatorLoader,
@@ -100,6 +102,9 @@ __all__ = [
     # Segmentation (served)
     'SegmenterLoader',
     'Segmenter',
+    # Caption (served)
+    'CaptionerLoader',
+    'Captioner',
     # Background removal (served)
     'BackgroundRemoverLoader',
     'BackgroundRemover',

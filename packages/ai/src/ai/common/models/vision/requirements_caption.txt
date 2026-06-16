@@ -1,0 +1,5 @@
+# contract-check: skip-install  reason: Florence-2 extras (einops/timm) on top of the transformers baseline; PR lane skips, nightly --install-all verifies.
+# Caption-specific extras, installed after the shared requirements_vision.txt base.
+accelerate
+einops
+timm

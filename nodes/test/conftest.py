@@ -268,6 +268,7 @@ def pytest_generate_tests(metafunc):
             'depth_estimate',
             'detect',
             'detect_segment',
+            'caption',
             'background_removal',
             'pose_estimation',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
