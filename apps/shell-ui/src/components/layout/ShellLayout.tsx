@@ -219,11 +219,26 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
 	const authGateTriggeredRef = useRef<string | null>(null);
+	const prevIdentityRef = useRef(identity);
+	const suppressGateRef = useRef(false);
 
 	useEffect(() => {
+		// Detect a logout transition (had an identity, now none). On logout the
+		// shell switches the active app back to home via shell:switchApp, but that
+		// event is delivered on a microtask, so the workspace's activeAppId flips a
+		// tick AFTER identity clears. During that gap the check below would see
+		// "no identity + auth-required app still active" and fire shell:loginRequest
+		// → startOAuth, bouncing a signing-out user to the Zitadel login screen
+		// instead of leaving them on the logged-out home. Suppress the gate from the
+		// moment identity drops until the active app settles back on the default.
+		const wasLoggedIn = !!prevIdentityRef.current;
+		prevIdentityRef.current = identity;
+		if (wasLoggedIn && !identity) suppressGateRef.current = true;
+		if (identity || activeAppId === defaultAppId) suppressGateRef.current = false;
+
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
-		if (!identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		if (!suppressGateRef.current && !identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
 			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });

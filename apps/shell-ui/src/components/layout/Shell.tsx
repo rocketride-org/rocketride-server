@@ -317,11 +317,20 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				if (mountedRef.current) setRenderPhase('goodbye');
 			});
 		} else {
+			// Return to the home app before the auth gate re-runs. Otherwise
+			// ShellLayout still sees an auth-required app (e.g. Pipeline Builder)
+			// active with identity===null and emits shell:loginRequest →
+			// startOAuth, bouncing the signing-out user to the Zitadel login
+			// screen instead of the logged-out home. switchApp updates the live
+			// workspace (and clears the persisted rr:appId via persistActiveApp);
+			// setActiveAppId keeps the startup seed in sync for any later remount.
+			setActiveAppId(defaultAppId);
+			cm.emit('shell:switchApp', { appId: defaultAppId });
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('shell');
 			});
 		}
-	}, [cm, sessionAppId]);
+	}, [cm, sessionAppId, defaultAppId]);
 
 	useEffect(() => {
 		return cm.on('shell:logoutRequest', () => handleLogout());
