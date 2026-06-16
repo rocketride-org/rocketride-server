@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
+from typing import Any, Dict, List
 import os
 import base64
 
@@ -156,6 +156,17 @@ class IInstance(IInstanceBase):
 
         # Add the table
         self.instance.currentObject.response[key].append(table)
+
+    def writeJson(self, data: Dict[str, Any]):
+        # Get the key to write to (official lane name is "json")
+        key = self._getkey('json')
+
+        # If it isn't there, create it
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
+
+        # Add the json
+        self.instance.currentObject.response[key].append(data)
 
     def writeDocuments(self, documents: List[Doc]):
         # Get the key to write to

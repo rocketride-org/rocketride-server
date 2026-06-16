@@ -393,6 +393,10 @@ class IServiceFilterInstance(Protocol):
         """Send a table structure."""
         pass
 
+    def sendJson(self, data: Dict[str, Any]) -> None:
+        """Send a JSON object."""
+        pass
+
     def sendAudio(self, action: int, mimeType: str, buffer: bytes) -> None:
         """Send an audio buffer with the given action and MIME type."""
         pass
@@ -515,6 +519,10 @@ class IServiceFilterInstance(Protocol):
 
     def writeTable(self, table: str) -> None:
         """Send a table structure."""
+        pass
+
+    def writeJson(self, data: Dict[str, Any]) -> None:
+        """Send a JSON object."""
         pass
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes) -> None:
@@ -951,6 +959,10 @@ class IInstanceBase:
 
     def writeTable(self, table: str) -> None:
         """Send a table structure."""
+        pass
+
+    def writeJson(self, data: Dict[str, Any]) -> None:
+        """Send a JSON object."""
         pass
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes) -> None:

@@ -206,6 +206,10 @@ class DataConn(DAPConn):
         elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
             return 'questions'
 
+        # If this is json content and we have a json listener
+        elif mime_type.startswith('application/json') and 'json' in listeners:
+            return 'json'
+
         # If this is text content and we have a text listener
         elif mime_type.startswith('text/') and 'text' in listeners:
             return 'text'
@@ -594,6 +598,13 @@ class DataConn(DAPConn):
                 if lane == 'text':
                     string_data = data.decode('utf-8')
                     pipe.writeText(string_data)
+
+                elif lane == 'json':
+                    try:
+                        json_data = json.loads(data.decode('utf-8'))
+                        pipe.writeJson(json_data)
+                    except Exception as e:
+                        raise ValueError(str(e))
 
                 elif lane == 'audio':
                     pipe.writeAudio(AVI_ACTION.WRITE, mime_type, data)

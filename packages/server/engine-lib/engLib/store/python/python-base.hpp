@@ -41,7 +41,7 @@ class IPythonInstanceBase;
 ///     the method is implemented by the underlying python node or not
 //-------------------------------------------------------------------------
 APUTIL_DEFINE_ENUM_BITMASK(
-    PythonInstanceMethod, 0, 24, None = 0,
+    PythonInstanceMethod, 0, 25, None = 0,
 
     BeginInstance = BIT(0), EndInstance = BIT(1),
 
@@ -55,7 +55,9 @@ APUTIL_DEFINE_ENUM_BITMASK(
     WriteDocuments = BIT(18),
 
     GetPermissions = BIT(19), OutputPermissions = BIT(20),
-    GetPermissionsBulk = BIT(21), GetThreadCount = BIT(22));
+    GetPermissionsBulk = BIT(21), GetThreadCount = BIT(22),
+
+    WriteJson = BIT(23));
 
 //-------------------------------------------------------------------------
 /// @details
@@ -267,6 +269,12 @@ public:
     //		Supports word lane
     //-----------------------------------------------------------------
     virtual Error writeWords(const WordVector &textWords) noexcept override;
+
+    //-----------------------------------------------------------------
+    // Public API	: python-instance.json.cpp
+    //		Supports json lane
+    //-----------------------------------------------------------------
+    virtual Error writeJson(const json::Value &jsonData) noexcept override;
 
     //-----------------------------------------------------------------
     // Public API	: python-instance.avi.cpp

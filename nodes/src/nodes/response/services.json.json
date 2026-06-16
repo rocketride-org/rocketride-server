@@ -3,29 +3,29 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Webhook",
+	"title": "Return JSON",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
 	//
-	"protocol": "webhook://",
+	"protocol": "response_json://",
 	//
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["source"],
+	"classType": ["infrastructure"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": ["noinclude"],
+	"capabilities": [],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
-	"register": "endpoint",
+	"register": "filter",
 	//
 	// Optional:
 	//		The node is the actual physical node to instantiate - if
@@ -37,24 +37,23 @@
 	//		The path is the executable/script code - it is node dependent
 	// 		and is optional for most node
 	//
-	"path": "nodes.webhook",
+	"path": "nodes.response",
 	//
 	// Required:
-	//		The prefix map when added/removed when converting URLs <=> paths
+	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
-	"prefix": "WebHook",
+	"prefix": "response",
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A source component that listens for incoming HTTP requests and accepts ", "uploaded documents or data from external systems or processes. It enables ", "seamless integration for document ingestion, allowing external systems to ", "trigger the component and send files for further processing. Configurable ", "with endpoint and authentication settings, it ensures secure and reliable ", "document transfer for pipeline processing. Ideal for receiving documents, ", "images, or other files from external platforms via HTTP-based communication."],
+	"description": ["A component that returns structured JSON data back to the requesting client. It handles ", "the response phase of the HTTP request-response cycle by returning the results as a JSON ", "object. This component ensures that data is transmitted efficiently and clearly to ", "the client, providing a standardized format for the response."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "webhook.svg",
+	"icon": "util-infrastructure.svg",
 	"documentation": "https://docs.rocketride.org",
-	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -66,11 +65,11 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": ["tags", "text", "json", "audio", "video", "image", "questions"]
+		"json": []
 	},
 	//
 	//	Optional:
-	//		Profile section are configuration options used by the driver
+	//		Profile section are configuration optoins used by the driver
 	//		itself
 	//
 	"preconfig": {
@@ -89,9 +88,12 @@
 	//		in the shape
 	//
 	"fields": {
-		"parameters": {
-			"object": "parameters",
-			"properties": []
+		"laneName": {
+			"type": "string",
+			"title": "Identifier key within result",
+			"minLength": 1,
+			"default": "json",
+			"maxLength": 32
 		}
 	},
 	//
@@ -102,8 +104,8 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Webhook",
-			"properties": ["hideForm", "type", "source.mode", "parameters"]
+			"title": "Return JSON",
+			"properties": ["laneName"]
 		}
 	]
 }

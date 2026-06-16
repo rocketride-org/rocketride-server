@@ -76,6 +76,27 @@ def test_determine_lane_question_without_listener_falls_back_to_raw():
     assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
 
 
+def test_determine_lane_json_with_json_listener():
+    """'application/json' maps to the 'json' lane when that listener exists."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json'])
+    assert conn._determine_lane('application/json', pipe) == 'json'
+
+
+def test_determine_lane_json_without_listener_falls_back_to_raw():
+    """Without a 'json' listener, 'application/json' falls back to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners([])
+    assert conn._determine_lane('application/json', pipe) == 'raw'
+
+
+def test_determine_lane_json_tolerates_charset_parameter():
+    """'application/json; charset=utf-8' still maps to the 'json' lane."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json'])
+    assert conn._determine_lane('application/json; charset=utf-8', pipe) == 'json'
+
+
 @pytest.mark.parametrize(
     'mime, listener, expected',
     [

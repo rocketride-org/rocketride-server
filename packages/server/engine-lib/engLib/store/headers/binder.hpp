@@ -57,12 +57,13 @@ private:
         methodMap;
 
 public:
-    static constexpr std::array<const char *, 15> MethodNames = {
+    static constexpr std::array<const char *, 16> MethodNames = {
         "open",
         "tags",
         "text",
         "table",
         "words",
+        "json",
         "audio",
         "video",
         "questions",
@@ -105,6 +106,7 @@ public:
     virtual Error writeText(const Utf16View &text) noexcept;
     virtual Error writeTable(const Utf16View &text) noexcept;
     virtual Error writeWords(const WordVector &textWords) noexcept;
+    virtual Error writeJson(const json::Value &jsonData) noexcept;
     virtual Error writeAudio(const AVI_ACTION action, Text &mimeType,
                              const pybind11::bytes &streamData) noexcept;
     virtual Error writeVideo(const AVI_ACTION action, Text &mimeType,
