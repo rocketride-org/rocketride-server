@@ -39,6 +39,13 @@ import EnvironmentPage from '../../views/environment/EnvironmentPage';
 /** Shell overlay pages that render as modal dialogs over the client area. */
 export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
 
+/** Opaque overlay ids a guest app is allowed to request via `shell:openOverlay`. */
+const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
+
+/** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
+const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> =>
+	typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -108,7 +115,9 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 	// shell routes it into the same overlay state the sidebar uses.
 	useEffect(() => {
 		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id }: { id: ShellOverlay }) => {
-			if (id) setOverlay(id);
+			// Gate to the contracted ids so a stray runtime value can't open a
+			// blank modal shell with no page content.
+			if (isOpenableOverlay(id)) setOverlay(id);
 		});
 	}, []);
 
