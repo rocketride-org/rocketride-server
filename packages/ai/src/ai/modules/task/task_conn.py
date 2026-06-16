@@ -386,9 +386,11 @@ class TaskConn(
             raise PermissionError(f'Permission {perm!r} denied')
 
     def require_zitadel_auth(self) -> None:
-        """Verify the connection is authenticated (any credential type is accepted)."""
+        """Verify the connection is authenticated and not waitlisted."""
         if not self._authenticated or not self._account_info:
             raise PermissionError('Not authenticated')
+        if self._account_info.waitlisted:
+            raise PermissionError('Account is waitlisted')
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """

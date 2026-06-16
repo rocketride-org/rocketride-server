@@ -191,6 +191,19 @@ function registerApp(appRoot) {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
 					readme = `/${APPS_BASE}/${dirName}/README.md`;
+
+					// Copy sibling assets/ directory if it exists (images referenced by the README)
+					const assetsSrc = path.join(path.dirname(readmeSrc), 'assets');
+					const assetsDst = path.join(buildDir, 'assets');
+					if (fs.existsSync(assetsSrc) && fs.statSync(assetsSrc).isDirectory()) {
+						fs.mkdirSync(assetsDst, { recursive: true });
+						for (const file of fs.readdirSync(assetsSrc)) {
+							const srcFile = path.join(assetsSrc, file);
+							if (fs.statSync(srcFile).isFile()) {
+								fs.copyFileSync(srcFile, path.join(assetsDst, file));
+							}
+						}
+					}
 				} catch {
 					task.output = `Warning: readme not found at ${appManifest.readme}`;
 				}

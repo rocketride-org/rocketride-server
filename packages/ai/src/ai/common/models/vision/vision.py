@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.vision')
@@ -228,14 +229,17 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     results = VisionLoader.postprocess(bundle, raw, 1, ['embedding'], metadata)
     t_post = (time.perf_counter() - t0) * 1000
 
-    # Report all perf counters — same shape as model server response
+    # Report all perf counters — same keys as model server response
+    # (pending_request.py build_dap_result).
+    # gpu_memory is in GB-sec (model_gb * inference_sec).
+    inference_sec = (t_pre + t_gpu + t_post) / 1000.0
     metrics.add_time(
         {
-            'preprocess': t_pre,
-            'gpu': t_gpu,
-            'postprocess': t_post,
-            'queue_wait': 0,
-            'latency': t_pre + t_gpu + t_post,
+            'gpu_preprocess': t_pre,
+            'gpu_compute': t_gpu,
+            'gpu_postprocess': t_post,
+            'gpu_queue_wait': 0,
+            'gpu_memory': model_gpu_gb(bundle) * inference_sec,
         }
     )
 

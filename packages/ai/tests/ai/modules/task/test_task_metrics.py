@@ -111,10 +111,10 @@ def no_gpu(monkeypatch):
 
 # Default billing rates matching the DB seed defaults (all time units in ms).
 _TEST_BILLING_RATES = {
-    'cpu_compute': 0.000283,  # tokens per ms
-    'cpu_memory': 0.005,  # tokens per GB-sec
-    'gpu_compute': 0.000594,  # tokens per ms
-    'gpu_memory': 0.3,  # tokens per GB-sec
+    'cpu_compute': 0.001,  # tokens per ms
+    'cpu_memory': 0.05,  # tokens per GB-sec
+    'gpu_compute': 0.005,  # tokens per ms
+    'gpu_memory': 2.0,  # tokens per GB-sec
     'gpu_preprocess': 0.0,
     'gpu_postprocess': 0.0,
     'gpu_queue_wait': 0.0,
@@ -378,6 +378,7 @@ def test_sample_gpu_swallows_sampling_errors(monkeypatch, fake_psutil):
 def test_accumulate_sample_updates_internal_counters(fake_psutil, no_gpu):
     """Internal cpu_seconds, memory_mb_seconds, duration_seconds increase as expected."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     tm._cpu_percent_raw = 200.0  # raw across cores
     status.metrics.cpu_memory_mb = 150.0
     status.metrics.gpu_memory_mb = 0.0  # gpu not available anyway
@@ -425,6 +426,7 @@ def test_accumulate_sample_tracks_peaks(fake_psutil, no_gpu):
 def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
     """avg_* fields equal accumulated total / duration."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     tm._cpu_percent_raw = 200.0
     status.metrics.cpu_memory_mb = 100.0
     tm._accumulate_sample(2.0)
@@ -443,21 +445,23 @@ def test_update_tokens_converts_resource_accumulators_via_db_rates(fake_psutil, 
     """Tokens = raw_value * DB rate; total = sum of components."""
     tm, status = _make_metrics(fake_psutil)
     # Inject accumulators directly to bypass arithmetic noise.
-    # 1000 CPU-seconds = 1_000_000 ms * 0.000283 tokens/ms = 283 tokens
-    tm._cpu_seconds = 1000.0
-    # 1024 MB-sec = 1 GB-sec * 0.005 tokens/GB-sec = 0.005 tokens
-    tm._memory_mb_seconds = 1024.0
-    # GPU memory not available (no_gpu fixture)
-    tm._gpu_memory_mb_seconds = 0.0
+    # 100 CPU-seconds = 100_000 ms * 0.001 tokens/ms = 100 tokens
+    tm._cpu_seconds = 100.0
+    # 10240 MB-sec = 10 GB-sec * 0.05 tokens/GB-sec = 0.5 tokens
+    tm._memory_mb_seconds = 10240.0
+    # GPU memory comes from subprocess timer, not OS sampling
+    # Simulate 5 GB-sec of inference VRAM (stored as GB-sec, not ms)
+    tm._subprocess_timers['gpu_memory'] = 5.0
 
     tm._update_tokens()
 
-    expected_cpu = round(1000.0 * 1000.0 * _TEST_BILLING_RATES['cpu_compute'], 1)
-    expected_mem = round(1.0 * _TEST_BILLING_RATES['cpu_memory'], 1)
+    expected_cpu = round(100.0 * 1000.0 * _TEST_BILLING_RATES['cpu_compute'], 1)
+    expected_mem = round(10.0 * _TEST_BILLING_RATES['cpu_memory'], 1)
+    expected_gpu_mem = round(5.0 * _TEST_BILLING_RATES['gpu_memory'], 1)
     assert status.tokens.cpu_utilization == expected_cpu
     assert status.tokens.cpu_memory == expected_mem
-    assert status.tokens.gpu_memory == 0.0
-    expected_total = round(expected_cpu + expected_mem, 1)
+    assert status.tokens.gpu_memory == expected_gpu_mem
+    expected_total = round(expected_cpu + expected_mem + expected_gpu_mem, 1)
     assert status.tokens.total == expected_total
 
 

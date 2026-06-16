@@ -423,22 +423,29 @@ class TaskMetrics:
         # OS-level: convert accumulators to rate-table units
         cpu_ms = self._cpu_seconds * 1000.0
         memory_gb_sec = self._memory_mb_seconds / 1024.0
-        gpu_memory_gb_sec = self._gpu_memory_mb_seconds / 1024.0
 
         # OS-level token charges (rate is tokens-per-unit from DB)
         cpu_tokens = cpu_ms * rates.get('cpu_compute', 0.0)
         memory_tokens = memory_gb_sec * rates.get('cpu_memory', 0.0)
-        gpu_memory_tokens = gpu_memory_gb_sec * rates.get('gpu_memory', 0.0)
 
         # GPU inference tokens (subprocess-reported timer in ms)
-        gpu_inference_ms = self._subprocess_timers.get('gpu', 0.0)
+        gpu_inference_ms = self._subprocess_timers.get('gpu_compute', 0.0)
         gpu_inference_tokens = gpu_inference_ms * rates.get('gpu_compute', 0.0)
 
+        # GPU memory tokens — pro-rated by model size during actual inference
+        # only (reported by model server or local-mode wrappers as GB-sec
+        # in the 'gpu_memory' timer). Value is already in GB-sec (not ms).
+        gpu_memory_gb_sec = self._subprocess_timers.get('gpu_memory', 0.0)
+        gpu_memory_tokens = gpu_memory_gb_sec * rates.get('gpu_memory', 0.0)
+
         # Subprocess-reported timers and counters: apply any matching DB rate
+        # Skip 'gpu_compute' (already handled above) and 'gpu_memory'
+        # (already handled above).
+        _handled_timers = {'gpu_compute', 'gpu_memory'}
         custom_tokens: dict[str, float] = {}
         for timer_name, timer_ms in self._subprocess_timers.items():
-            if timer_name == 'gpu':
-                continue  # already handled above as gpu_compute
+            if timer_name in _handled_timers:
+                continue
             rate = rates.get(timer_name, 0.0)
             if rate > 0:
                 custom_tokens[timer_name] = round(timer_ms * rate, 1)

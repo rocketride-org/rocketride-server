@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
-from ai.common.utils.cuda_utils import pick_torch_device
+from ai.common.utils.cuda_utils import pick_torch_device, model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.detection')
@@ -501,13 +501,14 @@ class Detector:
         t0 = time.perf_counter()
         out = DetectorLoader.postprocess(self._bundle, raw, 1, ['detections'], metadata=self._metadata)
         t_post = (time.perf_counter() - t0) * 1000
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._bundle) * inference_sec,
             }
         )
         return out[0]['detections']

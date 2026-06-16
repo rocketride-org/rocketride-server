@@ -9,6 +9,7 @@
     "publisher": "Aparavi Software AG",
     "name": "Aparavi AQL",
     "description": "Chat with your Aparavi data using natural language",
+    "readme": "./src/README.md",
     "icon": "./src/icon.svg",
     "categories": ["tools"],
     "mode": "free",

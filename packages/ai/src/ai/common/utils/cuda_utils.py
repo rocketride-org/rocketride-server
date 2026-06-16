@@ -94,3 +94,29 @@ def resolve_pipeline_device(device: Optional[str] = None) -> Tuple[Any, str]:
     if device == 'cuda':
         return 0, 'cuda:0'
     return device, str(device)
+
+
+def model_gpu_gb(model: Any) -> float:
+    """Estimate GPU memory footprint of a torch model in GB.
+
+    Works with raw nn.Module, dict bundles containing a 'model' key,
+    and objects wrapping a .model attribute.  Returns 0.0 for
+    non-torch objects (CPU-only nodes, proxy mode, etc.).
+    """
+    try:
+        import torch.nn as nn
+
+        # Unwrap bundle dicts and wrapper objects
+        m = model
+        if isinstance(m, dict):
+            m = m.get('model', m)
+        if not isinstance(m, nn.Module) and hasattr(m, 'model'):
+            m = m.model
+        if not isinstance(m, nn.Module):
+            return 0.0
+
+        total_bytes = sum(p.element_size() * p.nelement() for p in m.parameters())
+        total_bytes += sum(b.element_size() * b.nelement() for b in m.buffers())
+        return total_bytes / (1024**3)
+    except Exception:
+        return 0.0
