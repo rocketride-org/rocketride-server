@@ -271,6 +271,9 @@ def pytest_generate_tests(metafunc):
             'caption',
             'background_removal',
             'pose_estimation',
+            # Debug-only nodes (capabilities include "debug"): inactive in release
+            # (NDEBUG) builds, so the dynamic engine test cannot load them.
+            'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
             # Require live third-party API credentials (no live calls in default CI):
