@@ -780,7 +780,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================

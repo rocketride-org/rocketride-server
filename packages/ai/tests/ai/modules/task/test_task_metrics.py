@@ -444,6 +444,7 @@ def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
 def test_update_tokens_converts_resource_accumulators_via_db_rates(fake_psutil, no_gpu):
     """Tokens = raw_value * DB rate; total = sum of components."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     # Inject accumulators directly to bypass arithmetic noise.
     # 100 CPU-seconds = 100_000 ms * 0.001 tokens/ms = 100 tokens
     tm._cpu_seconds = 100.0
