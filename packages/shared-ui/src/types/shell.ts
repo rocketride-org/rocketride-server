@@ -188,6 +188,13 @@ export interface ShellConnectionEventMap {
 	/** Navigate back to the My Apps launcher screen. */
 	'shell:myApps': Record<string, never>;
 
+	/**
+	 * Request the shell open a built-in overlay (e.g. from a guest app's
+	 * profile/account menu, which can't render the shell's overlays directly).
+	 * The `id` selects which overlay to show.
+	 */
+	'shell:openOverlay': { id: 'account' | 'settings' | 'environment' };
+
 	/** Sidebar is starting to collapse — dependent UI can prepare. */
 	'shell:sidebarCollapsing': Record<string, never>;
 
