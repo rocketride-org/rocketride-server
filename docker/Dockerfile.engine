@@ -22,13 +22,19 @@ RUN apt-get update \
 
 COPY --chown=rocketride:rocketride dist/server/ /opt/rocketride/
 
+# Engine writes runtime data to /opt/data; create it writable for the
+# non-root user (root owns /opt) and persist it. See #1295.
+RUN mkdir -p /opt/data && chown -R rocketride:rocketride /opt/data
+VOLUME /opt/data
+
 WORKDIR /opt/rocketride
 
 USER rocketride
 
 EXPOSE 5565
 
+# /version is public; /ping returns 401 behind the auth gate. See #1295.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:5565/ping || exit 1
+    CMD curl -f http://localhost:5565/version || exit 1
 
 ENTRYPOINT ["./engine", "./ai/eaas.py", "--host=0.0.0.0"]
