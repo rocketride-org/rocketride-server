@@ -272,9 +272,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				// Filter out top-up packs — those are handled by the TopUpModal
 				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup' && p.isActive !== false);
 				setPlans(subscriptionPlans);
-				// Pre-select the first checkout-able plan
-				const first = subscriptionPlans.find((p) => !p.metadata?.action);
-				if (first) setSelectedPlan(first);
+				// Default selection (lowest-order billable plan at the visible
+				// interval -- i.e. Starter) is driven by PlanPicker via
+				// ``autoSelectDefault`` so the selection always matches the
+				// interval that is actually shown.
 			})
 			.catch((err) => setError(err.message ?? 'Failed to load subscription plans.'))
 			.finally(() => setPlansLoading(false));
@@ -362,6 +363,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							loading={plansLoading}
 							selectedPlan={selectedPlan}
 							onSelectPlan={setSelectedPlan}
+							autoSelectDefault
 							footer={
 								<button
 									style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action)}
