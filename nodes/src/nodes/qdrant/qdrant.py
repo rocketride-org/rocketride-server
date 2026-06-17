@@ -179,39 +179,40 @@ class Store(DocumentStoreBase):
         # See if we can get the collection info, throws if it does not exist or other error
         info = self.client.get_collection(collection_name=self.collection)
 
-        # If we do not have a payload schema yet
-        if not len(info.payload_schema):
-            # Setup our payload index so we can query by nodeId
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.nodeId', field_type=PayloadSchemaType.KEYWORD
-            )
+        # Ensure every payload key we filter/order by has an index. Qdrant under
+        # strict mode (Qdrant Cloud sets strict_mode_config.enabled with
+        # unindexed_filtering_retrieve=false) rejects filtering on an unindexed
+        # key with a 400. We check per-key rather than all-or-nothing so an
+        # already-built but under-indexed collection backfills missing indexes
+        # on the next connect; create_payload_index is idempotent.
+        # NOTE: meta.chunkId / meta.tableId are integer keys that getPaths() and
+        # _convertFilter filter on; omitting them previously caused that 400.
+        existing = set(info.payload_schema or {})
 
-            # Setup our payload index so we can query by object id
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.objectId', field_type=PayloadSchemaType.KEYWORD
-            )
+        keyword_keys = ('meta.nodeId', 'meta.objectId', 'meta.parent')
+        integer_keys = ('meta.permissionId', 'meta.chunkId', 'meta.tableId')
+        bool_keys = ('meta.isDeleted', 'meta.isTable')
 
-            # Setup our payload index so we can query by parent path
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.parent', field_type=PayloadSchemaType.KEYWORD
-            )
+        for field in keyword_keys:
+            if field not in existing:
+                self.client.create_payload_index(
+                    collection_name=self.collection, field_name=field, field_type=PayloadSchemaType.KEYWORD
+                )
 
-            # Setup our payload index so we can query by permission id
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.permissionId', field_type=PayloadSchemaType.INTEGER
-            )
+        for field in integer_keys:
+            if field not in existing:
+                self.client.create_payload_index(
+                    collection_name=self.collection, field_name=field, field_type=PayloadSchemaType.INTEGER
+                )
 
-            # Setup our payload index so we can query by isDeleted
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.isDeleted', field_type=PayloadSchemaType.BOOL
-            )
+        for field in bool_keys:
+            if field not in existing:
+                self.client.create_payload_index(
+                    collection_name=self.collection, field_name=field, field_type=PayloadSchemaType.BOOL
+                )
 
-            # Setup our payload index so we can query by isTable
-            self.client.create_payload_index(
-                collection_name=self.collection, field_name='meta.isTable', field_type=PayloadSchemaType.BOOL
-            )
-
-            # Setup a full text keyword search on our content
+        # Setup a full text keyword search on our content
+        if 'content' not in existing:
             self.client.create_payload_index(
                 collection_name=self.collection,
                 field_name='content',
