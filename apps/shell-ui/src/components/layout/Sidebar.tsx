@@ -372,8 +372,10 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const showAppSwitcher = !hideAppSwitcher && appManifest.length > 1;
 
-	// The "Settings" overlay is Aparavi-AQL-specific; only surface it when that app is installed.
-	const aparaviInstalled = appManifest.some((a) => a.id === 'rocketride.aparavi');
+	// The "Settings" overlay is Aparavi-AQL-specific; only surface it when that app is on the
+	// user's desktop. `appManifest` is the full catalog (always contains aparavi), so it can't
+	// gate this — use isOnDesktop(), the same per-user signal the app switcher below relies on.
+	const aparaviInstalled = isOnDesktop('rocketride.aparavi');
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
