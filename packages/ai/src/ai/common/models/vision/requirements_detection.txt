@@ -2,3 +2,9 @@
 # Detection-specific extras, installed after the shared requirements_vision.txt base.
 timm
 rfdetr; python_version >= "3.10"
+# Cap matplotlib below 3.11: 3.11.0's pybind11 ft2font extension aborts the embedded
+# engine (SIGABRT, "module 'matplotlib.ft2font' has no attribute '__path__'") when
+# supervision (pulled by rfdetr) imports matplotlib.pyplot at load time. The abort is a
+# C++ terminate, not a Python exception, so the rtdetr fallback in detection.py can't
+# catch it — one detection request takes down the whole model server.
+matplotlib<3.11
