@@ -108,6 +108,17 @@ class RFDetrLoader:
 
         try:
             import contextlib
+            import sys
+            import types
+
+            # supervision (pulled by rfdetr) imports matplotlib.pyplot at module load.
+            # matplotlib >= 3.10 ships ft2font as a pybind11 extension whose attribute
+            # probe aborts the embedded engine (SIGABRT, "module 'matplotlib.ft2font'
+            # has no attribute '__path__'") — a C++ terminate the except below can't
+            # catch, so it kills the whole model server. pyplot is only used by
+            # supervision plotting helpers we never call, so stub it before importing
+            # rfdetr. Mirrors nodes/face_detection.py.
+            sys.modules.setdefault('matplotlib.pyplot', types.ModuleType('matplotlib.pyplot'))
 
             from rfdetr import RFDETRBase  # type: ignore
 
