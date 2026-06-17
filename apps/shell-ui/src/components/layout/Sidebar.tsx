@@ -372,12 +372,14 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const showAppSwitcher = !hideAppSwitcher && appManifest.length > 1;
 
+	// The "Settings" overlay is Aparavi-AQL-specific; only surface it when that app is installed.
+	const aparaviInstalled = appManifest.some((a) => a.id === 'rocketride.aparavi');
+
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
 			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
 			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
 			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
 				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
@@ -386,6 +388,10 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 				})),
 			},
 		];
+
+		if (aparaviInstalled) {
+			items.splice(3, 0, { id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') });
+		}
 
 		if (showAppSwitcher) {
 			/**
@@ -415,7 +421,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, aparaviInstalled, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
 
 	// --- Don't render sidebar when not authenticated -------------------------
 
