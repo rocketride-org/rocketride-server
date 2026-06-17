@@ -306,6 +306,16 @@ def _get_constraints_path() -> str:
     return os.path.join(engine_cache_dir(), 'constraints.txt')
 
 
+def _constraints_args(constraints_path: str, exe_dir: str) -> list[str]:
+    """Return uv ``-c`` args if the constraints file exists and is non-empty, else ``[]``.
+
+    Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
+    """
+    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
+        return ['-c', os.path.relpath(constraints_path, exe_dir)]
+    return []
+
+
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
     Run a subprocess command, keeping stdin open until process exits.
@@ -777,12 +787,10 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
             f.write('uv\n')
     # uv splits --excludes on whitespace, so an absolute path with a space (macOS
     # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
-    # -c is parsed as a single value and is unaffected. See #1256.
+    # See #1256.
     args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
 
-    # Only add constraints if the file exists and has content
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', _get_constraints_path()])
+    args.extend(_constraints_args(constraints_path, exe_dir))
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -888,8 +896,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
     uv_args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
 
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        uv_args.extend(['-c', _get_constraints_path()])
+    uv_args.extend(_constraints_args(constraints_path, exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
@@ -1038,10 +1045,8 @@ def main():
                 uv_args += ['--index-strategy', 'unsafe-best-match']
 
             # For install/sync commands, add constraints file if available
-            constraints_path = _get_constraints_path()
             if sys.argv[1] in ('install', 'sync'):
-                if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-                    uv_args.extend(['-c', _get_constraints_path()])
+                uv_args.extend(_constraints_args(_get_constraints_path(), exe_dir))
 
             # Run uv
             result = subprocess.run(uv_args, cwd=exe_dir)
