@@ -24,9 +24,11 @@
 // APP DESCRIPTOR — hello-ui MF remote entry point
 // =============================================================================
 
+import React from 'react';
 import type { AppDescriptor } from 'shell-ui';
 import HelloApp from './HelloApp';
 import HelloSidebar from './HelloSidebar';
+import RocketRideMark from './RocketRideMark';
 
 /**
  * AppDescriptor for the Hello World demo app.
@@ -38,6 +40,8 @@ const HELLO_APP: AppDescriptor = {
 	name: 'Hello World',
 	branding: {
 		appName: 'Hello World',
+		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0' }),
+		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34' }),
 	},
 	components: {
 		App: HelloApp,
