@@ -543,14 +543,12 @@ class TaskServer(DAPBase):
             phoneNumberVerified=False,
             locale='',
             defaultTeam=control.teamId,
-            organizations=[
-                {
-                    'id': control.orgId,
-                    'name': '',
-                    'permissions': [],
-                    'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
-                }
-            ],
+            organization={
+                'id': control.orgId,
+                'name': '',
+                'permissions': [],
+                'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
+            },
         )
 
     async def authenticate(self, authorization: str) -> Optional[AccountInfo]:
