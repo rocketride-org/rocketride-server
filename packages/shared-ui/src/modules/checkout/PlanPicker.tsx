@@ -73,7 +73,8 @@ export function planDisplayAmount(plan: CheckoutPlan): string {
 	const cents = (plan.amountCents || 0) / (plan.interval === 'year' ? 12 : 1);
 	const amount = cents / 100;
 	const symbol = (plan as any).currency?.toUpperCase() === 'EUR' ? '\u20AC' : '$';
-	return amount === Math.floor(amount) ? `${symbol}${amount}` : `${symbol}${amount.toFixed(2)}`;
+	// Round up to whole dollars \u2014 the picker shows no cents.
+	return `${symbol}${Math.ceil(amount)}`;
 }
 
 /** Label describing the billing cadence for a plan card, or null when none applies. */
