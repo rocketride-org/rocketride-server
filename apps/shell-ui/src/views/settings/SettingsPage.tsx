@@ -447,6 +447,11 @@ const SettingsPage: React.FC = () => {
 		const groups = new Map<string, { apps: typeof appManifest; defs: AppSettingDefinition[] }>();
 
 		for (const app of appManifest) {
+			// appManifest is the full catalog; only surface settings for apps the user has
+			// actually installed (on their desktop). Without this, an uninstalled app's
+			// settings (e.g. Aparavi AQL) would appear for everyone. Shell "General"
+			// settings above are unaffected and always shown.
+			if (!app.onDesktop) continue;
 			const appSettings = app.settings ?? [];
 			if (appSettings.length === 0) continue;
 			const sig = keySignature(appSettings);

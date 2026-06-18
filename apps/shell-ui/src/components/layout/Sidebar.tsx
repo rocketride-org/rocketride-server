@@ -372,16 +372,14 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const showAppSwitcher = !hideAppSwitcher && appManifest.length > 1;
 
-	// The "Settings" overlay is Aparavi-AQL-specific; only surface it when that app is on the
-	// user's desktop. `appManifest` is the full catalog (always contains aparavi), so it can't
-	// gate this — use isOnDesktop(), the same per-user signal the app switcher below relies on.
-	const aparaviInstalled = isOnDesktop('rocketride.aparavi');
-
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
 			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
 			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
 			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
+			// Settings is a global workspace view (shell "General" plus any installed app's
+			// settings), so it's always available. Per-app gating lives in SettingsPage.
+			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
 				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
@@ -390,10 +388,6 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 				})),
 			},
 		];
-
-		if (aparaviInstalled) {
-			items.splice(3, 0, { id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') });
-		}
 
 		if (showAppSwitcher) {
 			/**
@@ -423,7 +417,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, aparaviInstalled, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
 
 	// --- Don't render sidebar when not authenticated -------------------------
 
