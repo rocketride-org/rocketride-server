@@ -55,6 +55,35 @@ export function planAmount(plan: CheckoutPlan): string {
 }
 
 /**
+ * Format a plan's price for display in the picker card.
+ *
+ * Mirrors {@link planAmount} exactly, except annual plans
+ * (``interval === 'year'``) are shown as a monthly-equivalent amount
+ * (yearly cents divided by 12).  The actual purchase is unaffected --
+ * checkout still uses the plan's annual ``stripePriceId`` and Stripe
+ * charges the full annual total.  A ``metadata.displayAmount`` override
+ * is returned verbatim, with no division.
+ *
+ * @param plan - The plan to format.
+ * @returns A display price string (e.g. ``$20`` for a ``$240/yr`` plan).
+ */
+export function planDisplayAmount(plan: CheckoutPlan): string {
+	const display = plan.metadata?.displayAmount;
+	if (display) return display;
+	const cents = (plan.amountCents || 0) / (plan.interval === 'year' ? 12 : 1);
+	const amount = cents / 100;
+	const symbol = (plan as any).currency?.toUpperCase() === 'EUR' ? '\u20AC' : '$';
+	return amount === Math.floor(amount) ? `${symbol}${amount}` : `${symbol}${amount.toFixed(2)}`;
+}
+
+/** Label describing the billing cadence for a plan card, or null when none applies. */
+function planIntervalLabel(plan: CheckoutPlan): string | null {
+	if (!plan.interval || plan.interval === 'one_time') return null;
+	if (plan.interval === 'year') return 'per month, billed annually';
+	return 'per month';
+}
+
+/**
  * Builds the href for a plan action (link URL or mailto: URI).
  *
  * @param action - The plan action descriptor.
@@ -428,11 +457,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 							{/* Card header: tier name, price, interval */}
 							<div style={S.cardHead(selected)}>
 								<div style={S.cardTier}>{plan.nickname}</div>
-								<div style={S.cardPrice}>{planAmount(plan)}</div>
-								{plan.interval && plan.interval !== 'one_time' && (
-									<div style={S.cardInterval}>
-										per {plan.interval === 'month' ? 'month' : 'year'}
-									</div>
+								<div style={S.cardPrice}>{planDisplayAmount(plan)}</div>
+								{planIntervalLabel(plan) && (
+									<div style={S.cardInterval}>{planIntervalLabel(plan)}</div>
 								)}
 							</div>
 
