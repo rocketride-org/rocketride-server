@@ -61,6 +61,7 @@ def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organ
         userToken='token-' + user_id,
         defaultTeam=default_team,
         organization=organization,
+        sysPermissions=[],
     )
 
 
