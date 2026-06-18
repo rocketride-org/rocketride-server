@@ -285,7 +285,15 @@ export class ConnectionManager implements IConnectionManager {
 		// so the button works again without a manual page refresh.
 		if (typeof window !== 'undefined') {
 			window.addEventListener('pageshow', (e) => {
-				if ((e as PageTransitionEvent).persisted) this.oauthStarted = false;
+				if ((e as PageTransitionEvent).persisted) {
+					this.oauthStarted = false;
+					// Back from Zitadel without signing in: if still unauthenticated,
+					// drop any pending app so a later refresh can't re-seed the auth
+					// gate and bounce the user back to login. Guard on token — a
+					// signed-in user's last-active-app restore reuses rr:appId via
+					// persistActiveApp, so it must survive for them.
+					if (!this.loadToken()) this.clearPendingAppId();
+				}
 			});
 		}
 	}
@@ -469,7 +477,13 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
-		// No token — show shell unauthenticated (transport is attached, public APIs work)
+		// No code, no session lock, no token — an unauthenticated home load. If a
+		// pending app survived an abandoned OAuth round-trip (user pressed Back from
+		// the Zitadel login instead of signing in), drop it now. Otherwise Shell
+		// re-seeds startupAppId from it and the ShellLayout auth gate re-fires
+		// shell:loginRequest → startOAuth, bouncing the user straight back to Zitadel.
+		this.clearPendingAppId();
+		// Show shell unauthenticated (transport is attached, public APIs work)
 		return null;
 	}
 
@@ -768,6 +782,13 @@ export class ConnectionManager implements IConnectionManager {
 	/** Read the pending app ID (set before OAuth redirect). */
 	public getPendingAppId(): string {
 		try { return sessionStorage.getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
+	}
+
+	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
+	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
+	 *  auth gate on the next load and bounce them straight back to login. */
+	public clearPendingAppId(): void {
+		try { sessionStorage.removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
 	}
 
 	/** Save pending app ID (for retrieval after OAuth callback). */
