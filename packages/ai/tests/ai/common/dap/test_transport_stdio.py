@@ -592,8 +592,7 @@ async def test_read_stream_processes_normal_lines_in_order():
     await TransportStdio._read_stream(stub, reader, 'stderr')
 
     kinds = [e.get('event') for e in stub.events]
-    assert 'apaevt_status_state' in kinds
-    assert 'apaevt_status_message' in kinds
+    assert kinds == ['apaevt_status_state', 'apaevt_status_message']
 
 
 @pytest.mark.asyncio
