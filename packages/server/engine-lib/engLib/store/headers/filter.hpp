@@ -277,7 +277,7 @@ public:
     virtual void cb_sendTagData(py::object &data) noexcept(false);
     virtual void cb_sendText(const std::u16string &text) noexcept(false);
     virtual void cb_sendTable(const std::u16string &text) noexcept(false);
-    virtual void cb_sendJson(const json::Value &jsonData) noexcept(false);
+    virtual void cb_sendJson(python::IJson json) noexcept(false);
     virtual void cb_sendAudio(
         const AVI_ACTION action, Text &mimeType,
         const pybind11::bytes &streamData) noexcept(false);
@@ -334,7 +334,7 @@ public:
     virtual void cb_writeText(const std::u16string &text) noexcept(false);
     virtual void cb_writeTable(const std::u16string &text) noexcept(false);
     virtual void cb_writeWords(const WordVector &textWords) noexcept(false);
-    virtual void cb_writeJson(const json::Value &jsonData) noexcept(false);
+    virtual void cb_writeJson(python::IJson json) noexcept(false);
     virtual void cb_writeAudio(
         const AVI_ACTION action, Text &mimeType,
         const pybind11::bytes &streamData) noexcept(false);

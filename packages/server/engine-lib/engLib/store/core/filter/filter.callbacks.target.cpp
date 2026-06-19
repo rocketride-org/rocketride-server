@@ -491,7 +491,7 @@ void IServiceFilterInstance::cb_writeWords(
 }
 
 void IServiceFilterInstance::cb_writeJson(
-    const json::Value &jsonData) noexcept(false) {
+    python::IJson json) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -501,7 +501,7 @@ void IServiceFilterInstance::cb_writeJson(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = binder.writeJson(jsonData)) throw ccode;
+        if (auto ccode = binder.writeJson(*json.getJsonValue())) throw ccode;
     }
 }
 

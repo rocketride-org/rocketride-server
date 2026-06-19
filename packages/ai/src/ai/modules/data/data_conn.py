@@ -33,6 +33,7 @@ from rocketlib import (
     Ec,
     Entry,
     IInvokeTool,
+    IJson,
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
@@ -602,7 +603,7 @@ class DataConn(DAPConn):
                 elif lane == 'json':
                     try:
                         json_data = json.loads(data.decode('utf-8'))
-                        pipe.writeJson(json_data)
+                        pipe.writeJson(IJson(json_data))
                     except Exception as e:
                         raise ValueError(str(e))
 

@@ -81,6 +81,8 @@ void setJsonValue(json::Value &target,
         target = value.cast<double>();
     else if (py::isinstance<json::Value>(value))
         target = value.cast<json::Value>();
+    else if (py::isinstance<IJson>(value))
+        target = *value.cast<IJson>().getJsonValue();
     else if (py::isinstance<py::dict>(value)) {
         // Set it as an object
         target = json::Value(json::objectValue);

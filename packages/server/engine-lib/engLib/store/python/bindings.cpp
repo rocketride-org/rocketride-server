@@ -1179,6 +1179,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(__getitem__, &IJson::getitem)
         .PYBIND(__setitem__, &IJson::setitem);
 
+    py::implicitly_convertible<py::dict, IJson>();
+    py::implicitly_convertible<py::list, IJson>();
+
     //-------------------------------------------------------------
     /// @details
     ///		Bind error codes (Ec enum)

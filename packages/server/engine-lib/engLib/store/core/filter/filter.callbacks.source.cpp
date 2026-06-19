@@ -245,7 +245,7 @@ void IServiceFilterInstance::cb_sendTable(const std::u16string &text) noexcept(
 }
 
 void IServiceFilterInstance::cb_sendJson(
-    const json::Value &jsonData) noexcept(false) {
+    python::IJson json) noexcept(false) {
     // Check to make sure source mode
     if (this->endpoint->config.endpointMode != ENDPOINT_MODE::SOURCE)
         throw APERR(Ec::InvalidParam,
@@ -255,7 +255,7 @@ void IServiceFilterInstance::cb_sendJson(
     _block() {
         engine::python::UnlockPython unlock;
 
-        if (auto ccode = sendJson(*m_pTarget, jsonData)) throw ccode;
+        if (auto ccode = sendJson(*m_pTarget, *json.getJsonValue())) throw ccode;
     }
 }
 

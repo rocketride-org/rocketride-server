@@ -38,7 +38,7 @@ Error IPythonInstanceBase::writeJson(const json::Value &jsonData) noexcept {
         return Parent::writeJson(jsonData);
 
     auto python = localfcn()->Error {
-        auto pyJson = engine::python::pyjson::jsonToDict(jsonData);
+        auto pyJson = IJson(jsonData);
 
         // Call it
         m_pyInstance.attr("writeJson")(pyJson);
