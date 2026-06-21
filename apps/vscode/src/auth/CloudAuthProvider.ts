@@ -43,6 +43,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 	private context: vscode.ExtensionContext | undefined;
 	private pendingVerifier: string | null = null;
+	private pendingGoogleOAuth: ((tokens: string, state: string) => void) | null = null;
 	private disposables: vscode.Disposable[] = [];
 	private readonly _onDidChange = new EventEmitter();
 
@@ -91,9 +92,51 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		await vscode.env.openExternal(vscode.Uri.parse(authUrl));
 	}
 
+	// --- Google node OAuth ---------------------------------------------------
+
+	/**
+	 * Registers a one-shot callback to receive Google node-OAuth tokens once the
+	 * broker's deep link (`/auth/google`) returns. The pipeline editor that
+	 * started the login registers itself here; the next callback invocation
+	 * clears the slot. Google's consent screen can't render in a webview iframe,
+	 * so the login runs in the system browser and returns via this deep link.
+	 *
+	 * @param callback Invoked with the raw `tokens` and `state` query strings.
+	 */
+	setPendingGoogleOAuth(callback: (tokens: string, state: string) => void): void {
+		this.pendingGoogleOAuth = callback;
+	}
+
+	private handleGoogleOAuth(uri: vscode.Uri): void {
+		const params = new URLSearchParams(uri.query);
+		const error = params.get('oauth_error') || params.get('error');
+		const tokens = params.get('tokens');
+
+		const callback = this.pendingGoogleOAuth;
+		this.pendingGoogleOAuth = null;
+
+		if (error) {
+			vscode.window.showErrorMessage(`Google sign-in failed: ${params.get('error_description') || error}`);
+			return;
+		}
+		if (!tokens) {
+			vscode.window.showErrorMessage('Google sign-in failed: no tokens received.');
+			return;
+		}
+		if (!callback) {
+			vscode.window.showWarningMessage('Google sign-in completed, but no pipeline editor was waiting for it.');
+			return;
+		}
+		callback(tokens, params.get('state') ?? '');
+	}
+
 	// --- URI Handler ---------------------------------------------------------
 
 	async handleUri(uri: vscode.Uri): Promise<void> {
+		if (uri.path === '/auth/google') {
+			this.handleGoogleOAuth(uri);
+			return;
+		}
 		if (uri.path !== '/auth/callback') return;
 
 		const params = new URLSearchParams(uri.query);

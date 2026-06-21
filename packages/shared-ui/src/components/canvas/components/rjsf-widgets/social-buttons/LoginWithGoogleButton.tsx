@@ -46,7 +46,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	const { t } = useTranslation();
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const { saveChanges, selectedNode, oauth2RootUrl, onOpenLink } = useFlow() as any;
+	const { saveChanges, selectedNode, oauth2RootUrl, oauthReturnUrl, onOpenExternal } = useFlow() as any;
 
 	// Serialize the current form data for the OAuth redirect so the server can restore state on callback
 	const serviceParam = JSON.stringify(selectedNode?.data?.formData || {});
@@ -77,16 +77,20 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		const authType = selectedNode?.data?.formData?.parameters?.authType || 'user';
 		url.searchParams.set('type', authType);
 
-		// Pass the current URL so the OAuth callback can redirect back here after completion
-		url.searchParams.set('baseURL', window.location.href);
+		// Tell the broker where to return tokens. Web hosts redirect back to the
+		// current page; hosts that can't receive a web redirect (VS Code) supply
+		// a deep link via oauthReturnUrl that they intercept out-of-band.
+		url.searchParams.set('baseURL', oauthReturnUrl || window.location.href);
 
 		const targetUrl = url.toString();
-		// Use onOpenLink callback for embedded hosts (e.g., VSCode), otherwise do a full-page redirect
-		if (onOpenLink) onOpenLink(targetUrl);
+		// VS Code (onOpenExternal) opens the system browser — Google's consent
+		// screen refuses to render in an embedded iframe — and delivers tokens
+		// back via pendingOAuthTokens. Web hosts do a full-page redirect.
+		if (onOpenExternal) onOpenExternal(targetUrl);
 		else window.location.href = targetUrl;
 
 		// eslint-disable-next-line react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any
-	}, [(props as any).formContext, serviceParam, nodeId, selectedNode, oauth2RootUrl, onOpenLink]);
+	}, [(props as any).formContext, serviceParam, nodeId, selectedNode, oauth2RootUrl, oauthReturnUrl, onOpenExternal]);
 
 	// Show the button in error color if any OAuth-related token is missing from validation errors
 	const color = useMemo(() => {

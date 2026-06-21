@@ -188,7 +188,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
-	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, envKeys = [] } = useFlowProject();
+	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, pendingOAuthTokens, clearPendingOAuthTokens, envKeys = [] } = useFlowProject();
 	const { getPreference, setPreference, isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------
@@ -198,7 +198,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const service: IService | undefined = (servicesJson as IServiceCatalog)?.[node.data.provider];
 
 	// --- OAuth callback helpers (context-free) ------------------------------
-	const { applyOAuthCallbacks, clearSecureParamsFromUrl } = useOAuthCallbacks();
+	const { applyOAuthCallbacks, applyGoogleTokens, clearSecureParamsFromUrl } = useOAuthCallbacks();
 
 	// --- Schema from the service catalog ------------------------------------
 	const schema = useMemo((): IServiceSchema | undefined => {
@@ -266,6 +266,34 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		requestAnimationFrame(() => clearSecureParamsFromUrl());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [node.id]);
+
+	// --- Apply OAuth tokens delivered out-of-band by the host (VS Code) ------
+	// Web hosts return tokens in the page URL (handled above); VS Code can't
+	// receive a web redirect, so the host intercepts the broker's deep link and
+	// pushes the tokens down via `pendingOAuthTokens`. Apply them to the node
+	// that started the login, then clear so they aren't re-applied.
+	useEffect(() => {
+		if (!pendingOAuthTokens) return;
+		const { tokens, state } = pendingOAuthTokens;
+
+		// Brokers echo the originating node_id in `state`; ignore tokens meant
+		// for another node. Malformed state falls through to the open panel.
+		let targetNodeId: string | undefined;
+		try {
+			targetNodeId = (JSON.parse(state || '{}') as { node_id?: string }).node_id;
+		} catch {
+			/* malformed state */
+		}
+		if (targetNodeId && targetNodeId !== node.id) return;
+
+		const enrichedConfig = applyGoogleTokens(node.data.config ?? {}, tokens, state);
+		persistTokensFromFormData(enrichedConfig, persistedAuthTokens);
+		setFormValues(enrichedConfig);
+		persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onContentUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
+
+		clearPendingOAuthTokens?.();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pendingOAuthTokens, node.id]);
 
 	// --- RJSF change handler ------------------------------------------------
 	const onChange = useCallback(

@@ -18,6 +18,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { TaskStatus, GenericEvent, ConnectionState, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
 import { getLogger } from '../shared/util/output';
@@ -368,6 +369,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
+						oauthReturnUrl: `${vscode.env.uriScheme}://rocketride.rocketride/auth/google`,
 						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
@@ -466,6 +468,20 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'project:openLink': {
 					if (data.url) {
 						this.openLink(data.url as string, data.displayName as string | undefined);
+					}
+					break;
+				}
+
+				// OAuth login: open the broker URL in the system browser (Google's
+				// consent screen refuses to render in a webview iframe) and arm a
+				// one-shot callback so the deep-link return delivers tokens back to
+				// this panel via project:oauthTokens.
+				case 'project:openExternal': {
+					if (data.url) {
+						CloudAuthProvider.getInstance().setPendingGoogleOAuth((tokens, state) => {
+							webview.postMessage({ type: 'project:oauthTokens', tokens, state });
+						});
+						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
 					}
 					break;
 				}
