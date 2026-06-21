@@ -1,0 +1,60 @@
+{
+	"title": "Gmail",
+	"protocol": "tool_gmail://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_gmail",
+	"prefix": "gmail",
+	"icon": "gmail.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Gmail operations as agent tools.", "Read, search, label, draft, send, and organize mail, with permanent delete gated.", "Authenticates via a Google service account or user OAuth."],
+	"tile": ["Gmail (${parameters.gmail.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Gmail",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "modify",
+				"allowHardDelete": false
+			}
+		}
+	},
+	"fields": {
+		"gmail.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Gmail scopes to request. readonly: read only. modify: read + label/organize. send: modify + send mail. full: complete mailbox access, required for permanent delete.",
+			"default": "modify",
+			"enum": [
+				["readonly", "Read-only"],
+				["modify", "Modify (read + organize)"],
+				["send", "Send (modify + send mail)"],
+				["full", "Full (allows permanent delete)"]
+			]
+		},
+		"gmail.allowHardDelete": {
+			"type": "boolean",
+			"title": "Allow permanent delete",
+			"description": "When enabled (and access is set to Full), message_delete and messages_batchDelete can permanently delete mail, bypassing Trash. Irreversible. Off by default.",
+			"default": false,
+			"enum": [
+				[true, "Yes — allow permanent delete"],
+				[false, "No — Trash only"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Gmail",
+			"properties": ["type", "google.authType", "gmail.access", "gmail.allowHardDelete"]
+		}
+	]
+}

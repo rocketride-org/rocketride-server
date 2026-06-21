@@ -124,15 +124,19 @@ def resolve_google_access(config: dict, spec: AccessSpec) -> GoogleAccess:
 
 _G = 'https://www.googleapis.com/auth'
 
+# The full mailbox scope is its own host, not under _G/. Only this scope can
+# permanently delete (messages.delete); gmail.modify only trashes.
+_GMAIL_FULL = 'https://mail.google.com/'
+
 GMAIL = AccessSpec(
     scopes={
         'readonly': [f'{_G}/gmail.readonly'],
         'modify': [f'{_G}/gmail.modify'],
         'send': [f'{_G}/gmail.modify', f'{_G}/gmail.send'],
+        'full': [_GMAIL_FULL],  # superset: read/modify/send/permanent-delete
     },
     default='modify',
-    # No allowHardDelete: permanent delete (messages.delete) needs the full
-    # https://mail.google.com/ scope, which no tier here grants. gmail.modify only trashes.
+    flags=('allowHardDelete',),  # gates permanent delete; needs the 'full' tier scope
 )
 DRIVE = AccessSpec(
     scopes={'readonly': [f'{_G}/drive.readonly'], 'write': [f'{_G}/drive']},
