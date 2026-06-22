@@ -39,6 +39,12 @@
 				["settings_sharing", "Settings sharing (settings + sendAs/delegation/S⁠MIME)"],
 				["full", "Full (allows permanent delete)"]
 			]
+		},
+		"gmail.allowHardDelete": {
+			"type": "boolean",
+			"title": "Allow permanent delete",
+			"description": "Enable permanent message/thread deletion (requires full access tier). Disabled by default to protect against accidental data loss.",
+			"default": false
 		}
 	},
 	"shape": [

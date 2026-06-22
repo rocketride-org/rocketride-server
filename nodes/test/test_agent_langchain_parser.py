@@ -8,9 +8,9 @@
 """
 Unit tests for _parse_tool_call_envelope in agent_langchain/langchain.py.
 
-No langchain install or engine runtime required — module-level deps are stubbed
-before import, and langchain_core.messages.AIMessage is replaced with a minimal
-fake so the parser's internal import resolves without the real package.
+Stubs are installed non-destructively (never overwriting real modules already in
+sys.modules), and engine stubs are cleaned up after langchain.py is loaded so
+they don't leak into other test modules sharing the same session.
 """
 
 from __future__ import annotations
@@ -29,8 +29,6 @@ _NODES_SRC = Path(__file__).resolve().parents[1] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
-_STUBS_INSTALLED = False
-
 
 class _FakeAIMessage:
     def __init__(self, content='', tool_calls=None, additional_kwargs=None):
@@ -39,69 +37,100 @@ class _FakeAIMessage:
         self.additional_kwargs = additional_kwargs or {}
 
 
-def _install_stubs():
-    global _STUBS_INSTALLED
-    if _STUBS_INSTALLED:
-        return
+# Snapshot sys.modules BEFORE any stubs so we know exactly what we add.
+_PRE_STUB = frozenset(sys.modules)
 
-    def _mod(name):
+
+def _mod_if_absent(name):
+    """Register a stub module only if name is not already in sys.modules."""
+    if name not in sys.modules:
         m = types.ModuleType(name)
         sys.modules[name] = m
         return m
+    return sys.modules[name]
 
-    depends_mod = _mod('depends')
-    depends_mod.depends = lambda *a, **kw: None
 
-    rocketlib = _mod('rocketlib')
-    rocketlib.ToolDescriptor = object
+def _install_stubs():
+    # Engine runtime stubs — only needed while exec'ing langchain.py's top-level
+    # imports. Removed after loading (see cleanup block below).
+    depends_mod = _mod_if_absent('depends')
+    if not hasattr(depends_mod, 'depends'):
+        depends_mod.depends = lambda *a, **kw: None
 
-    ai = _mod('ai')
-    ai_common = _mod('ai.common')
-    ai.common = ai_common
+    rocketlib = _mod_if_absent('rocketlib')
+    if not hasattr(rocketlib, 'ToolDescriptor'):
+        rocketlib.ToolDescriptor = object
 
-    ai_agent = _mod('ai.common.agent')
-    ai_common.agent = ai_agent
-    ai_agent.AgentBase = object
-    ai_agent.AgentContext = object
+    ai = _mod_if_absent('ai')
+    ai_common = _mod_if_absent('ai.common')
+    if not hasattr(ai, 'common'):
+        ai.common = ai_common
 
-    ai_agent_types = _mod('ai.common.agent.types')
-    ai_agent.types = ai_agent_types
-    ai_agent_types.AgentRunResult = object
+    ai_agent = _mod_if_absent('ai.common.agent')
+    if not hasattr(ai_common, 'agent'):
+        ai_common.agent = ai_agent
+    if not hasattr(ai_agent, 'AgentBase'):
+        ai_agent.AgentBase = object
+    if not hasattr(ai_agent, 'AgentContext'):
+        ai_agent.AgentContext = object
 
-    ai_schema = _mod('ai.common.schema')
-    ai_common.schema = ai_schema
-    ai_schema.Question = object
+    ai_agent_types = _mod_if_absent('ai.common.agent.types')
+    if not hasattr(ai_agent, 'types'):
+        ai_agent.types = ai_agent_types
+    if not hasattr(ai_agent_types, 'AgentRunResult'):
+        ai_agent_types.AgentRunResult = object
 
-    ai_utils = _mod('ai.common.utils')
-    ai_common.utils = ai_utils
-    ai_utils.langchain_messages_to_transcript = lambda *a, **kw: ''
-    ai_utils.normalize_bound_tools = lambda *a, **kw: []
-    ai_utils.safe_str = str
+    ai_schema = _mod_if_absent('ai.common.schema')
+    if not hasattr(ai_common, 'schema'):
+        ai_common.schema = ai_schema
+    if not hasattr(ai_schema, 'Question'):
+        ai_schema.Question = object
 
-    # langchain_core stubs — also used inside _parse_tool_call_envelope
-    lc = _mod('langchain_core')
-    lc_msgs = _mod('langchain_core.messages')
-    lc.messages = lc_msgs
-    lc_msgs.AIMessage = _FakeAIMessage
+    ai_utils = _mod_if_absent('ai.common.utils')
+    if not hasattr(ai_common, 'utils'):
+        ai_common.utils = ai_utils
+    if not hasattr(ai_utils, 'langchain_messages_to_transcript'):
+        ai_utils.langchain_messages_to_transcript = lambda *a, **kw: ''
+    if not hasattr(ai_utils, 'normalize_bound_tools'):
+        ai_utils.normalize_bound_tools = lambda *a, **kw: []
+    if not hasattr(ai_utils, 'safe_str'):
+        ai_utils.safe_str = str
 
-    lc_lm = _mod('langchain_core.language_models')
-    lc.language_models = lc_lm
-    lc_lm.BaseChatModel = object
+    # langchain_core stubs — kept in sys.modules at call time because
+    # _parse_tool_call_envelope imports AIMessage inside the function body.
+    # In CI, langchain-core is installed (agent_langchain/requirements.txt),
+    # so _mod_if_absent won't install stubs there and there's nothing to clean.
+    lc = _mod_if_absent('langchain_core')
+    lc_msgs = _mod_if_absent('langchain_core.messages')
+    if not hasattr(lc, 'messages'):
+        lc.messages = lc_msgs
+    if not hasattr(lc_msgs, 'AIMessage'):
+        lc_msgs.AIMessage = _FakeAIMessage
 
-    lc_out = _mod('langchain_core.outputs')
-    lc.outputs = lc_out
-    lc_out.ChatGeneration = object
-    lc_out.ChatResult = object
+    lc_lm = _mod_if_absent('langchain_core.language_models')
+    if not hasattr(lc, 'language_models'):
+        lc.language_models = lc_lm
+    if not hasattr(lc_lm, 'BaseChatModel'):
+        lc_lm.BaseChatModel = object
 
-    lc_tools = _mod('langchain_core.tools')
-    lc.tools = lc_tools
-    lc_tools.BaseTool = object
+    lc_out = _mod_if_absent('langchain_core.outputs')
+    if not hasattr(lc, 'outputs'):
+        lc.outputs = lc_out
+    if not hasattr(lc_out, 'ChatGeneration'):
+        lc_out.ChatGeneration = object
+    if not hasattr(lc_out, 'ChatResult'):
+        lc_out.ChatResult = object
 
-    lc_agents = _mod('langchain.agents')
-    _mod('langchain')
-    lc_agents.AgentExecutor = object
+    lc_tools = _mod_if_absent('langchain_core.tools')
+    if not hasattr(lc, 'tools'):
+        lc.tools = lc_tools
+    if not hasattr(lc_tools, 'BaseTool'):
+        lc_tools.BaseTool = object
 
-    _STUBS_INSTALLED = True
+    lc_agents = _mod_if_absent('langchain.agents')
+    _mod_if_absent('langchain')
+    if not hasattr(lc_agents, 'AgentExecutor'):
+        lc_agents.AgentExecutor = object
 
 
 _install_stubs()
@@ -113,6 +142,13 @@ _spec = importlib.util.spec_from_file_location('_agent_langchain_langchain', _LA
 _langchain_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_langchain_mod)
 _parse = _langchain_mod._parse_tool_call_envelope
+
+# Remove engine stubs we installed — they're not needed at call time and must
+# not shadow the real rocketlib/ai modules for other tests in the same session.
+_ENGINE_PREFIXES = ('rocketlib', 'ai', 'depends')
+for _name in list(sys.modules):
+    if _name not in _PRE_STUB and any(_name == p or _name.startswith(p + '.') for p in _ENGINE_PREFIXES):
+        sys.modules.pop(_name, None)
 
 
 # ---------------------------------------------------------------------------

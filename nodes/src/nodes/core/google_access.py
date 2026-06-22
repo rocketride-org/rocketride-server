@@ -140,7 +140,7 @@ GMAIL = AccessSpec(
         'full': [_GMAIL_FULL],  # superset: read/modify/send/permanent-delete
     },
     default='modify',
-    flags=(),
+    flags=('allowHardDelete',),
 )
 DRIVE = AccessSpec(
     scopes={'readonly': [f'{_G}/drive.readonly'], 'write': [f'{_G}/drive']},
