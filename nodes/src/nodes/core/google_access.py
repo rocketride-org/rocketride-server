@@ -133,10 +133,14 @@ GMAIL = AccessSpec(
         'readonly': [f'{_G}/gmail.readonly'],
         'modify': [f'{_G}/gmail.modify'],
         'send': [f'{_G}/gmail.modify', f'{_G}/gmail.send'],
+        # settings.basic: filters, IMAP, POP, vacation, forwarding addresses
+        'settings': [f'{_G}/gmail.modify', f'{_G}/gmail.settings.basic'],
+        # settings.sharing: sendAs write, delegation, S/MIME management
+        'settings_sharing': [f'{_G}/gmail.modify', f'{_G}/gmail.settings.basic', f'{_G}/gmail.settings.sharing'],
         'full': [_GMAIL_FULL],  # superset: read/modify/send/permanent-delete
     },
     default='modify',
-    flags=('allowHardDelete',),  # gates permanent delete; needs the 'full' tier scope
+    flags=(),
 )
 DRIVE = AccessSpec(
     scopes={'readonly': [f'{_G}/drive.readonly'], 'write': [f'{_G}/drive']},

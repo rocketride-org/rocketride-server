@@ -9,7 +9,7 @@
 	"prefix": "gmail",
 	"icon": "gmail.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["Exposes Gmail operations as agent tools.", "Read, search, label, draft, send, and organize mail, with permanent delete gated.", "Authenticates via a Google service account or user OAuth."],
+	"description": ["Exposes Gmail operations as agent tools.", "Read, search, label, draft, send, and organize mail; permanent delete available with full access.", "Authenticates via a Google service account or user OAuth."],
 	"tile": ["Gmail (${parameters.gmail.access})"],
 	"lanes": {},
 	"preconfig": {
@@ -21,8 +21,7 @@
 				"serviceKey": "",
 				"adminEmail": "",
 				"userToken": "",
-				"access": "modify",
-				"allowHardDelete": false
+				"access": "modify"
 			}
 		}
 	},
@@ -30,23 +29,15 @@
 		"gmail.access": {
 			"type": "string",
 			"title": "Access level",
-			"description": "Gmail scopes to request. readonly: read only. modify: read + label/organize. send: modify + send mail. full: complete mailbox access, required for permanent delete.",
+			"description": "Gmail scopes to request. readonly: read only. modify: read + label/organize. send: modify + send mail. settings: modify + filters/IMAP/POP/vacation/forwarding. settings_sharing: settings + sendAs/delegation/S⁠MIME. full: complete mailbox access, required for permanent delete.",
 			"default": "modify",
 			"enum": [
 				["readonly", "Read-only"],
 				["modify", "Modify (read + organize)"],
 				["send", "Send (modify + send mail)"],
+				["settings", "Settings (modify + filters/IMAP/vacation/forwarding)"],
+				["settings_sharing", "Settings sharing (settings + sendAs/delegation/S⁠MIME)"],
 				["full", "Full (allows permanent delete)"]
-			]
-		},
-		"gmail.allowHardDelete": {
-			"type": "boolean",
-			"title": "Allow permanent delete",
-			"description": "When enabled (and access is set to Full), message_delete and messages_batchDelete can permanently delete mail, bypassing Trash. Irreversible. Off by default.",
-			"default": false,
-			"enum": [
-				[true, "Yes — allow permanent delete"],
-				[false, "No — Trash only"]
 			]
 		}
 	},
@@ -54,7 +45,7 @@
 		{
 			"section": "Pipe",
 			"title": "Gmail",
-			"properties": ["type", "google.authType", "gmail.access", "gmail.allowHardDelete"]
+			"properties": ["type", "google.authType", "gmail.access"]
 		}
 	]
 }

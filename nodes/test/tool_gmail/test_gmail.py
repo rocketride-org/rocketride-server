@@ -82,7 +82,22 @@ for _name in _added:
 # Fake Gmail service: records terminal calls, returns canned results.
 # ---------------------------------------------------------------------------
 
-_RESOURCES = {'users', 'messages', 'threads', 'labels', 'drafts', 'history', 'attachments'}
+_RESOURCES = {
+    'users',
+    'messages',
+    'threads',
+    'labels',
+    'drafts',
+    'history',
+    'attachments',
+    # settings sub-resources
+    'settings',
+    'filters',
+    'sendAs',
+    'smimeInfo',
+    'delegates',
+    'forwardingAddresses',
+}
 
 
 class _Req:
@@ -122,8 +137,8 @@ class FakeGmail:
         return next((kw for n, kw in self.calls if n == op), None)
 
 
-def make_inst(access_tier='modify', allow_hard_delete=False, results=None):
-    access = ga.resolve_google_access({'access': access_tier, 'allowHardDelete': allow_hard_delete}, ga.GMAIL)
+def make_inst(access_tier='modify', results=None):
+    access = ga.resolve_google_access({'access': access_tier}, ga.GMAIL)
     inst = IInstance.IInstance()
     inst.IGlobal = types.SimpleNamespace(service=FakeGmail(results or {}), access=access)
     return inst
@@ -269,30 +284,24 @@ def test_draft_send_requires_send_scope():
 
 
 # ---------------------------------------------------------------------------
-# Hard delete gate (allowHardDelete flag + full tier)
+# Hard delete gate (full tier)
 # ---------------------------------------------------------------------------
 
 
-def test_hard_delete_blocked_when_flag_off():
-    inst = make_inst(access_tier='full', allow_hard_delete=False)
-    with pytest.raises(ga.GoogleAccessError):
-        inst.message_delete({'id': 'm1'})
-
-
 def test_hard_delete_blocked_without_full_tier():
-    # Flag on, but a non-full tier cannot grant the delete scope.
-    inst = make_inst(access_tier='send', allow_hard_delete=True)
+    # Non-full tier cannot grant the permanent-delete scope.
+    inst = make_inst(access_tier='send')
     with pytest.raises(ga.GoogleAccessError):
         inst.message_delete({'id': 'm1'})
 
 
-def test_hard_delete_allowed_with_flag_and_full_tier():
-    inst = make_inst(access_tier='full', allow_hard_delete=True, results={'delete': {}})
+def test_hard_delete_allowed_with_full_tier():
+    inst = make_inst(access_tier='full', results={'delete': {}})
     assert inst.message_delete({'id': 'm1'}) == {'deleted': True, 'id': 'm1'}
 
 
 def test_batch_delete_enforces_cap_and_gate():
-    inst = make_inst(access_tier='full', allow_hard_delete=True, results={'batchDelete': {}})
+    inst = make_inst(access_tier='full', results={'batchDelete': {}})
     assert inst.messages_batchDelete({'ids': ['a', 'b', 'c']}) == {'deleted': 3}
     with pytest.raises(ValueError):
         inst.messages_batchDelete({'ids': [f'id{i}' for i in range(1001)]})
@@ -334,3 +343,569 @@ def test_mock_sdk_user_auth_builds_service(monkeypatch):
 
     svc = gmail_client.build_service('user', {'userToken': '{"access_token": "mock-tok"}'}, ['scope'])
     assert gmail_client.execute(svc.users().labels().list(userId='me'))['labels'][0]['id'] == 'INBOX'
+
+
+def test_expired_token_no_refresh_path_raises(monkeypatch):
+    """Expired token with no oauth_server_url and no client creds → clear ValueError."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    from nodes.tool_gmail import gmail_client
+    import time
+
+    expired_token = json.dumps(
+        {
+            'access_token': 'ya29.old',
+            'refresh_token': '1//x',
+            'expiry_date': int((time.time() - 3600) * 1000),  # 1 hour ago
+        }
+    )
+    with pytest.raises(ValueError, match='expired'):
+        gmail_client.build_service('user', {'userToken': expired_token}, ['scope'])
+
+
+def test_valid_token_sets_expiry_on_credentials(monkeypatch):
+    """A fresh token with expiry_date sets creds.expiry so the library won't auto-refresh."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    from nodes.tool_gmail import gmail_client
+    import time
+
+    future_expiry_ms = int((time.time() + 3600) * 1000)
+    token = json.dumps({'access_token': 'mock-tok', 'expiry_date': future_expiry_ms})
+    svc = gmail_client.build_service('user', {'userToken': token}, ['scope'])
+    assert svc is not None
+
+
+def test_build_service_raises_on_scope_mismatch(monkeypatch):
+    """Token with only gmail.modify scope should raise immediately when settings scopes are required."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    from nodes.tool_gmail import gmail_client
+
+    token = json.dumps(
+        {
+            'access_token': 'tok',
+            'scope': 'https://www.googleapis.com/auth/gmail.modify',
+        }
+    )
+    with pytest.raises(ValueError, match='missing required scopes'):
+        gmail_client.build_service(
+            'user',
+            {'userToken': token},
+            ['https://www.googleapis.com/auth/gmail.settings.basic'],
+        )
+
+
+def test_build_service_full_scope_token_not_blocked(monkeypatch):
+    """https://mail.google.com/ (full scope) must not trigger the scope-mismatch check."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    from nodes.tool_gmail import gmail_client
+
+    token = json.dumps({'access_token': 'tok', 'scope': 'https://mail.google.com/'})
+    svc = gmail_client.build_service(
+        'user',
+        {'userToken': token},
+        ['https://www.googleapis.com/auth/gmail.settings.basic'],
+    )
+    assert svc is not None
+
+
+def test_build_service_no_scope_field_does_not_raise(monkeypatch):
+    """Token without a scope field should not trigger the scope check (broker may omit it)."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    from nodes.tool_gmail import gmail_client
+
+    token = json.dumps({'access_token': 'tok'})
+    # Should not raise even though settings scope is required — no scope metadata to check against
+    svc = gmail_client.build_service(
+        'user',
+        {'userToken': token},
+        ['https://www.googleapis.com/auth/gmail.settings.basic'],
+    )
+    assert svc is not None
+
+
+# ---------------------------------------------------------------------------
+# services.json contract: all GMAIL tiers exist in the access enum
+# ---------------------------------------------------------------------------
+
+
+def test_services_json_access_enum_matches_gmail_spec():
+    fields = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['fields']
+    enum_tiers = {v for v, _ in fields['gmail.access']['enum']}
+    spec_tiers = set(ga.GMAIL.scopes)
+    assert spec_tiers == enum_tiers, f'tier mismatch between GMAIL spec and services.json: {spec_tiers ^ enum_tiers}'
+
+
+# ---------------------------------------------------------------------------
+# Thread ops
+# ---------------------------------------------------------------------------
+
+
+def test_thread_modify_sets_labels():
+    inst = make_inst(results={'modify': {'id': 't1', 'messages': []}})
+    out = inst.thread_modify({'id': 't1', 'addLabelIds': ['STARRED']})
+    body = inst.IGlobal.service.call_for('modify')['body']
+    assert body == {'addLabelIds': ['STARRED']}
+    assert out['id'] == 't1'
+
+
+def test_thread_modify_requires_labels():
+    inst = make_inst()
+    with pytest.raises(ValueError):
+        inst.thread_modify({'id': 't1'})
+
+
+# ---------------------------------------------------------------------------
+# check_connection diagnostics
+# ---------------------------------------------------------------------------
+
+
+def _inst_with_token(access_tier: str, token: dict | None) -> 'IInstance.IInstance':
+    """Return an IInstance whose IGlobal.glb simulates a persisted user token."""
+    inst = make_inst(access_tier)
+    token_json = json.dumps(token) if token is not None else ''
+    inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_gmail', connConfig={})
+    inst.IGlobal._token_cfg = {'authType': 'user', 'userToken': token_json}
+    return inst
+
+
+def _patch_config(monkeypatch, inst):
+    """Make Config.getNodeConfig return the inst's _token_cfg."""
+    cfg_mod = MagicMock()
+    cfg_mod.Config.getNodeConfig = MagicMock(return_value=inst.IGlobal._token_cfg)
+    monkeypatch.setitem(sys.modules, 'ai.common.config', cfg_mod)
+
+
+def test_check_connection_missing_scope(monkeypatch):
+    """check_connection reports missing scopes and provides an action."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    inst = _inst_with_token(
+        'settings', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
+    )
+    _patch_config(monkeypatch, inst)
+    result = inst.check_connection({})
+    assert not result['connection_ok']
+    assert any('gmail.settings.basic' in s for s in result['missing_scopes'])
+    assert result['action'] is not None
+
+
+def test_check_connection_ok_with_full_scope(monkeypatch):
+    """check_connection reports OK when the token carries https://mail.google.com/ (full scope)."""
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    inst = _inst_with_token('settings', {'access_token': 'tok', 'scope': 'https://mail.google.com/'})
+    _patch_config(monkeypatch, inst)
+    result = inst.check_connection({})
+    assert result['connection_ok']
+    assert result['missing_scopes'] == []
+    assert result['action'] is None
+
+
+def test_thread_trash_and_untrash():
+    inst = make_inst(results={'trash': {'id': 't1', 'messages': []}, 'untrash': {'id': 't1', 'messages': []}})
+    assert inst.thread_trash({'id': 't1'})['id'] == 't1'
+    assert inst.thread_untrash({'id': 't1'})['id'] == 't1'
+
+
+def test_thread_delete_blocked_without_full_tier():
+    inst = make_inst(access_tier='send')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.thread_delete({'id': 't1'})
+
+
+def test_thread_delete_allowed_with_full_tier():
+    inst = make_inst(access_tier='full', results={'delete': {}})
+    assert inst.thread_delete({'id': 't1'}) == {'deleted': True, 'id': 't1'}
+
+
+# ---------------------------------------------------------------------------
+# Message convenience wrappers
+# ---------------------------------------------------------------------------
+
+
+def test_message_archive_removes_inbox_label():
+    inst = make_inst(results={'modify': {'id': 'm1', 'labelIds': []}})
+    inst.message_archive({'id': 'm1'})
+    body = inst.IGlobal.service.call_for('modify')['body']
+    assert body == {'removeLabelIds': ['INBOX']}
+
+
+def test_message_mark_read_removes_unread():
+    inst = make_inst(results={'modify': {'id': 'm1', 'labelIds': []}})
+    inst.message_mark_read({'id': 'm1'})
+    assert inst.IGlobal.service.call_for('modify')['body'] == {'removeLabelIds': ['UNREAD']}
+
+
+def test_message_mark_unread_adds_unread():
+    inst = make_inst(results={'modify': {'id': 'm1', 'labelIds': ['UNREAD']}})
+    inst.message_mark_unread({'id': 'm1'})
+    assert inst.IGlobal.service.call_for('modify')['body'] == {'addLabelIds': ['UNREAD']}
+
+
+def test_message_star_and_unstar():
+    inst = make_inst(results={'modify': {'id': 'm1', 'labelIds': ['STARRED']}})
+    inst.message_star({'id': 'm1'})
+    assert inst.IGlobal.service.call_for('modify')['body'] == {'addLabelIds': ['STARRED']}
+
+    inst2 = make_inst(results={'modify': {'id': 'm1', 'labelIds': []}})
+    inst2.message_unstar({'id': 'm1'})
+    assert inst2.IGlobal.service.call_for('modify')['body'] == {'removeLabelIds': ['STARRED']}
+
+
+def test_message_convenience_blocked_on_readonly():
+    inst = make_inst(access_tier='readonly')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.message_archive({'id': 'm1'})
+
+
+# ---------------------------------------------------------------------------
+# message_get_body: MIME extraction
+# ---------------------------------------------------------------------------
+
+
+def test_message_get_body_extracts_text_and_html():
+    import base64
+
+    def _b64(s):
+        return base64.urlsafe_b64encode(s.encode()).decode()
+
+    raw_msg = {
+        'id': 'm1',
+        'threadId': 't1',
+        'snippet': 'Hello',
+        'payload': {
+            'mimeType': 'multipart/alternative',
+            'parts': [
+                {'mimeType': 'text/plain', 'body': {'data': _b64('plain text')}},
+                {'mimeType': 'text/html', 'body': {'data': _b64('<b>html</b>')}},
+            ],
+        },
+    }
+    inst = make_inst(results={'get': raw_msg})
+    out = inst.message_get_body({'id': 'm1'})
+    assert out['text'] == 'plain text'
+    assert out['html'] == '<b>html</b>'
+
+
+def test_message_get_body_nested_parts():
+    """Nested multipart structure is recursed."""
+    import base64
+
+    def _b64(s):
+        return base64.urlsafe_b64encode(s.encode()).decode()
+
+    raw_msg = {
+        'id': 'm2',
+        'payload': {
+            'mimeType': 'multipart/mixed',
+            'parts': [
+                {
+                    'mimeType': 'multipart/alternative',
+                    'parts': [
+                        {'mimeType': 'text/plain', 'body': {'data': _b64('deep text')}},
+                    ],
+                },
+            ],
+        },
+    }
+    inst = make_inst(results={'get': raw_msg})
+    out = inst.message_get_body({'id': 'm2'})
+    assert out['text'] == 'deep text'
+    assert out['html'] is None
+
+
+# ---------------------------------------------------------------------------
+# HTML send / attachments
+# ---------------------------------------------------------------------------
+
+
+def test_send_html_body_encodes_multipart():
+    import base64
+
+    inst = make_inst(access_tier='send', results={'get': {'messages': []}, 'send': {'id': 's1', 'threadId': 't1'}})
+    inst.message_send({'to': 'a@x.com', 'subject': 'Hi', 'html_body': '<b>hello</b>'})
+    send_kwargs = inst.IGlobal.service.call_for('send')
+    raw = base64.urlsafe_b64decode(send_kwargs['body']['raw']).decode('utf-8', errors='replace')
+    # The decoded MIME bytes always contain the Content-Type headers in plain text.
+    assert 'text/html' in raw
+    assert 'multipart/alternative' in raw
+
+
+def test_send_with_attachment_encodes_attachment():
+    import base64
+
+    inst = make_inst(access_tier='send', results={'get': {'messages': []}, 'send': {'id': 's1', 'threadId': 't1'}})
+    content_b64 = base64.b64encode(b'hello file').decode()
+    inst.message_send(
+        {
+            'to': 'a@x.com',
+            'subject': 'With attachment',
+            'html_body': '<p>see attached</p>',
+            'attachments': [{'filename': 'test.txt', 'content_base64': content_b64, 'mime_type': 'text/plain'}],
+        }
+    )
+    send_kwargs = inst.IGlobal.service.call_for('send')
+    raw = base64.urlsafe_b64decode(send_kwargs['body']['raw']).decode('utf-8', errors='replace')
+    assert 'Content-Disposition: attachment' in raw
+    assert 'test.txt' in raw
+
+
+def test_draft_create_with_html_body():
+    import base64
+
+    inst = make_inst(results={'create': {'id': 'd1', 'message': {'id': 'm1', 'threadId': 't1'}}})
+    inst.draft_create({'to': 'a@x.com', 'subject': 'Draft HTML', 'html_body': '<p>rich</p>'})
+    create_kwargs = inst.IGlobal.service.call_for('create')
+    raw = base64.urlsafe_b64decode(create_kwargs['body']['message']['raw']).decode('utf-8', errors='replace')
+    assert 'text/html' in raw
+
+
+# ---------------------------------------------------------------------------
+# Filters
+# ---------------------------------------------------------------------------
+
+
+def test_filter_list_requires_settings_scope():
+    inst = make_inst(access_tier='modify')  # modify doesn't have settings.basic
+    with pytest.raises(ga.GoogleAccessError):
+        inst.filter_list({})
+
+
+def test_filter_list_with_settings_tier():
+    inst = make_inst(access_tier='settings', results={'list': {'filter': [{'id': 'f1', 'criteria': {}, 'action': {}}]}})
+    out = inst.filter_list({})
+    assert out[0]['id'] == 'f1'
+
+
+def test_filter_create_passes_body():
+    inst = make_inst(
+        access_tier='settings',
+        results={'create': {'id': 'f2', 'criteria': {'from': 'x@y.com'}, 'action': {'addLabelIds': ['L1']}}},
+    )
+    out = inst.filter_create({'criteria': {'from': 'x@y.com'}, 'action': {'addLabelIds': ['L1']}})
+    assert out['id'] == 'f2'
+    body = inst.IGlobal.service.call_for('create')['body']
+    assert body['criteria'] == {'from': 'x@y.com'}
+
+
+def test_filter_create_rejects_non_dict_criteria():
+    inst = make_inst(access_tier='settings')
+    with pytest.raises(ValueError):
+        inst.filter_create({'criteria': 'from:x', 'action': {}})
+
+
+def test_filter_delete():
+    inst = make_inst(access_tier='settings', results={'delete': {}})
+    out = inst.filter_delete({'id': 'f1'})
+    assert out == {'deleted': True, 'id': 'f1'}
+
+
+# ---------------------------------------------------------------------------
+# Watch
+# ---------------------------------------------------------------------------
+
+
+def test_watch_start_requires_topic():
+    inst = make_inst()
+    with pytest.raises(ValueError):
+        inst.watch_start({})
+
+
+def test_watch_start_sends_topic():
+    inst = make_inst(results={'watch': {'historyId': '123', 'expiration': '9999'}})
+    out = inst.watch_start({'topic_name': 'projects/p/topics/t'})
+    assert out['historyId'] == '123'
+    body = inst.IGlobal.service.call_for('watch')['body']
+    assert body['topicName'] == 'projects/p/topics/t'
+
+
+def test_watch_stop():
+    inst = make_inst(results={'stop': {}})
+    out = inst.watch_stop({})
+    assert out == {'stopped': True}
+
+
+# ---------------------------------------------------------------------------
+# sendAs
+# ---------------------------------------------------------------------------
+
+
+def test_send_as_list_requires_settings():
+    inst = make_inst(access_tier='modify')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.send_as_list({})
+
+
+def test_send_as_list_with_settings_tier():
+    inst = make_inst(
+        access_tier='settings', results={'list': {'sendAs': [{'sendAsEmail': 'a@b.com', 'isPrimary': True}]}}
+    )
+    out = inst.send_as_list({})
+    assert out[0]['sendAsEmail'] == 'a@b.com'
+
+
+def test_send_as_create_requires_settings_sharing():
+    inst = make_inst(access_tier='settings')  # settings but not settings_sharing
+    with pytest.raises(ga.GoogleAccessError):
+        inst.send_as_create({'send_as_email': 'alias@x.com'})
+
+
+def test_send_as_delete():
+    inst = make_inst(access_tier='settings_sharing', results={'delete': {}})
+    out = inst.send_as_delete({'send_as_email': 'alias@x.com'})
+    assert out == {'deleted': True, 'sendAsEmail': 'alias@x.com'}
+
+
+# ---------------------------------------------------------------------------
+# IMAP / POP
+# ---------------------------------------------------------------------------
+
+
+def test_imap_get_requires_settings():
+    inst = make_inst(access_tier='modify')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.imap_get({})
+
+
+def test_imap_get_with_settings_tier():
+    inst = make_inst(access_tier='settings', results={'getImap': {'enabled': True, 'autoExpunge': False}})
+    out = inst.imap_get({})
+    assert out['enabled'] is True
+
+
+def test_imap_update_passes_body():
+    inst = make_inst(access_tier='settings', results={'updateImap': {'enabled': False}})
+    inst.imap_update({'enabled': False, 'auto_expunge': True})
+    body = inst.IGlobal.service.call_for('updateImap')['body']
+    assert body['enabled'] is False
+    assert body['autoExpunge'] is True
+
+
+def test_imap_update_requires_at_least_one_field():
+    inst = make_inst(access_tier='settings')
+    with pytest.raises(ValueError):
+        inst.imap_update({})
+
+
+def test_pop_get_and_update():
+    inst = make_inst(
+        access_tier='settings',
+        results={'getPop': {'accessWindow': 'allMail'}, 'updatePop': {'accessWindow': 'fromNowOn'}},
+    )
+    assert inst.pop_get({})['accessWindow'] == 'allMail'
+    inst.pop_update({'access_window': 'fromNowOn'})
+    body = inst.IGlobal.service.call_for('updatePop')['body']
+    assert body['accessWindow'] == 'fromNowOn'
+
+
+# ---------------------------------------------------------------------------
+# Vacation
+# ---------------------------------------------------------------------------
+
+
+def test_vacation_get_requires_settings():
+    inst = make_inst(access_tier='modify')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.vacation_get({})
+
+
+def test_vacation_get_returns_settings():
+    inst = make_inst(
+        access_tier='settings', results={'getVacation': {'enableAutoReply': False, 'responseSubject': 'OOO'}}
+    )
+    out = inst.vacation_get({})
+    assert out['enableAutoReply'] is False
+
+
+def test_vacation_update_sends_enable_flag():
+    inst = make_inst(access_tier='settings', results={'updateVacation': {'enableAutoReply': True}})
+    inst.vacation_update({'enable_auto_reply': True, 'response_subject': 'Away'})
+    body = inst.IGlobal.service.call_for('updateVacation')['body']
+    assert body['enableAutoReply'] is True
+    assert body['responseSubject'] == 'Away'
+
+
+def test_vacation_update_requires_fields():
+    inst = make_inst(access_tier='settings')
+    with pytest.raises(ValueError):
+        inst.vacation_update({})
+
+
+# ---------------------------------------------------------------------------
+# Forwarding addresses
+# ---------------------------------------------------------------------------
+
+
+def test_forwarding_address_list():
+    inst = make_inst(
+        access_tier='settings',
+        results={'list': {'forwardingAddresses': [{'forwardingEmail': 'f@x.com', 'verificationStatus': 'accepted'}]}},
+    )
+    out = inst.forwarding_address_list({})
+    assert out[0]['forwardingEmail'] == 'f@x.com'
+
+
+def test_forwarding_address_create_and_delete():
+    inst = make_inst(
+        access_tier='settings',
+        results={
+            'create': {'forwardingEmail': 'f@x.com', 'verificationStatus': 'pending'},
+            'delete': {},
+        },
+    )
+    out = inst.forwarding_address_create({'forwarding_email': 'f@x.com'})
+    assert out['verificationStatus'] == 'pending'
+    out2 = inst.forwarding_address_delete({'forwarding_email': 'f@x.com'})
+    assert out2['deleted'] is True
+
+
+# ---------------------------------------------------------------------------
+# Delegation
+# ---------------------------------------------------------------------------
+
+
+def test_delegate_list_requires_settings_sharing():
+    inst = make_inst(access_tier='settings')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.delegate_list({})
+
+
+def test_delegate_create_and_delete():
+    inst = make_inst(
+        access_tier='settings_sharing',
+        results={
+            'create': {'delegateEmail': 'd@x.com', 'verificationStatus': 'pending'},
+            'delete': {},
+        },
+    )
+    out = inst.delegate_create({'delegate_email': 'd@x.com'})
+    assert out['delegateEmail'] == 'd@x.com'
+    out2 = inst.delegate_delete({'delegate_email': 'd@x.com'})
+    assert out2['deleted'] is True
+
+
+# ---------------------------------------------------------------------------
+# S/MIME
+# ---------------------------------------------------------------------------
+
+
+def test_smime_list_requires_settings():
+    inst = make_inst(access_tier='modify')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.smime_list({'send_as_email': 'a@b.com'})
+
+
+def test_smime_set_default_requires_settings_sharing():
+    inst = make_inst(access_tier='settings')
+    with pytest.raises(ga.GoogleAccessError):
+        inst.smime_set_default({'send_as_email': 'a@b.com', 'id': 'key1'})
+
+
+def test_smime_delete():
+    inst = make_inst(access_tier='settings_sharing', results={'delete': {}})
+    out = inst.smime_delete({'send_as_email': 'a@b.com', 'id': 'key1'})
+    assert out == {'deleted': True, 'id': 'key1', 'sendAsEmail': 'a@b.com'}

@@ -37,11 +37,21 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import time as _time
 from email.message import EmailMessage
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any
 
 # Gmail's per-call ceiling for batchModify / batchDelete is 1000 ids.
 MAX_BATCH = 1000
+
+# HTTP status codes worth retrying (rate-limit + transient server errors).
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+# Google's full-access Gmail scope — a superset of all granular Gmail scopes.
+_GMAIL_FULL_SCOPE = 'https://mail.google.com/'
 
 # Gmail uses the special id 'me' to mean the authorized mailbox.
 USER_ID = 'me'
@@ -77,17 +87,99 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
     from googleapiclient.discovery import build
 
     if auth_type == 'user':
+        import datetime as _dt
+
         from google.oauth2.credentials import Credentials
 
         info = json.loads(_decode_blob(cfg.get('userToken') or ''))
-        creds = Credentials(
-            token=info.get('access_token') or info.get('token'),
-            refresh_token=info.get('refresh_token'),
-            token_uri=info.get('token_uri', 'https://oauth2.googleapis.com/token'),
-            client_id=info.get('client_id'),
-            client_secret=info.get('client_secret'),
-            scopes=scopes,
-        )
+        access_token = info.get('access_token') or info.get('token') or ''
+        refresh_token = info.get('refresh_token')
+        client_id = info.get('client_id')
+        client_secret = info.get('client_secret')
+        token_uri = info.get('token_uri', 'https://oauth2.googleapis.com/token')
+        oauth_server_url = info.get('oauth_server_url')
+        expiry_date_ms = info.get('expiry_date')
+
+        expiry: '_dt.datetime | None' = None
+        if expiry_date_ms:
+            expiry = _dt.datetime.utcfromtimestamp(expiry_date_ms / 1000)
+
+        granted_scopes = set((info.get('scope') or '').split())
+        if granted_scopes and _GMAIL_FULL_SCOPE not in granted_scopes:
+            missing = [s for s in scopes if s not in granted_scopes]
+            if missing:
+                raise ValueError(
+                    'Gmail: your Google account authorization is missing required scopes '
+                    'for the selected access tier. Please disconnect and reconnect your '
+                    f'Google account. Missing: {", ".join(missing)}'
+                )
+
+        if client_id and client_secret:
+            # Standard Google OAuth2 credentials: the library handles refresh automatically.
+            creds = Credentials(
+                token=access_token,
+                refresh_token=refresh_token,
+                token_uri=token_uri,
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=scopes,
+            )
+            if expiry is not None:
+                creds.expiry = expiry
+        else:
+            # Fail fast: if the token is already expired and there is no refresh path
+            # (no broker URL and no client credentials), the first API call would fail
+            # with a cryptic RefreshError. Surface a clear message now.
+            if expiry is not None and expiry < _dt.datetime.utcnow() and not oauth_server_url:
+                raise ValueError(
+                    'Gmail access token has expired. Please reconnect your Google account in the node settings.'
+                )
+            # Broker-issued token: client_id/client_secret belong to the broker's Google app
+            # and are never embedded in the token. Override refresh() so that any refresh
+            # attempt (proactive or after a 401) goes to the broker instead of Google directly.
+            _broker_url = oauth_server_url
+
+            class _BrokerCredentials(Credentials):
+                def refresh(self, request: object) -> None:  # type: ignore[override]
+                    import urllib.error as _uerr
+                    import urllib.request as _req
+
+                    import google.auth.exceptions as _gae
+
+                    if not _broker_url or not self.refresh_token:
+                        raise _gae.RefreshError(
+                            'Gmail access token has expired. Please reconnect your Google account in the node settings.'
+                        )
+                    body = json.dumps({'refresh_token': self.refresh_token}).encode()
+                    req = _req.Request(
+                        _broker_url,
+                        data=body,
+                        headers={'Content-Type': 'application/json'},
+                        method='POST',
+                    )
+                    try:
+                        with _req.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode())
+                    except _uerr.URLError as exc:
+                        raise _gae.RefreshError(
+                            f'Gmail token refresh failed (broker unreachable: {exc}). '
+                            'Please reconnect your Google account.'
+                        ) from exc
+                    self.token = data.get('access_token') or self.token
+                    ms = data.get('expiry_date')
+                    if ms:
+                        self.expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
+
+            creds = _BrokerCredentials(
+                token=access_token,
+                refresh_token=refresh_token,
+                token_uri=token_uri,
+                client_id=None,
+                client_secret=None,
+                scopes=scopes,
+            )
+            if expiry is not None:
+                creds.expiry = expiry
     else:
         from google.oauth2 import service_account
 
@@ -102,14 +194,25 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
 
 
 def execute(request: Any) -> dict:
-    """Run a Gmail API request, converting HttpError into a clean ValueError."""
-    try:
-        return request.execute() or {}
-    except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
-        status = getattr(getattr(exc, 'resp', None), 'status', None)
-        detail = getattr(exc, 'reason', None) or str(exc)
-        prefix = f'Gmail API {status}: ' if status else 'Gmail request failed: '
-        raise ValueError(f'{prefix}{detail}') from exc
+    """Run a Gmail API request with exponential-backoff retry on 429/5xx."""
+    base_delay = 1.0
+    for attempt in range(4):
+        try:
+            return request.execute() or {}
+        except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
+            status = getattr(getattr(exc, 'resp', None), 'status', None)
+            if status and int(status) in _RETRY_STATUSES and attempt < 3:
+                _time.sleep(min(base_delay * (2**attempt), 60.0))
+                continue
+            detail = getattr(exc, 'reason', None) or str(exc)
+            if status and int(status) == 403:
+                raise ValueError(
+                    f'Gmail API 403: {detail}. If this is a scope error, disconnect '
+                    'and reconnect your Google account with the required access tier.'
+                ) from exc
+            prefix = f'Gmail API {status}: ' if status else 'Gmail request failed: '
+            raise ValueError(f'{prefix}{detail}') from exc
+    raise RuntimeError('execute: retry loop exhausted unexpectedly')  # unreachable
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +230,7 @@ def build_raw_message(
     in_reply_to: str | None = None,
     references: str | None = None,
 ) -> str:
-    """Assemble a MIME message and return base64url-encoded raw bytes for send."""
+    """Assemble a plain-text MIME message and return base64url-encoded raw bytes."""
     msg = EmailMessage()
     msg['To'] = to
     if cc:
@@ -141,6 +244,77 @@ def build_raw_message(
         msg['References'] = references
     msg.set_content(body or '')
     return base64.urlsafe_b64encode(msg.as_bytes()).decode('ascii')
+
+
+def build_html_message(
+    *,
+    to: str,
+    subject: str,
+    html_body: str,
+    text_body: str | None = None,
+    cc: str | None = None,
+    bcc: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+    attachments: list[dict] | None = None,
+) -> str:
+    """Assemble a multipart MIME message with HTML body and optional attachments.
+
+    Each entry in ``attachments`` must have keys ``filename``, ``content_base64``
+    (standard or url-safe base64), and optionally ``mime_type`` (defaults to
+    application/octet-stream).
+
+    Returns base64url-encoded raw bytes suitable for the Gmail send/draft APIs.
+    """
+    alt = MIMEMultipart('alternative')
+    alt.attach(MIMEText(text_body or '', 'plain', 'utf-8'))
+    alt.attach(MIMEText(html_body, 'html', 'utf-8'))
+
+    if attachments:
+        outer = MIMEMultipart('mixed')
+        if to:
+            outer['To'] = to
+        if cc:
+            outer['Cc'] = cc
+        if bcc:
+            outer['Bcc'] = bcc
+        outer['Subject'] = subject
+        if in_reply_to:
+            outer['In-Reply-To'] = in_reply_to
+        if references:
+            outer['References'] = references
+        outer.attach(alt)
+        for att in attachments:
+            filename = att.get('filename') or 'attachment'
+            mime_type = att.get('mime_type') or 'application/octet-stream'
+            main_type, _, sub_type = mime_type.partition('/')
+            part = MIMEBase(main_type, sub_type or 'octet-stream')
+            raw_b64 = att.get('content_base64') or ''
+            # Accept either standard (+/) or URL-safe (-_) base64.
+            try:
+                data = base64.urlsafe_b64decode(raw_b64 + '==')
+            except Exception:
+                data = base64.b64decode(raw_b64 + '==')
+            part.set_payload(data)
+            from email import encoders as _enc
+
+            _enc.encode_base64(part)
+            part.add_header('Content-Disposition', 'attachment', filename=filename)
+            outer.attach(part)
+        return base64.urlsafe_b64encode(outer.as_bytes()).decode('ascii')
+
+    # No attachments — plain alternative container.
+    alt['To'] = to
+    if cc:
+        alt['Cc'] = cc
+    if bcc:
+        alt['Bcc'] = bcc
+    alt['Subject'] = subject
+    if in_reply_to:
+        alt['In-Reply-To'] = in_reply_to
+    if references:
+        alt['References'] = references
+    return base64.urlsafe_b64encode(alt.as_bytes()).decode('ascii')
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +405,71 @@ def clean_history(record: dict | None) -> dict:
         if key in record:
             out[key] = [clean_ref(e.get('message')) for e in record[key]]
     return out
+
+
+def clean_filter(f: dict | None) -> dict:
+    if not isinstance(f, dict):
+        return {}
+    return {k: f[k] for k in ('id', 'criteria', 'action') if k in f}
+
+
+def clean_send_as(s: dict | None) -> dict:
+    if not isinstance(s, dict):
+        return {}
+    return {
+        k: s[k]
+        for k in (
+            'sendAsEmail',
+            'displayName',
+            'replyToAddress',
+            'signature',
+            'isPrimary',
+            'isDefault',
+            'verificationStatus',
+            'treatAsAlias',
+        )
+        if k in s
+    }
+
+
+def clean_vacation(v: dict | None) -> dict:
+    if not isinstance(v, dict):
+        return {}
+    return {
+        k: v[k]
+        for k in (
+            'enableAutoReply',
+            'responseSubject',
+            'responseBodyPlainText',
+            'responseBodyHtml',
+            'restrictToContacts',
+            'restrictToDomain',
+            'startTime',
+            'endTime',
+        )
+        if k in v
+    }
+
+
+def clean_forwarding_address(a: dict | None) -> dict:
+    if not isinstance(a, dict):
+        return {}
+    return {k: a[k] for k in ('forwardingEmail', 'verificationStatus') if k in a}
+
+
+def clean_delegate(d: dict | None) -> dict:
+    if not isinstance(d, dict):
+        return {}
+    return {k: d[k] for k in ('delegateEmail', 'verificationStatus') if k in d}
+
+
+def clean_imap(i: dict | None) -> dict:
+    if not isinstance(i, dict):
+        return {}
+    return {k: i[k] for k in ('enabled', 'autoExpunge', 'expungeBehavior', 'maxFolderSize') if k in i}
+
+
+def clean_pop(p: dict | None) -> dict:
+    if not isinstance(p, dict):
+        return {}
+    return {k: p[k] for k in ('accessWindow', 'disposition') if k in p}

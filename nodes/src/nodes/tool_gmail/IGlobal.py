@@ -58,10 +58,7 @@ class IGlobal(IGlobalBase):
         from .gmail_client import build_service
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.access = resolve_google_access(
-            {'access': cfg.get('access'), 'allowHardDelete': cfg.get('allowHardDelete', False)},
-            GMAIL,
-        )
+        self.access = resolve_google_access({'access': cfg.get('access')}, GMAIL)
         auth_type = (cfg.get('authType') or 'service').strip()
         self.service = build_service(auth_type, cfg, self.access.scopes)
 
@@ -71,14 +68,30 @@ class IGlobal(IGlobalBase):
 
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             # Surfaces tier/flag misconfig (e.g. unknown access tier) as a warning.
-            resolve_google_access(
-                {'access': cfg.get('access'), 'allowHardDelete': cfg.get('allowHardDelete', False)},
-                GMAIL,
-            )
+            resolve_google_access({'access': cfg.get('access')}, GMAIL)
             auth_type = (cfg.get('authType') or 'service').strip()
             if auth_type == 'user':
-                if not str(cfg.get('userToken') or '').strip():
+                token_str = str(cfg.get('userToken') or '').strip()
+                if not token_str:
                     warning('Gmail: sign in with Google to provide an access token')
+                else:
+                    try:
+                        from .gmail_client import _decode_blob
+                        import json as _json
+
+                        token_info = _json.loads(_decode_blob(token_str))
+                        granted = set((token_info.get('scope') or '').split())
+                        resolved = resolve_google_access({'access': cfg.get('access')}, GMAIL)
+                        _full = 'https://mail.google.com/'
+                        missing = [] if _full in granted else [s for s in resolved.scopes if s not in granted]
+                        if missing and granted:
+                            warning(
+                                'Gmail: your Google account authorization is missing scopes '
+                                'for the selected access tier. Please disconnect and reconnect '
+                                f'your Google account. Missing: {", ".join(missing)}'
+                            )
+                    except Exception:
+                        pass  # scope check must not block config validation
             elif not str(cfg.get('serviceKey') or '').strip():
                 warning('Gmail: a service account key file is required')
         except Exception as e:
