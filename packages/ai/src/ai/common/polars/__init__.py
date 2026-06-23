@@ -40,7 +40,15 @@ import os
 import platform
 import sys
 
-from depends import depends, pip
+from depends import FileLock, _get_cache_dir, depends, pip
+
+try:
+    from engLib import debug as _debug
+except Exception:  # pragma: no cover - engLib is only present in the engine runtime
+
+    def _debug(*_args, **_kwargs):
+        """No-op fallback when the engine logging helper is unavailable."""
+
 
 # polars-lts-cpu only matters on x86_64; ARM wheels don't ship AVX2 code paths.
 _NEEDS_LTS = platform.machine().lower() in ('x86_64', 'amd64')
@@ -52,6 +60,10 @@ if _NEEDS_LTS:
     try:
         import importlib.metadata as _md
 
+        # `polars` and `polars-lts-cpu` are distinct PyPI *distributions* that
+        # install into the same `polars` *import* namespace. version() queries
+        # the distribution name, so this detects a transitively-pulled plain
+        # `polars` even though the import name is identical for both.
         _has_plain_polars = False
         try:
             _md.version('polars')
@@ -64,17 +76,23 @@ if _NEEDS_LTS:
         if _has_plain_polars:
             # Plain `polars` was pulled in transitively (img2table etc.).
             # Drop it and force-reinstall lts-cpu so its binary wins on disk.
-            pip('uninstall', '-y', 'polars')
-            pip('install', '--force-reinstall', '--no-deps', 'polars-lts-cpu')
+            #
+            # Serialize this under the same install lock depends() uses: pip()
+            # runs raw with no locking, so without this two worker processes
+            # starting concurrently could interleave uninstall/reinstall and
+            # corrupt site-packages mid-rewrite.
+            with FileLock(os.path.join(_get_cache_dir(), 'install.lock')):
+                pip('uninstall', '-y', 'polars')
+                pip('install', '--force-reinstall', '--no-deps', 'polars-lts-cpu')
 
-            # Drop any already-loaded polars modules so the next import
-            # picks up the freshly-written files instead of cached state.
-            for _mod in [m for m in list(sys.modules) if m == 'polars' or m.startswith('polars.')]:
-                sys.modules.pop(_mod, None)
-    except Exception:
-        # Best-effort cleanup. If it fails, the import below will surface
-        # the underlying issue with a real traceback.
-        pass
+                # Drop any already-loaded polars modules so the next import
+                # picks up the freshly-written files instead of cached state.
+                for _mod in [m for m in list(sys.modules) if m == 'polars' or m.startswith('polars.')]:
+                    sys.modules.pop(_mod, None)
+    except Exception as _exc:
+        # Best-effort cleanup. If it fails, the import below will surface the
+        # underlying issue with a real traceback; log why we skipped cleanup.
+        _debug(f'ai.common.polars: lts-cpu cleanup skipped: {_exc}')
 
 import polars as pl  # noqa: E402
 

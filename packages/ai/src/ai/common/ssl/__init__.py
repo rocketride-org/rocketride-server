@@ -23,39 +23,73 @@ macOS, OpenSSL system roots on Linux). Effects:
   - urllib, requests, httpx, and anything using a default SSL context all
     benefit from the same patch — no per-callsite changes needed.
 
-Usage:
-    import ai.common.ssl  # noqa: F401 - patches default SSL context
+Scope: this patches the Python `ssl` layer. Downloads that shell out to pip
+(e.g. a `pip install <url>` inside a loader) use pip's own bundled CA store
+and are NOT covered here.
 
-Import this once, early, in any module that triggers HTTPS downloads.
-The `ai.common.models` package imports it at the top of its __init__.py,
-so any model loader is covered transitively.
+Usage:
+    from ai.common.ssl import ensure
+    ensure()  # idempotent; performs the injection once per process
+
+Injection is process-global, so `ensure()` is called from
+``BaseLoader._ensure_dependencies`` — the local-mode chokepoint every
+``load()`` passes through — rather than at package import. Remote-mode
+dispatch processes never load ML libraries or download weights, so they no
+longer pay for an injection they don't use.
 
 If truststore can't be installed or injected (e.g. very old Python), this
-module falls back to pointing OpenSSL at certifi's bundle — better than
-the partial Windows store, but won't pick up corporate CAs.
+falls back to pointing OpenSSL at certifi's bundle — better than the partial
+Windows store, but won't pick up corporate CAs.
 """
 
 import os
+
 from depends import depends
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
 try:
-    import truststore
+    from engLib import debug as _debug
+except Exception:  # pragma: no cover - engLib is only present in the engine runtime
 
-    truststore.inject_into_ssl()
-except Exception:
-    # Fallback: point Python at certifi's CA bundle. Catches the "embedded
-    # Python's default trust store is too small" case but won't help with
-    # corporate TLS interception. Better than nothing.
+    def _debug(*_args, **_kwargs):
+        """No-op fallback when the engine logging helper is unavailable."""
+
+
+# Process-global one-shot guard: injection mutates the default SSL context for
+# the whole interpreter, so it must run exactly once per process.
+_injected = False
+
+
+def ensure() -> None:
+    """Patch Python's default SSL context to use the OS trust store.
+
+    Idempotent and safe to call on every model load: the work runs once per
+    process, guarded by the module-level ``_injected`` flag.
+    """
+    global _injected
+    if _injected:
+        return
+    # Set the guard up front so a failure below is not retried (and re-run
+    # through the install lock) on every subsequent load().
+    _injected = True
+
+    requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+    depends(requirements)
+
     try:
-        import certifi
+        import truststore
 
-        os.environ.setdefault('SSL_CERT_FILE', certifi.where())
-        os.environ.setdefault('REQUESTS_CA_BUNDLE', certifi.where())
-    except Exception:
-        # Both truststore and certifi fallback failed. Leave the default SSL
-        # context untouched — downstream HTTPS calls will surface their own
-        # error with a real traceback if validation fails.
-        pass
+        truststore.inject_into_ssl()
+    except Exception as exc:
+        # Fallback: point Python at certifi's CA bundle. Catches the "embedded
+        # Python's default trust store is too small" case but won't help with
+        # corporate TLS interception. Better than nothing.
+        try:
+            import certifi
+
+            os.environ.setdefault('SSL_CERT_FILE', certifi.where())
+            os.environ.setdefault('REQUESTS_CA_BUNDLE', certifi.where())
+        except Exception:
+            # Both truststore and certifi fallback failed. Leave the default SSL
+            # context untouched — downstream HTTPS calls will surface their own
+            # error with a real traceback if validation fails.
+            _debug(f'ai.common.ssl: trust store injection unavailable: {exc}')

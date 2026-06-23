@@ -18,11 +18,6 @@ The loaders use a unified interface so the model server can work with any
 model type without model-specific branching.
 """
 
-# Patch default SSL context to use the OS trust store before any loader
-# triggers a model download. Without this, embedded Python on Windows fails
-# weight downloads with "unable to get local issuer certificate".
-import ai.common.ssl  # noqa: F401
-
 # Base loader class
 from .base import BaseLoader
 
