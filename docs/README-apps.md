@@ -672,7 +672,7 @@ useEffect(() => {
 | `shell:loginRequest` | `{ appId?: string }` | Apps → Shell | Request OAuth login (optionally targeting an app) |
 | `shell:logoutRequest` | `{}` | Apps → Shell | Request logout |
 | `shell:switchApp` | `{ appId: string }` | Apps → Shell | Switch the active app |
-| `shell:subscribe` | `{ app: AppManifestEntry }` | Apps → Shell | Open subscription checkout for an app |
+| `shell:subscribe` | `{ app: AppManifestEntry, plan?: CheckoutPlan }` | Apps → Shell | Open subscription checkout for an app; optional `plan` preselects a tier and skips the picker (straight to payment) |
 | `shell:myApps` | `{}` | Apps → Shell | Navigate to My Apps |
 | `shell:accountUpdate` | `ConnectResult` | Server → Shell | Server-pushed account/subscription change |
 | `shell:servicesUpdated` | `{ services: Record<string, unknown>; servicesError?: string }` | Shell → Apps | Service catalog fetch completed |

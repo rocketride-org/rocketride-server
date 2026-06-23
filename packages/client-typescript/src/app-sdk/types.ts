@@ -431,7 +431,7 @@ export interface ShellEventMap {
 	'shell:loginRequest': { appId?: string };
 	'shell:logoutRequest': Record<string, never>;
 	'shell:switchApp': { appId: string };
-	'shell:subscribe': { app: AppManifestEntry };
+	'shell:subscribe': { app: AppManifestEntry; plan?: unknown };
 	'shell:myApps': Record<string, never>;
 	'shell:accountUpdate': ConnectResult;
 	'shell:sidebarCollapsing': Record<string, never>;

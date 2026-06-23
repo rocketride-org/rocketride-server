@@ -13,7 +13,7 @@
  * All server communication flows through callback props — no SDK imports.
  */
 
-import React, { useEffect, useState, useCallback, useMemo, type CSSProperties } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
@@ -246,6 +246,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appName,
 	appDescription,
 	stripePublishableKey,
+	preselectedPlan,
 	onFetchPlans,
 	onCreateCheckout,
 	onConfirmPending,
@@ -258,7 +259,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	// ── State ────────────────────────────────────────────────────────────
 	const [plans, setPlans] = useState<CheckoutPlan[]>([]);
 	const [plansLoading, setPlansLoading] = useState(true);
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(null);
+	// Seed the selection from a preselected plan so the payment step can render
+	// its recap immediately (and the picker is skipped — see the auto-advance
+	// effect below).
+	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(preselectedPlan ?? null);
 
 	const [clientSecret, setClientSecret] = useState<string | null>(null);
 	const [subscriptionId, setSubscriptionId] = useState<string>('');
@@ -303,6 +307,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		setClientSecret(null);
 		setError(null);
 	}, []);
+
+	// When a plan is preselected (web pricing page), skip the picker entirely:
+	// create the subscription immediately so the user lands on the payment step.
+	// At mount ``plans`` is still empty, so the PlanPicker cannot re-select a
+	// default over our seeded selection before this fires. Runs once.
+	const autoStartedRef = useRef(false);
+	useEffect(() => {
+		if (!preselectedPlan || autoStartedRef.current) return;
+		if (!clientSecret && !loadingSecret) {
+			autoStartedRef.current = true;
+			void handleContinue();
+		}
+	}, [preselectedPlan, clientSecret, loadingSecret, handleContinue]);
 
 	// Stripe Elements appearance
 	const appearance = useMemo(() => {

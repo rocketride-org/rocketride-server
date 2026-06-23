@@ -26,6 +26,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { CheckoutModal } from 'shared';
+import type { CheckoutPlan } from 'shared';
 import { ConnectionManager } from '../../connection/connection';
 import type { AppManifestEntry } from '../../workspace/types';
 
@@ -53,12 +54,19 @@ export interface CheckoutFlowProps {
 export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) => {
 	/** App the user wants to subscribe to; null when modal is closed. */
 	const [checkoutApp, setCheckoutApp] = useState<AppManifestEntry | null>(null);
+	/** Optional plan preselected by the caller (e.g. the web pricing page) to
+	 *  skip the picker and go straight to payment; null = show the picker. */
+	const [presetPlan, setPresetPlan] = useState<CheckoutPlan | null>(null);
 
 	// --- Listen for subscribe events -----------------------------------------
 	useEffect(() => {
-		return ConnectionManager.getInstance().on('shell:subscribe', ({ app }: { app: unknown }) => {
-			setCheckoutApp(app as AppManifestEntry);
-		});
+		return ConnectionManager.getInstance().on(
+			'shell:subscribe',
+			({ app, plan }: { app: unknown; plan?: CheckoutPlan }) => {
+				setCheckoutApp(app as AppManifestEntry);
+				setPresetPlan(plan ?? null);
+			},
+		);
 	}, []);
 
 	// --- Listen for unsubscribe events ---------------------------------------
@@ -84,6 +92,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			appName={checkoutApp.name}
 			appDescription={checkoutApp.description}
 			stripePublishableKey={stripeKey}
+			preselectedPlan={presetPlan ?? undefined}
 			onFetchPlans={async () => {
 				const c = cm.getClient();
 				if (!c) throw new Error('Not connected');
@@ -104,8 +113,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 					priceId,
 				});
 			}}
-			onSuccess={() => setCheckoutApp(null)}
-			onClose={() => setCheckoutApp(null)}
+			onSuccess={() => { setCheckoutApp(null); setPresetPlan(null); }}
+			onClose={() => { setCheckoutApp(null); setPresetPlan(null); }}
 		/>
 	);
 };

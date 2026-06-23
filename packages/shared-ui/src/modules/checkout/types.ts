@@ -97,6 +97,15 @@ export interface CheckoutModalProps {
 	/** Stripe publishable key (pk_test_* or pk_live_*). */
 	stripePublishableKey: string;
 
+	/**
+	 * When set, the modal skips the plan-picker step and goes straight to the
+	 * payment step for this plan (creating the subscription immediately). Omit
+	 * (the default) to show the picker first. Only the web pricing page sets
+	 * this; the in-app and VS Code extension flows leave it undefined and keep
+	 * the pick-a-plan → Continue UX.
+	 */
+	preselectedPlan?: CheckoutPlan;
+
 	/** Fetches available subscription plans from the server. */
 	onFetchPlans: () => Promise<CheckoutPlan[]>;
 
