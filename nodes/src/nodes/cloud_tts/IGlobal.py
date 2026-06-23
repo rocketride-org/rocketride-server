@@ -11,7 +11,7 @@ from typing import Any, Tuple
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
-from . import elevenlabs_tts, openai_tts
+from . import elevenlabs_tts, openai_tts, rime_tts
 
 _MP3_MIME = 'audio/mpeg'
 
@@ -32,6 +32,15 @@ _ENGINES = {
         'default_voice': 'EXAVITQu4vr4xnSDxMaL',
         'env_key': 'ELEVENLABS_API_KEY',
         'label': 'ElevenLabs',
+    },
+    # Rime speakers are model-specific; the services.tts_rime.json profile
+    # conditional renders one speaker enum per model, all merged under `voice`.
+    'rime': {
+        'synthesize': rime_tts.synthesize,
+        'default_model': 'coda',
+        'default_voice': 'astra',
+        'env_key': 'RIME_API_KEY',
+        'label': 'Rime',
     },
 }
 
