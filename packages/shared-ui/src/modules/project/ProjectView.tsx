@@ -345,9 +345,12 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	// --- Viewport change -----------------------------------------------------
 
-	const handleViewportChange = (viewport: { x: number; y: number; zoom: number }) => {
+	// Memoized so ReactFlow's onMoveEnd handler keeps a stable identity — an
+	// inline function here gives <ReactFlow> a new onMoveEnd every render, which
+	// makes its StoreUpdater re-sync endlessly ("Maximum update depth exceeded").
+	const handleViewportChange = useCallback((viewport: { x: number; y: number; zoom: number }) => {
 		updateViewState({ viewport });
-	};
+	}, [updateViewState]);
 
 	const panels = {
 		design: {

@@ -325,6 +325,13 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	/** Content signature of the components currently on the canvas. Echoes of our
 	 *  own edits share this signature and must NOT trigger a reload. */
 	const loadedContentSig = useRef<string>('');
+	/** Circuit breaker for the reload effect: if the content signature never
+	 *  converges (a non-idempotent load round-trip), the effect re-enters
+	 *  hundreds of times/sec and crashes with "Maximum update depth exceeded".
+	 *  We cap reloads within a short window as a backstop to the signature guard.
+	 *  Bailing also stops our re-emit, so the runaway terminates instead of
+	 *  churning. Counts in normal use stay far below the cap. */
+	const reloadGuardRef = useRef<{ t: number; n: number }>({ t: 0, n: 0 });
 
 	// --- Derived state -----------------------------------------------------
 
@@ -993,6 +1000,24 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// depth exceeded". Content comparison converges; undo/redo still loads because
 		// its content differs from what's currently on the canvas.
 		if (!projectChanged && incomingSig === loadedContentSig.current) {
+			return;
+		}
+
+		// Backstop circuit breaker: if signature comparison fails to converge for
+		// some project, this effect re-enters in a tight reload loop. Cap reloads
+		// within a short window (well above any human-driven undo/redo/open rate,
+		// far below React's nested-update crash threshold). Bailing skips loadData,
+		// which stops the re-emit that drives the loop, so it self-terminates.
+		const now = performance.now();
+		const guard = reloadGuardRef.current;
+		if (now - guard.t > 250) {
+			guard.t = now;
+			guard.n = 0;
+		}
+		guard.n += 1;
+		if (guard.n > 30) {
+			// eslint-disable-next-line no-console
+			console.warn('[FlowGraph] Suppressed runaway canvas reload — project content is not converging on load. Canvas left in its last-loaded state.');
 			return;
 		}
 
