@@ -1,38 +1,37 @@
-// =============================================================================
-// MIT License
-// Copyright (c) 2026 Aparavi Software AG
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-// =============================================================================
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.rocketride.tika_api.parsers.rar;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -53,7 +52,9 @@ import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.AttributesImpl;
 
+import net.sf.sevenzipjbinding.ExtractAskMode;
 import net.sf.sevenzipjbinding.ExtractOperationResult;
+import net.sf.sevenzipjbinding.IArchiveExtractCallback;
 import net.sf.sevenzipjbinding.IInArchive;
 import net.sf.sevenzipjbinding.ISequentialOutStream;
 import net.sf.sevenzipjbinding.SevenZip;
@@ -68,8 +69,15 @@ import net.sf.sevenzipjbinding.simple.ISimpleInArchiveItem;
  * explicitly rejects RAR5 archives.
  *
  * The parser spools the input to a temp file, opens it via 7-Zip-JBinding's
- * auto-detection (handles both RAR4 and RAR5), then iterates entries and
- * routes each to the {@link EmbeddedDocumentExtractor} on the parse context.
+ * auto-detection (handles both RAR4 and RAR5), enumerates the entries it can
+ * read, then extracts the selected ones in a single bulk pass and routes each
+ * to the {@link EmbeddedDocumentExtractor} on the parse context.
+ *
+ * <p>Extraction uses {@link IInArchive#extract(int[], boolean, IArchiveExtractCallback)}
+ * rather than per-entry {@code extractSlow}: RAR archives are frequently solid,
+ * where {@code extractSlow} re-decompresses from the start of the archive for
+ * every entry (O(n&sup2;) on an n-entry archive). A single bulk call decompresses
+ * the whole archive once while preserving solid-block ordering.
  */
 public class RarSevenZipParser implements Parser {
     private static final long serialVersionUID = 1L;
@@ -103,12 +111,63 @@ public class RarSevenZipParser implements Parser {
                     RandomAccessFileInStream inStream = new RandomAccessFileInStream(raf);
                     IInArchive archive = SevenZip.openInArchive(null, inStream)) {
 
+                // Pass 1: enumerate entries, emit their XHTML markers, and collect
+                // the indices we actually want to extract (skipping folders,
+                // encrypted entries, and anything the extractor declines).
                 ISimpleInArchive simple = archive.getSimpleInterface();
+                Map<Integer, Metadata> selected = new LinkedHashMap<>();
+                int fileEntries = 0;
+                int encryptedEntries = 0;
+
                 for (ISimpleInArchiveItem item : simple.getArchiveItems()) {
-                    if (Thread.currentThread().isInterrupted()) {
-                        break;
+                    Boolean folder = safeIsFolder(item);
+                    if (folder == null || folder) {
+                        // Unreadable header (logged) or a directory — nothing to extract.
+                        continue;
                     }
-                    extractItem(item, xhtml, extractor, tmp);
+                    fileEntries++;
+
+                    Boolean encrypted = safeIsEncrypted(item);
+                    if (encrypted == null) {
+                        continue;
+                    }
+                    if (encrypted) {
+                        // Per-entry resilience: skip this one but keep reading the rest,
+                        // consistent with how unreadable headers are handled. A blanket
+                        // EncryptedDocumentException is only surfaced below if EVERY entry
+                        // is encrypted (i.e. the archive as a whole is unreadable).
+                        encryptedEntries++;
+                        logger.log(Level.WARNING, "Skipping encrypted RAR entry: " + safePath(item));
+                        continue;
+                    }
+
+                    Metadata entryMeta = handleEntryMetadata(item, xhtml);
+                    if (entryMeta == null || !extractor.shouldParseEmbedded(entryMeta)) {
+                        continue;
+                    }
+                    selected.put(item.getItemIndex(), entryMeta);
+                }
+
+                if (fileEntries > 0 && encryptedEntries == fileEntries) {
+                    // Nothing was readable because the whole archive is encrypted.
+                    throw new EncryptedDocumentException();
+                }
+
+                // Pass 2: extract everything selected in one decompression pass.
+                if (!selected.isEmpty()) {
+                    int[] indices = toSortedIndices(selected.keySet());
+                    ExtractCallback callback = new ExtractCallback(selected, xhtml, extractor, tmp);
+                    try {
+                        archive.extract(indices, false, callback);
+                    } catch (SevenZipException e) {
+                        // A checked failure raised while dispatching an extracted entry to
+                        // the embedded extractor is wrapped by the callback; unwrap and
+                        // rethrow it as its original type so write-limit and I/O semantics
+                        // are preserved. Anything else is a genuine archive read error.
+                        callback.rethrowPending();
+                        throw new TikaException("RarSevenZipParser failed to extract RAR entries", e);
+                    }
+                    callback.rethrowPending();
                 }
             }
         } catch (SevenZipException e) {
@@ -118,77 +177,185 @@ public class RarSevenZipParser implements Parser {
         xhtml.endDocument();
     }
 
-    private static void extractItem(ISimpleInArchiveItem item, XHTMLContentHandler xhtml,
-            EmbeddedDocumentExtractor extractor, TemporaryResources tmp)
-            throws IOException, SAXException, TikaException {
-        String name;
-        Date ctime;
-        Date mtime;
-        Long size;
-        boolean folder;
-        boolean encrypted;
-        try {
-            folder = item.isFolder();
-            if (folder) {
-                return;
+    /**
+     * Receives bulk-extracted entry bytes from 7-Zip-JBinding. For each selected
+     * index it spools the bytes to a temp file, then hands that file to the
+     * embedded extractor as soon as the entry finishes — so only one entry is on
+     * disk at a time. Checked exceptions from the embedded extractor cannot cross
+     * the {@link IArchiveExtractCallback} signature, so the first one is stashed
+     * and re-raised by {@link #rethrowPending()} after extraction unwinds.
+     */
+    private static final class ExtractCallback implements IArchiveExtractCallback {
+        private final Map<Integer, Metadata> selected;
+        private final XHTMLContentHandler xhtml;
+        private final EmbeddedDocumentExtractor extractor;
+        private final TemporaryResources tmp;
+
+        private int currentIndex = -1;
+        private File currentFile;
+        private OutputStream currentOut;
+        private Exception pending;
+
+        ExtractCallback(Map<Integer, Metadata> selected, XHTMLContentHandler xhtml,
+                EmbeddedDocumentExtractor extractor, TemporaryResources tmp) {
+            this.selected = selected;
+            this.xhtml = xhtml;
+            this.extractor = extractor;
+            this.tmp = tmp;
+        }
+
+        @Override
+        public ISequentialOutStream getStream(int index, ExtractAskMode extractAskMode) throws SevenZipException {
+            if (extractAskMode != ExtractAskMode.EXTRACT || !selected.containsKey(index)) {
+                return null;
             }
-            encrypted = item.isEncrypted();
-            name = item.getPath();
-            ctime = item.getCreationTime();
-            mtime = item.getLastWriteTime();
-            size = item.getSize();
-        } catch (SevenZipException e) {
-            // Bad header on this entry — skip it but keep going through the archive.
-            logger.log(Level.WARNING, "Skipping unreadable RAR entry header", e);
-            return;
-        }
-
-        if (encrypted) {
-            // Match Tika's behavior for encrypted archives: surface to the caller.
-            throw new EncryptedDocumentException();
-        }
-
-        Metadata entryMeta = handleEntryMetadata(name, ctime, mtime, size, xhtml);
-        if (!extractor.shouldParseEmbedded(entryMeta)) {
-            return;
-        }
-
-        File entryFile = tmp.createTemporaryFile();
-        try (OutputStream fos = new FileOutputStream(entryFile)) {
-            ExtractOperationResult result = item.extractSlow(new ISequentialOutStream() {
+            try {
+                currentFile = tmp.createTemporaryFile();
+                currentOut = new BufferedOutputStream(new FileOutputStream(currentFile));
+            } catch (IOException e) {
+                throw new SevenZipException("Failed to create temp file for RAR entry", e);
+            }
+            currentIndex = index;
+            final OutputStream out = currentOut;
+            return new ISequentialOutStream() {
                 @Override
                 public int write(byte[] data) throws SevenZipException {
                     try {
-                        fos.write(data);
+                        out.write(data);
                     } catch (IOException e) {
                         throw new SevenZipException(e);
                     }
                     return data.length;
                 }
-            });
-            if (result != ExtractOperationResult.OK) {
-                logger.log(Level.WARNING, "RAR entry extraction returned " + result + " for " + name);
-                return;
-            }
-        } catch (SevenZipException e) {
-            logger.log(Level.WARNING, "Failed to extract RAR entry: " + name, e);
-            return;
+            };
         }
 
-        // Hand a TikaInputStream (mark/reset supported, file-backed) to the
-        // embedded extractor — Tika's detectors call mark/reset to sniff bytes
-        // and a plain FileInputStream throws IOException: mark/reset not supported.
-        try (TikaInputStream entryStream = TikaInputStream.get(entryFile.toPath())) {
-            extractor.parseEmbedded(entryStream, xhtml, entryMeta, true);
+        @Override
+        public void prepareOperation(ExtractAskMode extractAskMode) {
+        }
+
+        @Override
+        public void setOperationResult(ExtractOperationResult extractOperationResult) throws SevenZipException {
+            if (currentIndex < 0) {
+                return;
+            }
+            int index = currentIndex;
+            File file = currentFile;
+            Metadata meta = selected.get(index);
+            // Reset state before doing anything that can throw, so a failure here
+            // never leaves a half-open stream referenced for the next entry.
+            currentIndex = -1;
+            currentFile = null;
+            OutputStream out = currentOut;
+            currentOut = null;
+
+            try {
+                if (out != null) {
+                    out.close();
+                }
+            } catch (IOException e) {
+                logger.log(Level.WARNING, "Failed to close temp stream for RAR entry: " + name(meta), e);
+            }
+
+            try {
+                if (extractOperationResult != ExtractOperationResult.OK) {
+                    logger.log(Level.WARNING,
+                            "RAR entry extraction returned " + extractOperationResult + " for " + name(meta));
+                    return;
+                }
+                // Hand a TikaInputStream (mark/reset supported, file-backed) to the
+                // embedded extractor — Tika's detectors call mark/reset to sniff bytes
+                // and a plain FileInputStream throws IOException: mark/reset not supported.
+                try (TikaInputStream entryStream = TikaInputStream.get(file.toPath())) {
+                    extractor.parseEmbedded(entryStream, xhtml, meta, true);
+                } catch (IOException | SAXException e) {
+                    // Cannot cross this callback's signature; stash and stop extraction.
+                    // Rethrown in original form by rethrowPending() once extract() unwinds.
+                    pending = e;
+                    throw new SevenZipException("Embedded parse failed for RAR entry: " + name(meta), e);
+                }
+            } finally {
+                if (file != null) {
+                    // Keep peak disk usage to a single entry rather than the whole archive.
+                    file.delete();
+                }
+            }
+        }
+
+        @Override
+        public void setTotal(long total) {
+        }
+
+        @Override
+        public void setCompleted(long complete) {
+        }
+
+        /** Re-raise the first checked exception captured during dispatch, if any. */
+        void rethrowPending() throws IOException, SAXException {
+            if (pending instanceof IOException) {
+                throw (IOException) pending;
+            }
+            if (pending instanceof SAXException) {
+                throw (SAXException) pending;
+            }
+        }
+
+        private static String name(Metadata meta) {
+            String n = meta == null ? null : meta.get(TikaCoreProperties.RESOURCE_NAME_KEY);
+            return n == null ? "<unknown>" : n;
+        }
+    }
+
+    private static Boolean safeIsFolder(ISimpleInArchiveItem item) {
+        try {
+            return item.isFolder();
+        } catch (SevenZipException e) {
+            logger.log(Level.WARNING, "Skipping unreadable RAR entry header", e);
+            return null;
+        }
+    }
+
+    private static Boolean safeIsEncrypted(ISimpleInArchiveItem item) {
+        try {
+            return item.isEncrypted();
+        } catch (SevenZipException e) {
+            logger.log(Level.WARNING, "Skipping RAR entry with unreadable encryption flag", e);
+            return null;
+        }
+    }
+
+    private static String safePath(ISimpleInArchiveItem item) {
+        try {
+            return item.getPath();
+        } catch (SevenZipException e) {
+            return "<unknown>";
         }
     }
 
     /**
-     * Mirrors {@code PackageParser.handleEntryMetadata}, which is package/protected
-     * in upstream Tika and not callable from here.
+     * Reads an entry's metadata and emits its XHTML marker. Returns {@code null}
+     * (and logs) if the entry header cannot be read, so the caller can skip it
+     * without aborting the whole archive.
+     *
+     * <p>Mirrors {@code PackageParser.handleEntryMetadata}, which is
+     * package-protected in upstream Tika and not callable from here.
      */
-    private static Metadata handleEntryMetadata(String name, Date createAt, Date modifiedAt,
-            Long size, XHTMLContentHandler xhtml) throws SAXException {
+    private static Metadata handleEntryMetadata(ISimpleInArchiveItem item, XHTMLContentHandler xhtml)
+            throws SAXException {
+        String name;
+        Date createAt;
+        Date modifiedAt;
+        Long size;
+        try {
+            name = item.getPath();
+            createAt = item.getCreationTime();
+            modifiedAt = item.getLastWriteTime();
+            size = item.getSize();
+        } catch (SevenZipException e) {
+            logger.log(Level.WARNING, "Skipping unreadable RAR entry header", e);
+            return null;
+        }
+
         Metadata entrydata = new Metadata();
         if (createAt != null) {
             entrydata.set(TikaCoreProperties.CREATED, createAt);
@@ -210,5 +377,15 @@ public class RarSevenZipParser implements Parser {
             entrydata.set(TikaCoreProperties.EMBEDDED_RELATIONSHIP_ID, name);
         }
         return entrydata;
+    }
+
+    private static int[] toSortedIndices(Set<Integer> keys) {
+        List<Integer> sorted = new ArrayList<>(keys);
+        Collections.sort(sorted);
+        int[] indices = new int[sorted.size()];
+        for (int i = 0; i < indices.length; i++) {
+            indices[i] = sorted.get(i);
+        }
+        return indices;
     }
 }
