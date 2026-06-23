@@ -238,9 +238,9 @@ const ProjectWebview: React.FC = () => {
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source });
+			sendMessage({ type: 'status:pipelineAction', action, source, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
 		},
-		[sendMessage]
+		[sendMessage, viewState]
 	);
 
 	const handleMissingEnvVars = useCallback(
@@ -252,6 +252,8 @@ const ProjectWebview: React.FC = () => {
 
 	const handleViewStateChange = useCallback(
 		(vs: ViewState) => {
+			// Keep local state current so the next run message carries the latest trace level
+			setViewState(vs);
 			// Persist to VS Code webview state (survives tab switches)
 			const current = getState() ?? ({} as ViewState);
 			setState({ ...current, ...vs });

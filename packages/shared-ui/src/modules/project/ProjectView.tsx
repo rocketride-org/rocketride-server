@@ -31,7 +31,7 @@ import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
-import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
+import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
 
 // =============================================================================
 // PROPS
@@ -322,6 +322,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const allTabs = [
 		{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
+		{ id: 'parameters', label: 'Parameters' },
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
@@ -352,6 +353,13 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	const panels = {
 		design: {
 			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+		},
+		parameters: {
+			content: (
+				<div style={commonStyles.tabContent}>
+					<ParametersPane value={viewState.pipelineTraceLevel ?? 'summary'} onChange={(level) => updateViewState({ pipelineTraceLevel: level })} disabled={isReadonly} />
+				</div>
+			),
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
@@ -420,6 +428,44 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 };
 
 ProjectView.displayName = 'ProjectView';
+
+// =============================================================================
+// PARAMETERS PANE
+// =============================================================================
+
+const TRACE_LEVELS: { value: TraceLevel; label: string }[] = [
+	{ value: 'full', label: 'Full — every lane write & invoke, including full payload data' },
+	{ value: 'summary', label: 'Summary — structure + result summaries (no large/binary payloads)' },
+	{ value: 'metadata', label: 'Metadata — lane/node structure only' },
+	{ value: 'none', label: 'None — tracing disabled' },
+];
+
+const ParametersPane: React.FC<{
+	value: TraceLevel;
+	onChange: (value: TraceLevel) => void;
+	disabled?: boolean;
+}> = ({ value, onChange, disabled }) => {
+	return (
+		<div style={{ ...commonStyles.card, borderRadius: 6, maxWidth: 640 }}>
+			<div style={commonStyles.cardHeader}>
+				<span style={styles.sourceName}>Pipeline parameters</span>
+			</div>
+			<div style={commonStyles.cardBody}>
+				<label htmlFor="rr-trace-level" style={{ display: 'block', fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 6 }}>
+					Trace level
+				</label>
+				<select id="rr-trace-level" style={commonStyles.inputField} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as TraceLevel)}>
+					{TRACE_LEVELS.map((lvl) => (
+						<option key={lvl.value} value={lvl.value}>
+							{lvl.label}
+						</option>
+					))}
+				</select>
+				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 8 }}>Controls how much trace data the engine emits for this pipeline. Higher levels feed the Flow and Trace tabs, but Full inlines entire payloads (including images) and can stall large-image runs. Defaults to Summary.</div>
+			</div>
+		</div>
+	);
+};
 
 // =============================================================================
 // SOURCE STATUS PANE

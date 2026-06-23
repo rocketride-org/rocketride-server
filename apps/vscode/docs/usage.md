@@ -51,6 +51,12 @@ The visual editor provides:
 - **Properties panel**: Configure selected component settings (API keys, models, connection strings, etc.).
 - **Lane connections**: Draw lines between component output and input lanes to define data flow.
 
+## Pipeline Parameters
+
+The **Parameters** tab (next to **Design**) holds run-time settings for the open pipeline:
+
+- **Trace level**: how much execution-trace data the engine emits — `full`, `summary` (default), `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images. The selected level is saved per pipeline and applied on the next run.
+
 ## Monitoring Execution
 
 The **Status** page shows:
