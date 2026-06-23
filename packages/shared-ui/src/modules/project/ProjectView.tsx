@@ -181,6 +181,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		mode: initialViewState?.mode ?? 'design',
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
+		pipelineTraceLevel: initialViewState?.pipelineTraceLevel,
 	}));
 
 	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});

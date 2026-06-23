@@ -89,6 +89,7 @@ const ProjectWebview: React.FC = () => {
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
 					viewport: vs?.viewport,
+					pipelineTraceLevel: vs?.pipelineTraceLevel,
 				});
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
@@ -186,6 +187,7 @@ const ProjectWebview: React.FC = () => {
 					mode: msg.state?.mode ?? 'design',
 					flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
 					viewport: msg.state?.viewport,
+					pipelineTraceLevel: msg.state?.pipelineTraceLevel,
 				});
 				break;
 			case 'project:initialPrefs':

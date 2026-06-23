@@ -37,7 +37,9 @@ const LAYOUTS_KEY = 'rocketride.layouts';
 // TYPES
 // =============================================================================
 
-/** Pipeline trace level (mirrors the shared-ui `TraceLevel` and the SDK `client.use` option). */
+// Defined locally on purpose: the host tsconfig excludes `src/providers/views/**`
+// and does not map the `shared/*` path alias, so it cannot import the canonical
+// TraceLevel from the webview/shared-ui layer. Keep in sync with that union.
 type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
 
 interface EditorState {
