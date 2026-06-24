@@ -113,7 +113,19 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 					priceId,
 				});
 			}}
-			onSuccess={() => { setCheckoutApp(null); setPresetPlan(null); }}
+			onSuccess={() => {
+				// New purchase complete: drop the user into the app they just bought
+				// and confirm briefly, rather than leaving them on the pricing grid.
+				// (Upgrades keep their own inline confirmation in UpgradeModal.)
+				const appId = checkoutApp.id;
+				const appName = checkoutApp.name;
+				setCheckoutApp(null);
+				setPresetPlan(null);
+				cm.emit('shell:switchApp', { appId });
+				cm.emit('shell:statusMessage', { message: `Welcome to ${appName} — your plan is now active.` });
+				// Auto-clear so the confirmation doesn't linger in the status bar.
+				setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
+			}}
 			onClose={() => { setCheckoutApp(null); setPresetPlan(null); }}
 		/>
 	);
