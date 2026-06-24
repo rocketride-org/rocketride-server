@@ -268,6 +268,21 @@ const S = {
 		transition: 'opacity 0.15s',
 	} as CSSProperties,
 
+	// "Current plan" badge shown on the user's active card (selection mode).
+	currentBadge: {
+		display: 'inline-block',
+		alignSelf: 'center',
+		fontSize: 10,
+		fontWeight: 700,
+		letterSpacing: 0.4,
+		textTransform: 'uppercase' as const,
+		color: 'var(--rr-brand)',
+		border: '1px solid var(--rr-brand)',
+		borderRadius: 999,
+		padding: '1px 8px',
+		marginBottom: 6,
+	} as CSSProperties,
+
 	// ── Loading / empty state ────────────────────────────────────────────
 	status: {
 		textAlign: 'center' as const,
@@ -312,6 +327,23 @@ export interface PlanPickerProps {
 	/** Label for the per-card billable CTA. Default: ``'Get started'``. Only used with ``onPlanCta``. */
 	ctaLabel?: string;
 
+	/**
+	 * Optional per-plan CTA overrides, keyed by ``stripePriceId``. Lets a host
+	 * app render context-aware labels (e.g. "Selected", "Upgrade", "Switch
+	 * plan") and disable a card's CTA — without baking any subscription logic
+	 * into shared-ui (this component ships in the VS Code extension too). A plan
+	 * with no entry falls back to ``ctaLabel``. Only used with ``onPlanCta``.
+	 */
+	ctaConfig?: Record<string, { label?: string; disabled?: boolean }>;
+
+	/**
+	 * Stripe price ID of the user's current plan, in card-selection mode
+	 * (``onSelectPlan``). The matching card shows a "Current" badge and is made
+	 * non-selectable. The host owns what "current" means — no subscription logic
+	 * lives here. Used by the upgrade flow.
+	 */
+	currentPriceId?: string;
+
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
 
@@ -347,6 +379,8 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	onActionClick = defaultActionClick,
 	onPlanCta,
 	ctaLabel = 'Get started',
+	ctaConfig,
+	currentPriceId,
 	footer,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
@@ -487,12 +521,16 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 					const action = planAction(plan);
 					const isAction = !!action;
 					const selected = !isAction && selectedPlan?.stripePriceId === plan.stripePriceId;
+					const isCurrent = !isAction && !!currentPriceId && plan.stripePriceId === currentPriceId;
+					const cta = isAction ? undefined : ctaConfig?.[plan.stripePriceId];
+					const ctaDisabled = cta?.disabled ?? false;
 					const desc = planDescription(plan);
 					// Whole-card selection only applies when a selection handler is
 					// wired (the checkout/upgrade modals). On display-only pages
 					// (pricing) the card is static — the CTA button is the action —
 					// so drop the pointer, radio role, focusability and click handlers.
-					const interactive = !isAction && !!onSelectPlan;
+					// The current plan is never selectable (you can't "switch" to it).
+					const interactive = !isAction && !!onSelectPlan && !isCurrent;
 
 					return (
 						<div
@@ -515,6 +553,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 						>
 							{/* Card header: tier name, price, interval */}
 							<div style={S.cardHead(selected)}>
+								{isCurrent && <div style={S.currentBadge}>Current plan</div>}
 								<div style={S.cardTier}>{plan.nickname}</div>
 								<div style={S.cardPrice}>{planDisplayAmount(plan)}</div>
 								{planIntervalLabel(plan) && (
@@ -556,17 +595,24 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								</a>
 							)}
 
-							{/* Primary CTA for billable plans (opt-in via onPlanCta) */}
+							{/* Primary CTA for billable plans (opt-in via onPlanCta). A host
+							    may override label/disabled per plan via ctaConfig (e.g.
+							    "Selected" on the user's current tier). */}
 							{!isAction && onPlanCta && (
 								<button
 									type="button"
-									style={S.cardCta}
+									disabled={ctaDisabled}
+									style={
+										ctaDisabled
+											? { ...S.cardCta, background: 'transparent', color: 'var(--rr-text-secondary)', border: '1px solid var(--rr-border)', cursor: 'default' }
+											: S.cardCta
+									}
 									onClick={(e) => {
 										e.stopPropagation();
-										onPlanCta(plan);
+										if (!ctaDisabled) onPlanCta(plan);
 									}}
 								>
-									{ctaLabel}
+									{cta?.label ?? ctaLabel}
 								</button>
 							)}
 						</div>
