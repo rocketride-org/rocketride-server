@@ -145,6 +145,9 @@ jobs:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
           BUILD_STAMP: ${{ inputs.build_stamp }}
+          # Production values baked into the VS Code extension at build time.
+          ROCKETRIDE_URI: ${{ vars.ROCKETRIDE_URI }}
+          RR_STRIPE_PUBLISHABLE_KEY: ${{ vars.RR_STRIPE_PUBLISHABLE_KEY }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       # MinIO for S3Store integration tests (Linux only). Env vars are exported
