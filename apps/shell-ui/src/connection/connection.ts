@@ -687,6 +687,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.clearToken();
 		this.clearSessionAppId();
 		this.accountInfo = undefined;
+		// Drop any buffered user-intent events so a stale shell:subscribe /
+		// shell:loginRequest can't replay into the next session.
+		this.pendingEvents.clear();
 
 		// Emit logout before disconnecting so listeners can clean up
 		this.emit('shell:logout', {});
@@ -702,6 +705,7 @@ export class ConnectionManager implements IConnectionManager {
 		await this.disconnect();
 		this.listeners.clear();
 		this.wildcardListeners.clear();
+		this.pendingEvents.clear();
 		this.debugLog.length = 0;
 	}
 

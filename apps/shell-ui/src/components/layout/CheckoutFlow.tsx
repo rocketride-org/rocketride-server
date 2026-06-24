@@ -24,7 +24,7 @@
 // CHECKOUT FLOW — Stripe subscription checkout wired to shell events
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckoutModal } from 'shared';
 import type { CheckoutPlan } from 'shared';
 import { ConnectionManager } from '../../connection/connection';
@@ -57,6 +57,14 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	/** Optional plan preselected by the caller (e.g. the web pricing page) to
 	 *  skip the picker and go straight to payment; null = show the picker. */
 	const [presetPlan, setPresetPlan] = useState<CheckoutPlan | null>(null);
+	/** Pending timer that clears the post-purchase welcome status message. */
+	const statusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	// Cancel the pending status-message clear if we unmount first (e.g. logout
+	// or navigation) so it doesn't emit after the component is gone.
+	useEffect(() => () => {
+		if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
+	}, []);
 
 	// --- Listen for subscribe events -----------------------------------------
 	useEffect(() => {
@@ -124,7 +132,9 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				cm.emit('shell:switchApp', { appId });
 				cm.emit('shell:statusMessage', { message: `Welcome to ${appName} — your plan is now active.` });
 				// Auto-clear so the confirmation doesn't linger in the status bar.
-				setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
+				// Tracked in a ref so it's cancelled if we unmount before it fires.
+				if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
+				statusClearTimer.current = setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
 			}}
 			onClose={() => { setCheckoutApp(null); setPresetPlan(null); }}
 		/>
