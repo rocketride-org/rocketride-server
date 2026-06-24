@@ -90,7 +90,7 @@ function getenv() {
 	const merged = { ...config, ...env };
 
 	// Real env vars win, for known keys only, ignoring empty values.
-	for (const key of Object.keys(merged)) {
+	for (const key in merged) {
 		const real = process.env[key];
 		if (real !== undefined && real !== '') merged[key] = real;
 	}
