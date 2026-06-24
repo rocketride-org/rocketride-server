@@ -131,14 +131,24 @@ export class ConnectionManager implements IConnectionManager {
 	// SINGLETON
 	// =========================================================================
 
-	private static instance: ConnectionManager;
+	/**
+	 * Global key for the singleton. A plain `private static instance` is NOT a
+	 * true singleton under Module Federation: a remote (e.g. home-ui) that loads
+	 * a duplicated copy of the shell-ui module gets its own class object with its
+	 * own static field, so its emit() lands on a different instance than the one
+	 * the Shell host registered listeners on — events vanish silently. Anchoring
+	 * the instance on globalThis makes getInstance() return the same object
+	 * regardless of how many module copies exist in the page.
+	 */
+	private static readonly GLOBAL_KEY = Symbol.for('rocketride.connectionManager');
 
 	/** Returns the singleton ConnectionManager instance. */
 	public static getInstance(): ConnectionManager {
-		if (!ConnectionManager.instance) {
-			ConnectionManager.instance = new ConnectionManager();
+		const g = globalThis as unknown as Record<symbol, ConnectionManager | undefined>;
+		if (!g[ConnectionManager.GLOBAL_KEY]) {
+			g[ConnectionManager.GLOBAL_KEY] = new ConnectionManager();
 		}
-		return ConnectionManager.instance;
+		return g[ConnectionManager.GLOBAL_KEY]!;
 	}
 
 	private constructor() {}
@@ -181,6 +191,22 @@ export class ConnectionManager implements IConnectionManager {
 	private listeners = new Map<string, Set<Handler>>();
 	private wildcardListeners = new Set<WildcardHandler>();
 	private debugLog: DebugLogEntry[] = [];
+
+	/**
+	 * User-intent control events that must not be silently dropped if emitted
+	 * while no listener is registered (e.g. the Shell listener is mid-remount, or
+	 * a remote emits before the host's listener useEffect has run). These are
+	 * buffered (latest payload wins) and replayed to the first matching handler
+	 * that registers via on(). Status/lifecycle events are intentionally NOT
+	 * replayable — replaying a stale 'shell:disconnected' would be wrong.
+	 */
+	private static readonly REPLAYABLE_EVENTS = new Set<string>([
+		'shell:loginRequest',
+		'shell:subscribe',
+	]);
+
+	/** Latest buffered payload per replayable event, awaiting a listener. */
+	private pendingEvents = new Map<string, unknown>();
 
 	// =========================================================================
 	// INITIALIZATION
@@ -877,9 +903,10 @@ export class ConnectionManager implements IConnectionManager {
 		// Push into debug log
 		this.logDebug(event as string, payload);
 
-		// Dispatch to registered handlers via microtask
+		// Dispatch to registered handlers via microtask. An unsubscribed handler
+		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
-		if (handlers) {
+		if (handlers && handlers.size > 0) {
 			Promise.resolve().then(() => {
 				for (const fn of handlers) {
 					try {
@@ -889,6 +916,18 @@ export class ConnectionManager implements IConnectionManager {
 					}
 				}
 			});
+			return;
+		}
+
+		// No live listener. For user-intent control events, buffer the payload so
+		// it can be replayed to the next listener that registers (see on()).
+		// Without this, a click whose listener isn't yet/no-longer mounted is
+		// silently swallowed — the prod "Get Started does nothing" symptom.
+		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
+			this.pendingEvents.set(event as string, payload);
+			console.warn(
+				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
+			);
 		}
 	}
 
@@ -907,6 +946,20 @@ export class ConnectionManager implements IConnectionManager {
 		if (!this.listeners.has(key)) this.listeners.set(key, new Set());
 		const set = this.listeners.get(key)!;
 		set.add(handler as Handler);
+
+		// Replay a buffered user-intent event to this fresh listener (see emit()).
+		// Delivered once, via microtask to match normal emit() dispatch timing.
+		if (this.pendingEvents.has(key)) {
+			const payload = this.pendingEvents.get(key);
+			this.pendingEvents.delete(key);
+			Promise.resolve().then(() => {
+				try {
+					(handler as Handler)(payload);
+				} catch (err) {
+					console.error(`[ConnectionManager] Replay handler for '${key}' threw:`, err);
+				}
+			});
+		}
 
 		// Warn if a single event has too many listeners — likely a leak
 		if (set.size > 25) {
