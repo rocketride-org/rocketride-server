@@ -947,16 +947,25 @@ export class ConnectionManager implements IConnectionManager {
 		const set = this.listeners.get(key)!;
 		set.add(handler as Handler);
 
-		// Replay a buffered user-intent event to this fresh listener (see emit()).
-		// Delivered once, via microtask to match normal emit() dispatch timing.
+		// Replay a buffered user-intent event to a fresh listener (see emit()).
+		// Deferred to a microtask AND dispatched to the LIVE listener set at that
+		// time — not the captured handler — because under React StrictMode
+		// (mount→cleanup→mount) or any remount the registering handler may
+		// unsubscribe before the microtask runs. The buffered payload is consumed
+		// only once a live listener actually receives it, so the intent is never
+		// lost to a dead handler.
 		if (this.pendingEvents.has(key)) {
-			const payload = this.pendingEvents.get(key);
-			this.pendingEvents.delete(key);
 			Promise.resolve().then(() => {
-				try {
-					(handler as Handler)(payload);
-				} catch (err) {
-					console.error(`[ConnectionManager] Replay handler for '${key}' threw:`, err);
+				const live = this.listeners.get(key);
+				if (!this.pendingEvents.has(key) || !live || live.size === 0) return;
+				const payload = this.pendingEvents.get(key);
+				this.pendingEvents.delete(key);
+				for (const fn of live) {
+					try {
+						fn(payload);
+					} catch (err) {
+						console.error(`[ConnectionManager] Replay handler for '${key}' threw:`, err);
+					}
 				}
 			});
 		}
