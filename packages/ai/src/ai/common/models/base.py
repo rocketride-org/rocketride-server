@@ -31,6 +31,8 @@ get_model_server_address() reads --modelserver=<addr> from sys.argv and
 returns the raw string — no parsing or URL construction.
 """
 
+import contextlib
+import threading
 import hashlib
 import json
 import sys
@@ -234,6 +236,20 @@ def is_model_server_enabled() -> bool:
         True if ``--modelserver=<address>`` is present, False otherwise.
     """
     return bool(get_model_server_address())
+
+
+def make_device_lock() -> contextlib.AbstractContextManager:
+    """Return the device-access guard for the current run mode.
+
+    Local in-process GPU inference must serialize, so this returns a real
+    ``threading.Lock``. In proxy mode the model server batches and the DAP transport
+    multiplexes concurrent requests, so a node-side lock would only throttle it —
+    returns a no-op ``contextlib.nullcontext`` instead.
+
+    Returns:
+        A context manager — ``threading.Lock`` locally, ``nullcontext`` when proxying.
+    """
+    return contextlib.nullcontext() if is_model_server_enabled() else threading.Lock()
 
 
 # =============================================================================

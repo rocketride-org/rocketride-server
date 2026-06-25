@@ -22,9 +22,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import contextlib
-import threading
-
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
@@ -70,9 +67,9 @@ class IGlobal(IGlobalBase):
         self.pose_estimator = PoseEstimator(mode=mode, device=None, threshold=self.threshold, max_persons=max_persons)
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import is_model_server_enabled
+        from ai.common.models.base import make_device_lock
 
-        self.device_lock = contextlib.nullcontext() if is_model_server_enabled() else threading.Lock()
+        self.device_lock = make_device_lock()
 
     def endGlobal(self):
         """Disconnect the facade and release shared state on teardown."""
