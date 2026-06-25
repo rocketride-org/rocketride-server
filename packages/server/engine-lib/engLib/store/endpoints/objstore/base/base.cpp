@@ -79,8 +79,9 @@ ErrorOr<SharedPtr<Aws::S3::S3Client>> IBaseInstance::getClient(
     Aws::Client::ClientConfiguration clientCfg;
     clientCfg.connectTimeoutMs = 30'000;
     clientCfg.requestTimeoutMs = 120'000;
-    // The client is shared by the scanner threads (up to 64), so the
-    // connection pool must be large enough to avoid serializing them
+    // The client is shared by the scanner threads, so the connection pool
+    // must be large enough to avoid serializing them. Keep this in sync with
+    // the thread-count cap in store/core/scan.cpp (m_threadCount <= 64).
     clientCfg.maxConnections = 64;
 
     if (!config.region)
