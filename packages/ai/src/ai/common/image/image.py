@@ -104,7 +104,7 @@ class ImageProcessor:
         return thumbnail
 
     @staticmethod
-    def get_bytes(image: Image, fmt: str = 'PNG', quality: int = 90) -> bytes:
+    def get_bytes(image: Image, fmt: str = 'PNG', quality: int = 90, compress_level: int = 6) -> bytes:
         """
         Encode a Pillow Image to bytes.
 
@@ -115,6 +115,9 @@ class ImageProcessor:
             image (Image): The Pillow Image object to convert.
             fmt (str): 'PNG' (default) or 'JPEG'.
             quality (int): JPEG quality (ignored for PNG).
+            compress_level (int): PNG zlib level 0-9 (ignored for non-PNG). Default 6
+                matches Pillow. Lower trades file size for speed — e.g. 1 cuts a 30 MP
+                RGBA encode from ~16 s to ~2-3 s, which matters for full-res cutouts.
 
         Returns:
             bytes: The encoded image data.
@@ -124,6 +127,8 @@ class ImageProcessor:
             if image.mode not in ('RGB', 'L'):
                 image = image.convert('RGB')
             image.save(buffered, format='JPEG', quality=quality)
+        elif fmt.upper() == 'PNG':
+            image.save(buffered, format='PNG', compress_level=compress_level)
         else:
             image.save(buffered, format=fmt)
         return buffered.getvalue()
