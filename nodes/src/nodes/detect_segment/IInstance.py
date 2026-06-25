@@ -24,8 +24,9 @@
 
 import colorsys
 import json
+import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 
 from ai.common.image import ImageProcessor
 
@@ -195,10 +196,10 @@ class IInstance(IInstanceBase):
             self.instance.writeText(json.dumps(result, default=str))
 
         if self.instance.hasListener('image'):
-            image_bytes = ImageProcessor.get_bytes(annotated)
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
+            image_bytes = ImageProcessor.get_bytes(annotated, fmt='JPEG')
+            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/jpeg')
+            self.instance.writeImage(AVI_ACTION.WRITE, 'image/jpeg', image_bytes)
+            self.instance.writeImage(AVI_ACTION.END, 'image/jpeg')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and run segmentation on END.
@@ -218,8 +219,10 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             try:
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
+                t0 = time.perf_counter()
                 with self.IGlobal.device_lock:
                     result = self.IGlobal.segmenter.segment(image)
+                debug(f'segment: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, result)
             except Exception as exc:
                 warning(f'detect_segment: dropping frame due to inference error: {exc}')

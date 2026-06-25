@@ -23,10 +23,11 @@
 # =============================================================================
 
 import json
+import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.image import Image, ImageProcessor
-from ai.common.image.dense_resize import resize_for_inference
+from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
 from .IGlobal import IGlobal
 
 
@@ -57,11 +58,14 @@ class IInstance(IInstanceBase):
         """
         import numpy as np
 
-        # Cap the source first; the cutout is emitted at this (capped) resolution.
-        source_capped, _ = resize_for_inference(image.convert('RGB'), self.IGlobal.max_edge)
+        orig_rgb = image.convert('RGB')
+        # Downscale only for inference; the cutout is restored to the original resolution.
+        source_capped, original_size = resize_for_inference(orig_rgb, self.IGlobal.max_edge)
 
+        t0 = time.perf_counter()
         with self.IGlobal.device_lock:
             alpha = self.IGlobal.remover.remove(source_capped)
+        debug(f'bg_removal: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
 
         alpha_norm = alpha.astype(np.float32) / 255.0
         stats = {
@@ -73,11 +77,17 @@ class IInstance(IInstanceBase):
             self.instance.writeText(json.dumps(stats))
 
         if self.instance.hasListener('image'):
-            # Straight (un-premultiplied) alpha avoids dark fringes when consumers
-            # re-composite over a non-black background.
-            r, g, b = source_capped.split()
-            rgba = Image.merge('RGBA', (r, g, b, Image.fromarray(alpha, mode='L')))
-            image_bytes = ImageProcessor.get_bytes(rgba)
+            # Restore the matte to the original resolution and composite over the full-res
+            # source so the cutout matches the input size. Straight (un-premultiplied) alpha
+            # avoids dark fringes when consumers re-composite over a non-black background.
+            t0 = time.perf_counter()
+            alpha_full = restore_dense_output(alpha, original_size, mode='bilinear')
+            r, g, b = orig_rgb.split()
+            rgba = Image.merge('RGBA', (r, g, b, Image.fromarray(alpha_full, mode='L')))
+            # Fast zlib level: a full-res RGBA cutout encodes ~5-6x faster than the
+            # default level 6 (~16s -> ~3s on 30 MP), for a modestly larger PNG.
+            image_bytes = ImageProcessor.get_bytes(rgba, compress_level=1)
+            debug(f'bg_removal: encode={(time.perf_counter() - t0) * 1000:.0f}ms out={len(image_bytes) / 1e6:.1f}MB')
             self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
             self.instance.writeImage(AVI_ACTION.END, 'image/png')

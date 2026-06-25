@@ -58,10 +58,10 @@ class IInstance(IInstanceBase):
             self.instance.writeText(json.dumps(faces))
 
         if self.instance.hasListener('image'):
-            image_bytes = ImageProcessor.get_bytes(annotated)
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
+            image_bytes = ImageProcessor.get_bytes(annotated, fmt='JPEG')
+            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/jpeg')
+            self.instance.writeImage(AVI_ACTION.WRITE, 'image/jpeg', image_bytes)
+            self.instance.writeImage(AVI_ACTION.END, 'image/jpeg')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         if action == AVI_ACTION.BEGIN:

@@ -168,3 +168,32 @@ def test_build_detector_succeeds_when_lib_present(monkeypatch):
     monkeypatch.setattr(det, '_resolve_model_path', lambda: '/tmp/model.tflite')
 
     assert det._build_detector() is sentinel
+
+
+# ---------------------------------------------------------------------------
+# _rescale_to_original maps downscaled-inference coords back to original size
+# ---------------------------------------------------------------------------
+
+
+def test_rescale_to_original_maps_box_centroid_and_landmarks():
+    faces = [
+        {
+            'label': 'face',
+            'score': 0.9,
+            'box': {'x1': 100.0, 'y1': 50.0, 'x2': 200.0, 'y2': 150.0},
+            'centroid': {'x': 150.0, 'y': 100.0},
+            'landmarks': [{'name': 'nose_tip', 'x': 150.0, 'y': 100.0}],
+        }
+    ]
+    # inference at (1000, 500), original (2000, 1000) -> fx = fy = 2.
+    out = FaceDetector._rescale_to_original(faces, (1000, 500), 2000, 1000)
+    assert out[0]['box'] == {'x1': 200.0, 'y1': 100.0, 'x2': 400.0, 'y2': 300.0}
+    assert out[0]['centroid'] == {'x': 300.0, 'y': 200.0}
+    assert out[0]['landmarks'][0]['x'] == 300.0
+    assert out[0]['landmarks'][0]['y'] == 200.0
+
+
+def test_rescale_to_original_noop_when_sizes_match():
+    faces = [{'box': {'x1': 1.0, 'y1': 2.0, 'x2': 3.0, 'y2': 4.0}}]
+    out = FaceDetector._rescale_to_original(faces, (500, 500), 500, 500)
+    assert out[0]['box'] == {'x1': 1.0, 'y1': 2.0, 'x2': 3.0, 'y2': 4.0}
