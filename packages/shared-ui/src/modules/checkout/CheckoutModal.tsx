@@ -252,6 +252,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	onConfirmPending,
 	onSuccess,
 	onClose,
+	onActionClick,
 }) => {
 	// Initialise Stripe lazily
 	const [stripePromise] = useState(() => loadStripe(stripePublishableKey));
@@ -380,6 +381,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							loading={plansLoading}
 							selectedPlan={selectedPlan}
 							onSelectPlan={setSelectedPlan}
+							onActionClick={onActionClick}
 							autoSelectDefault
 							footer={
 								<button

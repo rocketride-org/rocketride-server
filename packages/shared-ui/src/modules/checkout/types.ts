@@ -126,4 +126,12 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Overrides how a plan's action CTA (Free → link, Enterprise → mailto) is
+	 * opened. The browser default (window.open / mailto) works in the SaaS web
+	 * app; the VS Code extension passes a handler that routes through the host,
+	 * since webview navigation is sandboxed.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }

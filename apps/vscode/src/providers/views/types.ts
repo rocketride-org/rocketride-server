@@ -23,7 +23,7 @@ export type ProjectHostToWebview = { type: 'project:load'; project: any; viewSta
 	| { type: 'project:envKeysUpdate'; envKeys: string[] };
 
 /** All messages the ProjectWebview can send to the extension host. */
-export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string; pipelineTraceLevel?: TraceLevel } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
+export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string; browser?: boolean } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string; pipelineTraceLevel?: TraceLevel } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL
