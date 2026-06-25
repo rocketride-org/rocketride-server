@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import {
 	NodeConnectionTypes,
 	type IDataObject,
@@ -7,6 +8,14 @@ import {
 	type IWebhookFunctions,
 	type IWebhookResponseData,
 } from 'n8n-workflow';
+
+function secretDigest(value: string) {
+	return createHash('sha256').update(value, 'utf8').digest();
+}
+
+function secretsMatch(provided: string, secret: string): boolean {
+	return timingSafeEqual(secretDigest(provided), secretDigest(secret));
+}
 
 // A trigger cannot meaningfully be used as an AI Agent tool, so usableAsTool is
 // intentionally omitted — otherwise n8n generates a confusing "RocketRide Trigger
@@ -111,7 +120,7 @@ export class RocketRideInboundTrigger implements INodeType {
 			const provided = String(headers.authorization ?? '')
 				.replace(/^Bearer\s+/i, '')
 				.trim();
-			if (provided !== secret) {
+			if (!secretsMatch(provided, secret)) {
 				const res = this.getResponseObject();
 				res.status(401).json({ error: 'Unauthorized: invalid RocketRide secret' });
 				return { noWebhookResponse: true };

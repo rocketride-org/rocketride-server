@@ -11,10 +11,23 @@ on:
     paths:
       - 'packages/n8n-nodes/**'
       - '.github/workflows/n8n-nodes-ci.yml'
+      - '.github/workflows/n8n-nodes-release.yml'
+      - '.gitignore'
+      - '.prettierignore'
+      - 'eslint.config.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
   push:
     branches: [develop, main]
     paths:
       - 'packages/n8n-nodes/**'
+      - '.github/workflows/n8n-nodes-ci.yml'
+      - '.github/workflows/n8n-nodes-release.yml'
+      - '.gitignore'
+      - '.prettierignore'
+      - 'eslint.config.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
 
 permissions:
   contents: read

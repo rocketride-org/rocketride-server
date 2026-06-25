@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest';
-import { RocketRideInboundTrigger } from '../nodes/RocketRideInboundTrigger/RocketRideInboundTrigger.node.ts';
+import { timingSafeEqual } from 'node:crypto';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('node:crypto', async (importOriginal) => {
+	const crypto = await importOriginal();
+	return {
+		...crypto,
+		timingSafeEqual: vi.fn(crypto.timingSafeEqual),
+	};
+});
+
+const { RocketRideInboundTrigger } = await import(
+	'../nodes/RocketRideInboundTrigger/RocketRideInboundTrigger.node.ts'
+);
 
 function makeCtx({ params = {}, body = {}, headers = {}, query = {} }) {
 	const state = { responded: null };
@@ -49,7 +61,31 @@ describe('RocketRideInboundTrigger.webhook', () => {
 		expect(out.workflowData[0][0].json.ok).toBe(true);
 	});
 
-	it('rejects with 401 when the secret is wrong', async () => {
+	it('passes the secret check when the Authorization header matches without Bearer', async () => {
+		const { ctx } = makeCtx({
+			params: { secret: 's3cr3t' },
+			body: { ok: true },
+			headers: { authorization: 's3cr3t' },
+		});
+		const out = await RocketRideInboundTrigger.prototype.webhook.call(ctx);
+		expect(out.workflowData[0][0].json.ok).toBe(true);
+	});
+
+	it('rejects with 401 when the secret is the wrong same-length value', async () => {
+		const { ctx, state } = makeCtx({
+			params: { secret: 's3cr3t' },
+			body: {},
+			headers: { authorization: 'Bearer x3cr3t' },
+		});
+		const out = await RocketRideInboundTrigger.prototype.webhook.call(ctx);
+		expect(out.noWebhookResponse).toBe(true);
+		expect(state.responded).toEqual({
+			code: 401,
+			body: { error: 'Unauthorized: invalid RocketRide secret' },
+		});
+	});
+
+	it('rejects with 401 when the secret is the wrong different-length value', async () => {
 		const { ctx, state } = makeCtx({
 			params: { secret: 's3cr3t' },
 			body: {},
@@ -57,7 +93,10 @@ describe('RocketRideInboundTrigger.webhook', () => {
 		});
 		const out = await RocketRideInboundTrigger.prototype.webhook.call(ctx);
 		expect(out.noWebhookResponse).toBe(true);
-		expect(state.responded.code).toBe(401);
+		expect(state.responded).toEqual({
+			code: 401,
+			body: { error: 'Unauthorized: invalid RocketRide secret' },
+		});
 	});
 
 	it('redacts Authorization/Cookie headers from _rocketride metadata', async () => {
@@ -71,5 +110,20 @@ describe('RocketRideInboundTrigger.webhook', () => {
 		expect(headers.authorization).toBeUndefined();
 		expect(headers.cookie).toBeUndefined();
 		expect(headers['x-keep']).toBe('1');
+	});
+
+	it('compares secrets with fixed-length SHA-256 digests and timingSafeEqual', async () => {
+		vi.mocked(timingSafeEqual).mockClear();
+		const { ctx } = makeCtx({
+			params: { secret: 's3cr3t' },
+			body: {},
+			headers: { authorization: 'Bearer nope' },
+		});
+		await RocketRideInboundTrigger.prototype.webhook.call(ctx);
+
+		expect(timingSafeEqual).toHaveBeenCalledTimes(1);
+		const [[providedDigest, secretDigest]] = vi.mocked(timingSafeEqual).mock.calls;
+		expect(providedDigest).toHaveLength(32);
+		expect(secretDigest).toHaveLength(32);
 	});
 });
