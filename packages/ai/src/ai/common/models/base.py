@@ -223,6 +223,19 @@ def get_model_server_address() -> Optional[str]:
     return None
 
 
+def is_model_server_enabled() -> bool:
+    """
+    True when a model server is configured via ``--modelserver``.
+
+    Reflects configuration only (the flag is set with a non-empty address); it does
+    not verify the server is reachable or running.
+
+    Returns:
+        True if ``--modelserver=<address>`` is present, False otherwise.
+    """
+    return bool(get_model_server_address())
+
+
 # =============================================================================
 # MODEL CLIENT
 # =============================================================================
