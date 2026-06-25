@@ -1,1 +1,3 @@
 gliner
+onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
+onnxruntime==1.20.1; platform_system == 'Darwin'
