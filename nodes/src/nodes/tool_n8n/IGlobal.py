@@ -43,6 +43,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 # and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
 N8N_URL_ENV = 'ROCKETRIDE_N8N_URL'
 N8N_API_KEY_ENV = 'ROCKETRIDE_N8N_KEY'
+N8N_WORKFLOW_ENV = 'ROCKETRIDE_N8N_WORKFLOW'
 
 DEFAULT_BASE_URL = 'http://localhost:5678'
 
@@ -86,7 +87,7 @@ class IGlobal(IGlobalBase):
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip('/')
 
         self.api_key = str(cfg.get('apiKey') or '').strip() or os.environ.get(N8N_API_KEY_ENV, '').strip()
-        self.default_workflow = str(cfg.get('workflow') or '').strip()
+        self.default_workflow = str(cfg.get('workflow') or '').strip() or os.environ.get(N8N_WORKFLOW_ENV, '').strip()
         self.mode = 'async' if str(cfg.get('mode') or 'sync').strip().lower() == 'async' else 'sync'
         self.payload_mode = (
             'structured' if str(cfg.get('payloadMode') or 'simple').strip().lower() == 'structured' else 'simple'

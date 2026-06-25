@@ -103,11 +103,35 @@ for _name, _stub in _build_import_stubs().items():
         _added_stubs.append(_name)
 
 client = importlib.import_module('nodes.tool_n8n.n8n_client')
+global_mod = importlib.import_module('nodes.tool_n8n.IGlobal')
 instance_mod = importlib.import_module('nodes.tool_n8n.IInstance')
 
 # Drop the stubs we injected so they never leak into the shared pytest session.
 for _name in _added_stubs:
     sys.modules.pop(_name, None)
+
+
+# ---------------------------------------------------------------------------
+# IGlobal: config/env loading
+# ---------------------------------------------------------------------------
+
+
+def test_begin_global_uses_workflow_env_when_config_workflow_empty(monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_N8N_WORKFLOW', 'env-webhook-path')
+    monkeypatch.setattr(
+        global_mod.Config,
+        'getNodeConfig',
+        lambda *a, **kw: {'baseUrl': 'http://n8n:5678', 'workflow': '   '},
+    )
+
+    glb = global_mod.IGlobal()
+    glb.IEndpoint = MagicMock()
+    glb.IEndpoint.endpoint.openMode = object()
+    glb.glb = MagicMock(logicalType='tool_n8n', connConfig={})
+
+    glb.beginGlobal()
+
+    assert glb.default_workflow == 'env-webhook-path'
 
 
 # ---------------------------------------------------------------------------

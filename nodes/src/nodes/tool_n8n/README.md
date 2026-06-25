@@ -56,7 +56,7 @@ The agent never chooses the host — every request targets the configured Base U
 
 | Field                | Default                 | Description                                                                        |
 | -------------------- | ----------------------- | ---------------------------------------------------------------------------------- |
-| n8n Base URL         | `http://localhost:5678` | Your n8n instance URL. In Docker, use `host.docker.internal:5678` (see below).     |
+| n8n Base URL         | `http://localhost:5678` | Your n8n instance URL. In Docker, use `http://host.docker.internal:5678` (see below). |
 | API Key              | —                       | n8n public API key (`X-N8N-API-KEY`). Only for listing/inspecting/polling.         |
 | Workflow             | —                       | Webhook path the target workflow listens on (the pipeline step triggers this).     |
 | Payload shape        | `simple`                | Pipeline step body: `simple` → `{"data": text}`; `structured` → `{text, documents:[{content, metadata}]}` (preserves document boundaries/metadata). |

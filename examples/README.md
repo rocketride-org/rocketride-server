@@ -103,7 +103,7 @@ The [`n8n/`](n8n/) subfolder has runnable test pipes covering every mode — `n8
 
 **Single-agent pipeline** using the LlamaIndex agent framework, backed by Claude.
 
-```
+```text
 chat -> LlamaIndex agent -> response
               |
         +-----+-----+
