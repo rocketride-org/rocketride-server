@@ -752,7 +752,14 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	 */
 	private openLink(url: string, displayName?: string, browser = false): void {
 		if (browser) {
-			void vscode.env.openExternal(vscode.Uri.parse(url));
+			// URL comes from a webview message; allowlist schemes before opening.
+			const uri = vscode.Uri.parse(url);
+			const scheme = uri.scheme.toLowerCase();
+			if (!['https', 'http', 'mailto'].includes(scheme)) {
+				this.logger.error(`[ProjectProvider] Blocked external URL scheme: ${scheme}`);
+				return;
+			}
+			void vscode.env.openExternal(uri);
 			return;
 		}
 		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
