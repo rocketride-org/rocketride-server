@@ -460,7 +460,7 @@ class PoseEstimator:
             The same list with box + keypoint coords scaled to the original image
             (mutated in place; returned unchanged when the sizes already match).
         """
-        from ai.common.image.dense_resize import inference_scale, scale_box, scale_point
+        from ai.common.utils.image_utils import inference_scale, scale_box, scale_point
 
         factors = inference_scale(small_size, (orig_w, orig_h))
         if not poses or factors is None:
