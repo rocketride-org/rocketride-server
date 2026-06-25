@@ -222,6 +222,9 @@ def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
     """
     params = []
     for config in configs:
+        # Release engines don't register "debug" nodes; running one only errors.
+        if 'debug' in config.capabilities:
+            continue
         if skip_nodes and config.node_name in skip_nodes:
             if include_skip is None or config.node_name not in include_skip:
                 continue
@@ -271,8 +274,6 @@ def pytest_generate_tests(metafunc):
             'caption',
             'background_removal',
             'pose_estimation',
-            # Debug-only nodes (capabilities include "debug"): inactive in release
-            # (NDEBUG) builds, so the dynamic engine test cannot load them.
             'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',

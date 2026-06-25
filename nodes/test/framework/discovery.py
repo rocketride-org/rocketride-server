@@ -101,6 +101,7 @@ class NodeTestConfig:
     # Node metadata
     preconfig: Dict[str, Any] = field(default_factory=dict)
     lanes: Dict[str, Any] = field(default_factory=dict)
+    capabilities: List[str] = field(default_factory=list)
     config_id: Optional[str] = None
 
     def get_test_id(self) -> str:
@@ -376,6 +377,7 @@ def _parse_test_config(
                 config=group.get('config') if isinstance(group.get('config'), dict) else {},
                 preconfig=data.get('preconfig', {}),
                 lanes=data.get('lanes', {}),
+                capabilities=_ensure_list_field(data.get('capabilities'), 'capabilities', service_file),
                 config_id=config_id,
             )
         )
