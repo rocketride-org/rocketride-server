@@ -558,21 +558,19 @@ class Detector:
         dets: List[Dict[str, Any]], small_size: Tuple[int, int], orig_w: int, orig_h: int
     ) -> List[Dict[str, Any]]:
         """Map box/centroid coordinates from the downscaled image back to original size."""
-        sw, sh = small_size
-        if not dets or (sw == orig_w and sh == orig_h):
+        from ai.common.image.dense_resize import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not dets or factors is None:
             return dets
-        fx, fy = orig_w / sw, orig_h / sh
+        fx, fy = factors
         for d in dets:
-            b = d.get('box')
-            if b:
-                b['x1'] *= fx
-                b['x2'] *= fx
-                b['y1'] *= fy
-                b['y2'] *= fy
+            box = d.get('box')
+            if box:
+                scale_box(box, fx, fy)
             c = d.get('centroid')
             if c:
-                c['x'] *= fx
-                c['y'] *= fy
+                scale_point(c, fx, fy)
         return dets
 
     def disconnect(self) -> None:

@@ -460,20 +460,18 @@ class PoseEstimator:
             The same list with box + keypoint coords scaled to the original image
             (mutated in place; returned unchanged when the sizes already match).
         """
-        sw, sh = small_size
-        if not poses or (sw == orig_w and sh == orig_h):
+        from ai.common.image.dense_resize import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not poses or factors is None:
             return poses
-        fx, fy = orig_w / sw, orig_h / sh
+        fx, fy = factors
         for p in poses:
-            b = p.get('box')
-            if b:
-                b['x1'] *= fx
-                b['x2'] *= fx
-                b['y1'] *= fy
-                b['y2'] *= fy
+            box = p.get('box')
+            if box:
+                scale_box(box, fx, fy)
             for kp in p.get('keypoints', []):
-                kp['x'] *= fx
-                kp['y'] *= fy
+                scale_point(kp, fx, fy)
         return poses
 
     def disconnect(self) -> None:

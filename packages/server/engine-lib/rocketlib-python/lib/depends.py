@@ -753,6 +753,22 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _write_excludes_file() -> str:
+    """Write uv's resolution-excludes file (rewritten each call) and return its path.
+
+    Excludes `uv` (bootstrapped by depends.py; pip-installing it crashes on Windows)
+    and, on non-Darwin, plain `onnxruntime` (it clobbers onnxruntime-gpu in the same
+    folder; the gpu build provides `import onnxruntime`).
+    """
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
+    excludes = 'uv\n'
+    if platform.system() != 'Darwin':
+        excludes += 'onnxruntime\n'
+    with open(excludes_path, 'w', encoding='utf-8') as f:
+        f.write(excludes)
+    return excludes_path
+
+
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
     """
     Run uv pip install --dry-run and return list of packages that would be installed.
@@ -779,21 +795,10 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         '--no-color',
     ]
 
-    # Exclude uv from resolution — it's bootstrapped by depends.py and
-    # installing it as a pip package crashes on Windows (os error 32)
-    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
-    if not os.path.exists(excludes_path):
-        excludes = 'uv\n'
-        # Plain onnxruntime would clobber onnxruntime-gpu (same folder); the gpu build
-        # provides `import onnxruntime`. macOS has no gpu wheel, so keep plain there.
-        if platform.system() != 'Darwin':
-            excludes += 'onnxruntime\n'
-        with open(excludes_path, 'w', encoding='utf-8') as f:
-            f.write(excludes)
     # uv splits --excludes on whitespace, so an absolute path with a space (macOS
     # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
     # See #1256.
-    args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
+    args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     args.extend(_constraints_args(constraints_path, exe_dir))
 
@@ -893,18 +898,8 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
     ]
 
-    # Exclude uv from resolution (same excludes file as dry-run)
-    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
-    if not os.path.exists(excludes_path):
-        excludes = 'uv\n'
-        # Plain onnxruntime would clobber onnxruntime-gpu (same folder); the gpu build
-        # provides `import onnxruntime`. macOS has no gpu wheel, so keep plain there.
-        if platform.system() != 'Darwin':
-            excludes += 'onnxruntime\n'
-        with open(excludes_path, 'w', encoding='utf-8') as f:
-            f.write(excludes)
     # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
-    uv_args.extend(['--excludes', os.path.relpath(excludes_path, exe_dir)])
+    uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
 

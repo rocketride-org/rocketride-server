@@ -256,24 +256,21 @@ class FaceDetector:
             The same list with box/centroid/landmark coords scaled to the original image
             (mutated in place; returned unchanged when the sizes already match).
         """
-        sw, sh = small_size
-        if not faces or (sw == orig_w and sh == orig_h):
+        from ai.common.image.dense_resize import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not faces or factors is None:
             return faces
-        fx, fy = orig_w / sw, orig_h / sh
+        fx, fy = factors
         for f in faces:
-            b = f.get('box')
-            if b:
-                b['x1'] *= fx
-                b['x2'] *= fx
-                b['y1'] *= fy
-                b['y2'] *= fy
+            box = f.get('box')
+            if box:
+                scale_box(box, fx, fy)
             c = f.get('centroid')
             if c:
-                c['x'] *= fx
-                c['y'] *= fy
+                scale_point(c, fx, fy)
             for kp in f.get('landmarks', []):
-                kp['x'] *= fx
-                kp['y'] *= fy
+                scale_point(kp, fx, fy)
         return faces
 
     def _format(self, result: Any, img_w: int, img_h: int) -> List[Dict[str, Any]]:

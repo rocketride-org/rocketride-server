@@ -84,8 +84,7 @@ class IInstance(IInstanceBase):
             alpha_full = restore_dense_output(alpha, original_size, mode='bilinear')
             r, g, b = orig_rgb.split()
             rgba = Image.merge('RGBA', (r, g, b, Image.fromarray(alpha_full, mode='L')))
-            # Fast zlib level: a full-res RGBA cutout encodes ~5-6x faster than the
-            # default level 6 (~16s -> ~3s on 30 MP), for a modestly larger PNG.
+            # Fast zlib level: ~5-6x faster encode on big RGBA cutouts, slightly larger file.
             image_bytes = ImageProcessor.get_bytes(rgba, compress_level=1)
             debug(f'bg_removal: encode={(time.perf_counter() - t0) * 1000:.0f}ms out={len(image_bytes) / 1e6:.1f}MB')
             self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
