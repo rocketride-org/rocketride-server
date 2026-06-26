@@ -795,9 +795,13 @@ function makeInstallPipAction() {
                     'mcp>=1.2.0',
                     // Model server
                     'huggingface_hub[hf_xet]',
-                    // Pin cryptography to match nodes/src/nodes/requirements.txt
-                    // so transitive deps (mcp, azure, etc.) don't pull a newer
-                    // major that conflicts at test time.
+                    // Pin cryptography to the node-requirements range so the build
+                    // installs the right version up front. Unconstrained, the build
+                    // pulls the latest (transitively, via mcp/huggingface_hub) and
+                    // depends() then downgrades it during parallel pytest collection;
+                    // on Windows the workers race to overwrite the already-loaded
+                    // cryptography _rust.pyd DLL and the whole suite fails. Keep this
+                    // in lockstep with nodes/src/nodes/requirements.txt.
                     'cryptography>=46.0.7,<47',
                 );
                 await setState('server.pipInstalledV9', true);
