@@ -619,6 +619,51 @@ class FileStore:
 
         return normalized
 
+    async def get_url(self, path: str, expires_in: int = 3600) -> str:
+        """
+        Get a direct HTTP URL for accessing the file.
+
+        Cloud backends (S3, Azure) return a presigned/SAS URL directly.
+        The local filesystem backend generates a JWT-signed URL pointing at
+        the server's ``/task/fetch`` endpoint.
+
+        Args:
+            path: Relative path within the account store.
+            expires_in: URL validity in seconds (default 1 hour).
+
+        Returns:
+            A direct HTTP(S) URL to the file.
+
+        Raises:
+            ValueError: If ``RR_SIGNING_KEY`` is not set and the backend
+                requires a locally-signed URL.
+        """
+        import os
+
+        full_path = self._full_path(path)
+        url = await self._store.get_url(full_path, expires_in)
+        if url is not None:
+            return url
+
+        # Local filesystem backend — generate a JWT-signed fetch URL
+        import time
+        import jwt
+
+        signing_key = os.environ.get('RR_SIGNING_KEY', '')
+        if not signing_key:
+            raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+
+        payload = {
+            'sub': self._client_id,
+            'path': path,
+            'exp': int(time.time()) + expires_in,
+        }
+        token = jwt.encode(payload, signing_key, algorithm='HS256')
+
+        # This was set by the main web server
+        base_url = os.environ.get('RR_BASE_URL', 'http://localhost:5565')
+        return f'{base_url}/task/fetch?token={token}'
+
     def _full_path(self, path: str) -> str:
         """Build the full storage path: users/<client_id>/files/<path>."""
         validated = self._validate_path(path)

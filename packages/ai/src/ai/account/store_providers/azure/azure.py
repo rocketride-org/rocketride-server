@@ -517,6 +517,48 @@ class AzureBlobStore(IStore):
         context['block_counter'] += 1
 
     # =========================================================================
+    # URL Generation
+    # =========================================================================
+
+    async def get_url(self, filename: str, expires_in: int = 3600) -> str | None:
+        """Generate a SAS URL for direct browser access to an Azure blob."""
+        from datetime import datetime, timedelta, timezone
+
+        blob_name = self._get_blob_name(filename)
+        try:
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+
+            # Extract account name and key for SAS generation
+            account_name = self._account_name
+            account_key = self._account_key
+
+            if not account_name or not account_key:
+                # If using connection string, parse account name and key from it
+                if self._connection_string:
+                    parts = dict(p.split('=', 1) for p in self._connection_string.split(';') if '=' in p)
+                    account_name = parts.get('AccountName')
+                    account_key = parts.get('AccountKey')
+
+            if not account_name or not account_key:
+                return None  # Cannot generate SAS without credentials
+
+            sas_token = generate_blob_sas(
+                account_name=account_name,
+                container_name=self._container,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            )
+
+            blob_url = f'https://{account_name}.blob.core.windows.net/{self._container}/{blob_name}?{sas_token}'
+            return blob_url
+        except ImportError:
+            raise StorageError('Azure SDK not installed. Install with: pip install azure-storage-blob')
+        except Exception as e:
+            raise StorageError(f'Failed to generate SAS URL: {e}') from e
+
+    # =========================================================================
     # Private Methods
     # =========================================================================
 

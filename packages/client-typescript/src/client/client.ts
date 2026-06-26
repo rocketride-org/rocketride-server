@@ -2216,6 +2216,26 @@ export class RocketRideClient extends DAPClient {
 		await this.call('rrext_store', { subcommand: 'fs_rename', old_path: oldPath, new_path: newPath });
 	}
 
+	/**
+	 * Get a direct HTTP URL for accessing a file in the store.
+	 *
+	 * For cloud backends (S3, Azure) this returns a presigned/SAS URL.
+	 * For local filesystem backends this returns a JWT-signed URL pointing
+	 * at the server's `/task/fetch` endpoint.
+	 *
+	 * The returned URL can be used directly as `src` on `<img>`, `<video>`,
+	 * `<audio>`, and `<iframe>` elements for native browser streaming.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param expiresIn - URL validity in seconds (default 3600)
+	 * @returns A direct HTTP(S) URL to the file
+	 */
+	async fsGetUrl(path: string, expiresIn: number = 3600): Promise<string> {
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', { subcommand: 'fs_geturl', path, expires_in: expiresIn });
+		return (body as any).url;
+	}
+
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================

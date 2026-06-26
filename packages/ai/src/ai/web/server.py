@@ -447,6 +447,15 @@ class WebServer:
         # Save the port
         self._port = port
 
+        # Publish the server's base URL so components (e.g. FileStore JWT
+        # signing) can construct URLs without needing a reference to the
+        # web server instance.  Only set if not already overridden by the
+        # operator via .env or environment.
+        if not os.environ.get('RR_BASE_URL'):
+            scheme = 'https' if ssl_certfile else 'http'
+            public_host = 'localhost' if host == '0.0.0.0' else host
+            os.environ['RR_BASE_URL'] = f'{scheme}://{public_host}:{port}'
+
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
             self.app,

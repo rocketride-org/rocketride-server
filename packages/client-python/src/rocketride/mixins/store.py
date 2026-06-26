@@ -205,6 +205,28 @@ class StoreMixin(DAPClient):
         self._validate_relative_path(new_path, 'new_path')
         await self.call('rrext_store', subcommand='fs_rename', old_path=old_path, new_path=new_path)
 
+    async def fs_get_url(self, path: str, expires_in: int = 3600) -> str:
+        """
+        Get a direct HTTP URL for accessing a file in the store.
+
+        For cloud backends (S3, Azure) this returns a presigned/SAS URL.
+        For local filesystem backends this returns a JWT-signed URL pointing
+        at the server's ``/task/fetch`` endpoint.
+
+        The returned URL can be used directly in browsers for streaming
+        media, downloading files, or embedding in ``<img>``/``<video>`` tags.
+
+        Args:
+            path: Relative path within the account store.
+            expires_in: URL validity in seconds (default 3600).
+
+        Returns:
+            A direct HTTP(S) URL to the file.
+        """
+        self._validate_relative_path(path, 'path')
+        result = await self.call('rrext_store', subcommand='fs_geturl', path=path, expires_in=expires_in)
+        return result['url']
+
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)
     # =========================================================================

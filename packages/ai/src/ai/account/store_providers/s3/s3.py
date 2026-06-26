@@ -559,6 +559,24 @@ class S3Store(IStore):
         return 'NoSuchKey' in error_str or 'NoSuchKey' in class_name or 'NotFound' in error_str or '404' in error_str
 
     # =========================================================================
+    # URL Generation
+    # =========================================================================
+
+    async def get_url(self, filename: str, expires_in: int = 3600) -> str | None:
+        """Generate a presigned S3 URL for direct browser access."""
+        key = self._get_key(filename)
+        try:
+            client = self._get_client()
+            url = client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self._bucket, 'Key': key},
+                ExpiresIn=expires_in,
+            )
+            return url
+        except Exception as e:
+            raise StorageError(f'Failed to generate presigned URL: {e}') from e
+
+    # =========================================================================
     # Private Methods
     # =========================================================================
 

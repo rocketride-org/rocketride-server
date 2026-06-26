@@ -1,0 +1,296 @@
+// MIT License
+//
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// =============================================================================
+// EXPLORER SIDEBAR — file tree for the RocketRide server store
+// =============================================================================
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ShellSidebarProps } from 'shell-ui';
+import { useShellConnection } from 'shell-ui';
+import { Explorer, BxDownload } from 'shared';
+import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
+import { getDocs } from './docs';
+import { createStoreVfs } from './store';
+
+// =============================================================================
+// CONFIG
+// =============================================================================
+
+/** Explorer configuration for the store file browser. */
+const EXPLORER_CONFIG: ExplorerConfig = {
+	title: 'Files',
+	emptyMessage: 'No files in store',
+	allowFolders: true,
+};
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+/**
+ * Sidebar for the File Explorer app.
+ *
+ * Uses the shared Explorer component for the file tree with built-in
+ * rename, delete, create file, and create folder support.  Files are
+ * opened in the Documents tab system on click.
+ */
+const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
+	const { client, isConnected } = useShellConnection();
+	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
+	const [vfs, setVfs] = useState<IVirtualFileSystem | null>(null);
+
+	// Active file path from Documents (for highlighting)
+	const [activeFile, setActiveFile] = useState('');
+	useEffect(() => {
+		const docs = getDocs();
+		if (!docs) return;
+		const readActive = (): string => {
+			const s = docs.getState();
+			const group = s.groups[s.activeGroupId];
+			if (!group) return '';
+			const editorId = group.editorIds[group.activeEditorIndex];
+			return editorId ? (s.editors[editorId]?.documentUri ?? '') : '';
+		};
+		setActiveFile(readActive());
+		return docs.subscribe(() => setActiveFile(readActive()));
+	}, []);
+
+	// --- Create VFS when client is available ----------------------------------
+
+	useEffect(() => {
+		if (client) {
+			setVfs(createStoreVfs(client));
+		} else {
+			setVfs(null);
+		}
+	}, [client]);
+
+	// --- Refresh file list (recursive) ----------------------------------------
+
+	const refresh = useCallback(async () => {
+		if (!client || !isConnected) { setEntries([]); return; }
+		try {
+			const allEntries = await listRecursive(client, '');
+			setEntries(allEntries);
+		} catch {
+			setEntries([]);
+		}
+	}, [client, isConnected]);
+
+	// Refresh on mount and when connection changes
+	useEffect(() => { refresh(); }, [refresh]);
+
+	// --- Open a file ----------------------------------------------------------
+
+	const handleOpenFile = useCallback((path: string) => {
+		const entry = entries.find((e) => e.path === path);
+		// Don't try to open directories as documents
+		if (entry?.type === 'dir') return;
+		getDocs()?.openDocument(path);
+	}, [entries]);
+
+	// --- File management (rename, delete, createFile, createFolder) -----------
+
+	const handleFileManage = useCallback(async (
+		action: 'rename' | 'delete' | 'createFolder' | 'createFile',
+		path: string,
+		newName?: string,
+	) => {
+		if (!client) return;
+		try {
+			switch (action) {
+				case 'rename': {
+					if (!newName) break;
+					const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+					const newPath = dir ? `${dir}/${newName}` : newName;
+					if (newPath === path) break;
+					await client.fsRename(path, newPath);
+					// Update open editor tabs
+					const docs = getDocs();
+					if (docs) {
+						const s = docs.getState();
+						const editorIds = Object.entries(s.editors)
+							.filter(([, ed]) => ed.documentUri === path)
+							.map(([id]) => id);
+						for (const eid of editorIds) docs.closeEditor(eid);
+						if (editorIds.length > 0) await docs.openDocument(newPath);
+					}
+					break;
+				}
+				case 'delete': {
+					const stat = await client.fsStat(path);
+					if (stat.type === 'dir') {
+						await client.fsRmdir(path, true);
+					} else {
+						await client.fsDelete(path);
+					}
+					getDocs()?.discardDocument(path);
+					break;
+				}
+				case 'createFile': {
+					await client.fsWriteString(path, '');
+					getDocs()?.openDocument(path);
+					break;
+				}
+				case 'createFolder': {
+					await client.fsMkdir(path);
+					break;
+				}
+			}
+			await refresh();
+		} catch (err) {
+			console.error(`[ExplorerSidebar] ${action} failed:`, err);
+		}
+	}, [client, refresh]);
+
+	// --- Move (drag within tree) ----------------------------------------------
+
+	const handleMove = useCallback(async (sourcePath: string, targetDir: string) => {
+		if (!client) return;
+		try {
+			const name = sourcePath.includes('/') ? sourcePath.substring(sourcePath.lastIndexOf('/') + 1) : sourcePath;
+			const newPath = targetDir ? `${targetDir}/${name}` : name;
+			if (newPath === sourcePath) return;
+			await client.fsRename(sourcePath, newPath);
+			await refresh();
+		} catch (err) {
+			console.error('[ExplorerSidebar] move failed:', err);
+		}
+	}, [client, refresh]);
+
+	// --- Upload (drop from OS) ------------------------------------------------
+
+	const handleUpload = useCallback(async (files: File[], targetDir: string) => {
+		if (!client) return;
+		try {
+			for (const file of files) {
+				const path = targetDir ? `${targetDir}/${file.name}` : file.name;
+				const data = new Uint8Array(await file.arrayBuffer());
+				const { handle } = await client.fsOpen(path, 'w');
+				const chunkSize = 4 * 1024 * 1024; // 4 MB
+				let offset = 0;
+				while (offset < data.length) {
+					await client.fsWrite(handle, data.subarray(offset, offset + chunkSize));
+					offset += chunkSize;
+				}
+				await client.fsClose(handle, 'w');
+			}
+			await refresh();
+		} catch (err) {
+			console.error('[ExplorerSidebar] upload failed:', err);
+		}
+	}, [client, refresh]);
+
+	// --- Download (kebab menu action) -----------------------------------------
+
+	const handleDownload = useCallback(async (path: string) => {
+		if (!client) return;
+		try {
+			const url = await client.fsGetUrl(path);
+			if (!url) return;
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+		} catch (err) {
+			console.error('[ExplorerSidebar] download failed:', err);
+		}
+	}, [client]);
+
+	const fileActions: ExplorerFileAction[] = useMemo(() => [
+		{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
+	], [handleDownload]);
+
+	// --- Collapsed mode -------------------------------------------------------
+
+	if (collapsed) {
+		return null;
+	}
+
+	// --- Expanded mode --------------------------------------------------------
+
+	// Use a no-op VFS for the Explorer — we handle all operations via callbacks
+	const noopVfs: IVirtualFileSystem = {
+		list: async () => [],
+		read: async () => null,
+		write: async () => {},
+		rename: async () => {},
+		delete: async () => {},
+		mkdir: async () => {},
+	};
+
+	return (
+		<div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+			<Explorer
+				vfs={noopVfs}
+				config={EXPLORER_CONFIG}
+				entries={entries}
+				isConnected={isConnected}
+				activeFilePath={activeFile}
+				onOpenFile={handleOpenFile}
+				onFileManage={handleFileManage}
+				onRefresh={refresh}
+				onMove={handleMove}
+				onUpload={handleUpload}
+				fileActions={fileActions}
+			/>
+		</div>
+	);
+};
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Recursively lists all files and directories from the server store,
+ * building a flat ExplorerEntry[] array that the Explorer component
+ * can derive its tree hierarchy from.
+ */
+async function listRecursive(
+	client: any,
+	dir: string,
+): Promise<ExplorerEntry[]> {
+	const result = await client.fsListDir(dir);
+	const entries: ExplorerEntry[] = [];
+
+	for (const item of result.entries ?? []) {
+		const path = dir ? `${dir}/${item.name}` : item.name;
+		entries.push({ path, type: item.type ?? 'file' });
+
+		if (item.type === 'dir') {
+			try {
+				const children = await listRecursive(client, path);
+				entries.push(...children);
+			} catch {
+				// Skip inaccessible directories
+			}
+		}
+	}
+
+	return entries;
+}
+
+export default ExplorerSidebar;

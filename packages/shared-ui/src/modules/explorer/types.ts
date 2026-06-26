@@ -242,4 +242,19 @@ export interface IExplorerProps {
 
 	/** Called when the user clicks the refresh button. */
 	onRefresh: () => void;
+
+	/**
+	 * Called when a file or directory is dragged and dropped onto a directory.
+	 * Optional — when absent, internal drag-to-move is disabled.
+	 */
+	onMove?: (sourcePath: string, targetDir: string) => void;
+
+	/**
+	 * Called when files are dropped from the OS onto the file tree.
+	 * Optional — when absent, upload-by-drop is disabled.
+	 *
+	 * @param files     - The dropped File objects.
+	 * @param targetDir - The directory path they were dropped onto ('' for root).
+	 */
+	onUpload?: (files: File[], targetDir: string) => void;
 }

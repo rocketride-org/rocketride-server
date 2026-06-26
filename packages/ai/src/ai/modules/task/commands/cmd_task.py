@@ -118,6 +118,7 @@ class TaskCommands(DAPConn):
             'fs_rmdir': self._store_fs_rmdir,
             'fs_stat': self._store_fs_stat,
             'fs_rename': self._store_fs_rename,
+            'fs_geturl': self._store_fs_geturl,
         }
 
     async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -740,3 +741,27 @@ class TaskCommands(DAPConn):
         # Delegate the rename operation to the user-scoped file store backend.
         await self._get_file_store().rename(old_path, new_path)
         return self.build_response(request)
+
+    async def _store_fs_geturl(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get a direct HTTP URL for accessing a file in the store.
+
+        For cloud backends (S3, Azure), returns a presigned/SAS URL.
+        For filesystem backends, returns a JWT-signed ``/task/fetch`` URL
+        that the server's HTTP endpoint validates and serves.
+
+        Args:
+            request (Dict[str, Any]): Original DAP request.
+            args (Dict[str, Any]): Must contain ``path`` (relative store path).
+                Optional ``expires_in`` (seconds, default 3600).
+
+        Returns:
+            Dict[str, Any]: DAP response with ``url`` in the body.
+        """
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'geturl requires a non-empty "path" string')
+
+        expires_in = int(args.get('expires_in', 3600))
+        url = await self._get_file_store().get_url(path, expires_in)
+        return self.build_response(request, body={'url': url})
