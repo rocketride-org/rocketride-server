@@ -768,7 +768,7 @@ function makeInstallPipAction() {
             // Bootstrap pip, then install all build, test, and runtime dependencies.
             // uv is left for depends.py at runtime; the builder just uses pip.
             // State key version bumped to force re-run when deps change.
-            const pipInstalled = await getState('server.pipInstalledV8');
+            const pipInstalled = await getState('server.pipInstalledV9');
             if (!pipInstalled) {
                 // Bootstrap pip
                 // Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
@@ -795,8 +795,16 @@ function makeInstallPipAction() {
                     'mcp>=1.2.0',
                     // Model server
                     'huggingface_hub[hf_xet]',
+                    // Pin cryptography to the node-requirements range so the build
+                    // installs the right version up front. Unconstrained, the build
+                    // pulls the latest (transitively, via mcp/huggingface_hub) and
+                    // depends() then downgrades it during parallel pytest collection;
+                    // on Windows the workers race to overwrite the already-loaded
+                    // cryptography _rust.pyd DLL and the whole suite fails. Keep this
+                    // in lockstep with nodes/src/nodes/requirements.txt.
+                    'cryptography>=46.0.7,<47',
                 );
-                await setState('server.pipInstalledV8', true);
+                await setState('server.pipInstalledV9', true);
             } else {
                 task.output = 'Build and test deps already installed (skipped)';
             }
