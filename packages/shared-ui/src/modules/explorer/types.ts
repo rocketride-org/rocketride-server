@@ -190,8 +190,10 @@ export interface ExplorerFileAction {
 	label: string;
 	/** Optional leading icon node. */
 	icon?: ReactNode;
-	/** Invoked with the row's file path when the item is chosen. */
-	onSelect: (path: string) => void;
+	/** Invoked with the row's file path when the item is chosen. Omit if using children. */
+	onSelect?: (path: string) => void;
+	/** Submenu items — when present, hovering the item opens a nested menu. May be a static array or a function that receives the file path. */
+	children?: ExplorerFileAction[] | ((path: string) => ExplorerFileAction[]);
 }
 
 /**

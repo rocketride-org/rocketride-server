@@ -136,6 +136,26 @@ const S = {
 		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
 		minWidth: 120,
 	} as CSSProperties,
+	submenu: {
+		position: 'absolute' as const,
+		right: 15,
+		top: '100%',
+		zIndex: 101,
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: '4px 0',
+		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+		minWidth: 160,
+	} as CSSProperties,
+	submenuTrigger: {
+		position: 'relative' as const,
+	} as CSSProperties,
+	submenuArrow: {
+		marginLeft: 'auto',
+		fontSize: 10,
+		opacity: 0.6,
+	} as CSSProperties,
 	popupRow: {
 		display: 'flex',
 		alignItems: 'center',
@@ -331,6 +351,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 	const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 	const [selectedPath, setSelectedPath] = useState<string>(activeFilePath ?? '');
 	const [menuPath, setMenuPath] = useState<string | null>(null);
+	const [submenuId, setSubmenuId] = useState<string | null>(null);
 	const [renamePath, setRenamePath] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState('');
 	const [createState, setCreateState] = useState<{ type: 'file' | 'folder'; parentDir: string; name: string } | null>(null);
@@ -676,7 +697,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
-										setMenuPath(menuPath === file.path ? null : file.path);
+										setMenuPath(menuPath === file.path ? null : file.path); setSubmenuId(null);
 									}}
 								>
 									<BxDotsHorizontal size={16} />
@@ -707,21 +728,60 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									>
 										<BxTrash size={16} /> Delete
 									</button>
-									{fileActions?.map((a) => (
-										<button
-											key={a.id}
-											style={S.popupRow}
-											onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
-											onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
-											onClick={(e) => {
-												e.stopPropagation();
-												setMenuPath(null);
-												a.onSelect(file.path);
-											}}
-										>
-											{a.icon} {a.label}
-										</button>
-									))}
+									{fileActions?.map((a) => {
+										const children = typeof a.children === 'function' ? a.children(file.path) : a.children;
+										return children ? (
+											<div
+												key={a.id}
+												style={S.submenuTrigger}
+												onMouseEnter={() => setSubmenuId(a.id)}
+												onMouseLeave={() => setSubmenuId(null)}
+											>
+												<button
+													style={S.popupRow}
+													onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+													onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+													onClick={(e) => e.stopPropagation()}
+												>
+													{a.icon} {a.label} <span style={S.submenuArrow}>&#x25B8;</span>
+												</button>
+												{submenuId === a.id && (
+													<div style={S.submenu}>
+														{children.map((ch) => (
+															<button
+																key={ch.id}
+																style={S.popupRow}
+																onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+																onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setMenuPath(null);
+																	setSubmenuId(null);
+																	ch.onSelect?.(file.path);
+																}}
+															>
+																{ch.icon} {ch.label}
+															</button>
+														))}
+													</div>
+												)}
+											</div>
+										) : (
+											<button
+												key={a.id}
+												style={S.popupRow}
+												onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+												onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+												onClick={(e) => {
+													e.stopPropagation();
+													setMenuPath(null);
+													a.onSelect?.(file.path);
+												}}
+											>
+												{a.icon} {a.label}
+											</button>
+										);
+									})}
 								</div>
 							)}
 						</div>

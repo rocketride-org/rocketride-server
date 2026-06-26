@@ -10,7 +10,9 @@
     "name": "File Explorer",
     "description": "Browse, view, and edit files stored on the RocketRide server",
     "icon": "./src/icon.svg",
-    "categories": ["tools"],
+    "categories": [
+      "tools"
+    ],
     "mode": "free",
     "authenticated": true,
     "showStatusBar": true
@@ -26,11 +28,13 @@
   ],
   "dependencies": {
     "@module-federation/rsbuild-plugin": "^2.5.1",
+    "@monaco-editor/react": "^4.7.0",
     "docx-preview": "^0.3.3",
-    "shell-ui": "workspace:*",
+    "monaco-editor": "^0.55.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "shared": "workspace:*",
+    "shell-ui": "workspace:*",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

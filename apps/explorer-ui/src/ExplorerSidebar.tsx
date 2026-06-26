@@ -27,10 +27,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ShellSidebarProps } from 'shell-ui';
 import { useShellConnection } from 'shell-ui';
-import { Explorer, BxDownload } from 'shared';
+import { Explorer, BxDownload, BxDockLeft } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
 import { createStoreVfs } from './store';
+import { getMediaInfo } from './mediaTypes';
+import { getCompatibleViewers, VIEWER_LABELS } from './viewerRegistry';
+import type { ViewerId } from './viewerRegistry';
 
 // =============================================================================
 // CONFIG
@@ -219,9 +222,44 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 		}
 	}, [client]);
 
+	// --- Open with... handler ----------------------------------------------------
+
+	const handleOpenWith = useCallback((path: string, viewerId: ViewerId) => {
+		const docs = getDocs();
+		if (!docs) return;
+
+		// Open the file (may already be open)
+		docs.openDocument(path).then(() => {
+			const s = docs.getState();
+			const group = s.groups[s.activeGroupId];
+			if (!group) return;
+			// Find the editor for this URI in the active group
+			const editorId = group.editorIds.find(eid => s.editors[eid]?.documentUri === path);
+			if (!editorId) return;
+			docs.updateEditorViewState(editorId, { ...s.editors[editorId]?.viewState, viewerId });
+		});
+	}, []);
+
+	// --- File actions (kebab menu) -------------------------------------------
+
+	const buildOpenWithChildren = useCallback((path: string): ExplorerFileAction[] => {
+		const { category } = getMediaInfo(path);
+		return getCompatibleViewers(category).map(vid => ({
+			id: `open-with-${vid}`,
+			label: VIEWER_LABELS[vid],
+			onSelect: (p: string) => handleOpenWith(p, vid),
+		}));
+	}, [handleOpenWith]);
+
 	const fileActions: ExplorerFileAction[] = useMemo(() => [
+		{
+			id: 'open-with',
+			label: 'Open with\u2026',
+			icon: <BxDockLeft size={16} />,
+			children: buildOpenWithChildren,
+		},
 		{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
-	], [handleDownload]);
+	], [buildOpenWithChildren, handleDownload]);
 
 	// --- Collapsed mode -------------------------------------------------------
 

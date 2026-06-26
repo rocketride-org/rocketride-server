@@ -44,10 +44,11 @@ import { createDocs, destroyDocs, getDocs } from './docs';
 import { createStoreVfs } from './store';
 import { getMediaInfo } from './mediaTypes';
 import {
-	AudioViewer, BinaryViewer, DocxViewer, ImageViewer,
-	JsonViewer, MarkdownViewer, PdfViewer, SpreadsheetViewer,
+	AudioViewer, BinaryViewer, DocxViewer, HexViewer, ImageViewer,
+	JsonViewer, MarkdownViewer, MonacoViewer, PdfViewer, SpreadsheetViewer,
 	TextViewer, VideoViewer,
 } from './viewers';
+import type { ViewerId } from './viewerRegistry';
 
 // =============================================================================
 // STYLES
@@ -178,6 +179,7 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 												<FilePane
 													docs={docs}
 													uri={editor.documentUri}
+													editorId={editorId}
 												/>
 											</div>
 										);
@@ -196,11 +198,13 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 // FILE PANE — dispatches to the correct viewer based on file type
 // =============================================================================
 
-const FilePane: React.FC<{ docs: Documents; uri: string }> = ({ docs, uri }) => {
+const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = ({ docs, uri, editorId }) => {
 	const { client } = useShellConnection();
 	const state = docs.useStore();
 	const doc = state.documents[uri];
+	const editor = state.editors[editorId];
 	const { category, contentMode } = getMediaInfo(uri);
+	const viewerOverride = editor?.viewState?.viewerId as ViewerId | undefined;
 
 	// Blob documents store a local blob: URL as content.  These aren't
 	// persisted, so re-read from the server when content is missing.
@@ -223,26 +227,43 @@ const FilePane: React.FC<{ docs: Documents; uri: string }> = ({ docs, uri }) => 
 
 	const content = typeof doc.content === 'string' ? doc.content : '';
 
-	// --- Link viewers: video/audio get the client and fetch their own URL ---
+	// --- Viewer override: if the user chose "Open with…", use that viewer ---
 
+	if (viewerOverride) {
+		switch (viewerOverride) {
+			case 'monaco':      return <MonacoViewer docs={docs} uri={uri} content={content} />;
+			case 'text':        return <TextViewer docs={docs} uri={uri} content={content} />;
+			case 'json':        return <JsonViewer content={content} />;
+			case 'markdown':    return <MarkdownViewer content={content} />;
+			case 'hex':         return client ? <HexViewer client={client} uri={uri} /> : null;
+			case 'image':       return <ImageViewer content={content} uri={uri} />;
+			case 'pdf':         return <PdfViewer content={content} uri={uri} />;
+			case 'docx':        return <DocxViewer content={content} />;
+			case 'spreadsheet': return <SpreadsheetViewer content={content} />;
+			case 'video':       return client ? <VideoViewer client={client} uri={uri} /> : null;
+			case 'audio':       return client ? <AudioViewer client={client} uri={uri} /> : null;
+			case 'binary':      return <BinaryViewer />;
+		}
+	}
+
+	// --- Default dispatch based on file category ---
+
+	// Link viewers: video/audio get the client and fetch their own URL
 	if (category === 'video' && client) return <VideoViewer client={client} uri={uri} />;
 	if (category === 'audio' && client) return <AudioViewer client={client} uri={uri} />;
 
-	// --- Blob viewers: content is a blob: URL loaded by the store -----------
-
+	// Blob viewers: content is a blob: URL loaded by the store
 	if (category === 'image') return <ImageViewer content={content} uri={uri} />;
 	if (category === 'pdf') return <PdfViewer content={content} uri={uri} />;
 	if (category === 'docx') return <DocxViewer content={content} />;
 	if (category === 'spreadsheet') return <SpreadsheetViewer content={content} />;
 
-	// --- Inline viewers: content is the file text ---------------------------
-
-	if (category === 'json') return <JsonViewer content={content} />;
+	// Inline viewers: content is the file text
 	if (category === 'markdown') return <MarkdownViewer content={content} />;
 	if (category === 'binary') return <BinaryViewer />;
 
-	// Default: editable text
-	return <TextViewer docs={docs} uri={uri} content={content} />;
+	// Code, JSON, and plain text all use the Monaco editor
+	return <MonacoViewer docs={docs} uri={uri} content={content} />;
 };
 
 export default ExplorerApp;

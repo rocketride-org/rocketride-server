@@ -344,9 +344,15 @@ importers:
       '@module-federation/rsbuild-plugin':
         specifier: ^2.5.1
         version: 2.5.1(@rsbuild/core@2.0.11(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.0.6(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
+      '@monaco-editor/react':
+        specifier: ^4.7.0
+        version: 4.7.0(monaco-editor@0.55.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       docx-preview:
         specifier: ^0.3.3
         version: 0.3.7
+      monaco-editor:
+        specifier: ^0.55.1
+        version: 0.55.1
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -3274,6 +3280,16 @@ packages:
 
   '@module-federation/webpack-bundler-runtime@2.5.1':
     resolution: {integrity: sha512-0pUsP9aaWIUcfWUXqax/iSwozngORwf4RK0R1qTOYYC13qx+p4p1Ck28Rz6Tzj/6zpzJgcMQXR7nW4sL+ztaww==}
+
+  '@monaco-editor/loader@1.7.0':
+    resolution: {integrity: sha512-gIwR1HrJrrx+vfyOhYmCZ0/JcWqG5kbfG7+d3f/C1LXk2EvzAbHSg3MQ5lO2sMlo9izoAZ04shohfKLVT6crVA==}
+
+  '@monaco-editor/react@4.7.0':
+    resolution: {integrity: sha512-cyzXQCtO47ydzxpQtCGSQGOC8Gk3ZUeBXFAxD+CWXYFo5OqZyZUonFl0DwUlTyAfRHntBfw2p3w4s9R6oe1eCA==}
+    peerDependencies:
+      monaco-editor: '>= 0.25.0 < 1'
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   '@mui/core-downloads-tracker@6.5.0':
     resolution: {integrity: sha512-LGb8t8i6M2ZtS3Drn3GbTI1DVhDY6FJ9crEey2lZ0aN2EMZo8IZBZj9wRf4vqbZHaWjsYgtbOnJw5V8UWbmK2Q==}
@@ -8443,6 +8459,11 @@ packages:
       react:
         optional: true
 
+  marked@14.0.0:
+    resolution: {integrity: sha512-uIj4+faQ+MgHgwUW1l2PsPglZLOLOT1uErt06dAPtx2kjteLAkbsd/0FiYg/MGS+i7ZKLb7w2WClxHkzOOuryQ==}
+    engines: {node: '>= 18'}
+    hasBin: true
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -8764,6 +8785,9 @@ packages:
 
   moment@2.30.1:
     resolution: {integrity: sha512-uEmtNhbDOrWPFS+hdjFCBfy9f2YoyzRpwcl+DqpC6taX21FzsTLQVbMV/W7PzNSX6x/bhC1zA3c2UQ5NzH6how==}
+
+  monaco-editor@0.55.1:
+    resolution: {integrity: sha512-jz4x+TJNFHwHtwuV9vA9rMujcZRb0CEilTEwG2rRSpe/A7Jdkuj8xPKttCgOh+v/lkHy7HsZ64oj+q3xoAFl9A==}
 
   mrmime@2.0.1:
     resolution: {integrity: sha512-Y3wQdFg2Va6etvQ5I82yUhGdsKrcYox6p7FfL1LbK2J4V01F9TGlepTIhnK24t7koZibmg82KGglhA1XK5IsLQ==}
@@ -10955,6 +10979,9 @@ packages:
   stack-utils@2.0.6:
     resolution: {integrity: sha512-XlkWvfIm6RmsWtNJx+uqtKLS8eqFbxUg0ZzLXqY0caEy9l7hruX8IpiDnjsLavoBgqCCR71TqWO8MaXYheJ3RQ==}
     engines: {node: '>=10'}
+
+  state-local@1.0.7:
+    resolution: {integrity: sha512-HTEHMNieakEnoe33shBYcZ7NX83ACUjCu8c40iOGEZsngj9zRnkqS9j1pqQPXwobB0ZcVTk27REb7COQ0UR59w==}
 
   statuses@1.5.0:
     resolution: {integrity: sha512-OpZ3zP+jT1PI7I8nemJX4AKmAX070ZkYPVWV/AaKTJl+tXCTGyVdC1a4SL8RUQYEwk/f34ZX8UTykN68FwrqAA==}
@@ -15973,6 +16000,17 @@ snapshots:
       '@module-federation/sdk': 2.5.1(node-fetch@2.7.0(encoding@0.1.13))
     transitivePeerDependencies:
       - node-fetch
+
+  '@monaco-editor/loader@1.7.0':
+    dependencies:
+      state-local: 1.0.7
+
+  '@monaco-editor/react@4.7.0(monaco-editor@0.55.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@monaco-editor/loader': 1.7.0
+      monaco-editor: 0.55.1
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
 
   '@mui/core-downloads-tracker@6.5.0': {}
 
@@ -22128,6 +22166,8 @@ snapshots:
     optionalDependencies:
       react: 18.3.1
 
+  marked@14.0.0: {}
+
   math-intrinsics@1.1.0: {}
 
   mdast-util-directive@3.1.0:
@@ -22744,6 +22784,11 @@ snapshots:
       yargs-unparser: 2.0.0
 
   moment@2.30.1: {}
+
+  monaco-editor@0.55.1:
+    dependencies:
+      dompurify: 3.4.11
+      marked: 14.0.0
 
   mrmime@2.0.1: {}
 
@@ -25170,6 +25215,8 @@ snapshots:
   stack-utils@2.0.6:
     dependencies:
       escape-string-regexp: 2.0.0
+
+  state-local@1.0.7: {}
 
   statuses@1.5.0: {}
 
