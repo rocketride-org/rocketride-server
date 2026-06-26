@@ -34,7 +34,7 @@
 //            (images, PDF, docx, spreadsheets)
 // =============================================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell-ui';
 import { commonStyles } from 'shared/themes/styles';
@@ -49,6 +49,29 @@ import {
 	TextViewer, VideoViewer,
 } from './viewers';
 import type { ViewerId } from './viewerRegistry';
+
+// =============================================================================
+// BLOB URL REF-COUNTING
+// =============================================================================
+// Documents share content by URI across panes, so multiple FilePane components
+// may reference the same blob URL. We ref-count to ensure revokeObjectURL is
+// only called when the last pane releases its reference.
+
+const blobRefCounts = new Map<string, number>();
+
+function retainBlobUrl(url: string): void {
+	blobRefCounts.set(url, (blobRefCounts.get(url) ?? 0) + 1);
+}
+
+function releaseBlobUrl(url: string): void {
+	const count = (blobRefCounts.get(url) ?? 1) - 1;
+	if (count <= 0) {
+		blobRefCounts.delete(url);
+		URL.revokeObjectURL(url);
+	} else {
+		blobRefCounts.set(url, count);
+	}
+}
 
 // =============================================================================
 // STYLES
@@ -214,11 +237,29 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 		}
 	}, [contentMode, doc, uri, docs]);
 
-	// Revoke blob URLs on unmount to free memory.
+	// Ref-count blob URLs so we only revoke when no pane references them.
+	const prevBlobRef = useRef<string | null>(null);
 	useEffect(() => {
+		const url = (contentMode === 'blob' && doc?.content && typeof doc.content === 'string' && doc.content.startsWith('blob:'))
+			? doc.content
+			: null;
+
+		// Release previous blob URL if it changed
+		if (prevBlobRef.current && prevBlobRef.current !== url) {
+			releaseBlobUrl(prevBlobRef.current);
+		}
+
+		// Retain the new blob URL
+		if (url && url !== prevBlobRef.current) {
+			retainBlobUrl(url);
+		}
+
+		prevBlobRef.current = url;
+
 		return () => {
-			if (contentMode === 'blob' && doc?.content && typeof doc.content === 'string' && doc.content.startsWith('blob:')) {
-				URL.revokeObjectURL(doc.content);
+			if (prevBlobRef.current) {
+				releaseBlobUrl(prevBlobRef.current);
+				prevBlobRef.current = null;
 			}
 		};
 	}, [contentMode, doc?.content]);
@@ -260,7 +301,7 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 
 	// Inline viewers: content is the file text
 	if (category === 'markdown') return <MarkdownViewer content={content} />;
-	if (category === 'binary') return <BinaryViewer />;
+	if (category === 'binary') return client ? <HexViewer client={client} uri={uri} /> : <BinaryViewer />;
 
 	// Code, JSON, and plain text all use the Monaco editor
 	return <MonacoViewer docs={docs} uri={uri} content={content} />;

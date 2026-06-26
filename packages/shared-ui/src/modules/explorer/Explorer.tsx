@@ -537,6 +537,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 		// Internal move
 		const sourcePath = e.dataTransfer.getData('text/plain');
 		if (sourcePath && onMove && sourcePath !== dirPath) {
+			// Prevent moving a directory into itself or its own descendant
+			if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
 			onMove(sourcePath, dirPath);
 		}
 	}, [onMove, onUpload]);
@@ -736,12 +738,23 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 												style={S.submenuTrigger}
 												onMouseEnter={() => setSubmenuId(a.id)}
 												onMouseLeave={() => setSubmenuId(null)}
+												onFocus={() => setSubmenuId(a.id)}
+												onBlur={(e) => {
+													if (!e.currentTarget.contains(e.relatedTarget as Node)) setSubmenuId(null);
+												}}
 											>
 												<button
 													style={S.popupRow}
+													role="menuitem"
+													aria-haspopup="true"
+													aria-expanded={submenuId === a.id}
+													tabIndex={0}
 													onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
 													onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
-													onClick={(e) => e.stopPropagation()}
+													onClick={(e) => {
+														e.stopPropagation();
+														setSubmenuId(submenuId === a.id ? null : a.id);
+													}}
 												>
 													{a.icon} {a.label} <span style={S.submenuArrow}>&#x25B8;</span>
 												</button>

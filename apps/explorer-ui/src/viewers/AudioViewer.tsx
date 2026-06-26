@@ -42,6 +42,8 @@ export const AudioViewer: React.FC<Props> = ({ client, uri }) => {
 	const fileName = uri.includes('/') ? uri.substring(uri.lastIndexOf('/') + 1) : uri;
 
 	useEffect(() => {
+		setUrl(null);
+		setError(null);
 		let cancelled = false;
 		client.fsGetUrl(uri)
 			.then((u) => { if (!cancelled) setUrl(u); })

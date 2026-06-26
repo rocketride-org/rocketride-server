@@ -335,7 +335,7 @@ class RangeDataSource {
 			});
 		}
 
-		if (!response.ok && response.status !== 206) {
+		if (response.status !== 206) {
 			return; // silently skip failed chunks
 		}
 
@@ -377,6 +377,9 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 	// --- Initialise the range data source ------------------------------------
 
 	useEffect(() => {
+		setReady(false);
+		setError(null);
+		setFileSize(0);
 		let disposed = false;
 
 		const ds = new RangeDataSource(
@@ -516,6 +519,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 
 	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!ready) return <div style={viewerStyles.message}>Loading...</div>;
+	if (fileSize === 0) return <div style={viewerStyles.message}>(empty file)</div>;
 
 	return (
 		<div style={S.container}>

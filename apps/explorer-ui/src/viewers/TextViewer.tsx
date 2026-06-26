@@ -48,6 +48,7 @@ export const TextViewer: React.FC<Props> = ({ docs, uri, content }) => {
 			value={content}
 			onChange={handleChange}
 			spellCheck={false}
+			wrap="off"
 		/>
 	);
 };

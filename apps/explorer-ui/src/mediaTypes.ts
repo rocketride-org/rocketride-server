@@ -100,6 +100,25 @@ const MEDIA_MAP: Record<string, MediaInfo> = {
 	'.xls':  { category: 'spreadsheet', mime: 'application/vnd.ms-excel', contentMode: 'blob' },
 	'.csv':  { category: 'spreadsheet', mime: 'text/csv', contentMode: 'blob' },
 
+	// Binary — link (hex viewer fetches data directly; no VFS prefetch needed)
+	'.zip':    { category: 'binary', mime: 'application/zip',                  contentMode: 'link' },
+	'.gz':     { category: 'binary', mime: 'application/gzip',                 contentMode: 'link' },
+	'.tar':    { category: 'binary', mime: 'application/x-tar',                contentMode: 'link' },
+	'.7z':     { category: 'binary', mime: 'application/x-7z-compressed',      contentMode: 'link' },
+	'.rar':    { category: 'binary', mime: 'application/vnd.rar',              contentMode: 'link' },
+	'.bin':    { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.exe':    { category: 'binary', mime: 'application/vnd.microsoft.portable-executable', contentMode: 'link' },
+	'.dll':    { category: 'binary', mime: 'application/vnd.microsoft.portable-executable', contentMode: 'link' },
+	'.so':     { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.dylib':  { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.sqlite': { category: 'binary', mime: 'application/vnd.sqlite3',          contentMode: 'link' },
+	'.db':     { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.wasm':   { category: 'binary', mime: 'application/wasm',                 contentMode: 'link' },
+	'.class':  { category: 'binary', mime: 'application/java-vm',              contentMode: 'link' },
+	'.pyc':    { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.o':      { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+	'.obj':    { category: 'binary', mime: 'application/octet-stream',         contentMode: 'link' },
+
 	// Code / programming languages — inline (Monaco editor)
 	'.js':     { category: 'code', mime: 'text/javascript',              contentMode: 'inline' },
 	'.jsx':    { category: 'code', mime: 'text/javascript',              contentMode: 'inline' },

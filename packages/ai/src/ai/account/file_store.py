@@ -629,16 +629,23 @@ class FileStore:
 
         Args:
             path: Relative path within the account store.
-            expires_in: URL validity in seconds (default 1 hour).
+            expires_in: URL validity in seconds (default 1 hour, max 1 hour).
 
         Returns:
             A direct HTTP(S) URL to the file.
 
         Raises:
-            ValueError: If ``RR_SIGNING_KEY`` is not set and the backend
-                requires a locally-signed URL.
+            ValueError: If ``expires_in`` is not positive, or if
+                ``RR_SIGNING_KEY`` is not set and the backend requires a
+                locally-signed URL.
+            RuntimeError: If ``RR_BASE_URL`` is not configured and the
+                backend requires a locally-signed URL.
         """
         import os
+
+        if expires_in <= 0:
+            raise ValueError('expires_in must be positive')
+        expires_in = min(expires_in, 3600)
 
         full_path = self._full_path(path)
         url = await self._store.get_url(full_path, expires_in)
@@ -660,8 +667,13 @@ class FileStore:
         }
         token = jwt.encode(payload, signing_key, algorithm='HS256')
 
-        # This was set by the main web server
-        base_url = os.environ.get('RR_BASE_URL', 'http://localhost:5565')
+        # This was set by the main web server at startup
+        base_url = os.environ.get('RR_BASE_URL')
+        if not base_url:
+            raise RuntimeError(
+                'RR_BASE_URL is not set — configure it in .env or ensure'
+                ' the web server has started before generating fetch URLs'
+            )
         return f'{base_url}/task/fetch?token={token}'
 
     def _full_path(self, path: str) -> str:

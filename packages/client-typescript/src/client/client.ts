@@ -2316,6 +2316,10 @@ export class RocketRideClient extends DAPClient {
 	 * @throws Error if any segment is `..` or contains illegal characters
 	 */
 	private validateStorePath(path: string): void {
+		// Reject absolute paths — store paths must be relative
+		if (path.startsWith('/') || path.startsWith('\\')) {
+			throw new Error(`Path must be relative (got ${path})`);
+		}
 		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
 			// Reject parent-directory traversal attempts in any position of the path

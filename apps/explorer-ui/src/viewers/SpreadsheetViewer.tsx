@@ -28,6 +28,8 @@ export const SpreadsheetViewer: React.FC<Props> = ({ content }) => {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
+		setHtml(null);
+		setError(null);
 		if (!content) return;
 		let cancelled = false;
 

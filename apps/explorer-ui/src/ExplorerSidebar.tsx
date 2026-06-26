@@ -30,7 +30,6 @@ import { useShellConnection } from 'shell-ui';
 import { Explorer, BxDownload, BxDockLeft } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
-import { createStoreVfs } from './store';
 import { getMediaInfo } from './mediaTypes';
 import { getCompatibleViewers, VIEWER_LABELS } from './viewerRegistry';
 import type { ViewerId } from './viewerRegistry';
@@ -60,7 +59,6 @@ const EXPLORER_CONFIG: ExplorerConfig = {
 const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 	const { client, isConnected } = useShellConnection();
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
-	const [vfs, setVfs] = useState<IVirtualFileSystem | null>(null);
 
 	// Active file path from Documents (for highlighting)
 	const [activeFile, setActiveFile] = useState('');
@@ -77,16 +75,6 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 		setActiveFile(readActive());
 		return docs.subscribe(() => setActiveFile(readActive()));
 	}, []);
-
-	// --- Create VFS when client is available ----------------------------------
-
-	useEffect(() => {
-		if (client) {
-			setVfs(createStoreVfs(client));
-		} else {
-			setVfs(null);
-		}
-	}, [client]);
 
 	// --- Refresh file list (recursive) ----------------------------------------
 
@@ -190,13 +178,16 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 				const path = targetDir ? `${targetDir}/${file.name}` : file.name;
 				const data = new Uint8Array(await file.arrayBuffer());
 				const { handle } = await client.fsOpen(path, 'w');
-				const chunkSize = 4 * 1024 * 1024; // 4 MB
-				let offset = 0;
-				while (offset < data.length) {
-					await client.fsWrite(handle, data.subarray(offset, offset + chunkSize));
-					offset += chunkSize;
+				try {
+					const chunkSize = 4 * 1024 * 1024; // 4 MB
+					let offset = 0;
+					while (offset < data.length) {
+						await client.fsWrite(handle, data.subarray(offset, offset + chunkSize));
+						offset += chunkSize;
+					}
+				} finally {
+					await client.fsClose(handle, 'w');
 				}
-				await client.fsClose(handle, 'w');
 			}
 			await refresh();
 		} catch (err) {

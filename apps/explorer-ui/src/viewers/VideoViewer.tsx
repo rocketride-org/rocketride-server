@@ -26,6 +26,8 @@ export const VideoViewer: React.FC<Props> = ({ client, uri }) => {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
+		setUrl(null);
+		setError(null);
 		let cancelled = false;
 		client.fsGetUrl(uri)
 			.then((u) => { if (!cancelled) setUrl(u); })

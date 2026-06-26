@@ -70,6 +70,9 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 				// blob — get a presigned URL, fetch the data, return a blob: URL
 				const url = await client.fsGetUrl(path);
 				const response = await fetch(url);
+				if (!response.ok) {
+					throw new Error(`Failed to fetch ${path}: ${response.status} ${response.statusText}`);
+				}
 				const data = await response.arrayBuffer();
 				const blob = new Blob([data], { type: mime });
 				return URL.createObjectURL(blob);

@@ -25,6 +25,8 @@ export const DocxViewer: React.FC<Props> = ({ content }) => {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
+		setError(null);
+		if (containerRef.current) containerRef.current.innerHTML = '';
 		if (!containerRef.current || !content) return;
 		let cancelled = false;
 
