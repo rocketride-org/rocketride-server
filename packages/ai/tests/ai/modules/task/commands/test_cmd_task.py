@@ -49,6 +49,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
         'fs_rmdir': lambda req, args: TaskCommands._store_fs_rmdir(conn, req, args),
         'fs_stat': lambda req, args: TaskCommands._store_fs_stat(conn, req, args),
         'fs_rename': lambda req, args: TaskCommands._store_fs_rename(conn, req, args),
+        'fs_geturl': lambda req, args: TaskCommands._store_fs_geturl(conn, req, args),
     }
     return conn
 
@@ -381,4 +382,5 @@ def test_task_commands_init_builds_subcommand_dispatch_table():
         'fs_rmdir',
         'fs_stat',
         'fs_rename',
+        'fs_geturl',
     }
