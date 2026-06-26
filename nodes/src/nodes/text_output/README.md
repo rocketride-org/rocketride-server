@@ -102,7 +102,6 @@ _No configuration fields._
 ## Dependencies
 
 - `cffi`
-- `cryptography` `==46.0.7`
 - `pycparser`
 - `pyspnego`
 - `smbprotocol`
