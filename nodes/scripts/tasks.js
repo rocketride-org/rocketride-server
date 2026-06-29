@@ -206,6 +206,13 @@ function makeRunPytestAction(options = {}) {
             const parallelVal = String(parallelRaw).trim().toLowerCase();
             if (parallelVal && parallelVal !== 'off' && parallelVal !== '0') {
                 extraArgs.push('-n', parallelVal);
+                // Honor @pytest.mark.xdist_group: same-group tests run on one worker, so
+                // heavy GPU/model node tests serialize and don't OOM-crash workers (see
+                // conftest.pytest_collection_modifyitems). The marker is ignored under the
+                // default --dist load. Skip if the caller already set --dist via --pytest.
+                if (!extraArgs.includes('--dist')) {
+                    extraArgs.push('--dist', 'loadgroup');
+                }
             }
 
             await runPytest({
