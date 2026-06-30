@@ -152,6 +152,14 @@ class Chat(ChatBase):
 
         return message
 
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        response = self._llm.chat(messages=[{'role': 'user', 'content': blocks}])
+        message = response['choices'][0]['message']['content']
+        if not message:
+            raise ValueError('Response is empty.')
+        return message
+
     def getTokens(self, value: str) -> int:
         """
         Estimate the number of tokens in a given text string.

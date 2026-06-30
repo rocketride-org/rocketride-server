@@ -31,25 +31,45 @@
  * write atomicity and sequencing.
  */
 
-import { Chat, CHAT_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, CatalogContentionError, ChatNotFoundError, makeChatsNamespace, parseChatFile, type RocketRideChatClient } from '../src/client/Chat';
+import { Chat, CHAT_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, CATALOG_PATH, CatalogContentionError, ChatNotFoundError, makeChatsNamespace, parseChatFile, type RocketRideChatClient } from '../src/client/Chat';
 import { Question } from '../src/client/schema/Question';
 
 class MockFsClient implements RocketRideChatClient {
 	files: Map<string, string> = new Map();
 	dirs: Set<string> = new Set();
+	dirListings: Map<string, Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>> = new Map();
+	rmdirCalls: Array<{ path: string; recursive: boolean }> = [];
+	failRmdirFor: string | undefined = undefined;
 	chatCalls: Array<{ token: string; question: Question }> = [];
 	answerSupplier: () => unknown = () => ({ body: 'mock answer text' });
+
+	/** Seed catalog.json or any JSON file into the in-memory file store. */
+	seedJson(path: string, obj: unknown): void {
+		this.files.set(path, JSON.stringify(obj));
+	}
+
+	/** Seed a directory listing so fsListDir returns the given entries. */
+	seedDir(path: string, entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>): void {
+		this.dirListings.set(path, entries);
+	}
 
 	async fsMkdir(path: string): Promise<void> {
 		this.dirs.add(path);
 	}
 	async fsRmdir(path: string, recursive?: boolean): Promise<void> {
+		this.rmdirCalls.push({ path, recursive: recursive ?? false });
+		if (this.failRmdirFor === path) throw new Error(`EPERM: fsRmdir failed for ${path}`);
 		this.dirs.delete(path);
 		if (recursive) {
 			for (const key of Array.from(this.files.keys())) {
 				if (key.startsWith(path + '/')) this.files.delete(key);
 			}
 		}
+	}
+	async fsListDir(path: string): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }> {
+		if (!this.dirListings.has(path)) throw new Error(`ENOENT: ${path}`);
+		const entries = this.dirListings.get(path)!;
+		return { entries, count: entries.length };
 	}
 	async fsStat(path: string) {
 		if (this.files.has(path)) return { exists: true as const, type: 'file' as const, size: this.files.get(path)!.length };
@@ -107,6 +127,26 @@ describe('Chat persistence', () => {
 		expect(reopened.pipelineId).toBe(PIPELINE_ID);
 		expect(reopened.history).toHaveLength(2);
 		expect(reopened.history.map((t) => t.seq)).toEqual([1, 2]);
+	});
+
+	test('send persists Question.attachments verbatim; open() rehydrates them on the turn line', async () => {
+		const fs = new MockFsClient();
+		const chat = await Chat.create({ client: fs, token: TOKEN, pipelineId: PIPELINE_ID });
+		const att = {
+			attachment_id: '11111111-1111-1111-1111-111111111111',
+			mime: 'application/pdf',
+			filename: 'report.pdf',
+			size_bytes: 482113,
+			path: `.chats/${chat.id}/11111111-1111-1111-1111-111111111111.pdf`,
+		};
+		await chat.send('summarize this', { attachments: [att] });
+
+		const lines = fs.files.get(`.chats/${chat.id}/chat.jsonl`)!.trim().split('\n');
+		const turn = JSON.parse(lines[1]);
+		expect(turn.question.attachments).toEqual([att]);
+
+		const reopened = await Chat.open({ client: fs, token: TOKEN, chatId: chat.id });
+		expect((reopened.history[0].question as any).attachments).toEqual([att]);
 	});
 
 	test('open() throws ChatNotFoundError when chat file is missing', async () => {
@@ -302,5 +342,43 @@ describe('chat_id format guard', () => {
 		expect(() => Question.fromDict({ chat_id: 'gggggggg-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } as any)).toThrow();
 		const ok = Question.fromDict({ chat_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } as any);
 		expect(ok.chat_id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+	});
+});
+
+describe('Chat.sweepEmpty', () => {
+	it('removes only orphan dirs (no catalog entry), keeps real + exempt + non-uuid', async () => {
+		const REAL = '11111111-1111-4111-8111-111111111111';
+		const ORPH = '22222222-2222-4222-8222-222222222222';
+		const EXEMPT = '33333333-3333-4333-8333-333333333333';
+		const fs = new MockFsClient();
+		fs.seedJson(CATALOG_PATH, { schema_version: 1, version: 1, chats: [{ guid: REAL, pipeline_id: 'pX' }] });
+		fs.seedDir('.chats', [
+			{ name: REAL, type: 'dir' },
+			{ name: ORPH, type: 'dir' },
+			{ name: EXEMPT, type: 'dir' },
+			{ name: 'not-a-uuid', type: 'dir' },
+			{ name: 'catalog.json', type: 'file' },
+		]);
+		const res = await Chat.sweepEmpty({ client: fs, token: 't', exemptChatId: EXEMPT });
+		expect(res.deleted).toBe(1);
+		expect(fs.rmdirCalls).toEqual([{ path: `.chats/${ORPH}`, recursive: true }]);
+	});
+
+	it('is best-effort: one fsRmdir failure does not stop the rest', async () => {
+		const A = '44444444-4444-4444-8444-444444444444';
+		const B = '55555555-5555-4555-8555-555555555555';
+		const fs = new MockFsClient();
+		fs.seedJson(CATALOG_PATH, { schema_version: 1, version: 1, chats: [] });
+		fs.seedDir('.chats', [{ name: A, type: 'dir' }, { name: B, type: 'dir' }]);
+		fs.failRmdirFor = `.chats/${A}`;
+		const res = await Chat.sweepEmpty({ client: fs, token: 't' });
+		expect(res.deleted).toBe(1); // B still deleted despite A throwing
+		expect(fs.rmdirCalls.length).toBe(2);
+	});
+
+	it('returns {deleted:0} when .chats/ is missing', async () => {
+		const fs = new MockFsClient(); // no .chats seeded -> fsListDir throws
+		const res = await Chat.sweepEmpty({ client: fs, token: 't' });
+		expect(res.deleted).toBe(0);
 	});
 });

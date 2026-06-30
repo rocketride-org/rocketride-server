@@ -456,6 +456,14 @@ def _execute_wave_calls(
                     'total_chars': len(value),
                 }
 
+            # NOTE: attachment-typed tool inputs are NOT forwarded for the
+            # RocketRide Wave. The Wave planner reasons over a plain-string
+            # prompt (it can't perceive attachments), so it cannot meaningfully
+            # decide which file a tool should act on. Tool-attachment forwarding
+            # is intentionally limited to perception-capable frameworks
+            # (deepagent/langchain). See
+            # claude/tasks/multimodal-manual-testing/DEFERRED-tool-attachment-routing.md
+
             # Regular tool — route through AgentBase.call_tool, which forwards
             # to context.tools.invoke (and ultimately the engine's control-plane
             # invoke seam at the appropriate node).

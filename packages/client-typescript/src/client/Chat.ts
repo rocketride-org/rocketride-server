@@ -38,6 +38,7 @@
  */
 
 import { Question, QuestionType, type QuestionHistory } from './schema/Question.js';
+import type { Attachment } from './schema/Attachment.js';
 import type { PIPELINE_RESULT } from './types/index.js';
 
 // Allow the Chat class to talk to RocketRideClient via a structural interface
@@ -52,6 +53,7 @@ export interface RocketRideChatClient {
 	fsWriteString(path: string, text: string): Promise<void>;
 	fsReadJson<T = unknown>(path: string): Promise<T>;
 	fsWriteJson(path: string, obj: unknown): Promise<void>;
+	fsListDir(path: string): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }>;
 	chat(options: { token: string; question: Question; onSSE?: (type: string, data: Record<string, unknown>) => Promise<void> }): Promise<PIPELINE_RESULT>;
 }
 
@@ -60,7 +62,7 @@ export const CATALOG_SCHEMA_VERSION = 1;
 export const CATALOG_PREVIEW_LEN = 80;
 export const CATALOG_MAX_RETRY = 3;
 const CHATS_ROOT = '.chats';
-const CATALOG_PATH = '.chats/catalog.json';
+export const CATALOG_PATH = '.chats/catalog.json';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Header line written once at chat creation. */
@@ -240,7 +242,7 @@ export class Chat {
 	async send(
 		text: string,
 		opts?: {
-			attachments?: unknown[];
+			attachments?: Attachment[];
 			onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 			history?: QuestionHistory[];
 		}
@@ -248,6 +250,9 @@ export class Chat {
 		const run = async (): Promise<PIPELINE_RESULT> => {
 			const question = new Question({ type: QuestionType.PROMPT, chat_id: this.id });
 			question.addQuestion(text);
+			if (opts?.attachments && opts.attachments.length > 0) {
+				question.attachments = opts.attachments;
+			}
 			if (opts?.history) {
 				for (const item of opts.history) {
 					question.addHistory(item);
@@ -295,6 +300,44 @@ export class Chat {
 			// If the entry doesn't exist yet (chat has no turns), rename is a no-op —
 			// the title will be applied to the entry on first send via _updateCatalogEntryForTurn.
 		});
+	}
+
+	/**
+	 * Best-effort cleanup of abandoned, never-sent chats. Lists `.chats/` and
+	 * removes every sub-directory whose id is NOT in the full (all-pipelines)
+	 * catalog — a chat that never received a first message — taking any
+	 * attachments abandoned inside it. Exempts the chat the caller is using.
+	 * Never throws; logs and continues on per-dir failure.
+	 */
+	static async sweepEmpty(opts: { client: RocketRideChatClient; token: string; exemptChatId?: string }): Promise<{ deleted: number }> {
+		const { client, exemptChatId } = opts;
+		let entries: Array<{ name: string; type: 'file' | 'dir' }>;
+		try {
+			entries = (await client.fsListDir(CHATS_ROOT)).entries;
+		} catch {
+			return { deleted: 0 }; // .chats/ not created yet
+		}
+		// FULL catalog across all pipelines — no pipelineId filter (see Global Constraints).
+		let realIds: Set<string>;
+		try {
+			const cat = await client.fsReadJson<ChatCatalog>(CATALOG_PATH);
+			realIds = new Set((cat?.chats ?? []).map((c) => c.guid));
+		} catch (err) {
+			console.warn('Chat.sweepEmpty: catalog unreadable; skipping sweep', err);
+			return { deleted: 0 };
+		}
+		let deleted = 0;
+		for (const e of entries) {
+			if (e.type !== 'dir' || !UUID_RE.test(e.name)) continue;
+			if (realIds.has(e.name) || e.name === exemptChatId) continue;
+			try {
+				await client.fsRmdir(`${CHATS_ROOT}/${e.name}`, true);
+				deleted++;
+			} catch (err) {
+				console.warn(`Chat.sweepEmpty: fsRmdir failed for ${CHATS_ROOT}/${e.name}`, err);
+			}
+		}
+		return { deleted };
 	}
 
 	/** Hard-delete the chat: remove catalog entry, then remove the directory recursively. */

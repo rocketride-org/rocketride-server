@@ -96,6 +96,13 @@ class ChatBase:
         _modelTotalTokens (int): Maximum tokens the model can handle in total
     """
 
+    # Provider block-shape selector for Question.attachments dispatch.
+    # Subclasses override; default 'openai' because most providers in the catalog
+    # are OpenAI-compatible. Recognized values: 'openai' | 'anthropic' | 'gemini'
+    # | 'bedrock'. The non-OpenAI shapes each supply their own translator, and
+    # per-provider Chat subclasses override this value.
+    provider_shape: str = 'openai'
+
     # Reasoning capability from services.json (capabilities.reasoning), stamped by
     # the model sync. Read once in __init__ so no driver has to.
     _is_reasoning: bool = False
@@ -127,6 +134,10 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
+        # Remember the provider name for drop-and-warn telemetry tagging when
+        # a Question carries attachments the shape cannot represent.
+        self._provider = provider
+
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
@@ -425,6 +436,26 @@ class ChatBase:
         # This should never be reached due to the raise in the loop
         raise Exception('Unexpected exit from retry loop')
 
+    def _chat_blocks(self, blocks):
+        """Send a provider-native content-block list and return the text response.
+
+        Default implementation refuses, so a node that advertises a
+        ``provider_shape`` without overriding this method fails loudly rather
+        than silently dropping every attachment back to text-only. Provider
+        Chat subclasses with multimodal support override this.
+
+        Args:
+            blocks: The translated content list for the provider (e.g. the
+                OpenAI ``messages[0].content`` array of typed dicts).
+
+        Returns:
+            str: The model's response text.
+        """
+        raise NotImplementedError(
+            f"Provider '{self._provider}' does not support attachment blocks; "
+            'override _chat_blocks on the Chat subclass.'
+        )
+
     def _chat_string_responses(
         self,
         prompt: str,
@@ -662,26 +693,178 @@ class ChatBase:
         # Return the model's response
         return result
 
+    def _get_file_store(self):
+        """Return the per-account FileStore used to read attachment bytes.
+
+        Honours an injected ``self._file_store`` if one is ever set; otherwise
+        (the current production path) it builds one via the shared builder,
+        which resolves through :mod:`ai.account.store` using the ambient
+        ``ROCKETRIDE_CLIENT_ID`` env var. Returns an object exposing
+        ``read_bytes(path) -> bytes`` (sync).
+        """
+        injected = getattr(self, '_file_store', None)
+        if injected is not None:
+            return injected
+
+        from ai.common.file_store import build_sync_account_file_store
+
+        return build_sync_account_file_store()
+
+    def _make_notice(self, filename, mime, reason):
+        """Build a structured attachment notice for the chat UI.
+
+        The content (human ``message``) lives here so the node layer only has
+        to route the dict to its ``attachment_notice`` SSE stream. ``reason``
+        is one of ``'too_large'``, ``'unsupported'``, ``'provider_error'``.
+        """
+        provider = self._provider
+        msg = {
+            'too_large': f'{filename} is too large to send to the model (max 100 MB).',
+            'unsupported': f"{filename or 'Attachment'} wasn't sent — {provider} can't read {mime}.",
+            'provider_error': f'The model rejected {filename or "an attachment"}.',
+        }[reason]
+        return {'filename': filename, 'mime': mime, 'reason': reason, 'provider': provider, 'message': msg}
+
+    def _chat_with_attachments(self, question: Question, attachments, on_notice=None) -> str:
+        """Dispatch a Question with attachments through the provider-shape translator.
+
+        Picks the translator by ``self.provider_shape``, reads each
+        attachment's bytes via the per-account FileStore, builds the
+        provider-native content blocks, and invokes ``_chat_blocks``.
+        Over-cap attachments are pre-dropped; unsupported MIMEs drop+warn;
+        FileStore IO errors propagate. Every drop and any provider error is
+        surfaced through the optional ``on_notice(notice: dict)`` callback so
+        the node layer can route it to the chat UI.
+        """
+        from ai.common.llm_translate import (
+            translate_anthropic_shape,
+            translate_bedrock_shape,
+            translate_gemini_shape,
+            translate_openai_shape,
+        )
+
+        prompt_text = question.getPrompt()
+        shape = getattr(self, 'provider_shape', 'openai')
+
+        def _log_drops(dropped):
+            for d in dropped:
+                # Structured METRIC log line; MIME only, never path/filename
+                # (privacy invariant).
+                debug(f'METRIC attachment.dropped_unsupported provider={d.provider} mime={d.mime}')
+                # Surface each unsupported drop to the chat UI (filename + MIME).
+                if on_notice:
+                    on_notice(self._make_notice(d.filename, d.mime, 'unsupported'))
+
+        def _log_forwarded(kept_mimes):
+            # One emission per surviving attachment per send, tagged with
+            # provider + per-attachment MIME so it can be aggregated by both.
+            for mime in kept_mimes:
+                debug(f'METRIC llm.attachment_forwarded provider={self._provider} mime={mime}')
+
+        def _kept_mimes(all_atts, dropped_list):
+            """Return the MIME list of attachments that survived translation."""
+            dropped_ids = {getattr(d, 'attachment_id', None) for d in dropped_list}
+            return [
+                getattr(a, 'mime', 'application/octet-stream')
+                for a in all_atts
+                if getattr(a, 'attachment_id', None) not in dropped_ids
+            ]
+
+        # Each shape supplies its own translator returning (blocks, dropped);
+        # the blocks go straight to _chat_blocks. Adding a provider shape is a
+        # one-line entry here, not another near-identical branch.
+        translators = {
+            'openai': translate_openai_shape,
+            'anthropic': translate_anthropic_shape,
+            'gemini': translate_gemini_shape,
+            'bedrock': translate_bedrock_shape,
+        }
+        translate = translators.get(shape)
+
+        if translate is None:
+            # Unknown shape: warn and fall back to text-only so the existing
+            # pipeline keeps working until per-node shapes land.
+            debug(f'provider_shape={shape!r} not recognized; falling back to text-only for provider {self._provider}')
+            return self.chat_string(prompt_text)
+
+        # Pre-check the 100 MB LLM cap before any translate/read: over-cap
+        # attachments are dropped with a notice and never base64-inlined.
+        SLURP_CAP = 100 * 1024 * 1024
+        kept = []
+        for att in attachments:
+            if getattr(att, 'size_bytes', 0) > SLURP_CAP:
+                if on_notice:
+                    on_notice(self._make_notice(att.filename, att.mime, 'too_large'))
+            else:
+                kept.append(att)
+        attachments = kept
+
+        file_store = self._get_file_store()
+        try:
+            blocks, dropped = translate(prompt_text, attachments, file_store, self._provider)
+            _log_drops(dropped)
+            _log_forwarded(_kept_mimes(attachments, dropped))
+            try:
+                return self._chat_blocks(blocks)
+            except Exception as e:
+                # Provider rejected the blocks: surface it and still answer the
+                # turn with a text-only fallback rather than propagating.
+                if on_notice:
+                    n = self._make_notice('', '', 'provider_error')
+                    n['message'] = f'The model rejected the attachment: {e}'
+                    on_notice(n)
+                return self.chat_string(prompt_text)
+        except Exception:
+            # Byte-materialising read failed (e.g. FileStore 100 MB cap hit when
+            # size_bytes was 0/missing). Surface as too_large and answer text-only
+            # so the turn still completes rather than propagating uncaught.
+            if on_notice:
+                n = self._make_notice('', '', 'too_large')
+                n['message'] = 'An attachment could not be read (it may exceed the 100 MB limit).'
+                on_notice(n)
+            return self.chat_string(prompt_text)
+
     def chat(
         self,
         question: Question,
         on_chunk: Optional[Callable[[str], None]] = None,
         on_finish: Optional[Callable[[Optional[str]], None]] = None,
         on_reasoning_chunk: Optional[Callable[[str], None]] = None,
+        on_notice: Optional[Callable[[dict], None]] = None,
     ) -> Answer:
         """Chat with Question/Answer objects (JSON validation + retry); forwards the
         streaming callbacks unless expectJson, which needs the validated final answer.
+
+        ``on_notice`` receives a structured attachment-drop / provider-error
+        dict (see :meth:`_make_notice`) so the node layer can route it to the
+        chat UI as an ``attachment_notice`` SSE event.
         """
         # No streaming for expectJson: repair retries would paint a bad first attempt.
         stream_cbs = (None, None, None) if question.expectJson else (on_chunk, on_finish, on_reasoning_chunk)
 
-        # Use chat_string which already handles network retries and token management
-        response = self.chat_string(
-            question.getPrompt(),
-            on_chunk=stream_cbs[0],
-            on_finish=stream_cbs[1],
-            on_reasoning_chunk=stream_cbs[2],
+        # Per-shape attachment dispatch. Backwards-compatible: text-only Questions
+        # take the existing streaming fast path so no production behavior changes
+        # until per-node shapes are wired. FileStore IO errors raise; unsupported
+        # MIMEs drop+warn.
+        attachments = list(getattr(question, 'attachments', []) or [])
+        # Emit count_per_message on every send (including zero) so the
+        # orphan-volume signal (upload_starts − Σ counts) is computable from
+        # production logs without a reaper in v1.
+        debug(
+            f'METRIC attachment.count_per_message '
+            f'provider={getattr(self, "_provider", "unknown")} count={len(attachments)}'
         )
+        if attachments:
+            # Attachment path is non-streaming; callbacks apply to text-only sends.
+            response = self._chat_with_attachments(question, attachments, on_notice=on_notice)
+        else:
+            # Use chat_string which already handles network retries and token management
+            response = self.chat_string(
+                question.getPrompt(),
+                on_chunk=stream_cbs[0],
+                on_finish=stream_cbs[1],
+                on_reasoning_chunk=stream_cbs[2],
+            )
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —

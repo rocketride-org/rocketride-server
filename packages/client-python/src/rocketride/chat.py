@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 import weakref
@@ -42,6 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence
 
+from .schema.attachment import Attachment
 from .schema.question import Question, QuestionHistory, QuestionType
 
 CHAT_SCHEMA_VERSION = 1
@@ -51,6 +53,7 @@ CATALOG_MAX_RETRY = 3
 CHATS_ROOT = '.chats'
 CATALOG_PATH = '.chats/catalog.json'
 _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 
 class RocketRideChatClient(Protocol):
@@ -63,6 +66,7 @@ class RocketRideChatClient(Protocol):
     async def fs_write_string(self, path: str, text: str, encoding: str = ...) -> None: ...
     async def fs_read_json(self, path: str) -> Any: ...
     async def fs_write_json(self, path: str, obj: Any) -> None: ...
+    async def fs_list_dir(self, path: str = '') -> dict: ...
 
     async def chat(self, *, token: str, question: Question, on_sse: Any = ...) -> Any: ...
 
@@ -292,12 +296,14 @@ class Chat:
         self,
         text: str,
         *,
-        attachments: Optional[Sequence[Any]] = None,  # parked for feature 2
+        attachments: Optional[Sequence[Attachment]] = None,
         on_sse: Optional[Callable[[str, dict], Awaitable[None]]] = None,
         history: Optional[Sequence[QuestionHistory]] = None,
     ) -> Any:
         question = Question(type=QuestionType.PROMPT, chat_id=self.id)
         question.addQuestion(text)
+        if attachments:
+            question.attachments = list(attachments)
         if history:
             for item in history:
                 question.addHistory(item)
@@ -341,6 +347,38 @@ class Chat:
         except Exception:
             # Best-effort. Orphan directory recoverable by §5.5 rebuild.
             pass
+
+    @classmethod
+    async def sweep_empty(cls, *, client, token, exempt_chat_id=None) -> dict:
+        """Best-effort cleanup of abandoned, never-sent chats.
+
+        Lists ``.chats/`` and removes every sub-directory whose id is NOT in the
+        full (all-pipelines) catalog, taking any attachments abandoned inside it.
+        Exempts ``exempt_chat_id``. Never raises; logs and continues on failure.
+        """
+        try:
+            listing = await client.fs_list_dir(CHATS_ROOT)
+        except Exception:
+            return {'deleted': 0}
+        entries = listing.get('entries', []) if isinstance(listing, dict) else (listing or [])
+        try:
+            catalog = await client.fs_read_json(CATALOG_PATH)
+        except Exception:
+            return {'deleted': 0}
+        real_ids = {c['guid'] for c in (catalog or {}).get('chats', []) if 'guid' in c}
+        deleted = 0
+        for entry in entries:
+            name = entry.get('name', '')
+            if entry.get('type') != 'dir' or not _UUID_RE.match(name):
+                continue
+            if name in real_ids or name == exempt_chat_id:
+                continue
+            try:
+                await client.fs_rmdir(f'{CHATS_ROOT}/{name}', recursive=True)
+                deleted += 1
+            except Exception:
+                logger.warning('Chat.sweep_empty: fs_rmdir failed for %s/%s', CHATS_ROOT, name)
+        return {'deleted': deleted}
 
     # ------------------------------------------------------------------ internals
     async def _append_turn_line(self, turn: ChatTurn) -> None:

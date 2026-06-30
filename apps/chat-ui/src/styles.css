@@ -255,6 +255,40 @@ body {
 	flex-shrink: 0;
 }
 
+/* Attachment notice warning row — low-emphasis amber inline row */
+.message--warning {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.15rem 0.25rem;
+	color: #c98a00;
+	font-size: 0.78rem;
+	font-style: italic;
+}
+
+.message--warning-icon {
+	flex-shrink: 0;
+	font-style: normal;
+}
+
+.message--warning-text {
+	flex: 1;
+}
+
+/* Inline upload-too-large error row (ChatInput.tsx attachment-error) */
+.attachment-error {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.2rem 0.4rem;
+	margin: 0.25rem 0;
+	color: var(--error, #d9534f);
+	font-size: 0.78rem;
+	border-left: 2px solid var(--error, #d9534f);
+	background: rgba(217, 83, 79, 0.06);
+	border-radius: 2px;
+}
+
 .thinking-group {
 	margin: 4px 0;
 }
@@ -506,6 +540,88 @@ body {
 	cursor: not-allowed;
 	transform: none;
 	box-shadow: none;
+}
+
+/* Attach (paperclip) button — sibling of send-btn */
+.attach-btn {
+	padding: 8px;
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid var(--input-border);
+	border-radius: 50%;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.attach-btn:hover:not(:disabled) {
+	color: var(--accent-primary);
+	border-color: var(--accent-primary);
+}
+
+.attach-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Attachment pills — used both above the input and on the user bubble */
+.attachment-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
+.attachment-pills--bubble {
+	margin-top: 4px;
+	margin-bottom: 0;
+}
+
+.attachment-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 3px 8px;
+	background: var(--bg-secondary, rgba(255, 255, 255, 0.15));
+	border: 1px solid var(--border-color);
+	border-radius: 999px;
+	font-size: 11px;
+	color: var(--text-primary);
+	max-width: 200px;
+}
+
+.attachment-pills--bubble .attachment-pill {
+	background: rgba(255, 255, 255, 0.18);
+	border-color: rgba(255, 255, 255, 0.25);
+	color: inherit;
+}
+
+.attachment-pill-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.attachment-pill-remove {
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	color: inherit;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	opacity: 0.7;
+}
+
+.attachment-pill-remove:hover {
+	opacity: 1;
+}
+
+.attachment-pill--uploading {
+	font-style: italic;
+	opacity: 0.7;
 }
 
 /* Markdown Content Styling */

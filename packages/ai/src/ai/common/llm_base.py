@@ -22,19 +22,34 @@ class LLMBase(IInstanceBase):
         on_reasoning_chunk: Optional[Callable[[str], None]] = None,
     ) -> Answer:
         chat = self.IGlobal._chat
+
+        def _on_notice(notice):
+            # Route attachment drops / provider errors to the chat UI as an
+            # ``attachment_notice`` SSE event (mirrors ``_emit_thinking``).
+            try:
+                self.instance.sendSSE('attachment_notice', **notice)
+            except Exception:
+                pass
+
         # Legacy drivers override chat(self, question) without streaming callbacks.
         try:
             accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
         except (TypeError, ValueError):
             accepts_stream = True
+        try:
+            accepts_notice = 'on_notice' in inspect.signature(chat.chat).parameters
+        except (TypeError, ValueError):
+            accepts_notice = False
         if not accepts_stream:
-            return chat.chat(question)
-        return chat.chat(
-            question,
-            on_chunk=on_chunk,
-            on_finish=on_finish,
-            on_reasoning_chunk=on_reasoning_chunk,
-        )
+            return chat.chat(question, **({'on_notice': _on_notice} if accepts_notice else {}))
+        stream_kwargs = {
+            'on_chunk': on_chunk,
+            'on_finish': on_finish,
+            'on_reasoning_chunk': on_reasoning_chunk,
+        }
+        if accepts_notice:
+            stream_kwargs['on_notice'] = _on_notice
+        return chat.chat(question, **stream_kwargs)
 
     def writeQuestions(self, question: Question):
         # Stream the model's reasoning live, one line at a time, on the chat-ui

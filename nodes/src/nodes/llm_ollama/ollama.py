@@ -28,6 +28,7 @@ Ollame binding for the ChatLLM.
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 
@@ -64,3 +65,8 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _chat_blocks(self, blocks):
+        """Send a multimodal content-block list and return the response text."""
+        results = self._llm.invoke([HumanMessage(content=blocks)])
+        return results.content

@@ -17,12 +17,13 @@ Run with:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
 from rocketride.chat import (
     Chat,
+    CATALOG_PATH,
     CHAT_SCHEMA_VERSION,
     CATALOG_SCHEMA_VERSION,
     CatalogContentionError,
@@ -30,7 +31,7 @@ from rocketride.chat import (
     list_chats,
     parse_chat_file,
 )
-from rocketride.schema import Question
+from rocketride.schema import Attachment, Question
 
 
 class MockFsClient:
@@ -42,6 +43,9 @@ class MockFsClient:
         self.dirs: set[str] = set()
         self.chat_calls: List[Dict[str, Any]] = []
         self._answer = {'body': 'mock answer text'}
+        self.rmdir_calls: List[tuple] = []
+        self.fail_rmdir_for: Optional[str] = None
+        self._dir_listings: Dict[str, List[Dict[str, Any]]] = {}
 
     def set_answer(self, value):
         self._answer = value
@@ -53,6 +57,9 @@ class MockFsClient:
         self.dirs.add(path)
 
     async def fs_rmdir(self, path: str, *, recursive: bool = False) -> None:
+        self.rmdir_calls.append((path, recursive))
+        if self.fail_rmdir_for is not None and path == self.fail_rmdir_for:
+            raise RuntimeError(f'rmdir failed for {path}')
         self.dirs.discard(path)
         if recursive:
             for key in list(self.files.keys()):
@@ -79,6 +86,20 @@ class MockFsClient:
 
     async def fs_write_json(self, path: str, obj) -> None:
         await self.fs_write_string(path, json.dumps(obj, indent=2))
+
+    async def fs_list_dir(self, path: str = '') -> Dict[str, Any]:
+        if path not in self._dir_listings:
+            raise FileNotFoundError(path)
+        entries = self._dir_listings[path]
+        return {'entries': entries, 'count': len(entries)}
+
+    def seed_json(self, path: str, obj: Any) -> None:
+        """Write a JSON object into the in-memory store."""
+        self.files[path] = json.dumps(obj)
+
+    def seed_dir(self, path: str, entries: List[Dict[str, Any]]) -> None:
+        """Seed a directory listing for fs_list_dir."""
+        self._dir_listings[path] = entries
 
     async def chat(self, *, token, question, on_sse=None):
         if hasattr(self, '_answer_raises'):
@@ -119,6 +140,27 @@ async def test_round_trip_create_send_open():
     assert reopened.id == chat.id
     assert reopened.pipeline_id == PIPELINE_ID
     assert [t.seq for t in reopened.history] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_send_persists_and_rehydrates_attachments():
+    fs = MockFsClient()
+    chat = await Chat.create(client=fs, token=TOKEN, pipeline_id=PIPELINE_ID)
+    att = Attachment(
+        attachment_id='11111111-1111-1111-1111-111111111111',
+        mime='application/pdf',
+        filename='report.pdf',
+        size_bytes=482113,
+        path=f'.chats/{chat.id}/11111111-1111-1111-1111-111111111111.pdf',
+    )
+    await chat.send('summarize this', attachments=[att])
+
+    lines = [line for line in fs.files[f'.chats/{chat.id}/chat.jsonl'].split('\n') if line]
+    turn = json.loads(lines[1])
+    assert turn['question']['attachments'] == [att.model_dump()]
+
+    reopened = await Chat.open(client=fs, token=TOKEN, chat_id=chat.id)
+    assert reopened.history[0].question['attachments'] == [att.model_dump()]
 
 
 @pytest.mark.asyncio
@@ -292,3 +334,45 @@ async def test_catalog_contention_exhausts_after_max_retries():
 
     with pytest.raises(CatalogContentionError):
         await chat.rename('contention test')
+
+
+@pytest.mark.asyncio
+async def test_sweep_empty_removes_only_orphans():
+    real = '11111111-1111-4111-8111-111111111111'
+    orph = '22222222-2222-4222-8222-222222222222'
+    exempt = '33333333-3333-4333-8333-333333333333'
+    fs = MockFsClient()
+    fs.seed_json(CATALOG_PATH, {'schema_version': 1, 'version': 1, 'chats': [{'guid': real, 'pipeline_id': 'pX'}]})
+    fs.seed_dir(
+        '.chats',
+        [
+            {'name': real, 'type': 'dir'},
+            {'name': orph, 'type': 'dir'},
+            {'name': exempt, 'type': 'dir'},
+            {'name': 'not-a-uuid', 'type': 'dir'},
+            {'name': 'catalog.json', 'type': 'file'},
+        ],
+    )
+    res = await Chat.sweep_empty(client=fs, token='t', exempt_chat_id=exempt)
+    assert res == {'deleted': 1}
+    assert fs.rmdir_calls == [('.chats/' + orph, True)]
+
+
+@pytest.mark.asyncio
+async def test_sweep_empty_is_best_effort():
+    a = '44444444-4444-4444-8444-444444444444'
+    b = '55555555-5555-4555-8555-555555555555'
+    fs = MockFsClient()
+    fs.seed_json(CATALOG_PATH, {'schema_version': 1, 'version': 1, 'chats': []})
+    fs.seed_dir('.chats', [{'name': a, 'type': 'dir'}, {'name': b, 'type': 'dir'}])
+    fs.fail_rmdir_for = '.chats/' + a
+    res = await Chat.sweep_empty(client=fs, token='t')
+    assert res == {'deleted': 1}
+    assert len(fs.rmdir_calls) == 2  # both attempted; a failed, b succeeded
+
+
+@pytest.mark.asyncio
+async def test_sweep_empty_no_chats_dir():
+    fs = MockFsClient()  # nothing seeded -> fs_list_dir raises
+    res = await Chat.sweep_empty(client=fs, token='t')
+    assert res == {'deleted': 0}

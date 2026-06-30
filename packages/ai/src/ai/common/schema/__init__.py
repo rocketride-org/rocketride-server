@@ -2,6 +2,7 @@ from .autopipe import Autopipe
 
 from rocketride import (
     Answer,
+    Attachment,
     Question,
     QuestionExample,
     QuestionHistory,
@@ -15,6 +16,7 @@ from rocketride import (
 
 __all__ = [
     'Answer',
+    'Attachment',
     'Question',
     'QuestionExample',
     'QuestionHistory',

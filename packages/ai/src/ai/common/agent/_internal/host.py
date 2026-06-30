@@ -270,6 +270,7 @@ class AgentContext:
             ``'langchain'``, ``'wave'``).  Stamped from ``self.FRAMEWORK``
             at construction time.
         started_at: ISO-8601 timestamp of when the run started.
+        attachments: Attachments scoped to this agent run
     """
 
     invoker: Any
@@ -284,3 +285,5 @@ class AgentContext:
     pipe_id: int
     framework: str
     started_at: str
+
+    attachments: tuple = ()
