@@ -37,23 +37,30 @@ def test_group_reference_value_is_literal():
 
 
 def test_backslash_escape_value_is_literal():
-    """'\\t' / '\\n' must stay literal, not become control characters."""
-    out = _resolve_path_params('https://api/x/:id', {'id': r'a\tb'})
-    assert out == r'https://api/x/a\tb'
-    assert '\t' not in out
+    """'\\t' and '\\n' must stay literal, not become control characters."""
+    out_tab = _resolve_path_params('https://api/x/:id', {'id': r'a\tb'})
+    assert out_tab == r'https://api/x/a\tb'
+    assert '\t' not in out_tab
+
+    out_newline = _resolve_path_params('https://api/x/:id', {'id': r'a\nb'})
+    assert out_newline == r'https://api/x/a\nb'
+    assert '\n' not in out_newline
 
 
 def test_plain_value_substitution():
+    """Ordinary values replace every matching ':name' placeholder."""
     out = _resolve_path_params('https://api/users/:id/posts/:postId', {'id': '42', 'postId': '7'})
     assert out == 'https://api/users/42/posts/7'
 
 
 def test_non_string_value_is_stringified():
+    """Non-string values are coerced via str() before substitution."""
     out = _resolve_path_params('https://api/x/:id', {'id': 123})
     assert out == 'https://api/x/123'
 
 
 def test_no_params_returns_url_unchanged():
+    """An empty or None mapping leaves the URL untouched."""
     assert _resolve_path_params('https://api/x/:id', None) == 'https://api/x/:id'
     assert _resolve_path_params('https://api/x/:id', {}) == 'https://api/x/:id'
 
