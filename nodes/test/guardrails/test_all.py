@@ -368,6 +368,26 @@ class TestPIILeak:
         result = engine.check_pii_leak('The weather is nice today. No personal data here.')
         assert result['passed']
 
+    def test_email_rejects_pipe_in_tld(self):
+        """A pipe '|' must not be accepted as a TLD character (issue #1370).
+
+        The TLD char class was [A-Z|a-z], which matched a literal '|'. With the
+        old pattern, pipe-containing non-emails that end in a word char (so the
+        trailing \\b still holds) — e.g. 'user@example.c|m' or 'a@b.c|d' — were
+        wrongly flagged as PII.
+        """
+        engine = _make_engine()
+        for text in ('Contact user@example.c|m please.', 'See a@b.c|d here.'):
+            result = engine.check_pii_leak(text)
+            assert result['passed'], f'Pipe in TLD must not be detected as email: {text!r}'
+
+    def test_valid_email_with_two_letter_tld_still_detected(self):
+        """Guard against over-fixing: real emails must still be detected."""
+        engine = _make_engine()
+        result = engine.check_pii_leak('Ping me at jane@example.io today.')
+        assert not result['passed']
+        assert 'email' in result['details']
+
     def test_ssn_rejects_invalid_prefix(self):
         """SSN regex should reject prefixes starting with 000, 666, or 9xx."""
         engine = _make_engine()
