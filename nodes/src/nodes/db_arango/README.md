@@ -8,7 +8,7 @@ Connects to ArangoDB over HTTP using the official **python-arango** driver and p
 
 The schema is reflected once at pipeline start and included in every LLM prompt so AQL is generated against the real structure: user **collections** (classified as `document` or `edge`) with sampled fields and indexed fields, **named graphs** with their edge definitions (`from → edge → to`), and **ArangoSearch views**.
 
-The node is **read-only by design**. Every generated query is validated with ArangoDB's `EXPLAIN`, and the resulting execution plan is inspected for data-modification nodes (`InsertNode`, `UpdateNode`, `ReplaceNode`, `RemoveNode`, `UpsertNode`) — this plan-level check is the primary read-only gate. A keyword blocklist (`INSERT`, `UPDATE`, `REPLACE`, `REMOVE`, `UPSERT`, comments stripped) runs as defence-in-depth at execution time. Queries are bounded by a runtime limit, a per-query memory limit, and a maximum result-row cap. The only escape hatch is the opt-in `QuestionType.EXECUTE` path, gated by `allow_execute`, which is **off by default**.
+The node is **read-only by design**. Every generated query is validated with ArangoDB's `EXPLAIN`, and the resulting execution plan is inspected for data-modification nodes (`InsertNode`, `UpdateNode`, `ReplaceNode`, `RemoveNode`, `UpsertNode`) — this plan-level check is the **authoritative** read-only gate. A coarse keyword scan (`INSERT`, `UPDATE`, `REPLACE`, `REMOVE`, `UPSERT`; string literals and comments stripped) runs as a defence-in-depth backstop at execution time; because a write keyword can also be a collection or attribute name, on a match it defers to the same `EXPLAIN`-plan check before refusing, so a legitimate read is never blocked. Queries are bounded by a runtime limit, a per-query memory limit, and a maximum result-row cap. The only escape hatch is the opt-in `QuestionType.EXECUTE` path, gated by `allow_execute`, which is **off by default**.
 
 ---
 
@@ -54,10 +54,9 @@ When connected to an agent, the node exposes three functions namespaced under th
 Each generated query goes through a validate-and-retry loop:
 
 1. The LLM is prompted with the question, the reflected multi-model schema, the optional database description, and strict instructions: only read operations (`FOR`, `FILTER`, `SORT`, `LIMIT`, `LET`, `COLLECT`, `RETURN`, and graph traversals) are permitted, and a `LIMIT` clause must bound the query.
-2. The generated AQL is checked by the read-only keyword filter (`_is_aql_safe`).
-3. If that passes, the query is validated with `EXPLAIN` against the live database. `EXPLAIN` both verifies syntax and yields the execution plan, which is inspected for data-modification nodes — a write query is rejected as read-only. Any syntax error or modification rejection is fed back to the LLM together with the failing query, and the LLM retries up to `max_attempts` times (default 5, range 1-20).
+2. The generated AQL is validated with `EXPLAIN` against the live database. `EXPLAIN` both verifies syntax and yields the execution plan, which is inspected for data-modification nodes — this is the authoritative read-only gate, so a write query is rejected while a read that merely references a field or collection named like a write keyword is accepted. Any syntax error or modification rejection is fed back to the LLM together with the failing query, and the LLM retries up to `max_attempts` times (default 5, range 1-20).
 
-As defence-in-depth, the keyword filter also runs at execution time inside `_run_query`, so an unsafe statement is refused even if a caller bypasses the generation path. Reads are additionally bounded by a 30-second runtime limit, a 1 GiB per-query memory limit, and the `max_execute_rows` result cap.
+As defence-in-depth, a coarse keyword scan (`_is_aql_safe`) also runs at execution time inside `_run_query`; because a write keyword can double as a collection or attribute name, on a match it defers to the same `EXPLAIN`-plan check before refusing — so an unsafe statement is still blocked even if a caller bypasses the generation path, while a legitimate read is not. Reads are additionally bounded by a 30-second runtime limit, a 1 GiB per-query memory limit, and the `max_execute_rows` result cap.
 
 ArangoDB returns JSON-native documents, so result rows are emitted as-is with no special serialisation.
 

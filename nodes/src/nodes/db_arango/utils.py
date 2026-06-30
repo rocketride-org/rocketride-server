@@ -31,13 +31,16 @@ import re
 # AQL safety check — read-only queries only
 # ---------------------------------------------------------------------------
 
-# The five AQL data-modification keywords. An AQL query is a write query if and
-# only if it uses one of these (the parser rejects more than one per query), so
-# blocking them as standalone keywords is a sound read-only gate. The plan-based
-# check in IGlobal (modification node types) is the primary, more precise gate;
-# this regex is the defence-in-depth layer that also runs at execution time.
+# The five AQL data-modification keywords. The plan-based check in IGlobal
+# (modification node types) is the primary, authoritative read-only gate; this
+# regex is only a soft backstop that runs at execution time. The leading negative
+# look-behind ``(?<![\w.])`` keeps it from matching a keyword used as an attribute
+# access or compound identifier (``u.update``, ``last_update``), which is a read,
+# not a write. A bare collection name spelled like a keyword (``FOR d IN replace``)
+# can still match here — a text scan cannot tell a keyword from an identifier — so
+# _run_query defers to the EXPLAIN-plan gate on a hit rather than refusing outright.
 _UNSAFE_AQL = re.compile(
-    r'\b(?:INSERT|UPDATE|REPLACE|REMOVE|UPSERT)\b',
+    r'(?<![\w.])(?:INSERT|UPDATE|REPLACE|REMOVE|UPSERT)\b',
     re.IGNORECASE,
 )
 
@@ -61,9 +64,13 @@ def _parse_is_valid(value: object) -> bool:
 def _is_aql_safe(aql: str) -> bool:
     """Return True when the AQL statement is read-only (no data modification).
 
-    String literals and comments are stripped before checking, so a keyword inside
-    a string/comment neither triggers a false rejection nor (via a ``//`` inside a
-    string, e.g. a URL) hides a real trailing write keyword from the scan.
+    This is a coarse, heuristic backstop, not the authoritative gate (that is the
+    EXPLAIN-plan check in IGlobal). String literals and comments are stripped before
+    checking, so a keyword inside a string/comment neither triggers a false rejection
+    nor (via a ``//`` inside a string, e.g. a URL) hides a real trailing write keyword.
+    The regex look-behind also ignores keywords used as attribute access
+    (``u.update``). A bare collection name spelled like a keyword (``FOR d IN
+    replace``) can still read False here; callers defer to the EXPLAIN-plan gate.
 
     Args:
         aql (str): The AQL statement to inspect.
@@ -126,16 +133,3 @@ def _plan_nodes(plan: object) -> list:
 def _plan_is_modification(plan: object) -> bool:
     """Return True when an ``explain()`` plan contains any data-modification node."""
     return any(isinstance(node, dict) and node.get('type') in _MODIFICATION_NODE_TYPES for node in _plan_nodes(plan))
-
-
-def _strip_ns(tool_name: str) -> str:
-    """Strip the ``'arango.'`` namespace prefix from a tool name.
-
-    Args:
-        tool_name (str): Fully-qualified tool name (e.g. ``'arango.get_data'``).
-
-    Returns:
-        str: Bare tool name without the namespace prefix.
-    """
-    prefix = 'arango.'
-    return tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name

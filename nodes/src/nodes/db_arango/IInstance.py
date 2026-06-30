@@ -40,7 +40,7 @@ from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
 from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
-from .utils import _is_aql_safe, _parse_is_valid
+from .utils import _parse_is_valid
 
 
 class IInstance(IInstanceBase):
@@ -212,16 +212,15 @@ class IInstance(IInstanceBase):
         is_valid = _parse_is_valid(result.get('isValid', False))
         aql = result.get('query', '')
 
-        if is_valid and aql and _is_aql_safe(aql):
+        # is_valid means the query passed the EXPLAIN-plan read-only gate in
+        # _buildAqlQuery, so it is already known safe — no keyword re-check here.
+        if is_valid and aql:
             return {'aql': aql, 'valid': True}
-        elif is_valid and aql:
-            return {'error': 'Generated query contains unsafe AQL', 'aql': aql, 'valid': False}
-        else:
-            # An EXPLAIN-validation failure carries an 'error'; a genuine off-topic
-            # question does not (its 'query' is the LLM's plain-text answer).
-            if result.get('error'):
-                return {'error': result['error'], 'aql': aql, 'valid': False}
-            return {'answer': aql, 'valid': False}
+        # Not valid: an EXPLAIN-validation failure carries an 'error'; a genuine
+        # off-topic question does not (its 'query' is the LLM's plain-text answer).
+        if result.get('error'):
+            return {'error': result['error'], 'aql': aql, 'valid': False}
+        return {'answer': aql, 'valid': False}
 
     # ------------------------------------------------------------------
     # Pipeline lane handlers
@@ -276,7 +275,8 @@ class IInstance(IInstanceBase):
             is_valid = _parse_is_valid(query_json.get('isValid', False))
             aql = query_json.get('query', '')
 
-            executed = is_valid and bool(aql) and _is_aql_safe(aql)
+            # is_valid already means EXPLAIN-plan-approved read-only (see _buildAqlQuery).
+            executed = is_valid and bool(aql)
 
             if executed:
                 result = self.IGlobal._run_query(aql)
@@ -325,13 +325,10 @@ class IInstance(IInstanceBase):
 
             if not is_valid or not aql:
                 return result
-            if not _is_aql_safe(aql):
-                # Generated query writes — reject it so callers report an error
-                # rather than treating it as valid or emitting it as an answer.
-                result['isValid'] = False
-                result['error'] = 'Generated query contains unsafe (write) AQL'
-                return result
 
+            # The EXPLAIN-plan modification check is the authoritative read-only
+            # gate — it accepts a valid read even when it references a field or
+            # collection named like a write keyword, and rejects a genuine write.
             ok, explain_error = self.IGlobal._validate_query(aql)
             if ok:
                 return result

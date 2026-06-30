@@ -154,11 +154,15 @@ class IGlobal(IGlobalBase):
         Raises:
             arango.exceptions.ArangoError: If the driver reports a query error.
         """
-        # Defence-in-depth: block writes even if the caller skips the safety check.
-        # (The precise, primary read-only gate is the EXPLAIN-plan check applied
-        # during query generation in IInstance; this keyword check is the backstop.)
+        # Defence-in-depth backstop. The cheap keyword scan can't tell a write
+        # CLAUSE from a collection/attribute NAMED like a write keyword, so on a
+        # hit defer to the precise EXPLAIN-plan gate before refusing — a read is
+        # never blocked just because it references such a name. (The authoritative
+        # gate is _validate_query, also applied during generation in IInstance.)
         if not _is_aql_safe(aql):
-            raise ValueError('Refusing to execute unsafe (write) AQL statement')
+            ok, reason = self._validate_query(aql)
+            if not ok:
+                raise ValueError(f'Refusing to execute unsafe (write) AQL statement: {reason}')
 
         cursor = self.db.aql.execute(
             aql,

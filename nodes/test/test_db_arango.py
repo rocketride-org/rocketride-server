@@ -221,7 +221,6 @@ _II.error = _stub_error
 # Public handles under test.
 _is_aql_safe = _UTILS._is_aql_safe
 _parse_is_valid = _UTILS._parse_is_valid
-_strip_ns = _UTILS._strip_ns
 _plan_is_modification = _UTILS._plan_is_modification
 _plan_nodes = _UTILS._plan_nodes
 IGlobal = _IG.IGlobal
@@ -316,6 +315,9 @@ class TestAqlSafety:
             'FOR v, e, p IN 1..3 OUTBOUND "users/1" knows RETURN p',
             'RETURN 1',
             'FOR u IN users RETURN u.inserted_at',  # 'inserted_at' must not trip INSERT
+            'FOR u IN users RETURN u.update',  # attribute named like a keyword (read)
+            'FOR u IN users RETURN { x: u.remove }',  # keyword-named attribute in an object literal
+            'FOR d IN c RETURN d.replace',  # compound attribute access, not a REPLACE clause
         ],
     )
     def test_read_only_queries_are_safe(self, query):
@@ -357,15 +359,6 @@ class TestParseIsValid:
     @pytest.mark.parametrize('value', [False, 'false', 'no', None, 0, 'yes'])
     def test_falsy(self, value):
         assert _parse_is_valid(value) is False
-
-
-class TestStripNs:
-    def test_strips_arango_prefix(self):
-        assert _strip_ns('arango.get_data') == 'get_data'
-
-    def test_leaves_unprefixed(self):
-        assert _strip_ns('get_data') == 'get_data'
-        assert _strip_ns('other.get_data') == 'other.get_data'
 
 
 # =============================================================================
@@ -426,12 +419,34 @@ class TestAffectedRows:
 
 class TestRunQuery:
     def test_unsafe_query_raises_without_executing(self):
+        # The keyword scan flags the REMOVE clause; the EXPLAIN-plan gate then
+        # confirms it modifies data -> refused before any execute runs.
         executed = []
         ig = IGlobal.__new__(IGlobal)
-        ig.db = SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: executed.append(1) or iter([])))
+        ig.db = SimpleNamespace(
+            aql=SimpleNamespace(
+                explain=lambda aql: _plan('EnumerateCollectionNode', 'RemoveNode', 'ReturnNode'),
+                execute=lambda *a, **k: executed.append(1) or iter([]),
+            )
+        )
         with pytest.raises(ValueError, match='unsafe'):
             ig._run_query('FOR u IN users REMOVE u IN users')
         assert executed == []  # safety gate ran before any execute
+
+    def test_collection_named_like_keyword_executes(self):
+        # A read against a collection named 'replace' trips the keyword scan, but the
+        # EXPLAIN-plan gate sees no modification node, so the read executes (not refused).
+        executed = []
+        ig = IGlobal.__new__(IGlobal)
+        ig.max_execute_rows = 100
+        ig.db = SimpleNamespace(
+            aql=SimpleNamespace(
+                explain=lambda aql: _plan('EnumerateCollectionNode', 'ReturnNode'),
+                execute=lambda *a, **k: executed.append(1) or iter([{'d': 1}]),
+            )
+        )
+        assert ig._run_query('FOR d IN replace RETURN d') == [{'d': 1}]
+        assert executed == [1]  # the precise gate let the read through
 
     def test_safe_query_executes_and_returns_rows(self):
         ig = IGlobal.__new__(IGlobal)
@@ -619,15 +634,20 @@ class TestGetAql:
         out = inst.get_aql({'question': 'show users'})
         assert out == {'aql': 'FOR u IN users LIMIT 5 RETURN u', 'valid': True}
 
-    def test_valid_but_unsafe_query_flagged(self):
-        ig = _fake_ig()
+    def test_write_query_rejected_by_explain_plan(self):
+        # A generated write is rejected by the authoritative EXPLAIN-plan gate (not
+        # the keyword scan), so get_aql reports valid:False with the modification error.
+        ig = _fake_ig(
+            max_validation_attempts=2,
+            _validate_query=lambda aql: (False, 'Query performs data modification; this node is read-only.'),
+        )
         inst = _make_instance(
             ig=ig,
             instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users REMOVE u IN users'}),
         )
         out = inst.get_aql({'question': 'delete all users'})
         assert out['valid'] is False
-        assert 'unsafe' in out['error']
+        assert 'modification' in out['error'].lower()
 
     def test_off_topic_returns_answer(self):
         ig = _fake_ig()
@@ -794,16 +814,33 @@ class TestWriteQuestions:
         assert 'syntax error' in inst.instance.answers[0].value
         assert not inst.instance.tables
 
-    def test_unsafe_generated_query_emits_error(self):
-        ig = _fake_ig()
+    def test_write_generated_query_emits_error(self):
+        # A generated write is rejected by the EXPLAIN-plan gate; the lane emits the
+        # modification error and nothing is executed or tabulated.
+        ig = _fake_ig(
+            max_validation_attempts=2,
+            _validate_query=lambda aql: (False, 'Query performs data modification; this node is read-only.'),
+        )
         inst = _make_instance(
             ig=ig,
             instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users REMOVE u IN users'}),
         )
         inst.writeQuestions(self._question(_QTYPE.QUESTION))
         assert inst.instance.answers
-        assert 'unsafe' in inst.instance.answers[0].value.lower()
+        assert 'modification' in inst.instance.answers[0].value.lower()
         assert not inst.instance.tables
+
+    def test_collection_named_like_keyword_emits_table(self):
+        # The pipeline path no longer pre-rejects a read against a keyword-named
+        # collection: EXPLAIN approves it, _run_query returns rows, a table is emitted.
+        ig = _fake_ig(_run_query=lambda aql, *a, **k: [{'d': 1}])
+        inst = _make_instance(
+            ig=ig,
+            instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR d IN replace RETURN d'}),
+        )
+        inst.writeQuestions(self._question(_QTYPE.QUESTION))
+        assert inst.instance.tables  # the read executed and produced a table
+        assert not any('unsafe' in a.value.lower() for a in inst.instance.answers)
 
     def test_no_question_text_warns(self):
         _reset_logs()
