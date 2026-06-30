@@ -5,10 +5,11 @@
 
 """Regression tests for _resolve_path_params (issue #1369).
 
-Path-param values must be inserted literally. A value used as a plain re.sub
-replacement string would be interpreted as a template, so backslash escapes and
-group references in caller-supplied values would crash (``\\1`` ->
-``re.error``) or be silently mangled (``\\t`` -> a tab character).
+Path-param values are percent-encoded and inserted via a re.sub callback. This
+keeps each value as a single, literal path segment: a value used as a plain
+re.sub replacement string would be interpreted as a template (``\\1`` ->
+``re.error``, ``\\t`` -> a tab character), and an unencoded value could contain
+``/`` or ``..`` and alter the URL structure past the allowlist.
 """
 
 from __future__ import annotations
@@ -31,20 +32,27 @@ from http_client import _resolve_path_params  # noqa: E402
 
 
 def test_group_reference_value_is_literal():
-    """A value of '\\1' must be inserted verbatim, not treated as a backref."""
+    """A value of '\\1' must not be treated as a backref; the backslash is encoded."""
     out = _resolve_path_params('https://api/x/:id', {'id': r'\1'})
-    assert out == r'https://api/x/\1'
+    assert out == 'https://api/x/%5C1'
 
 
 def test_backslash_escape_value_is_literal():
-    """'\\t' and '\\n' must stay literal, not become control characters."""
+    """'\\t' and '\\n' must stay literal (backslash encoded), not become control chars."""
     out_tab = _resolve_path_params('https://api/x/:id', {'id': r'a\tb'})
-    assert out_tab == r'https://api/x/a\tb'
+    assert out_tab == 'https://api/x/a%5Ctb'
     assert '\t' not in out_tab
 
     out_newline = _resolve_path_params('https://api/x/:id', {'id': r'a\nb'})
-    assert out_newline == r'https://api/x/a\nb'
+    assert out_newline == 'https://api/x/a%5Cnb'
     assert '\n' not in out_newline
+
+
+def test_reserved_chars_are_encoded_to_stay_one_segment():
+    """A value with '/', '..' or '?' is encoded so it cannot escape its path segment."""
+    out = _resolve_path_params('https://api/public/:id', {'id': '../admin?x=1'})
+    assert out == 'https://api/public/..%2Fadmin%3Fx%3D1'
+    assert '/admin' not in out
 
 
 def test_plain_value_substitution():
