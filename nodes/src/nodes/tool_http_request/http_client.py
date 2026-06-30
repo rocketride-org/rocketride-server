@@ -101,7 +101,11 @@ def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str
         return url
     resolved = url
     for key, value in path_params.items():
-        resolved = re.sub(rf':{re.escape(key)}\b', str(value), resolved)
+        # Use a function replacement so the value is inserted literally. Passing the
+        # value as a plain string would let re.sub interpret backslash escapes and
+        # group references in it (e.g. '\1' -> re.error, '\t' -> a tab character).
+        replacement = str(value)
+        resolved = re.sub(rf':{re.escape(key)}\b', lambda _m, r=replacement: r, resolved)
     return resolved
 
 
