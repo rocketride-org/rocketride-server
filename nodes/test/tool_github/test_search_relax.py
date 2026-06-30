@@ -127,6 +127,27 @@ class TestRelaxQuery:
         or_clause = relaxed
         assert or_clause == 'alpha OR beta OR gamma'
 
+    def test_quoted_qualifier_value_stays_atomic(self):
+        # The space inside label:"good first issue" must not split the qualifier.
+        relaxed = mod._relax_query('dropper browse label:"good first issue"')
+        assert relaxed == 'dropper OR browse label:"good first issue"'
+
+    def test_negated_qualifier_preserved_as_filter(self):
+        # -label:bug is a filter, not a free-text term, so it must not join the OR clause.
+        relaxed = mod._relax_query('dropper browse -label:bug')
+        assert relaxed == 'dropper OR browse -label:bug'
+
+    def test_quoted_phrase_term_kept_quoted(self):
+        relaxed = mod._relax_query('"browse button" dropper repo:acme/app')
+        assert relaxed == '"browse button" OR dropper repo:acme/app'
+
+    def test_keyword_count_trimmed_to_leave_room_for_qualifiers(self):
+        # 5 keywords + 3 qualifiers would exceed GitHub's 5 AND/OR/NOT operator limit;
+        # the keyword count is trimmed so (OR ops) + (qualifiers) stays within budget.
+        relaxed = mod._relax_query('alpha beta gamma delta epsilon repo:a/b is:open in:title')
+        or_clause = relaxed.split(' repo:')[0]
+        assert or_clause == 'alpha OR beta OR gamma'  # 6 - 3 qualifiers = 3 keywords
+
 
 # ---------------------------------------------------------------------------
 # Fallback wiring in search_issues / search_code
