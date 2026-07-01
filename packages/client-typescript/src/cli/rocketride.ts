@@ -1451,9 +1451,10 @@ export class RocketRideCLI {
 				};
 			});
 
-			// Upload files - progress events come through event subscription
-			// Server handles concurrency automatically
-			const results = await this.client!.sendFiles(fileObjects, taskToken!);
+			// Upload files - progress events come through event subscription.
+			// Forward --max-concurrent so the client-side upload pool honors it
+			// (sendFiles guards against invalid values and falls back to 5).
+			const results = await this.client!.sendFiles(fileObjects, taskToken!, this.args.max_concurrent);
 
 			const endTime = Date.now();
 

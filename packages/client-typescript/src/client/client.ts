@@ -1466,7 +1466,11 @@ export class RocketRideClient extends DAPClient {
 		// Run uploads through a bounded pool so at most `maxConcurrent` data
 		// pipes are open at once (default 5), rather than opening one pipe per
 		// file. Results are written by index, so ordering is preserved.
-		const limit = Math.max(1, Math.min(maxConcurrent, files.length || 1));
+		// Guard against non-finite/invalid values (e.g. NaN from a bad
+		// parseInt upstream), which would otherwise yield zero workers and
+		// silently upload nothing.
+		const requested = Number.isFinite(maxConcurrent) ? Math.floor(maxConcurrent) : 5;
+		const limit = Math.max(1, Math.min(requested, files.length || 1));
 		let nextIndex = 0;
 		const worker = async (): Promise<void> => {
 			while (true) {
