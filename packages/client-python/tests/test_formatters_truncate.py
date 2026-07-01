@@ -44,6 +44,7 @@ class TestTruncateFilename(unittest.TestCase):
         self.assertEqual(truncate_filename('abcdef', 2), 'ab')
         self.assertEqual(truncate_filename('report.txt', 1), 'r')
         self.assertEqual(truncate_filename('abcdef', 3), 'abc')
+        self.assertEqual(truncate_filename('abcdef', -1), '')
 
     def test_returns_filename_when_it_fits(self) -> None:
         self.assertEqual(truncate_filename('a.txt', 10), 'a.txt')
