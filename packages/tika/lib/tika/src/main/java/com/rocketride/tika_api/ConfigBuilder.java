@@ -405,22 +405,17 @@ public class ConfigBuilder {
 		}
 	}
 
-	// Test seam: force the tool-availability result (null = probe the real host).
-	static Boolean toolsAvailableOverrideForTest = null;
-
 	/**
-	 * @return true only if ALL external media tools are available. The parsers launch
-	 *         their tools via the Unix `env` shim on every platform, so gate on `env`
-	 *         first — a host without it can't run them regardless of the tools (this is
-	 *         why Windows always falls back).
+	 * @return true only if ALL external media tools (ffmpeg/exiftool/sox) are available,
+	 *         so the kept external parser never throws for a mime whose tool is missing.
+	 *         On Windows they launch via the Unix `env` shim (absent), so gate on that first.
 	 */
 	private static boolean externalMediaToolsAvailable() {
-		if (toolsAvailableOverrideForTest != null) {
-			return toolsAvailableOverrideForTest;
+		boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+		if (isWindows && !isExternalToolAvailable("env")) {
+			return false;
 		}
-		// && short-circuits, so `env` is probed first and the rest are skipped if it's missing.
-		return isExternalToolAvailable("env")
-				&& isExternalToolAvailable("ffmpeg", "-version")
+		return isExternalToolAvailable("ffmpeg", "-version")
 				&& isExternalToolAvailable("exiftool", "-ver")
 				&& isExternalToolAvailable("sox", "--version");
 	}
@@ -436,9 +431,7 @@ public class ConfigBuilder {
 		NodeList children = defaultParser.getChildNodes();
 		for (int index = 0; index < children.getLength(); index++) {
 			Node child = children.item(index);
-			// Match by node name, not getLocalName(): elements created via
-			// createElement (removeParser) have a null localName in a namespace-aware DOM.
-			if (child.getNodeType() != Node.ELEMENT_NODE || !"parser-exclude".equals(child.getNodeName()))
+			if (!"parser-exclude".equals(child.getLocalName()))
 				continue;
 
 			Element excludeElement = (Element) child;
@@ -453,7 +446,7 @@ public class ConfigBuilder {
 	 * built-in parsers instead of throwing. Honors an existing exclusion (skips the
 	 * probe — an explicit parser-exclude wins, and check() spawns a process).
 	 */
-	static void excludeExternalParserIfUnavailable(Document doc, String parserName) {
+	private static void excludeExternalParserIfUnavailable(Document doc, String parserName) {
 		if (isParserExcluded(doc, parserName)) {
 			return;
 		}
