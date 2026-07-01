@@ -875,6 +875,32 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				panel.webview.postMessage({ type: 'pasteContent', text });
 			} else if (msg?.type === 'copyText' && typeof msg.text === 'string') {
 				await vscode.env.clipboard.writeText(msg.text);
+			} else if (msg?.type === 'requestFileDialog') {
+				const uris = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Upload' });
+
+				if (!uris || uris.length === 0) {
+					return;
+				}
+
+				const files: { buffer: number[]; name: string; type: string; lastModified: number }[] = [];
+
+				for (const uri of uris) {
+					try {
+						const bytes = await vscode.workspace.fs.readFile(uri);
+						files.push({
+							buffer: Array.from(bytes),
+							name: uri.path.split('/').pop() ?? 'file',
+							type: '',
+							lastModified: Date.now(),
+						});
+					} catch (err) {
+						this.logger.error(`[ProjectProvider] Failed to read selected file ${uri.fsPath}: ${err}`);
+					}
+				}
+
+				if (files.length > 0) {
+					panel.webview.postMessage({ type: 'nativeFilesSelected', files });
+				}
 			}
 		});
 	}
