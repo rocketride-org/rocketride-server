@@ -226,14 +226,28 @@ const styles = {
 		padding: '7px 10px',
 		borderRadius: 6,
 		border: '1px solid var(--rr-border)',
-		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary)',
+		backgroundColor: 'var(--rr-bg-input)',
+		color: 'var(--rr-text-primary)',
 		fontSize: 13,
 		fontFamily: 'var(--rr-font-family)',
 		cursor: 'pointer',
 		outline: 'none',
 	} as CSSProperties,
+
+	/** Theme option — match shell tokens so the native popup isn't white-on-dark. */
+	themeOption: {
+		backgroundColor: 'var(--rr-bg-paper)',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
 };
+
+/** Light themes for native control color-scheme (select popup). */
+function themeColorScheme(themeId: string): 'light' | 'dark' {
+	if (themeId === 'light' || themeId === 'rocketride-light' || themeId === 'visual-studio') {
+		return 'light';
+	}
+	return 'dark';
+}
 
 /** Accent colors cycled across app cards. */
 const CARD_COLORS = [
@@ -308,12 +322,15 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 				{/* Theme picker */}
 				{themeOptions.length > 0 && (
 					<select
-						style={styles.themeSelect}
+						style={{
+							...styles.themeSelect,
+							colorScheme: themeColorScheme(prefs.theme),
+						}}
 						value={prefs.theme}
 						onChange={(e) => setTheme(e.target.value)}
 					>
 						{themeOptions.map((t) => (
-							<option key={t.id} value={t.id}>{t.name}</option>
+							<option key={t.id} value={t.id} style={styles.themeOption}>{t.name}</option>
 						))}
 					</select>
 				)}
