@@ -22,6 +22,11 @@
 	"capabilities": ["internal", "nosaas"],
 	//
 	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An internal infrastructure component that runs on the remote host, receiving and executing pipeline workloads forwarded by a connected client node."],
+	//
+	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//

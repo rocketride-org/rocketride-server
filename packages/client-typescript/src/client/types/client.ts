@@ -279,11 +279,11 @@ export interface TeamInfo {
 }
 
 /**
- * Describes an organisation the authenticated user is a member of.
+ * Describes the organisation the authenticated user belongs to.
  *
  * Organisations group users and teams for billing and access management.
- * A user may belong to multiple organisations; each carries its own permission
- * set at the organisation level plus a list of contained teams.
+ * Each user belongs to exactly one organisation, which carries its own
+ * permission set at the organisation level plus a list of contained teams.
  */
 export interface OrgInfo {
 	/** Unique identifier of the organisation (UUID or short slug) */
@@ -359,10 +359,11 @@ export interface ConnectResult {
 	defaultTeam: string;
 
 	/**
-	 * List of organisations the authenticated user belongs to, each with
-	 * its own permission set and nested team memberships.
+	 * The organisation the authenticated user belongs to, with its own
+	 * permission set and nested team memberships.  Null when the user
+	 * has no org membership.
 	 */
-	organizations: OrgInfo[];
+	organization: OrgInfo | null;
 
 	/**
 	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
@@ -391,6 +392,18 @@ export interface ConnectResult {
 	 * The shell should show a waitlist page instead of the main workspace.
 	 */
 	waitlisted?: boolean;
+
+	/**
+	 * All org memberships the user has (for the org switcher UI).
+	 * Only present in profile responses, not in the auth handshake.
+	 */
+	memberships?: OrgInfo[];
+
+	/**
+	 * The ID of the user's currently active (default) organization.
+	 * Only present in profile responses.
+	 */
+	defaultOrgId?: string;
 }
 
 /**

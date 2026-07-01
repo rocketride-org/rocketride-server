@@ -21,7 +21,13 @@
 // SOFTWARE.
 
 // =============================================================================
-// SUNBURST CHART — Radial partition visualisation with d3
+// SUNBURST CHART — SnakeViz-style radial partition visualisation
+// =============================================================================
+//
+// Arc width = cumulative time (matching snakeviz).
+// Color = D3 ordinal scale by function name (consistent per function).
+// Hover = magenta highlight + all same-name arcs highlighted.
+// Click arc = re-root to that function.  Click center = zoom out one level.
 // =============================================================================
 
 import React, { useRef, useEffect, useState } from 'react';
@@ -29,71 +35,53 @@ import type { CSSProperties } from 'react';
 import * as d3 from 'd3';
 import type { HierarchyRectangularNode } from 'd3';
 import { commonStyles } from 'shared/themes/styles';
-import type { ProfileTreeNode, ProfileTreeResponse, OnNodeSelect } from './types';
+import type { ProfileTreeNode, OnRootChange } from './types';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-/** Maximum visible depth rings. */
-const MAX_DEPTH = 10;
-
 /** Minimum arc angle (radians) for a node to be rendered. */
 const MIN_ARC_ANGLE = 0.005;
 
-// =============================================================================
-// COLOUR PALETTE (same as FlameGraph)
-// =============================================================================
+/** Magenta highlight colour for hovered arcs. */
+const HOVER_COLOR = '#ff00ff';
 
-/** CSS variable names for chart colours. */
-const PALETTE_VARS = [
-	'--rr-chart-blue', '--rr-chart-purple', '--rr-chart-green',
-	'--rr-chart-yellow', '--rr-chart-orange', '--rr-chart-red',
+/**
+ * D3 category20c palette — the same 20-colour ordinal scale that snakeviz uses.
+ * Hardcoded to avoid dependency on d3-scale-chromatic type exports.
+ */
+const CATEGORY20C = [
+	'#3182bd', '#6baed6', '#9ecae1', '#c6dbef',
+	'#e6550d', '#fd8d3c', '#fdae6b', '#fdd0a2',
+	'#31a354', '#74c476', '#a1d99b', '#c7e9c0',
+	'#756bb1', '#9e9ac8', '#bcbddc', '#dadaeb',
+	'#636363', '#969696', '#bdbdbd', '#d9d9d9',
 ];
-
-/** Fallback hex values. */
-const PALETTE_FALLBACK = ['#4263eb', '#7048e8', '#2b8a3e', '#e67700', '#e67a2e', '#c92a2a'];
-
-/** Resolve palette from CSS custom properties on a DOM element. */
-function resolvePalette(el: Element): string[] {
-	const cs = getComputedStyle(el);
-	return PALETTE_VARS.map((v, i) => cs.getPropertyValue(v).trim() || PALETTE_FALLBACK[i]);
-}
-
-/** Simple string hash for distributing colours. */
-function hashStr(s: string): number {
-	let h = 0;
-	for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-	return Math.abs(h);
-}
-
-/** Map a node to a resolved colour string. */
-function nodeColour(palette: string[], name: string, tottime: number, cumtime: number): string {
-	const base = hashStr(name) % palette.length;
-	const ratio = cumtime > 0 ? tottime / cumtime : 0;
-	const shift = Math.floor(ratio * 2);
-	const idx = Math.min(base + shift, palette.length - 1);
-	return palette[idx];
-}
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	/** Outer container. */
+	/** Outer container — centers the SVG using flexbox. */
 	container: {
 		...commonStyles.columnFill,
-		alignItems: 'center',
 		overflow: 'auto',
 		background: 'var(--rr-bg-surface-alt)',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
 	} as CSSProperties,
 
-	/** SVG wrapper. */
+	/** SVG wrapper — constrains the SVG size. */
 	svgWrapper: {
 		display: 'flex',
+		alignItems: 'center',
 		justifyContent: 'center',
-		padding: 20,
+		padding: 10,
+		width: '100%',
+		height: '100%',
 	} as CSSProperties,
 
 	/** Tooltip overlay. */
@@ -120,12 +108,46 @@ const styles = {
 // =============================================================================
 
 interface SunburstChartProps {
-	/** Structured call tree from the server. */
-	treeData: ProfileTreeResponse | null;
-	/** Currently selected node for cross-highlighting. */
-	selectedNode: ProfileTreeNode | null;
-	/** Callback when a node is selected. */
-	onNodeSelect: OnNodeSelect;
+	/** Root node to visualise (the current viz root, not necessarily the tree root). */
+	root: ProfileTreeNode | null;
+	/** Total cumulative time of the full profile (for percentage display). */
+	totalTime: number;
+	/** Maximum depth rings to render. */
+	maxDepth: number;
+	/** Cutoff fraction — prune children with cumtime < cutoff * parent.cumtime. */
+	cutoff: number;
+	/** Callback when user clicks an arc to re-root the visualisation. */
+	onRootChange: OnRootChange;
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Apply cutoff pruning to a tree node.
+ * Returns a new node with children filtered by the cutoff threshold.
+ * Children whose cumtime is less than cutoff * parent.cumtime are removed.
+ */
+function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
+	if (cutoff <= 0 || !node.children.length) return node;
+	const threshold = cutoff * node.cumtime;
+	const prunedChildren = node.children
+		.filter((c) => c.cumtime >= threshold)
+		.map((c) => pruneTree(c, cutoff));
+	return { ...node, children: prunedChildren };
+}
+
+/**
+ * Limit tree depth to maxDepth levels.
+ * Returns a new tree with children beyond maxDepth removed.
+ */
+function limitDepth(node: ProfileTreeNode, maxDepth: number, depth: number = 0): ProfileTreeNode {
+	if (depth >= maxDepth) return { ...node, children: [] };
+	return {
+		...node,
+		children: node.children.map((c) => limitDepth(c, maxDepth, depth + 1)),
+	};
 }
 
 // =============================================================================
@@ -133,26 +155,26 @@ interface SunburstChartProps {
 // =============================================================================
 
 /**
- * Radial sunburst chart visualisation.
+ * SnakeViz-style radial sunburst chart.
  *
- * Renders a radial partition layout using d3.partition + d3.arc.
- * Click to zoom into a subtree; click centre to zoom back out.
- *
- * @param props.treeData     - Tree data from the server.
- * @param props.selectedNode - Currently highlighted node (cross-vis).
- * @param props.onNodeSelect - Callback for node selection.
+ * - Arc width proportional to cumulative time (not self-time)
+ * - D3 ordinal colour scale by function name (consistent per function)
+ * - Hover highlights all same-name arcs in magenta
+ * - Click arc = re-root, click center = zoom out one level
  */
-const SunburstChart: React.FC<SunburstChartProps> = ({ treeData, selectedNode, onNodeSelect }) => {
+/** Fixed internal coordinate size for the SVG viewBox. */
+const SVG_SIZE = 600;
+const SVG_RADIUS = SVG_SIZE / 2;
+
+const SunburstChart: React.FC<SunburstChartProps> = ({
+	root: vizRoot,
+	totalTime,
+	maxDepth,
+	cutoff,
+	onRootChange,
+}) => {
 	const svgRef = useRef<SVGSVGElement>(null);
-	const [zoomNode, setZoomNode] = useState<ProfileTreeNode | null>(null);
 	const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
-
-	// Current root for rendering
-	const currentRoot = zoomNode || treeData?.tree || null;
-
-	// Chart dimensions
-	const size = 600;
-	const radius = size / 2;
 
 	// =========================================================================
 	// D3 RENDER
@@ -160,34 +182,42 @@ const SunburstChart: React.FC<SunburstChartProps> = ({ treeData, selectedNode, o
 
 	useEffect(() => {
 		const svg = svgRef.current;
-		if (!svg || !currentRoot) return;
+		if (!svg || !vizRoot) return;
 
-		// Resolve theme colours (d3 .attr() can't use CSS var() references)
+		// Apply client-side depth limiting and cutoff pruning
+		const processedRoot = pruneTree(limitDepth(vizRoot, maxDepth), cutoff);
+
+		// Resolve theme colours
 		const cs = getComputedStyle(svg);
-		const palette = resolvePalette(svg);
 		const textPrimary = cs.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
 		const textSecondary = cs.getPropertyValue('--rr-text-secondary').trim() || '#666';
-		const brandColor = cs.getPropertyValue('--rr-brand').trim() || '#f7901f';
 		const bgPaper = cs.getPropertyValue('--rr-bg-paper').trim() || '#ffffff';
 
-		// Build hierarchy with self-time partitioning
-		const root = d3.hierarchy(currentRoot, (d) => d.children)
+		// D3 ordinal colour scale by function name (snakeviz: category20c)
+		const color = d3.scaleOrdinal(CATEGORY20C);
+
+		// Build hierarchy — partition value = cumtime (snakeviz behaviour)
+		const root = d3.hierarchy(processedRoot, (d) => d.children)
 			.sum((d) => {
+				// Use cumtime for partition sizing (snakeviz style)
 				if (!d.children || d.children.length === 0) return Math.max(d.cumtime, 0.000001);
+				// For parent nodes: cumtime minus children to avoid double-counting
 				const childCum = d.children.reduce((s, c) => s + c.cumtime, 0);
-				return Math.max(d.cumtime - childCum, 0);
+				return Math.max(d.cumtime - childCum, 0.000001);
 			})
 			.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 
 		// Radial partition layout
-		const partition = d3.partition<ProfileTreeNode>().size([2 * Math.PI, radius]);
+		const partition = d3.partition<ProfileTreeNode>().size([2 * Math.PI, SVG_RADIUS]);
 		partition(root);
 
-		// Setup SVG
+		// Setup SVG — fixed viewBox, scales to fill container via CSS
 		const svgSel = d3.select(svg)
-			.attr('width', size)
-			.attr('height', size)
-			.attr('viewBox', `${-radius} ${-radius} ${size} ${size}`);
+			.attr('viewBox', `${-SVG_RADIUS} ${-SVG_RADIUS} ${SVG_SIZE} ${SVG_SIZE}`)
+			.style('width', '100%')
+			.style('height', '100%')
+			.style('max-width', `${SVG_SIZE}px`)
+			.style('max-height', `${SVG_SIZE}px`);
 		svgSel.selectAll('*').remove();
 
 		// Arc generator
@@ -197,103 +227,92 @@ const SunburstChart: React.FC<SunburstChartProps> = ({ treeData, selectedNode, o
 			.innerRadius((d) => d.y0)
 			.outerRadius((d) => d.y1 - 1)
 			.padAngle(0.002)
-			.padRadius(radius / 2);
+			.padRadius(SVG_RADIUS / 2);
 
-		// Filter visible nodes
+		// Filter visible nodes (depth > 0, min arc angle)
 		const nodes = root.descendants()
-			.filter((d) => d.depth > 0 && d.depth <= MAX_DEPTH && (d.x1 - d.x0) > MIN_ARC_ANGLE) as HierarchyRectangularNode<ProfileTreeNode>[];
+			.filter((d) => d.depth > 0 && (d.x1 - d.x0) > MIN_ARC_ANGLE) as HierarchyRectangularNode<ProfileTreeNode>[];
 
 		// Draw arcs
-		const paths = svgSel.selectAll<SVGPathElement, HierarchyRectangularNode<ProfileTreeNode>>('path')
+		const paths = svgSel.selectAll<SVGPathElement, HierarchyRectangularNode<ProfileTreeNode>>('path.arc')
 			.data(nodes)
 			.join('path')
+			.attr('class', 'arc')
 			.attr('d', arc)
-			.attr('fill', (d) => nodeColour(palette, d.data.name, d.data.tottime, d.data.cumtime))
+			.attr('fill', (d) => color(d.data.name))
 			.attr('opacity', 0.85)
-			.attr('stroke', (d) => {
-				if (selectedNode && d.data.name === selectedNode.name
-					&& d.data.file === selectedNode.file
-					&& d.data.line === selectedNode.line) {
-					return brandColor;
-				}
-				return bgPaper;
-			})
-			.attr('stroke-width', (d) => {
-				if (selectedNode && d.data.name === selectedNode.name
-					&& d.data.file === selectedNode.file
-					&& d.data.line === selectedNode.line) return 2;
-				return 0.5;
-			})
+			.attr('stroke', bgPaper)
+			.attr('stroke-width', 0.5)
 			.style('cursor', 'pointer');
 
-		// Centre label — current root name
+		// Center label — current root name
 		svgSel.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '-0.3em')
 			.attr('fill', textPrimary)
 			.attr('font-size', 13)
 			.attr('font-family', 'var(--rr-font-mono, monospace)')
-			.text(currentRoot.name === '<root>' ? 'All' : currentRoot.name);
+			.text(vizRoot.name === '<root>' ? 'All' : vizRoot.name);
 
-		// Centre subtitle — cumtime
+		// Center subtitle — cumtime
 		svgSel.append('text')
 			.attr('text-anchor', 'middle')
 			.attr('dy', '1.2em')
 			.attr('fill', textSecondary)
 			.attr('font-size', 11)
 			.attr('font-family', 'var(--rr-font-mono, monospace)')
-			.text(`${currentRoot.cumtime.toFixed(3)}s`);
+			.text(`${vizRoot.cumtime.toFixed(3)}s`);
 
-		// Click centre circle to zoom out
-		const innerRadius = (root.children?.[0] as HierarchyRectangularNode<ProfileTreeNode>)?.y0 || 40;
-		svgSel.append('circle')
-			.attr('r', innerRadius)
-			.attr('fill', 'transparent')
-			.style('cursor', zoomNode ? 'pointer' : 'default')
-			.on('click', () => {
-				if (zoomNode) {
-					setZoomNode(null);
-					onNodeSelect(null);
+		// Click any arc to re-root the visualisation to that function
+		// (no children guard — ProfilerView resolves the full subtree from the original tree)
+		paths.on('click', (_event, d) => {
+			onRootChange(d.data);
+		});
+
+		// =====================================================================
+		// HOVER — Magenta highlight + same-function highlighting (snakeviz)
+		// =====================================================================
+
+		paths.on('mouseenter', (event, d) => {
+			const hoveredName = d.data.name;
+
+			// Highlight all arcs with the same function name
+			paths.each(function (dd) {
+				const el = d3.select(this);
+				if (dd.data.name === hoveredName) {
+					el.attr('fill', HOVER_COLOR).attr('opacity', 1);
+				} else {
+					el.attr('opacity', 0.4);
 				}
 			});
 
-		// Click arc to select and optionally zoom into subtree
-		paths.on('click', (_event, d) => {
-			// Always select the clicked node (enables leaf-arc selection)
-			onNodeSelect(d.data);
-
-			// Zoom into subtree only if the node has children
-			if (d.children && d.children.length > 0) {
-				setZoomNode(d.data);
-			}
-		});
-
-		// Tooltip
-		paths.on('mouseenter', (event, d) => {
+			// Tooltip with cumtime percentage
+			const pct = totalTime > 0 ? (d.data.cumtime / totalTime * 100).toFixed(1) : '0.0';
 			const lines = [
 				d.data.name,
+				`${d.data.cumtime.toFixed(4)}s (${pct}%)`,
 				`${d.data.file}:${d.data.line}`,
-				`Calls: ${d.data.ncalls}`,
-				`Total: ${d.data.tottime.toFixed(4)}s`,
-				`Cumulative: ${d.data.cumtime.toFixed(4)}s`,
 			];
 			setTooltip({ x: event.clientX + 12, y: event.clientY + 12, text: lines.join('\n') });
 		});
+
 		paths.on('mousemove', (event) => {
 			setTooltip((prev) => prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : null);
 		});
-		paths.on('mouseleave', () => setTooltip(null));
 
-	}, [currentRoot, selectedNode, zoomNode, onNodeSelect, radius, size]);
+		paths.on('mouseleave', () => {
+			// Restore original colours
+			paths.attr('fill', (d) => color(d.data.name)).attr('opacity', 0.85);
+			setTooltip(null);
+		});
 
-	// Reset zoom when tree data changes
-	useEffect(() => { setZoomNode(null); }, [treeData]);
+	}, [vizRoot, maxDepth, cutoff, onRootChange, totalTime]);
 
 	// =========================================================================
 	// RENDER
 	// =========================================================================
 
-	if (!treeData?.tree) {
+	if (!vizRoot) {
 		return <div style={commonStyles.empty}>No profiling data available. Start and stop a session to generate a sunburst chart.</div>;
 	}
 

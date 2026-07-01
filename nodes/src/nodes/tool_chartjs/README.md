@@ -1,41 +1,69 @@
----
-title: Chart (Chart.js)
-date: 2026-04-08
-sidebar_position: 1
----
+# tool_chartjs
 
-<head>
-  <title>Chart (Chart.js) - RocketRide Documentation</title>
-</head>
+A RocketRide tool node that generates ready-to-render Chart.js v4 chart configurations from raw data, using the pipeline LLM.
 
 ## What it does
 
-Tool node that exposes a `generate_chart` function to agents. The agent passes raw data and the node uses the pipeline LLM to produce a valid [Chart.js v4](https://www.chartjs.org/) configuration, returned as a ` ```chartjs ` fenced block that the chat UI renders as an interactive chart.
+Exposes a single `generate_chart` tool to an AI agent. The agent passes raw data (an array of objects or key-value pairs) plus an optional chart type, title, or natural-language description; the node prompts the pipeline LLM to produce a valid [Chart.js v4](https://www.chartjs.org/) configuration and returns it as a ` ```chartjs ` fenced block that the chat UI renders as an interactive chart.
 
-**Tool name:** `chartjs.generate_chart`
+The tool is published as `<serverName>.generate_chart`, `chartjs.generate_chart` with the default config. The agent is instructed to place the returned string verbatim in its answer, without wrapping it in additional fences.
+
+Key safeguards, all enforced in the node:
+
+- **Input truncation**: list data is capped at 200 items and the serialized payload at 20 KB before being sent to the LLM, keeping the prompt manageable.
+- **JSON validation**: the LLM response is parsed; invalid JSON raises an error instead of emitting a broken chart. Any stray markdown fences the LLM adds are stripped before parsing.
+- **Pure static JSON**: the LLM is instructed to emit no JavaScript function callbacks (e.g. `tooltip.callbacks.label`). Values that would normally require callbacks are embedded directly in label strings (e.g. `"Telegraph Voyage — $215.75"`).
+
+---
+
+## Configuration
+
+
+| Field | Type | Description |
+|---|---|---|
+| `serverName` | string | Default "chartjs". Namespace prefix for the tool: <serverName>.generate_chart |
+
+
+The node has no lanes.
+
+---
 
 ## Connections
 
-| Channel | Required | Description                                     |
-| ------- | -------- | ----------------------------------------------- |
-| `llm`   | yes      | LLM used to generate the Chart.js configuration |
+| Channel | Required        | Description                                          |
+|---------|-----------------|------------------------------------------------------|
+| `llm`   | yes (min 1)     | LLM used to generate the Chart.js configuration      |
 
-## Tool input
+Connect the node to an agent via the `tool` invoke channel. If no LLM node is connected, `generate_chart` raises an error at call time.
 
-| Field         | Required | Description                                                                                              |
-| ------------- | -------- | -------------------------------------------------------------------------------------------------------- |
-| `data`        | yes      | Raw data to chart — array of objects or key-value pairs                                                  |
-| `chart_type`  | no       | `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, `bubble` — omit to let the LLM choose |
-| `title`       | no       | Chart title                                                                                              |
-| `description` | no       | Natural language description of the desired chart                                                        |
+---
 
-Data is truncated to 200 items / 20KB before being sent to the LLM.
+## Available tools
 
-## Output
+### generate_chart
 
-A ` ```chartjs ` fenced block containing the Chart.js JSON configuration. The agent should place this verbatim in the answer — the UI renders it as a chart.
+Generates a Chart.js v4 configuration from data via the pipeline LLM.
 
-## Notes
 
-- Output is pure static JSON — no JavaScript callbacks. Values that would normally require callbacks (e.g. formatted tooltip labels) are embedded directly in label strings.
-- Connect this node to an agent via the `tool` invoke channel.
+| Tool | Description |
+|---|---|---|
+| `generate_chart` | ALWAYS use this tool when the user requests a chart, graph, or visualization. Do NOT generate Chart.js configs manually, call this tool instead. It generates a ready-to-render chart from data. Required: "data" (the raw data to chart). Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), "title" (chart title), "description" (natural language description of desired chart). Returns a ready-to-render string. Place it verbatim in the answer, do NOT wrap it in additional fences. |
+
+
+**Output:** a ` ```chartjs ` fenced block containing the Chart.js JSON configuration (`type`, `data` with `labels` and `datasets`, and `options` with `responsive` and `maintainAspectRatio` set to true). The agent should place this string verbatim in the answer, the UI renders it as a chart.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `tool_chartjs.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.generate_chart | `"chartjs"` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_chartjs)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

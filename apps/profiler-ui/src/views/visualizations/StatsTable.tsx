@@ -21,13 +21,20 @@
 // SOFTWARE.
 
 // =============================================================================
-// STATS TABLE — Sortable flat function table
+// STATS TABLE — SnakeViz-style sortable flat function table
+// =============================================================================
+//
+// Column order matches snakeviz / pstats output:
+//   ncalls | tottime | percall | cumtime | percall | filename:lineno(function)
+//
+// Row click = re-root the visualisation (not just cross-highlight).
+// Table always shows ALL functions regardless of current viz root.
 // =============================================================================
 
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
-import type { ProfileTreeNode, ProfileTreeResponse, OnNodeSelect } from './types';
+import type { ProfileTreeNode, ProfileTreeResponse, OnRootChange } from './types';
 
 // =============================================================================
 // TYPES
@@ -35,19 +42,30 @@ import type { ProfileTreeNode, ProfileTreeResponse, OnNodeSelect } from './types
 
 /** Aggregated stats for one unique function across all call sites. */
 interface FlatRow {
+	/** Function name. */
 	name: string;
+	/** Source filename. */
 	file: string;
+	/** Source line number. */
 	line: number;
+	/** Total call count. */
 	ncalls: number;
+	/** Self time (excludes sub-calls). */
 	tottime: number;
-	cumtime: number;
+	/** tottime / ncalls. */
 	percall: number;
+	/** Cumulative time (includes sub-calls). */
+	cumtime: number;
+	/** cumtime / ncalls. */
 	cumpercall: number;
+	/** Combined pstats-style location string. */
+	location: string;
+	/** Reference to the original tree node (for re-rooting). */
 	refNode: ProfileTreeNode;
 }
 
 /** Sortable column identifiers. */
-type SortColumn = 'name' | 'file' | 'ncalls' | 'tottime' | 'cumtime' | 'percall' | 'cumpercall';
+type SortColumn = 'ncalls' | 'tottime' | 'percall' | 'cumtime' | 'cumpercall' | 'location';
 
 /** Sort direction. */
 type SortDir = 'asc' | 'desc';
@@ -59,15 +77,14 @@ type SortDir = 'asc' | 'desc';
 /** Number of rows to render per chunk for windowed rendering. */
 const CHUNK_SIZE = 200;
 
-/** Column definitions. */
+/** Column definitions — matches snakeviz / pstats output order. */
 const COLUMNS: { key: SortColumn; label: string; align: 'left' | 'right' }[] = [
-	{ key: 'name', label: 'Function', align: 'left' },
-	{ key: 'file', label: 'File:Line', align: 'left' },
-	{ key: 'ncalls', label: 'Calls', align: 'right' },
-	{ key: 'tottime', label: 'Total Time', align: 'right' },
-	{ key: 'cumtime', label: 'Cum Time', align: 'right' },
-	{ key: 'percall', label: 'Time/Call', align: 'right' },
-	{ key: 'cumpercall', label: 'Cum/Call', align: 'right' },
+	{ key: 'ncalls', label: 'ncalls', align: 'right' },
+	{ key: 'tottime', label: 'tottime', align: 'right' },
+	{ key: 'percall', label: 'percall', align: 'right' },
+	{ key: 'cumtime', label: 'cumtime', align: 'right' },
+	{ key: 'cumpercall', label: 'percall', align: 'right' },
+	{ key: 'location', label: 'filename:lineno(function)', align: 'left' },
 ];
 
 // =============================================================================
@@ -118,7 +135,7 @@ const styles = {
 		fontFamily: 'var(--rr-font-mono, monospace)',
 	} as CSSProperties,
 
-	/** Header cell — extends commonStyles.tableHeader with sort cursor. */
+	/** Header cell. */
 	th: {
 		...commonStyles.tableHeader,
 		position: 'sticky',
@@ -145,19 +162,19 @@ const styles = {
 		background: 'var(--rr-bg-list-hover)',
 	} as CSSProperties,
 
-	/** Selected row. */
+	/** Selected row (current viz root). */
 	trSelected: {
 		background: 'var(--rr-bg-list-active)',
 		color: 'var(--rr-fg-list-active)',
 	} as CSSProperties,
 
-	/** Table body cell — extends commonStyles.tableCell. */
+	/** Table body cell. */
 	td: {
 		...commonStyles.tableCell,
 		whiteSpace: 'nowrap',
 		overflow: 'hidden',
 		textOverflow: 'ellipsis',
-		maxWidth: 300,
+		maxWidth: 400,
 		fontSize: 12,
 	} as CSSProperties,
 };
@@ -168,6 +185,7 @@ const styles = {
 
 /**
  * Flatten a call tree into a deduplicated list of unique functions.
+ * Matches snakeviz's behaviour: aggregate all occurrences of the same function.
  *
  * @param tree - Root of the call tree.
  * @returns Array of aggregated flat rows.
@@ -175,12 +193,13 @@ const styles = {
 function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 	const map = new Map<string, FlatRow>();
 
-	/** Recursively walk the tree, aggregating stats. */
+	/** Recursively walk the tree, aggregating stats by function identity. */
 	function walk(node: ProfileTreeNode): void {
 		if (node.name !== '<root>') {
 			const key = `${node.file}:${node.line}:${node.name}`;
 			const existing = map.get(key);
 			if (existing) {
+				// Aggregate calls and times across all call sites
 				existing.ncalls += node.ncalls;
 				existing.tottime += node.tottime;
 				existing.cumtime += node.cumtime;
@@ -194,6 +213,7 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 					cumtime: node.cumtime,
 					percall: 0,
 					cumpercall: 0,
+					location: `${node.file}:${node.line}(${node.name})`,
 					refNode: node,
 				});
 			}
@@ -203,7 +223,7 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 
 	walk(tree);
 
-	// Compute per-call values
+	// Compute per-call values after aggregation
 	const rows = Array.from(map.values());
 	for (const row of rows) {
 		row.percall = row.ncalls > 0 ? row.tottime / row.ncalls : 0;
@@ -217,20 +237,38 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 // =============================================================================
 
 /**
- * Sortable flat statistics table.
+ * SnakeViz-style sortable flat statistics table.
  *
- * Flattens the call tree, provides column sorting, search filtering,
- * and click-to-select for cross-highlighting.
+ * Column order matches pstats output: ncalls, tottime, percall, cumtime, percall,
+ * filename:lineno(function).
  *
- * @param props.treeData     - Tree data from the server.
- * @param props.selectedNode - Currently highlighted node (cross-vis).
- * @param props.onNodeSelect - Callback for node selection.
+ * Row click re-roots the visualisation to that function (not just cross-highlight).
+ * Table always shows all functions regardless of current viz root.
  */
+/**
+ * Path prefixes that identify project code.
+ * Used to filter rows when showSystemCalls is false.
+ */
+const PROJECT_PREFIXES = [
+	'./nodes/', './ai/', './lib/', './libs/', './rocketlib/', 'engLib:',
+];
+
+/** Check whether a file path belongs to project code. */
+function isProjectCode(file: string): boolean {
+	if (!file) return false;
+	return PROJECT_PREFIXES.some((p) => file.startsWith(p));
+}
+
 const StatsTable: React.FC<{
+	/** Full tree data from the server (always shows all functions). */
 	treeData: ProfileTreeResponse | null;
-	selectedNode: ProfileTreeNode | null;
-	onNodeSelect: OnNodeSelect;
-}> = ({ treeData, selectedNode, onNodeSelect }) => {
+	/** Current visualisation root node (for highlighting active row). */
+	vizRoot: ProfileTreeNode | null;
+	/** Callback to re-root the visualisation to a clicked function. */
+	onRootChange: OnRootChange;
+	/** Whether to show system/stdlib calls in the table. */
+	showSystemCalls: boolean;
+}> = ({ treeData, vizRoot, onRootChange, showSystemCalls }) => {
 	const [sortCol, setSortCol] = useState<SortColumn>('tottime');
 	const [sortDir, setSortDir] = useState<SortDir>('desc');
 	const [search, setSearch] = useState('');
@@ -242,17 +280,23 @@ const StatsTable: React.FC<{
 	// DATA PROCESSING
 	// =========================================================================
 
+	/** Flatten tree into deduplicated function list, optionally filtering system calls. */
 	const allRows = useMemo(() => {
 		if (!treeData?.tree) return [];
-		return flattenTree(treeData.tree);
-	}, [treeData]);
+		const rows = flattenTree(treeData.tree);
+		if (showSystemCalls) return rows;
+		// Filter to only project code when system calls is unchecked
+		return rows.filter((r) => isProjectCode(r.file));
+	}, [treeData, showSystemCalls]);
 
+	/** Apply search filter (matches snakeviz: filters by the location string). */
 	const filteredRows = useMemo(() => {
 		if (!search.trim()) return allRows;
 		const q = search.toLowerCase().trim();
-		return allRows.filter((r) => r.name.toLowerCase().includes(q) || r.file.toLowerCase().includes(q));
+		return allRows.filter((r) => r.location.toLowerCase().includes(q));
 	}, [allRows, search]);
 
+	/** Sort by selected column. */
 	const sortedRows = useMemo(() => {
 		const sorted = [...filteredRows];
 		const dir = sortDir === 'asc' ? 1 : -1;
@@ -265,6 +309,7 @@ const StatsTable: React.FC<{
 		return sorted;
 	}, [filteredRows, sortCol, sortDir]);
 
+	// Reset visible count when data changes
 	useEffect(() => { setVisibleCount(CHUNK_SIZE); }, [sortedRows]);
 
 	// =========================================================================
@@ -284,22 +329,25 @@ const StatsTable: React.FC<{
 	// HANDLERS
 	// =========================================================================
 
+	/** Toggle sort column/direction. */
 	const handleSort = useCallback((col: SortColumn) => {
 		setSortCol((prev) => {
 			if (prev === col) {
 				setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 				return col;
 			}
-			setSortDir(col === 'name' || col === 'file' ? 'asc' : 'desc');
+			// Default to desc for numeric columns, asc for text
+			setSortDir(col === 'location' ? 'asc' : 'desc');
 			return col;
 		});
 	}, []);
 
+	/** Row click — re-root the visualisation (snakeviz behaviour). */
 	const handleRowClick = useCallback((row: FlatRow) => {
-		onNodeSelect(row.refNode);
-	}, [onNodeSelect]);
+		onRootChange(row.refNode);
+	}, [onRootChange]);
 
-	/** Handle keyboard activation (Enter/Space) on a sortable column header. */
+	/** Handle keyboard activation on a sortable column header. */
 	const handleThKeyDown = useCallback((e: React.KeyboardEvent, col: SortColumn) => {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
@@ -307,7 +355,7 @@ const StatsTable: React.FC<{
 		}
 	}, [handleSort]);
 
-	/** Handle keyboard activation (Enter/Space) on a selectable row. */
+	/** Handle keyboard activation on a selectable row. */
 	const handleRowKeyDown = useCallback((e: React.KeyboardEvent, row: FlatRow) => {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
@@ -385,10 +433,11 @@ const StatsTable: React.FC<{
 					</thead>
 					<tbody>
 						{visibleRows.map((row, i) => {
-							const isSelected = selectedNode
-								&& row.name === selectedNode.name
-								&& row.file === selectedNode.file
-								&& row.line === selectedNode.line;
+							// Highlight the row that matches the current viz root
+							const isSelected = vizRoot
+								&& row.name === vizRoot.name
+								&& row.file === vizRoot.file
+								&& row.line === vizRoot.line;
 
 							return (
 								<tr
@@ -405,13 +454,12 @@ const StatsTable: React.FC<{
 									onMouseEnter={() => setHoveredIdx(i)}
 									onMouseLeave={() => setHoveredIdx(-1)}
 								>
-									<td style={{ ...styles.td, textAlign: 'left' }}>{row.name}</td>
-									<td style={{ ...styles.td, textAlign: 'left' }}>{row.file}:{row.line}</td>
 									<td style={{ ...styles.td, textAlign: 'right' }}>{row.ncalls.toLocaleString()}</td>
 									<td style={{ ...styles.td, textAlign: 'right' }}>{fmtTime(row.tottime)}</td>
-									<td style={{ ...styles.td, textAlign: 'right' }}>{fmtTime(row.cumtime)}</td>
 									<td style={{ ...styles.td, textAlign: 'right' }}>{fmtTime(row.percall)}</td>
+									<td style={{ ...styles.td, textAlign: 'right' }}>{fmtTime(row.cumtime)}</td>
 									<td style={{ ...styles.td, textAlign: 'right' }}>{fmtTime(row.cumpercall)}</td>
+									<td style={{ ...styles.td, textAlign: 'left' }}>{row.location}</td>
 								</tr>
 							);
 						})}

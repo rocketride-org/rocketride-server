@@ -12,7 +12,7 @@ sidebar_position: 1
 
 Agent node built on the [`deepagents`](https://github.com/langchain-ai/deepagents) library (LangChain/LangGraph). Adds strategic planning, persistent state, and long-context management on top of a standard LangChain agent loop.
 
-Runs standalone with its own tools, or as an orchestrator that delegates to connected `Deep Agent Subagent` nodes on the `deepagent` invoke channel. Subagents are optional — behaviour matches the old single-agent node when none are wired.
+Runs standalone with its own tools, or as an orchestrator that delegates to connected `Deep Agent Subagent` nodes on the `deepagent` invoke channel. Subagents are optional, behaviour matches the old single-agent node when none are wired.
 
 **Lanes:** `questions` → `answers`
 
@@ -38,16 +38,16 @@ By default only **Instructions** is shown. Toggle **Advanced Mode** to expose th
 
 | Field             | Description                                                          |
 | ----------------- | -------------------------------------------------------------------- |
-| Agent Description | What this agent does — used by parent agents to select and invoke it |
+| Agent Description | What this agent does, used by parent agents to select and invoke it  |
 | System Prompt     | The agent's full system prompt (overrides the built-in default)      |
 
 ## Tool calling
 
-This node uses a **JSON envelope protocol** for tool calling — the host LLM is instructed to output either `{"type":"tool_call","name":"...","args":{...}}` or `{"type":"final","content":"..."}`. Works with any LLM that can follow JSON instructions, not just ones with native function-calling support. Up to 3 retries are attempted when the LLM produces malformed JSON, and a tolerant parser rescues responses with trailing content or a stray second object.
+This node uses a **JSON envelope protocol** for tool calling: the host LLM is instructed to output either `{"type":"tool_call","name":"...","args":{...}}` or `{"type":"final","content":"..."}`. Works with any LLM that can follow JSON instructions, not just ones with native function-calling support. Up to 3 retries are attempted when the LLM produces malformed JSON, and a tolerant parser rescues responses with trailing content or a stray second object.
 
 ## Subagents
 
-Connect one or more `Deep Agent Subagent` nodes to the `deepagent` invoke channel to turn this node into an orchestrator. Each subagent is a specialist — give it its own LLM, tools, and a clear description so the orchestrator knows when to delegate to it.
+Connect one or more `Deep Agent Subagent` nodes to the `deepagent` invoke channel to turn this node into an orchestrator. Each subagent is a specialist: give it its own LLM, tools, and a clear description so the orchestrator knows when to delegate to it.
 
 When subagents are wired up:
 
@@ -56,11 +56,11 @@ When subagents are wired up:
 3. The orchestrator passes all subagents to `create_deep_agent(subagents=...)` and gains a `task(description, subagent_type)` tool it can call to delegate work.
 4. Each subagent runs in its own `AgentContext` so SSE events route back to the correct run.
 
-Subagents are optional — when none are wired the node behaves as a standard single-agent.
+Subagents are optional, when none are wired the node behaves as a standard single-agent.
 
 ## Hierarchical delegation
 
-On each run the orchestrator fans out a `describe` invoke, collects each subagent's descriptor, builds a `deepagents.SubAgent` record per subagent wired to its own LLM + tool channels, and passes them to `create_deep_agent(subagents=...)`. The orchestrator's LLM then calls the `task(description, subagent_type)` tool to delegate — each subagent runs inside its own `AgentContext` so SSE events route back to the same logical run.
+On each run the orchestrator fans out a `describe` invoke, collects each subagent's descriptor, builds a `deepagents.SubAgent` record per subagent wired to its own LLM + tool channels, and passes them to `create_deep_agent(subagents=...)`. The orchestrator's LLM then calls the `task(description, subagent_type)` tool to delegate, each subagent runs inside its own `AgentContext` so SSE events route back to the same logical run.
 
 ## Using as a tool
 

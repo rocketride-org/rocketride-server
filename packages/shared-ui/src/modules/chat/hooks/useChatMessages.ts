@@ -64,11 +64,11 @@ export interface UseChatMessagesReturn {
  * setMessages directly. Direct setMessages calls bypass the messagesRef
  * sync and will cause sendMessage to build history from a stale snapshot.
  */
-export function useChatMessages({ welcomeMessage }: UseChatMessagesOptions = {}): UseChatMessagesReturn {
-	const [messages, setMessages] = useState<ChatMessage[]>([]);
+export function useChatMessages({ welcomeMessage, initialMessages }: UseChatMessagesOptions = {}): UseChatMessagesReturn {
+	const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? []);
 	const [isTyping, setIsTyping] = useState(false);
 
-	const messagesRef = useRef<ChatMessage[]>([]);
+	const messagesRef = useRef<ChatMessage[]>(initialMessages ?? []);
 
 	const updateMessages = useCallback((updater: (prev: ChatMessage[]) => ChatMessage[]) => {
 		setMessages((prev) => {

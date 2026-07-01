@@ -40,6 +40,7 @@ export { default as MonitorView } from './modules/server';
 export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
+export { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
@@ -47,7 +48,7 @@ export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTa
 
 // --- Explorer module (generic file tree panel) -------------------------------
 export { Explorer } from './modules/explorer';
-export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerFileAction, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
 
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
@@ -72,11 +73,14 @@ export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sid
 export { default as AccountView } from './modules/account/AccountView';
 export type { IAccountViewProps } from './modules/account/AccountView';
 
+// --- Environment module (pipeline secrets / env vars) -------------------------
+export { EnvironmentView } from './modules/environment';
+export type { EnvironmentViewProps, EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
+
 // --- Billing module (subscription management) --------------------------------
 // Types: import directly from 'rocketride' (BillingDetail, CreditBalance, etc.)
-export { BillingView } from './modules/billing';
-export type { IBillingViewProps } from './modules/billing';
-export { CreditsPanel } from './modules/billing';
+export { CreditsPanel, UpgradeModal } from './modules/billing';
+export type { UpgradeModalProps } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------
 export { CheckoutModal, PlanPicker } from './modules/checkout';

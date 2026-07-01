@@ -4,4 +4,4 @@
 // =============================================================================
 
 export { Explorer } from './Explorer';
-export type { IVirtualFileSystem, IExplorerProps, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus, DirNode } from './types';
+export type { IVirtualFileSystem, IExplorerProps, ExplorerFileAction, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus, DirNode } from './types';

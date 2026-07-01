@@ -23,8 +23,6 @@
 """
 Deploy type definitions for the RocketRide Python SDK.
 
-Mirrors the server's ``DeploymentRecord`` model returned by ``rrext_deploy_*`` commands.
-
 Types:
     DeploymentRecord:   Deployment record as returned by add / list / status.
 """
@@ -36,15 +34,16 @@ from .pipeline import PipelineConfig
 
 class DeploymentRecord(TypedDict, total=False):
     """
-    Deployment record returned by ``rrext_deploy_add``, ``rrext_deploy_list``,
-    and ``rrext_deploy_status``.
-
-    Mirrors ``DeploymentRecord.model_dump()`` on the server.
+    Deployment record returned by ``deploy.add``, ``deploy.list``, and
+    ``deploy.status``.
     """
 
     pipeline: PipelineConfig
+    # Cron expression (e.g. '*/15 * * * *') or 'manual' for on-demand only.
     schedule: str
     state: Literal['active', 'paused', 'errored']
-    created_by: str
-    created_at: float
-    updated_at: float
+    # ID of the user who created the deployment.
+    userId: str
+    # Unix timestamps (seconds).
+    createdAt: float
+    updatedAt: float

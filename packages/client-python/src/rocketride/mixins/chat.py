@@ -164,8 +164,10 @@ class ChatMixin(DAPClient):
             objinfo = {'name': f'Question {self._next_chat_id}'}
             self._next_chat_id += 1
 
-            # Set up a data pipe to send the question to the AI system
-            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', provider='chat', on_sse=on_sse)
+            # Set up a data pipe to send the question to the AI system.
+            # No provider filter — chat() works with chat, webhook, and dropper sources.
+            # The rocketride-question MIME type routes to the 'questions' lane.
+            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', on_sse=on_sse)
 
             try:
                 # Open the communication channel to the AI

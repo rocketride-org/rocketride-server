@@ -115,9 +115,11 @@ describe('Deploy API Integration Tests', () => {
 				expect(rec.pipeline).toEqual(PIPELINE);
 				expect(rec.schedule).toBe('manual');
 				expect(rec.state).toBe('active');
-				expect(rec.created_by).toBeTruthy();
-				expect(rec.created_at).toBeGreaterThan(0);
-				expect(rec.updated_at).toBeGreaterThan(0);
+				expect(rec.userId).toBeTruthy();
+				// The stored user credential must never be echoed back to clients.
+				expect(rec).not.toHaveProperty('userToken');
+				expect(rec.createdAt).toBeGreaterThan(0);
+				expect(rec.updatedAt).toBeGreaterThan(0);
 			} finally {
 				await client.deploy.remove(rec.pipeline!.project_id!);
 			}
@@ -244,13 +246,13 @@ describe('Deploy API Integration Tests', () => {
 
 
 	it(
-		'update bumps updated_at',
+		'update bumps updatedAt',
 		async () => {
 			const rec = await client.deploy.add(PIPELINE);
 			try {
 				await client.deploy.update(rec.pipeline!.project_id!, { schedule: '@hourly' });
 				const s = await client.deploy.status(rec.pipeline!.project_id!);
-				expect(s.updated_at!).toBeGreaterThanOrEqual(rec.updated_at!);
+				expect(s.updatedAt!).toBeGreaterThanOrEqual(rec.updatedAt!);
 			} finally {
 				await client.deploy.remove(rec.pipeline!.project_id!);
 			}

@@ -130,9 +130,12 @@ export class CloudAuthProvider implements IAuthProvider {
 			register,
 		);
 
-		// Replace current history entry so the browser back button skips
-		// the expired Zitadel authRequestID page
-		window.location.replace(url);
+		// assign() (not replace()) so the landing page stays in history — the
+		// browser back button from Zitadel returns the user to where they came
+		// from. Zitadel's own login page (cross-origin) still lingers one step
+		// back from the app after login; we can't delete that entry from JS,
+		// but bootstrap() recovers gracefully if a stale ?code is revisited.
+		window.location.assign(url);
 	}
 
 	// =========================================================================

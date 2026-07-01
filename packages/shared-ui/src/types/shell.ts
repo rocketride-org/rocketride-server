@@ -34,6 +34,7 @@
 
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import type { ConnectionStatus } from './connection';
+import type { CheckoutPlan } from '../modules/checkout/types';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -165,8 +166,10 @@ export interface ShellConnectionEventMap {
 	 * Sign-in request initiated by the UI (e.g. "Get Started" button).
 	 *
 	 * Optional `appId` specifies which app to navigate to after auth completes.
+	 * Optional `register` requests Zitadel's sign-up form instead of sign-in
+	 * (used by "Get Started" CTAs vs. "Sign In" controls).
 	 */
-	'shell:loginRequest': { appId?: string };
+	'shell:loginRequest': { appId?: string; register?: boolean };
 
 	/** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
 	'shell:logoutRequest': Record<string, never>;
@@ -179,12 +182,21 @@ export interface ShellConnectionEventMap {
 	/**
 	 * User clicked "Subscribe" on a paid app in the marketplace.
 	 *
-	 * Opens the CheckoutModal. The `app` field is the manifest entry.
+	 * Opens the CheckoutModal. The `app` field is the manifest entry. The
+	 * optional `plan` preselects a tier and skips the picker — going straight
+	 * to payment (used by the web pricing page); omit it to show the picker.
 	 */
-	'shell:subscribe': { app: ShellAppEntry };
+	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan };
 
 	/** Navigate back to the My Apps launcher screen. */
 	'shell:myApps': Record<string, never>;
+
+	/**
+	 * Request the shell open a built-in overlay (e.g. from a guest app's
+	 * profile/account menu, which can't render the shell's overlays directly).
+	 * The `id` selects which overlay to show.
+	 */
+	'shell:openOverlay': { id: 'account' | 'settings' | 'environment' };
 
 	/** Sidebar is starting to collapse — dependent UI can prepare. */
 	'shell:sidebarCollapsing': Record<string, never>;

@@ -129,6 +129,11 @@ export default function InsideLines({ parentEl, inputConnected, inputLanes = [],
 				const inputPos = getLanePosition(inputHandleId, true);
 				const outputPos = getLanePosition(outputHandleId, false);
 				if (!inputPos || !outputPos) continue;
+				// Skip until the lane handles have finite coordinates. Before the node/handles
+				// are measured (or the flow transform isn't ready) getLanePosition can return
+				// NaN — and feeding NaN to d3.curveBasis emits an invalid `<path d="MNaN,NaN…">`
+				// (a console error every frame). The lines re-render once the handles measure.
+				if (![inputPos.x, inputPos.y, outputPos.x, outputPos.y].every(Number.isFinite)) continue;
 
 				const controlOffset = 15;
 				linesList.push({

@@ -240,9 +240,7 @@ public:
     virtual Error scanObjects(Path &path,
                               const ScanAddObject &callback) noexcept override;
     virtual Error processEntry(const S3Object &s3Object, Entry &object,
-                               const ScanAddObject &addObject,
-                               const SharedPtr<Aws::S3::S3Client> &client,
-                               const Text &bucket) noexcept;
+                               const ScanAddObject &addObject) noexcept;
     virtual Error processBuckets(const SharedPtr<Aws::S3::S3Client> &client,
                                  const ScanAddObject &callback) noexcept;
 
@@ -266,9 +264,17 @@ public:
     Text m_type;
 
 protected:
-    Text getContentType(const Text &key,
-                        const SharedPtr<Aws::S3::S3Client> &client,
-                        const Text &bucket) noexcept;
+    ErrorOr<SharedPtr<Aws::S3::S3Client>> getScanClient() noexcept;
+    void resetScanClient() noexcept;
+
+private:
+    //-----------------------------------------------------------------
+    ///  @details
+    ///    Cached client shared by the scanner threads, reset on error
+    ///    so the next scan re-connects
+    //-----------------------------------------------------------------
+    SharedPtr<Aws::S3::S3Client> m_scanClient;
+    mutable async::MutexLock m_scanClientLock;
 };
 
 //-------------------------------------------------------------------------

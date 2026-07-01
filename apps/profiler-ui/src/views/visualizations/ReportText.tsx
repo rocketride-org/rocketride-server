@@ -98,10 +98,12 @@ function copyViaExecCommand(text: string, setCopied: (v: boolean) => void): void
 		textarea.style.left = '-9999px';
 		document.body.appendChild(textarea);
 		textarea.select();
-		document.execCommand('copy');
+		const ok = document.execCommand('copy');
 		document.body.removeChild(textarea);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		if (ok) {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		}
 	} catch (err) {
 		console.log('[ReportText] Fallback clipboard copy failed:', err);
 	}

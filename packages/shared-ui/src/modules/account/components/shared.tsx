@@ -50,7 +50,7 @@ export function initials(name: string, email: string): string {
  * @returns A CSS hex color string.
  */
 export function avatarColor(seed: string): string {
-	const colors = ['#f7901f', '#3794ff', '#a78bfa', '#34d399', '#f59e0b', '#ec4899', '#14b8a6'];
+	const colors = ['#4a6fa5', '#6b7b8d', '#5b7a6e', '#7c6d82', '#5c798f', '#6e7f6b', '#8a7968'];
 	// Polynomial rolling hash — keeps the result in unsigned 32-bit range via >>> 0.
 	let h = 0;
 	for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;

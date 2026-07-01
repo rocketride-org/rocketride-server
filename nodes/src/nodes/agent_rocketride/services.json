@@ -45,7 +45,7 @@
 			"title": "Agent description",
 			"default": "",
 			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

@@ -145,7 +145,6 @@ export { useSubscriptions } from './hooks/useSubscriptions';
 // =============================================================================
 
 export { default as AccountPage } from './views/account/AccountPage';
-export { default as BillingPage } from './views/billing/BillingPage';
 export { default as SettingsPage } from './views/settings/SettingsPage';
 
 // Hook for plugin views to subscribe to shell lifecycle events (iframe protocol)

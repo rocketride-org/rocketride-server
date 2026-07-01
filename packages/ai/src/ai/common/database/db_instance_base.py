@@ -74,8 +74,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _db_dialect(self) -> str:
         """Return the machine-readable dialect identifier (e.g. 'mysql', 'postgres').
 
-        Surfaced to SDK callers via ``QuestionType.DIALECT`` so applications can
-        branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
+        Surfaced to SDK callers via the ``dialect`` tool function so applications
+        can branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
         """
 
     # ------------------------------------------------------------------
@@ -246,6 +246,62 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['sql'],
+            'properties': {
+                'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'rows': {'type': 'array', 'items': {'type': 'object'}},
+                'affected_rows': {'type': 'integer'},
+            },
+        },
+        description=lambda self: (
+            f'Execute a raw SQL statement against this {self._db_display_name()} database. '
+            f'Bypasses LLM translation and SQL safety checks.'
+        ),
+    )
+    def execute(self, args):
+        """Execute a raw SQL statement against this database."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        sql = args.get('sql')
+        if not sql or not isinstance(sql, str) or not sql.strip():
+            raise ValueError('"sql" is required and must be a non-empty string')
+
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+
+        result = self._executeRawQuery(sql.strip())
+        if result is None:
+            raise RuntimeError('SQL execution failed (check server logs for details)')
+
+        # Sanitize rows for JSON serialization
+        rows = [self._sanitize_row(row) for row in result['rows']]
+        return {'rows': rows, 'affected_rows': result['affected_rows']}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {},
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'dialect': {'type': 'string', 'description': 'Database engine identifier.'},
+            },
+        },
+        description='Return the database engine dialect (e.g. postgres, mysql, neo4j).',
+    )
+    def dialect(self, args):
+        """Return the database engine dialect."""
+        return {'dialect': self._db_dialect()}
 
     # ------------------------------------------------------------------
     # Sanitization helpers
@@ -504,46 +560,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
-
-        # DIALECT: dialect-discovery request — emit {'dialect': '...'} on the
-        # answers lane so the SDK can branch on the engine. No gate needed:
-        # the value is metadata, not data, and the node already exposed itself
-        # by being connected.
-        if question.type == QuestionType.DIALECT:
-            if 'answers' in lanes:
-                answer = Answer()
-                answer.setAnswer(json.dumps({'dialect': self._db_dialect()}))
-                self.instance.writeAnswers(answer)
-            return
-
-        # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
-        if question.type == QuestionType.EXECUTE:
-            if not self.IGlobal.allow_execute:
-                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
-                return
-            try:
-                execute_result = self._executeRawQuery(question_text)
-                if execute_result is None:
-                    return
-
-                rows = [self._sanitize_row(row) for row in execute_result['rows']]
-                affected = execute_result['affected_rows']
-                payload = {'rows': rows, 'affected_rows': affected}
-                markdown = self._formatResultAsMarkdown(rows) if rows else None
-
-                if 'text' in lanes:
-                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
-
-                if 'table' in lanes and rows:
-                    self.instance.writeTable(markdown)
-
-                if 'answers' in lanes:
-                    answer = Answer()
-                    answer.setAnswer(json.dumps(payload, default=str))
-                    self.instance.writeAnswers(answer)
-            except Exception as e:
-                error(f'Error handling execute question: {e}')
-            return
 
         try:
             # Ask the LLM to translate the natural-language question into SQL.

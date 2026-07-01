@@ -245,12 +245,12 @@ class S3Store(IStore):
                 head_response = await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
                 current_etag = head_response.get('ETag', '').strip('"')
 
-                # expected_version is REQUIRED for delete operations
-                if expected_version is None:
-                    raise StorageError(f'Expected version is required when deleting file: {filename}')
-
-                # Verify version matches
-                if current_etag != expected_version:
+                # Optimistic-concurrency check only when a version is supplied.
+                # With no version we fall through to an unconditional delete,
+                # matching the filesystem/memory backends so deleting your own
+                # file always works (cloud backends previously rejected this,
+                # breaking deletes in prod while local worked).
+                if expected_version is not None and current_etag != expected_version:
                     raise VersionMismatchError(
                         filename=filename,
                         expected_version=expected_version,

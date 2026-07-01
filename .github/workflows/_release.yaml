@@ -263,8 +263,6 @@ jobs:
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       # --- VS Code Marketplace + Open VSX ---
       - name: Set up Node.js for vsce
@@ -307,34 +305,30 @@ jobs:
 
       # --- Tag and GitHub Release ---
       #
-      # IMPORTANT: tag push uses WORKFLOW_PAT (a Personal Access Token with
-      # `repo` + `workflow` scopes) instead of the default GITHUB_TOKEN.
-      #
-      # GitHub rejects any tag push from GITHUB_TOKEN whose target commit
-      # modifies files under `.github/workflows/`, with the error:
-      #
-      #   refusing to allow a GitHub App to create or update workflow
-      #   `.github/workflows/<file>` without `workflows` permission
-      #
-      # `workflows` is a token-level scope, not a YAML permission, so the
-      # only fix is to swap to a credential that has it. WORKFLOW_PAT is
-      # that credential. Without this, every nightly that lands on a
-      # workflow-touching commit silently bricks the prerelease pipeline:
-      # the cleanup job runs first and deletes existing -prerelease tags,
-      # then all 5 prerelease creation jobs fail to push the new ones,
-      # leaving the repo with zero prereleases until the next clean
-      # commit.
+      # Mint a short-lived GitHub App installation token for the tag push. The
+      # tag points at a commit whose tree contains workflow files, so the
+      # pushing identity needs Workflows:write — GITHUB_TOKEN can't, and an App
+      # token avoids a long-lived PAT that silently expires. The App
+      # (RELEASE_BOT_APP_ID) is installed on this repo with Contents:write +
+      # Workflows:write; the token lives only for this job.
+      - name: Generate release-bot token
+        id: bot_token
+        if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Create tag
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          BOT_TOKEN: ${{ steps.bot_token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Swap the remote URL to authenticate with WORKFLOW_PAT for the
-          # push. This affects only this step's git config and goes away
-          # when the runner tears down.
-          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          # Authenticate the push with the App installation token (this step's
+          # git config only; gone when the runner tears down).
+          git remote set-url origin "https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "${{ inputs.prerelease }}" = "true" ]; then
             git tag -f "${{ matrix.tag_name }}"
             git push -f origin "${{ matrix.tag_name }}"
@@ -400,7 +394,7 @@ jobs:
           {
             echo "body<<${DELIM}"
             if [ "${{ inputs.prerelease }}" = "true" ]; then
-              echo "_Automated nightly prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo "_Automated prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
               echo ""
             fi
             if [ -n "$NOTES" ]; then

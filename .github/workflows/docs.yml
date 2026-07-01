@@ -1,0 +1,59 @@
+name: Docs
+
+# Build and deploy the co-located documentation site to docs.rocketride.org.
+# The site is produced by `builder docs:build` (gather -> index -> compile) and
+# emitted to dist/docs.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'packages/docs/**'
+      - 'nodes/src/nodes/**/README.md'
+      - 'packages/*/docs/**'
+      - 'apps/*/docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch: {}
+
+# Only contents:read is needed to build; the Pages-specific permissions are
+# granted narrowly on the deploy job below.
+permissions:
+  contents: read
+
+concurrency:
+  group: docs
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build docs
+        run: node scripts/build.js docs:build
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: dist/docs
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # publish the built site to GitHub Pages
+      id-token: write # OIDC token to verify the deployment origin
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

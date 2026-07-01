@@ -3,7 +3,7 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-import React, { useState, CSSProperties } from 'react';
+import React, { useState, useEffect, CSSProperties } from 'react';
 import type { DashboardConnection } from '../types';
 import { formatTime, formatTimeAgo, formatNumber } from '../util';
 import { commonStyles } from '../../../themes/styles';
@@ -13,12 +13,6 @@ import { commonStyles } from '../../../themes/styles';
 // =============================================================================
 
 const styles = {
-	layout: {
-		display: 'grid',
-		gridTemplateColumns: '1fr 360px',
-		gap: 16,
-		alignItems: 'start',
-	} as CSSProperties,
 	table: {
 		width: '100%',
 		borderCollapse: 'collapse',
@@ -45,13 +39,13 @@ const styles = {
 	msgIn: { color: 'var(--rr-color-success)', fontSize: 8 } as CSSProperties,
 	msgOut: { color: 'var(--rr-border-focus)', fontSize: 8 } as CSSProperties,
 
-	// Detail panel
-	detailPanel: {
-		...commonStyles.card,
-		maxHeight: 'calc(100vh - 140px)',
+	// Modal
+	modalDialog: {
+		...commonStyles.dialog,
+		width: 560,
+		maxWidth: '95vw',
+		maxHeight: '85vh',
 		overflowY: 'auto',
-		position: 'sticky',
-		top: 0,
 	} as CSSProperties,
 	detailClose: {
 		cursor: 'pointer',
@@ -107,7 +101,104 @@ const styles = {
 };
 
 // =============================================================================
-// COMPONENT
+// CONNECTION DETAIL MODAL
+// =============================================================================
+
+/** Reusable modal that displays full connection details. */
+export const ConnectionDetailModal: React.FC<{
+	connection: DashboardConnection;
+	onClose: () => void;
+}> = ({ connection, onClose }) => {
+	// Close on Escape key
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') onClose();
+		};
+		window.addEventListener('keydown', handler);
+		return () => window.removeEventListener('keydown', handler);
+	}, [onClose]);
+
+	return (
+		<div style={commonStyles.modalOverlay} onClick={onClose}>
+			<div role="dialog" aria-modal="true" aria-labelledby={`connection-detail-title-${connection.id}`} style={styles.modalDialog} onClick={(e) => e.stopPropagation()}>
+				<div style={commonStyles.cardHeader}>
+					<span id={`connection-detail-title-${connection.id}`}>
+						#{connection.id} &mdash; {connection.clientInfo?.name || connection.clientId || `Conn #${connection.id}`}
+					</span>
+					<button type="button" style={styles.detailClose} aria-label="Close details" onClick={onClose}>
+						&times;
+					</button>
+				</div>
+
+				<div style={styles.detailSection}>
+					<div style={commonStyles.labelUppercase}>Connection Info</div>
+					<div style={styles.detailRow}>
+						<span style={commonStyles.textMuted}>Connected at</span>
+						<span style={styles.mono}>{formatTime(connection.connectedAt)}</span>
+					</div>
+					<div style={styles.detailRow}>
+						<span style={commonStyles.textMuted}>API Key</span>
+						<span style={styles.mono}>
+							{connection.apikey ? `${connection.apikey.slice(0, 4)}${'•'.repeat(8)}${connection.apikey.slice(-4)}` : '—'}
+						</span>
+					</div>
+					{connection.clientInfo.name && (
+						<div style={styles.detailRow}>
+							<span style={commonStyles.textMuted}>Client</span>
+							<span>
+								{connection.clientInfo.name} {connection.clientInfo.version ?? ''}
+							</span>
+						</div>
+					)}
+				</div>
+
+				<div style={styles.detailSection}>
+					<div style={commonStyles.labelUppercase}>Monitors ({connection.monitors.length})</div>
+					{connection.monitors.length === 0 && <span style={commonStyles.textMuted}>none</span>}
+					{connection.monitors.map((m) => (
+						<div key={m.key} style={styles.monitorRow}>
+							<span style={{ ...styles.mono, flexShrink: 0, color: 'var(--rr-text-primary)' }}>{m.key}</span>
+							<span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+								{m.flags.map((f) => (
+									<span key={f} style={styles.flagTag}>
+										{f}
+									</span>
+								))}
+							</span>
+						</div>
+					))}
+				</div>
+
+				<div style={styles.detailSection}>
+					<div style={commonStyles.labelUppercase}>Attached Tasks ({connection.attachedTasks.length})</div>
+					<div style={styles.tagList}>
+						{connection.attachedTasks.map((t) => (
+							<span key={t} style={styles.tag}>
+								{t}
+							</span>
+						))}
+						{connection.attachedTasks.length === 0 && <span style={commonStyles.textMuted}>none</span>}
+					</div>
+				</div>
+
+				<div style={styles.detailSection}>
+					<div style={commonStyles.labelUppercase}>Traffic</div>
+					<div style={styles.detailRow}>
+						<span style={commonStyles.textMuted}>Messages In</span>
+						<span style={styles.mono}>{formatNumber(connection.messagesIn)}</span>
+					</div>
+					<div style={{ ...styles.detailRow, marginBottom: 0 }}>
+						<span style={commonStyles.textMuted}>Messages Out</span>
+						<span style={styles.mono}>{formatNumber(connection.messagesOut)}</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// =============================================================================
+// CONNECTIONS TAB
 // =============================================================================
 
 export const ConnectionsTab: React.FC<{ connections: DashboardConnection[] }> = ({ connections }) => {
@@ -115,11 +206,10 @@ export const ConnectionsTab: React.FC<{ connections: DashboardConnection[] }> = 
 	const selected = connections.find((c) => c.id === selectedId);
 
 	return (
-		<div style={styles.layout}>
+		<>
 			<div style={commonStyles.card}>
 				<div style={commonStyles.cardHeader}>
 					<span>Active Connections ({connections.length})</span>
-					<span style={commonStyles.textMuted}>click a row for details</span>
 				</div>
 				<table style={styles.table}>
 					<thead>
@@ -138,12 +228,12 @@ export const ConnectionsTab: React.FC<{ connections: DashboardConnection[] }> = 
 							<tr
 								key={conn.id}
 								style={{ ...styles.clickableRow, ...(selectedId === conn.id ? styles.selectedRow : {}) }}
-								onClick={() => setSelectedId(conn.id === selectedId ? null : conn.id)}
+								onClick={() => setSelectedId(conn.id)}
 								tabIndex={0}
 								onKeyDown={(e) => {
 									if (e.key === 'Enter' || e.key === ' ') {
 										e.preventDefault();
-										setSelectedId(conn.id === selectedId ? null : conn.id);
+										setSelectedId(conn.id);
 									}
 								}}
 							>
@@ -174,79 +264,7 @@ export const ConnectionsTab: React.FC<{ connections: DashboardConnection[] }> = 
 				</table>
 			</div>
 
-			{selected && (
-				<div style={styles.detailPanel}>
-					<div style={commonStyles.cardHeader}>
-						<span>
-							#{selected.id} &mdash; {selected.clientInfo?.name || selected.clientId || `Conn #${selected.id}`}
-						</span>
-						<button style={styles.detailClose} aria-label="Close details" onClick={() => setSelectedId(null)}>
-							&times;
-						</button>
-					</div>
-
-					<div style={styles.detailSection}>
-						<div style={commonStyles.labelUppercase}>Connection Info</div>
-						<div style={styles.detailRow}>
-							<span style={commonStyles.textMuted}>Connected at</span>
-							<span style={styles.mono}>{formatTime(selected.connectedAt)}</span>
-						</div>
-						<div style={styles.detailRow}>
-							<span style={commonStyles.textMuted}>API Key</span>
-							<span style={styles.mono}>{selected.apikey ? `${selected.apikey.slice(0, 4)}${'•'.repeat(8)}${selected.apikey.slice(-4)}` : '—'}</span>
-						</div>
-						{selected.clientInfo.name && (
-							<div style={styles.detailRow}>
-								<span style={commonStyles.textMuted}>Client</span>
-								<span>
-									{selected.clientInfo.name} {selected.clientInfo.version ?? ''}
-								</span>
-							</div>
-						)}
-					</div>
-
-					<div style={styles.detailSection}>
-						<div style={commonStyles.labelUppercase}>Monitors ({selected.monitors.length})</div>
-						{selected.monitors.length === 0 && <span style={commonStyles.textMuted}>none</span>}
-						{selected.monitors.map((m) => (
-							<div key={m.key} style={styles.monitorRow}>
-								<span style={{ ...styles.mono, flexShrink: 0, color: 'var(--rr-text-primary)' }}>{m.key}</span>
-								<span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-									{m.flags.map((f) => (
-										<span key={f} style={styles.flagTag}>
-											{f}
-										</span>
-									))}
-								</span>
-							</div>
-						))}
-					</div>
-
-					<div style={styles.detailSection}>
-						<div style={commonStyles.labelUppercase}>Attached Tasks ({selected.attachedTasks.length})</div>
-						<div style={styles.tagList}>
-							{selected.attachedTasks.map((t) => (
-								<span key={t} style={styles.tag}>
-									{t}
-								</span>
-							))}
-							{selected.attachedTasks.length === 0 && <span style={commonStyles.textMuted}>none</span>}
-						</div>
-					</div>
-
-					<div style={styles.detailSection}>
-						<div style={commonStyles.labelUppercase}>Traffic</div>
-						<div style={styles.detailRow}>
-							<span style={commonStyles.textMuted}>Messages In</span>
-							<span style={styles.mono}>{formatNumber(selected.messagesIn)}</span>
-						</div>
-						<div style={{ ...styles.detailRow, marginBottom: 0 }}>
-							<span style={commonStyles.textMuted}>Messages Out</span>
-							<span style={styles.mono}>{formatNumber(selected.messagesOut)}</span>
-						</div>
-					</div>
-				</div>
-			)}
-		</div>
+			{selected && <ConnectionDetailModal connection={selected} onClose={() => setSelectedId(null)} />}
+		</>
 	);
 };

@@ -24,8 +24,6 @@
 
 /**
  * Deploy type definitions for the RocketRide TypeScript SDK.
- *
- * Mirrors the server's `DeploymentRecord` model returned by `rrext_deploy_*` commands.
  */
 
 import type { PipelineConfig } from './pipeline.js';
@@ -35,17 +33,18 @@ export type { PipelineConfig };
 // DEPLOY TYPES
 // =============================================================================
 
-/** Deployment record returned by `rrext_deploy_add`, `rrext_deploy_list`, and `rrext_deploy_status`. */
+/** Deployment record returned by `deploy.add`, `deploy.list`, and `deploy.status`. */
 export interface DeploymentRecord {
 	pipeline?: PipelineConfig;
 	/** Cron expression or `"manual"`. */
 	schedule?: string;
 	state?: 'active' | 'paused' | 'errored';
-	created_by?: string;
+	/** ID of the user who created the deployment. */
+	userId?: string;
 	/** Unix timestamp (seconds). */
-	created_at?: number;
+	createdAt?: number;
 	/** Unix timestamp (seconds). */
-	updated_at?: number;
+	updatedAt?: number;
 }
 
 /** Parameters accepted by `client.deploy.update()`. */

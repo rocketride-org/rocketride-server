@@ -13,11 +13,11 @@
  * All server communication flows through callback props — no SDK imports.
  */
 
-import React, { useEffect, useState, useCallback, useMemo, type CSSProperties } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
-import { PlanPicker } from './PlanPicker';
+import { PlanPicker, planAmount } from './PlanPicker';
 import type { CheckoutModalProps, CheckoutPlan } from './types';
 
 // =============================================================================
@@ -31,7 +31,7 @@ const S = {
 		border: '1px solid var(--rr-border)',
 		borderRadius: 16,
 		width: '100%',
-		maxWidth: 720,
+		maxWidth: 960,
 		overflow: 'hidden',
 		boxShadow: '0 24px 64px var(--rr-shadow-widget)',
 		position: 'relative' as const,
@@ -197,7 +197,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 
 				// Step 2: Notify server — writes 'incomplete', webhook flips to 'active'
 				try {
-					await onConfirmPending(subscriptionId, plan.priceId);
+					await onConfirmPending(subscriptionId, plan.stripePriceId);
 				} catch {
 					// Non-fatal — the webhook will still update the DB
 				}
@@ -219,14 +219,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, onConfi
 
 			{/* Plan recap bar */}
 			<div style={S.planRecap}>
-				<span style={S.planRecapName}>{plan.label}</span>
-				<span style={S.planRecapAmount}>{plan.amount}</span>
+				<span style={S.planRecapName}>{plan.nickname}</span>
+				<span style={S.planRecapAmount}>{planAmount(plan)}</span>
 			</div>
 
 			<form onSubmit={handleSubmit}>
 				<PaymentElement options={{ wallets: { link: 'never' } }} />
 				<button type="submit" disabled={!stripe || submitting} style={S.submitBtn(!stripe || submitting)}>
-					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${plan.amount}`}
+					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${planAmount(plan)}`}
 				</button>
 			</form>
 		</>
@@ -246,11 +246,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appName,
 	appDescription,
 	stripePublishableKey,
+	preselectedPlan,
 	onFetchPlans,
 	onCreateCheckout,
 	onConfirmPending,
 	onSuccess,
 	onClose,
+	onActionClick,
 }) => {
 	// Initialise Stripe lazily
 	const [stripePromise] = useState(() => loadStripe(stripePublishableKey));
@@ -258,7 +260,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	// ── State ────────────────────────────────────────────────────────────
 	const [plans, setPlans] = useState<CheckoutPlan[]>([]);
 	const [plansLoading, setPlansLoading] = useState(true);
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(null);
+	// Seed the selection from a preselected plan so the payment step can render
+	// its recap immediately (and the picker is skipped — see the auto-advance
+	// effect below).
+	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(preselectedPlan ?? null);
 
 	const [clientSecret, setClientSecret] = useState<string | null>(null);
 	const [subscriptionId, setSubscriptionId] = useState<string>('');
@@ -269,10 +274,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	useEffect(() => {
 		onFetchPlans()
 			.then((fetched) => {
-				setPlans(fetched);
-				// Pre-select the first checkout-able plan
-				const first = fetched.find((p) => !p.action);
-				if (first) setSelectedPlan(first);
+				// Filter out top-up packs — those are handled by the TopUpModal
+				const subscriptionPlans = fetched.filter((p) => p.metadata?.kind !== 'topup' && p.isActive !== false);
+				setPlans(subscriptionPlans);
+				// Default selection (lowest-order billable plan at the visible
+				// interval -- i.e. Starter) is driven by PlanPicker via
+				// ``autoSelectDefault`` so the selection always matches the
+				// interval that is actually shown.
 			})
 			.catch((err) => setError(err.message ?? 'Failed to load subscription plans.'))
 			.finally(() => setPlansLoading(false));
@@ -280,12 +288,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	/** Creates a Stripe subscription and advances to payment. */
 	const handleContinue = useCallback(async () => {
-		if (!selectedPlan || selectedPlan.action) return;
+		if (!selectedPlan || selectedPlan.metadata?.action) return;
 
 		setLoadingSecret(true);
 		setError(null);
 		try {
-			const res = await onCreateCheckout(selectedPlan.priceId);
+			const res = await onCreateCheckout(selectedPlan.stripePriceId);
 			setClientSecret(res.clientSecret);
 			setSubscriptionId(res.subscriptionId);
 		} catch (err: any) {
@@ -300,6 +308,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		setClientSecret(null);
 		setError(null);
 	}, []);
+
+	// When a plan is preselected (web pricing page), skip the picker entirely:
+	// create the subscription immediately so the user lands on the payment step.
+	// At mount ``plans`` is still empty, so the PlanPicker cannot re-select a
+	// default over our seeded selection before this fires. Runs once.
+	const autoStartedRef = useRef(false);
+	useEffect(() => {
+		if (!preselectedPlan || autoStartedRef.current) return;
+		if (!clientSecret && !loadingSecret) {
+			autoStartedRef.current = true;
+			void handleContinue();
+		}
+	}, [preselectedPlan, clientSecret, loadingSecret, handleContinue]);
 
 	// Stripe Elements appearance
 	const appearance = useMemo(() => {
@@ -360,10 +381,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							loading={plansLoading}
 							selectedPlan={selectedPlan}
 							onSelectPlan={setSelectedPlan}
+							onActionClick={onActionClick}
+							autoSelectDefault
 							footer={
 								<button
-									style={S.continueBtn(!selectedPlan || !!selectedPlan.action)}
-									disabled={!selectedPlan || !!selectedPlan.action}
+									style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action)}
+									disabled={!selectedPlan || !!selectedPlan.metadata?.action}
 									onClick={handleContinue}
 								>
 									Continue

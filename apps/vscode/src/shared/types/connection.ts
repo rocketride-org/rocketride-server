@@ -93,4 +93,7 @@ export interface ConnectionStatus {
 
 	/** Detailed progress message (e.g. download progress) shown during connecting states */
 	progressMessage?: string;
+
+	/** Engine log line for sidebar progress display (e.g. "Installing wheel..."). */
+	progressLogLine?: string;
 }

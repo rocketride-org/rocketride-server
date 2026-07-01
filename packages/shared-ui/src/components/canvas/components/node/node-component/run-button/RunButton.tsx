@@ -73,7 +73,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const handleRun = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
-			console.log(`[RunButton] clicked nodeId=${nodeId} isRunning=${isRunning} isSubscribed=${isSubscribed} onRunPipeline=${!!onRunPipeline}`);
 			if (isRunning || !onRunPipeline) return;
 
 			const components = getProjectComponents(nodes as INode[], edges);
@@ -83,7 +82,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				version: PIPELINE_SCHEMA_VERSION,
 			};
 
-			console.log('[RunButton] calling onRunPipeline');
 			onRunPipeline(nodeId, project);
 		},
 		[isRunning, onRunPipeline, nodeId, nodes, edges, currentProject, isSubscribed]
@@ -163,8 +161,8 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			>
 				<span style={{ ...styles.button, position: 'relative' as const }}>
 					<Play size={16} style={{ ...styles.icon, color: 'var(--rr-text-disabled)' }} />
-					<span style={{ position: 'absolute' as const, top: -5, right: -5 }}>
-						<PadlockIcon size={10} />
+					<span style={{ position: 'absolute' as const, top: -8, right: -8 }}>
+						<PadlockIcon size={24} />
 					</span>
 				</span>
 			</div>

@@ -78,11 +78,13 @@ type IncomingMessage =
 				connectionMode: string;
 				developmentTeamId?: string;
 				devProgressMessage?: string;
+				devProgressLogLine?: string;
 				// Deploy connection
 				deployConnectionState?: string;
 				deployConnectionMode?: string | null;
 				deployTargetTeamId?: string;
 				deployProgressMessage?: string;
+				deployProgressLogLine?: string;
 				// Teams (from respective servers)
 				teams?: TeamDTO[];
 				deployTeams?: TeamDTO[];
@@ -126,6 +128,11 @@ const SidebarViewWebview: React.FC = () => {
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
+
+	// ── Engine progress log (last N lines for popup display) ───────────────
+	const MAX_PROGRESS_LINES = 15;
+	const [devProgressLog, setDevProgressLog] = useState<string[]>([]);
+	const [deployProgressLog, setDeployProgressLog] = useState<string[]>([]);
 
 	// ── Shared auth + identity ──────────────────────────────────────────────
 	const [userName, setUserName] = useState<string | undefined>();
@@ -249,12 +256,26 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.developmentTeamId !== undefined) setDevelopmentTeamId(msg.data.developmentTeamId);
 					setDevProgressMessage(msg.data.devProgressMessage);
 
+					// Accumulate dev engine log lines; clear on connect
+					if (msg.data.connectionState === 'connected') {
+						setDevProgressLog([]);
+					} else if (msg.data.devProgressLogLine && msg.data.devProgressLogLine !== devProgressLog[devProgressLog.length - 1]) {
+						setDevProgressLog((prev) => prev[prev.length - 1] === msg.data.devProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.devProgressLogLine!]);
+					}
+
 					// Deploy connection state
 					if (msg.data.deployConnectionState) setDeployConnectionState(msg.data.deployConnectionState);
 					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
 					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					setDeployProgressMessage(msg.data.deployProgressMessage);
+
+					// Accumulate deploy engine log lines; clear on connect
+					if (msg.data.deployConnectionState === 'connected') {
+						setDeployProgressLog([]);
+					} else if (msg.data.deployProgressLogLine) {
+						setDeployProgressLog((prev) => prev[prev.length - 1] === msg.data.deployProgressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), msg.data.deployProgressLogLine!]);
+					}
 					// Subscription status
 					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
 					break;
@@ -391,25 +412,21 @@ const SidebarViewWebview: React.FC = () => {
 		}
 	};
 
-	// ── Flat vs popup mode ──────────────────────────────────────────────────
-	// Flat: shared connection + no cloud account → show status inline, no popup.
-	// Popup: independent deploy target OR cloud account → full popup menu.
+	// ── Footer menu items ───────────────────────────────────────────────────
 	const anyConnected = connection.state === 'connected' || deployConnectionState === 'connected';
-	const useFlatFooter = !deployTargetMode && !cloudConnected;
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
-		if (useFlatFooter) return [];
-
 		const items: SidebarFooterMenuItem[] = [];
 
 		// ── Development section ─────────────────────────────────────────────
 		const devStatus = connectionStatusText(connection.state, developmentMode, devProgressMessage);
 		const devTeamLine = developmentMode === 'cloud' && devTeamName ? `Team: ${devTeamName}` : undefined;
+		const devLines = [devStatus, ...(devTeamLine ? [devTeamLine] : []), ...devProgressLog];
 		items.push({
 			id: 'dev-header',
 			label: 'Development',
 			header: true,
-			statusText: devTeamLine ? `${devStatus}\n${devTeamLine}` : devStatus,
+			statusText: devLines.join('\n'),
 			statusState: connection.state === 'connected' ? 'connected' : connection.state === 'connecting' ? 'connecting' : 'disconnected',
 			onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['development'] }),
 			submenu: developmentMode === 'cloud' && teams.length > 0 ? [...teams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `dev-${t.id}`, label: t.name, checked: developmentTeamId === t.id, onClick: () => sendMessage({ type: 'setDevelopmentTeam', teamId: t.id }) })) : undefined,
@@ -419,11 +436,12 @@ const SidebarViewWebview: React.FC = () => {
 		if (deployTargetMode) {
 			const deployStatus = connectionStatusText(deployConnectionState, deployTargetMode, deployProgressMessage);
 			const deployTeamLine = deployTargetMode === 'cloud' && deployTeamName ? `Team: ${deployTeamName}` : undefined;
+			const deployLines = [deployStatus, ...(deployTeamLine ? [deployTeamLine] : []), ...deployProgressLog];
 			items.push({
 				id: 'deploy-header',
 				label: 'Deployment',
 				header: true,
-				statusText: deployTeamLine ? `${deployStatus}\n${deployTeamLine}` : deployStatus,
+				statusText: deployLines.join('\n'),
 				statusState: deployConnectionState === 'connected' ? 'connected' : deployConnectionState === 'connecting' ? 'connecting' : 'disconnected',
 				onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['deployment'] }),
 				submenu: deployTargetMode === 'cloud' && deployTeams.length > 0 ? [...deployTeams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `deploy-${t.id}`, label: t.name, checked: deployTargetTeamId === t.id, onClick: () => sendMessage({ type: 'setDeployTargetTeam', teamId: t.id }) })) : undefined,
@@ -455,27 +473,16 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		return items;
-	}, [sendMessage, cloudConnected, useFlatFooter, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage, subscribed]);
-
-	// ── Flat-mode connection status ─────────────────────────────────────────
-	const flatConnectionStatus = useMemo(() => {
-		if (!useFlatFooter) return undefined;
-		const state = connection.state === 'connected' ? 'connected' as const : connection.state === 'connecting' ? 'connecting' as const : 'disconnected' as const;
-		// Line 1: connection state label (never the progress message).
-		// Line 2: progress/action message when the engine is doing something.
-		const modeStr = modeLabel(developmentMode);
-		const stateLabel = connection.state === 'connected' ? `Connected (${modeStr})` : connection.state === 'connecting' ? 'Connecting...' : connection.state === 'downloading-engine' ? 'Downloading engine...' : connection.state === 'starting-engine' ? 'Starting engine...' : connection.state === 'stopping-engine' ? 'Stopping engine...' : connection.state === 'auth-failed' ? 'Sign-in required' : 'Disconnected';
-		return { state, text: stateLabel, message: devProgressMessage };
-	}, [useFlatFooter, connection.state, developmentMode, devProgressMessage]);
-
-	const handleSettingsClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.settings.open' }), [sendMessage]);
-	const handleEnvironmentClick = useCallback(() => sendMessage({ type: 'command', command: 'rocketride.page.environment.open' }), [sendMessage]);
+	}, [sendMessage, cloudConnected, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage, deployProgressLog, subscribed, anyConnected]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} onEnvironmentClick={anyConnected ? handleEnvironmentClick : undefined} onSettingsClick={handleSettingsClick} connectionStatus={flatConnectionStatus} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
+	// No headerSlot: the VS Code host has no home-app destination, so it injects no
+	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
+	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
 	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 

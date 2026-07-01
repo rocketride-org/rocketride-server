@@ -391,7 +391,7 @@ Close the connection to the RocketRide server and stop automatic reconnection. I
 
 ##### Auth / Connection Lifecycle
 
-`connect()`/`disconnect()` are convenience wrappers over two independent concerns: the WebSocket transport (attach/detach) and the DAP auth handshake (login/logout). Use the primitives below when you need to manage them separately — e.g. attach once, then log in and out under different credentials without reopening the socket.
+`connect()`/`disconnect()` are convenience wrappers over two independent concerns: the WebSocket transport (attach/detach) and the DAP auth handshake (login/logout). Use the primitives below when you need to manage them separately: e.g. attach once, then log in and out under different credentials without reopening the socket.
 
 ###### `async attach(uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None`
 
@@ -425,7 +425,7 @@ Deauthenticate: sends a `deauth` request to the server and clears client-side au
 
 Return the `ConnectResult` from the last successful `login()`, or `None` if not authenticated.
 
-**Example — attach once, log in, run, log out:**
+**Example: attach once, log in, run, log out:**
 
 ```python
 client = RocketRideClient()  # config from .env
@@ -447,7 +447,7 @@ await client.detach()
 
 Start a RocketRide pipeline for processing data. Automatically performs environment variable substitution on the pipeline configuration.
 
-> All `use()` parameters are **keyword-only** — pass them by name (e.g. `use(pipeline=...)`), not positionally.
+> All `use()` parameters are **keyword-only**: pass them by name (e.g. `use(pipeline=...)`), not positionally.
 
 **Parameters:**
 
@@ -455,7 +455,7 @@ Start a RocketRide pipeline for processing data. Automatically performs environm
 - `filepath` (str, optional): Path to a `.pipe` or JSON file containing pipeline configuration.
 - `token` (str, optional): Custom token for the pipeline (auto-generated if not provided)
 - `source` (str, optional): Override pipeline source
-- `threads` (int, optional): Number of threads for execution (default: None — the server decides)
+- `threads` (int, optional): Number of threads for execution (default: None, the server decides)
 - `use_existing` (bool, optional): Use existing pipeline instance
 - `args` (List[str], optional): Command line arguments to pass to pipeline
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)
@@ -576,7 +576,7 @@ async def on_sse(type: str, data: dict) -> None:
 - `type` (str): The SSE event type
 - `data` (dict): The event payload
 
-**Example — streaming a chat response:**
+**Example: streaming a chat response:**
 
 ```python
 from rocketride.schema import Question
@@ -1081,10 +1081,10 @@ DAPException                      (base; wraps DAP error responses)
 
 Which methods raise what:
 
-- `connect()` / `attach()` / `login()` — `ConnectionException`, or `AuthenticationException` on bad credentials
-- `use()` — `ValidationException` for a bad config, `ExecutionException` if the pipeline fails to start
-- `send()` / `send_files()` / `pipe()` writes — `PipeException` on transfer failure (also catchable as `RuntimeError`)
-- `terminate()` / `restart()` — raise `RuntimeError` on failure
+- `connect()` / `attach()` / `login()`: `ConnectionException`, or `AuthenticationException` on bad credentials
+- `use()`: `ValidationException` for a bad config, `ExecutionException` if the pipeline fails to start
+- `send()` / `send_files()` / `pipe()` writes: `PipeException` on transfer failure (also catchable as `RuntimeError`)
+- `terminate()` / `restart()`: raise `RuntimeError` on failure
 
 Catching `RocketRideException` handles every SDK-originated error while still giving you `.dap_result` for context.
 

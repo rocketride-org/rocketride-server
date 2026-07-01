@@ -24,9 +24,11 @@
 // PROFILER-UI — App Descriptor
 // =============================================================================
 
+import React from 'react';
 import type { AppDescriptor } from 'shell-ui';
 import ProfilerApp from './ProfilerApp';
 import ProfilerSidebar from './ProfilerSidebar';
+import RocketRideMark from './RocketRideMark';
 
 /**
  * AppDescriptor for the Profiler app.
@@ -40,6 +42,8 @@ const PROFILER_APP: AppDescriptor = {
 	name: 'Profiler',
 	branding: {
 		appName: 'Profiler',
+		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0' }),
+		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34' }),
 	},
 	components: {
 		App: ProfilerApp,

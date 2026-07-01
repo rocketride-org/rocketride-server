@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that transforms text into numerical vector representations using advanced embedding ", "models. It converts input text—ranging from individual words to entire documents—into high-dimensional ", "vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ", "searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ", "configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ", "different use cases across domains."],
+	"description": ["A component that transforms text into numerical vector representations using advanced embedding ", "models. It converts input text, ranging from individual words to entire documents, into high-dimensional ", "vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ", "searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ", "configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ", "different use cases across domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

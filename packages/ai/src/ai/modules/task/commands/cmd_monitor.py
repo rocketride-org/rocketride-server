@@ -109,13 +109,43 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
-        """Send a server-level event if this connection is subscribed via the '*' wildcard."""
+    async def send_server_event(
+        self,
+        event_type: EVENT_TYPE,
+        event: Dict[str, Any],
+        user_id: str = None,
+        org_id: str = None,
+    ) -> None:
+        """
+        Send a server-level event if this connection is subscribed via the '*' wildcard.
+
+        Filtering order (each check short-circuits if it fails):
+        1. Connection must have '*' in its monitor subscriptions
+        2. The event_type bitmask must match the subscription
+        3. If org_id is specified, connection's primary org must match
+        4. If user_id is specified, connection's userId must match
+
+        Args:
+            event_type: Event type bitmask (e.g. EVENT_TYPE.DASHBOARD, EVENT_TYPE.BILLING).
+            event: DAP event payload with 'event' and 'body' keys.
+            user_id: Optional user scope -- only deliver to this user.
+            org_id: Optional org scope -- only deliver to connections in this org.
+        """
+        # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
+        # Step 2: bitmask must match
         if not (event_type & self._monitors['*']):
             return
-        # Tenant scoping: if the event carries a user_id, only deliver to matching accounts.
+        # Step 3: org scoping
+        if org_id is not None and hasattr(self, '_account_info') and self._account_info:
+            conn_org = ''
+            if hasattr(self._account_info, 'organization') and self._account_info.organization:
+                org = self._account_info.organization
+                conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
+            if conn_org != org_id:
+                return
+        # Step 4: user scoping
         if user_id is not None and hasattr(self, '_account_info') and self._account_info:
             if self._account_info.userId != user_id:
                 return

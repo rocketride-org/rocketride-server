@@ -101,7 +101,6 @@ export function useTemplateInstantiator() {
 			};
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
-			console.log('[TemplateInstantiator] post-ready: notifying host, nodes=%d, edges=%d, components=%d, docRevision=%d', nodes.length, edges.length, components.length, nextRevision);
 			onContentChanged(project);
 		}
 		fitView({ padding: 0.15, duration: 300 });
@@ -193,7 +192,6 @@ export function useTemplateInstantiator() {
 			const templateEdges = getEdgesFromNodes(newNodes as unknown as INode[]);
 			const currentEdges = [...edges];
 			const mergedEdges = [...currentEdges, ...templateEdges];
-			console.log('[TemplateInstantiator] loading: nodes=%d (+%d new), edges=%d (existing=%d, template=%d)', allNodes.length, newNodes.length, mergedEdges.length, currentEdges.length, templateEdges.length);
 			loadCanvas(allNodes, mergedEdges);
 
 			// Track new IDs so the post-ready effect can update internals + fitView

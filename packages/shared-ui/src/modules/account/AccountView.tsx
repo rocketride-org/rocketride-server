@@ -23,7 +23,8 @@ import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { commonStyles } from '../../themes/styles';
 import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
-import type { BillingDetail, CreditBalance, CreditPack } from '../billing/types';
+import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
+import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
@@ -31,7 +32,7 @@ import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
 import { TeamsPanel } from './components/TeamsPanel';
 import { MembersPanel } from './components/MembersPanel';
-import { S, Modal, PermGrid, ExpiryOpts, Avatar, relativeTime } from './components/shared';
+import { S, Modal, PermGrid, PermPill, ExpiryOpts, Avatar, relativeTime, PERM_DISPLAY } from './components/shared';
 
 // =============================================================================
 // REVEAL STYLES
@@ -138,8 +139,6 @@ export interface IAccountViewProps {
 	billingError: string | null;
 	/** Current org credit balance, or null while loading. */
 	creditBalance: CreditBalance | null;
-	/** Available credit packs for purchase. */
-	creditPacks: CreditPack[];
 	/** App manifest entries for resolving display names, icons, etc. from appId. */
 	apps?: Array<{ id: string; name: string; icon?: string; description?: string }>;
 
@@ -148,10 +147,36 @@ export interface IAccountViewProps {
 	onCancelSubscription: (appId: string) => Promise<void>;
 	/** Open the Stripe customer portal for payment management. */
 	onOpenPortal: () => Promise<void>;
-	/** Purchase a credit pack. Host handles Stripe checkout redirect/URL. */
-	onBuyCredits: (pack: CreditPack) => Promise<void>;
 	/** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
 	onSubscribe?: () => void;
+
+	// -- Dashboard data (admin billing insights) -------------------------------
+	/** Paginated transaction result for the transaction log. */
+	transactions?: TransactionsResult | null;
+	/** Per-user usage rollup. */
+	usageByUser?: UsageRollup[];
+	/** Per-team usage rollup. */
+	usageByTeam?: UsageRollup[];
+	/** Currently running tasks with live token data. */
+	activeTasks?: ActiveTask[];
+	/** Whether dashboard data is still loading. */
+	dashboardLoading?: boolean;
+	/** Callback to change the transaction page. */
+	onTransactionPage?: (page: number) => void;
+	/** Member lookup: userId -> display name. */
+	memberNames?: Record<string, string>;
+	/** Team lookup: teamId -> display name. */
+	teamNames?: Record<string, string>;
+	/** Available top-up packs (filtered from plans by kind='topup'). */
+	topupPlans?: any[];
+	/** Callback when user clicks a top-up pack. */
+	onBuyTopup?: (plan: any) => void;
+	/** All plans from app_prices (for the TopUpModal). */
+	allPlans?: any[];
+	/** Called to purchase a top-up pack (charges card on file). */
+	onPurchaseTopup?: (plan: any) => Promise<{ status: string; clientSecret?: string }>;
+	/** Called when the user confirms a plan upgrade/downgrade from the billing panel. */
+	onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
 
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */
@@ -168,6 +193,8 @@ export interface IAccountViewProps {
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
 	/** Sets the user's preferred default team. */
 	onSetDefaultTeam: (teamId: string) => Promise<void>;
+	/** Switches the user's active organization. */
+	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/** Triggers the logout flow. */
 	onLogout: () => void;
 	/** Permanently deletes the user account. */
@@ -179,11 +206,13 @@ export interface IAccountViewProps {
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 	/** Sends an invitation to a new organization member. */
-	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string }) => Promise<void>;
+	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => Promise<void>;
 	/** Updates an organization member's role. */
 	onUpdateMemberRole: (userId: string, role: string) => Promise<void>;
 	/** Removes an organization member. */
 	onRemoveMember: (userId: string) => Promise<void>;
+	/** Resends the initialization email for a pending member. */
+	onResendInvite: (userId: string) => Promise<void>;
 	/** Creates a new team. */
 	onCreateTeam: (name: string) => Promise<void>;
 	/** Deletes a team. */
@@ -214,14 +243,14 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, creditPacks, apps, onCancelSubscription, onOpenPortal, onBuyCredits, onSubscribe, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
 	// =========================================================================
 
-	/** The primary organization's ID (used for org-scoped env calls). */
-	const orgId = profile?.organizations?.[0]?.id;
+	/** The organization's ID (used for org-scoped env calls). */
+	const orgId = profile?.organization?.id;
 
 	// Build appId → app lookup for display name resolution
 	const appMap = useMemo(() => {
@@ -230,9 +259,9 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		return map;
 	}, [apps]);
 
-	/** True when the current user has org.admin on their primary organization. */
+	/** True when the current user has org.admin on their organization. */
 	const isOrgAdmin = useMemo(() => {
-		return profile?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
+		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
 
 	/**
@@ -242,11 +271,10 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isTeamAdmin = useMemo(() => {
 		return (teamId: string): boolean => {
 			if (isOrgAdmin) return true;
-			const orgs = profile?.organizations ?? [];
-			for (const o of orgs) {
-				for (const t of o.teams ?? []) {
-					if (t.id === teamId && t.permissions?.includes('team.admin')) return true;
-				}
+			const org = profile?.organization;
+			if (!org) return false;
+			for (const t of org.teams ?? []) {
+				if (t.id === teamId && t.permissions?.includes('team.admin')) return true;
 			}
 			return false;
 		};
@@ -277,6 +305,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const [inviteGivenName, setInviteGivenName] = useState('');
 	const [inviteFamilyName, setInviteFamilyName] = useState('');
 	const [inviteRole, setInviteRole] = useState('member');
+	const [inviteTeams, setInviteTeams] = useState<Record<string, string[]>>({});
+	const [inviteEditPermsTeamId, setInviteEditPermsTeamId] = useState<string | null>(null);
 	const [editRoleTarget, setEditRoleTarget] = useState<MemberRecord | null>(null);
 	const [editRoleValue, setEditRoleValue] = useState('member');
 	const [editPermsTarget, setEditPermsTarget] = useState<TeamMemberRecord | null>(null);
@@ -378,8 +408,16 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		setSaving(true);
 		setSaveError(null);
 		try {
-			// Step 2: call the host callback.
-			await onInviteMember({ email: inviteEmail.trim(), givenName: inviteGivenName.trim(), familyName: inviteFamilyName.trim(), role: inviteRole });
+			// Step 2: build team assignments from the checked teams.
+			const teamAssignments = Object.entries(inviteTeams).map(([teamId, permissions]) => ({ teamId, permissions }));
+			// Step 3: call the host callback.
+			await onInviteMember({
+				email: inviteEmail.trim(),
+				givenName: inviteGivenName.trim(),
+				familyName: inviteFamilyName.trim(),
+				role: inviteRole,
+				teamAssignments: teamAssignments.length > 0 ? teamAssignments : undefined,
+			});
 			setModal(null);
 		} catch (e) {
 			setSaveError(e instanceof Error ? e.message : 'Failed to invite member');
@@ -588,6 +626,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		setInviteGivenName('');
 		setInviteFamilyName('');
 		setInviteRole('member');
+		setInviteTeams({});
+		setInviteEditPermsTeamId(null);
 		setSaveError(null);
 		setModal('invite');
 	};
@@ -671,14 +711,14 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
+						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
 					</div>
 				),
 			},
 			billing: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} creditPacks={creditPacks} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} onBuyCredits={onBuyCredits} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} memberNames={memberNames} teamNames={teamNames} onUpgradeSubscription={onUpgradeSubscription} />
 					</div>
 				),
 			},
@@ -735,12 +775,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={openRemoveMember} isOrgAdmin={isOrgAdmin} />
+						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={openRemoveMember} onResendInvite={(m) => onResendInvite(m.userId)} isOrgAdmin={isOrgAdmin} />
 					</div>
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, creditPacks]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================
@@ -929,6 +969,73 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							<option value="admin">Admin</option>
 						</select>
 					</div>
+					{/* Team Access */}
+					{teams.length > 0 && (
+						<div style={S.field}>
+							<div style={S.fieldLabel}>Team Access</div>
+							<div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+								{teams.map((t) => {
+									const checked = t.id in inviteTeams;
+									const perms = inviteTeams[t.id] ?? [];
+									const editingPerms = inviteEditPermsTeamId === t.id;
+									return (
+										<div key={t.id}>
+											<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+												{/* Checkbox */}
+												<div
+													onClick={() => {
+														if (checked) {
+															const next = { ...inviteTeams };
+															delete next[t.id];
+															setInviteTeams(next);
+															if (editingPerms) setInviteEditPermsTeamId(null);
+														} else {
+															setInviteTeams({ ...inviteTeams, [t.id]: ['task.control', 'task.monitor'] });
+														}
+													}}
+													style={{
+														width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+														display: 'flex', alignItems: 'center', justifyContent: 'center',
+														fontSize: 9, cursor: 'pointer',
+														border: `1px solid ${checked ? 'var(--rr-color-info)' : 'var(--rr-border-input)'}`,
+														background: checked ? 'var(--rr-color-info)' : 'var(--rr-bg-input)',
+														color: 'var(--rr-fg-button)',
+													}}
+												>
+													{checked && '\u2713'}
+												</div>
+												{/* Team name */}
+												<span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: checked ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)' }}>{t.name}</span>
+												{/* Edit Perms button */}
+												{checked && (
+													<button
+														style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton, fontSize: 10, padding: '2px 8px' } as CSSProperties}
+														onClick={() => setInviteEditPermsTeamId(editingPerms ? null : t.id)}
+													>
+														{editingPerms ? 'Done' : 'Edit Perms'}
+													</button>
+												)}
+											</div>
+											{/* Permission badges (when not editing) */}
+											{checked && !editingPerms && perms.length > 0 && (
+												<div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, paddingLeft: 22 }}>
+													{perms.map((p) => (
+														<PermPill key={p} perm={p} />
+													))}
+												</div>
+											)}
+											{/* PermGrid (when editing) */}
+											{editingPerms && (
+												<div style={{ marginTop: 6, paddingLeft: 22 }}>
+													<PermGrid value={perms} onChange={(v) => setInviteTeams({ ...inviteTeams, [t.id]: v })} />
+												</div>
+											)}
+										</div>
+									);
+								})}
+							</div>
+						</div>
+					)}
 					{saveError && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 8 }}>{saveError}</div>}
 				</Modal>
 			)}

@@ -11,7 +11,7 @@ the server runtime. They cover:
 
 * ``_normalize_vectordb_tool_input`` — dict / JSON / pydantic / nested /
   malformed / security-context stripping.
-* Tool name namespacing — descriptor names must be ``<serverName>.<tool>``.
+* Tool name collection — bare method names (no server-name prefix).
 * Dispatch — ``search``, ``upsert``, ``delete`` call through to a fake store
   and propagate errors when the store is missing.
 * Semantic search — when ``IGlobal.embed_query`` is present the mixin
@@ -369,50 +369,52 @@ def test_normalize_non_dict_json_returns_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tool namespacing
+# Tool collection (bare names — agent framework adds node-ID prefix)
 # ---------------------------------------------------------------------------
 
+# Expected bare tool names from VectorStoreToolMixin
+_EXPECTED_TOOLS = {'search', 'upsert', 'delete', 'objdir', 'stats', 'get'}
 
-def test_collect_tool_methods_namespaces_with_server_name() -> None:
+
+def test_collect_tool_methods_returns_bare_names() -> None:
+    """Tools must use bare method names; the agent framework adds the node-ID prefix."""
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='myvdb'))
     methods = instance._collect_tool_methods()
 
-    assert set(methods.keys()) == {'myvdb.search', 'myvdb.upsert', 'myvdb.delete'}
+    assert set(methods.keys()) == _EXPECTED_TOOLS
     # Each value is a callable bound to the fake instance
     for bound in methods.values():
         assert callable(bound)
 
 
-def test_collect_tool_methods_uses_provider_fallback() -> None:
-    # No explicit serverName — should fall back to logicalType 'chroma'
+def test_collect_tool_methods_bare_names_regardless_of_provider() -> None:
+    """Bare names must be identical regardless of the provider / serverName."""
     instance = FakeIInstance(FakeIGlobal(store=FakeStore(), logical_type='chroma'))
     methods = instance._collect_tool_methods()
-    assert 'chroma.search' in methods
-    assert 'chroma.upsert' in methods
-    assert 'chroma.delete' in methods
+    assert set(methods.keys()) == _EXPECTED_TOOLS
 
 
-def test_collect_tool_methods_default_when_no_globals() -> None:
+def test_collect_tool_methods_bare_names_when_no_globals() -> None:
     class Orphan(VectorStoreToolMixin, _StubIInstanceBase):
         pass
 
     orphan = Orphan()
     orphan.IGlobal = None
     methods = orphan._collect_tool_methods()
-    # Falls all the way back to 'vectordb'
-    assert set(methods.keys()) == {'vectordb.search', 'vectordb.upsert', 'vectordb.delete'}
+    assert set(methods.keys()) == _EXPECTED_TOOLS
 
 
-def test_two_instances_different_server_names_do_not_collide() -> None:
-    """Core bug: two pinecone instances in one pipeline must not collide."""
+def test_two_instances_share_bare_names() -> None:
+    """Two vector store instances expose the same bare tool names.
+
+    The agent framework disambiguates via node-ID prefixes at discovery time.
+    """
     a = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='primary', logical_type='pinecone'))
     b = FakeIInstance(FakeIGlobal(store=FakeStore(), server_name='secondary', logical_type='pinecone'))
 
     names_a = set(a._collect_tool_methods().keys())
     names_b = set(b._collect_tool_methods().keys())
-    assert names_a.isdisjoint(names_b)
-    assert 'primary.search' in names_a
-    assert 'secondary.search' in names_b
+    assert names_a == names_b == _EXPECTED_TOOLS
 
 
 # ---------------------------------------------------------------------------
@@ -744,8 +746,8 @@ def test_upsert_returns_envelope_on_store_addchunks_exception() -> None:
     assert 'error' in result
 
 
-def test_dispatch_via_namespaced_name() -> None:
-    """End-to-end: _collect_tool_methods -> lookup -> invoke via namespaced key."""
+def test_dispatch_via_bare_name() -> None:
+    """End-to-end: _collect_tool_methods -> lookup -> invoke via bare key."""
     embed_calls: List[str] = []
 
     def embed_query(text: str) -> list:
@@ -758,10 +760,10 @@ def test_dispatch_via_namespaced_name() -> None:
     )
 
     methods = instance._collect_tool_methods()
-    assert 'pinecone.search' in methods
+    assert 'search' in methods
 
     # Simulate engine dispatch: methods[tool_name](input_obj)
-    result = methods['pinecone.search']({'query': 'hit'})
+    result = methods['search']({'query': 'hit'})
     assert result['total'] == 1
     assert result['results'][0]['content'] == 'hit'
 

@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A preprocessing component that segments large bodies of text into intelligently sized ", "chunks for downstream processing. It recursively splits content based on a hierarchy ", "of separators—such as paragraphs, sentences, or words—preserving context while ensuring ", "each chunk meets token or length constraints. This enables efficient handling of lengthy ", "documents in workflows like embedding, retrieval, or LLM-based generation. Ideal for ", "preparing content for language models where context length and coherence are critical."],
+	"description": ["A preprocessing component that segments large bodies of text into intelligently sized ", "chunks for downstream processing. It recursively splits content based on a hierarchy ", "of separators (such as paragraphs, sentences, or words) preserving context while ensuring ", "each chunk meets token or length constraints. This enables efficient handling of lengthy ", "documents in workflows like embedding, retrieval, or LLM-based generation. Ideal for ", "preparing content for language models where context length and coherence are critical."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

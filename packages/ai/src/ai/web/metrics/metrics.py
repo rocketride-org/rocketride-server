@@ -59,13 +59,14 @@ Usage:
         results = Loader.postprocess(model, raw_output, len(inputs), fields)
         t_post = (time.perf_counter() - t0) * 1000
 
+        # Keys match model server's build_dap_result() perf dict
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(model) * inference_sec,
             }
         )
         metrics.counter('gpu_inference_count', 1)

@@ -551,6 +551,12 @@ class Task(DAPBase):
             arguments=args,
             token=args.get('token'),
         )
+
+        # Propagate subprocess failures so callers don't silently
+        # receive success for a failed operation.
+        if self._data_client.did_fail(response):
+            raise RuntimeError(response.get('message', 'Data request failed'))
+
         return response
 
     async def _terminated(self) -> None:
@@ -652,27 +658,6 @@ class Task(DAPBase):
                     self._task_metrics = None
         except Exception as e:
             self.debug_message(f'Error cleaning up metrics: {e}')
-
-        # Reset metrics and tokens to zero after task termination
-        try:
-            # Reset current metrics
-            self._status.metrics.cpu_percent = 0.0
-            self._status.metrics.cpu_memory_mb = 0.0
-            self._status.metrics.gpu_memory_mb = 0.0
-
-            # Reset peak metrics
-            self._status.metrics.peak_cpu_percent = 0.0
-            self._status.metrics.peak_cpu_memory_mb = 0.0
-            self._status.metrics.peak_gpu_memory_mb = 0.0
-
-            # Reset average metrics
-            self._status.metrics.avg_cpu_percent = 0.0
-            self._status.metrics.avg_cpu_memory_mb = 0.0
-            self._status.metrics.avg_gpu_memory_mb = 0.0
-
-            self.debug_message('Metrics and tokens reset to zero')
-        except Exception as e:
-            self.debug_message(f'Error resetting metrics and tokens: {e}')
 
         try:
             # Clean up temporary files
@@ -1038,6 +1023,11 @@ class Task(DAPBase):
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
             self._status.serviceUp = service_up
+
+            # Gate billing accumulation on pipeline readiness so users
+            # are not charged for startup time (model loading, deps, etc.)
+            if self._task_metrics:
+                self._task_metrics.set_service_up(service_up)
 
             if service_up:
                 self._status.state = TASK_STATE.RUNNING.value
@@ -1600,6 +1590,8 @@ class Task(DAPBase):
                     user_id=getattr(_control, 'userId', '') if _control else '',
                     team_id=getattr(_control, 'teamId', '') if _control else '',
                     org_id=getattr(_control, 'orgId', '') if _control else '',
+                    pipeline_name=self._task_name or '',
+                    source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

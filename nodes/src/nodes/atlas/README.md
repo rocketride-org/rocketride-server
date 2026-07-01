@@ -1,48 +1,77 @@
----
-title: MongoDB Atlas
-date: 2026-04-08
-sidebar_position: 1
----
+# atlas
 
-<head>
-  <title>MongoDB Atlas - RocketRide Documentation</title>
-</head>
+A RocketRide vector store node that stores embedded document chunks in MongoDB Atlas and retrieves them by semantic or keyword search.
 
 ## What it does
 
-Vector store node backed by [MongoDB Atlas](https://www.mongodb.com/products/platform/atlas-vector-search). Stores embedded documents and retrieves them by semantic (vector) or keyword (text) search using Atlas Vector Search indexes.
+Ingests pre-embedded document chunks into a MongoDB Atlas collection and searches them in response to questions. Semantic search runs an Atlas `$vectorSearch` aggregation against the question's embedding; keyword search uses MongoDB full-text search (`$text`) against the question's text.
 
-**Lanes:**
+Uses **pymongo** (with **dnspython** for `mongodb+srv://` URI resolution), so no local MongoDB tooling is required on the machine running the engine.
+
+Requires a MongoDB Atlas **M10+** cluster or a **serverless** instance: Atlas Vector Search indexes are not available on free-tier (M0) clusters. On first ingest, the node automatically creates the collection, regular indexes on all metadata fields (`meta.nodeId`, `meta.objectId`, `meta.parent`, `meta.permissionId`, `meta.isDeleted`, `meta.isTable`, `meta.chunkId`, `meta.tableId`), a text index for keyword search, and a `knnVector` search index sized to the embedding dimensions. If Atlas rejects the search-index creation, the node logs the error and continues; in that case, create the vector search index manually in the Atlas UI.
+
+Documents must be run through an embedding node before reaching this node. A chunk without an embedding raises an error at ingest.
+
+---
+
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                                      |
-| ----------- | ----------- | ---------------------------------------------------------------- |
-| `documents` | —           | Ingest pre-embedded documents into the collection                |
+|-------------|-------------|------------------------------------------------------------------|
+| `documents` | (none)      | Ingest pre-embedded documents into the collection                |
 | `questions` | `documents` | Return matching documents                                        |
 | `questions` | `answers`   | Return matching documents as an answer                           |
 | `questions` | `questions` | Enrich the question with matching documents for downstream nodes |
 
-Documents must be run through an embedding node before reaching this node.
+### Fields
 
-## Configuration
+| Field | Type | Description |
+|---|---|---|
+| `provider` | string | Default "atlas".  |
 
-| Field      | Required | Default         | Description                                        |
-| ---------- | -------- | --------------- | -------------------------------------------------- |
-| Host       | yes      | —               | MongoDB Atlas connection URI (`mongodb+srv://...`) |
-| API Key    | yes      | —               | Atlas API key                                      |
-| Database   | yes      | `rocketride_db` | Database name                                      |
-| Collection | yes      | —               | Collection name                                    |
-| Score      | no       | `0.5`           | Minimum similarity score threshold                 |
-| Similarity | no       | `cosine`        | `cosine`, `euclidean`, or `dotproduct`             |
+Configuration is validated when the pipeline is saved: the host must match the `mongodb+srv://user:pass@cluster.xxxxx.mongodb.net/?...` URI pattern and all field-length and character restrictions listed above are checked at that time.
 
-## Requirements
-
-Requires a MongoDB Atlas **M10+** cluster or **serverless** instance — vector search indexes are not available on free-tier (M0) clusters. Vector and text search indexes are created automatically on first use.
+---
 
 ## Search modes
 
-- **Semantic** — Atlas Vector Search using the question's embedding (`$vectorSearch` aggregation)
-- **Keyword** — MongoDB full-text search using the question's text (`$text`)
+**Semantic** uses Atlas Vector Search against the question's embedding. The pipeline requests `limit x 10` candidates (`numCandidates`) and returns up to `limit` results (default 25). A non-zero offset is not supported and raises an error.
 
-## Upstream docs
+**Keyword** uses MongoDB full-text search against the question's text, sorted by text score, with offset/limit paging (default limit 25).
 
-- [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/vector-search-overview/)
+Raw scores are normalized to a `0-1` range before being returned. Cosine scores are mapped with `(score + 1) / 2`; other metrics pass through a sigmoid. Results that normalize below `0.20` are discarded regardless of the configured `score` threshold.
+
+---
+
+## Ingest behavior
+
+Before inserting, any existing documents whose `meta.objectId` matches an incoming top-level chunk (chunkId of 0) are deleted, so re-ingesting a document replaces it rather than duplicating it. Inserts are batched: a batch is flushed at 500 documents or when its accumulated size exceeds `payloadLimit`. Each stored document gets a generated UUID `_id` and carries `embedding`, `content`, and the chunk metadata under `meta`.
+
+Documents can be marked deleted or active in place via `meta.isDeleted`. Filters exclude deleted documents by default. The node can also reassemble a full document from its chunks in `chunkId` order and stream the text to the `renderData` lane.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `atlas.provider` | `string` |  | const: `"atlas"` |
+| `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io |  |
+| `vector.database` |  |  | `"rocketride_db"` |
+
+## Dependencies
+
+- `pymongo`
+- `dnspython`
+- `pydantic`
+- `urllib3`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/atlas)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

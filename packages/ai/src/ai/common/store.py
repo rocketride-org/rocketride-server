@@ -742,47 +742,6 @@ class VectorStoreToolMixin:
     #
     # Override ``_collect_tool_methods`` so that our bare Python method
     # names ``search``/``upsert``/``delete`` are exposed to the engine as
-    # namespaced tool names like ``pinecone.search``. The descriptor
-    # builder in ``IInstanceBase`` uses the dict key as the outbound
-    # ``descriptor['name']``, and the dispatcher looks up the inbound
-    # ``tool_name`` in the same dict — so namespacing both sides with one
-    # override is sufficient. We still delegate collection to ``super()``
-    # so that any further @tool_function methods added in subclasses are
-    # picked up (and namespaced) automatically.
-
-    def _collect_tool_methods(self) -> Dict[str, Callable]:
-        # Delegate to IInstanceBase (or any intermediate mixin) to discover
-        # all @tool_function methods via MRO walking. Fall back to a local
-        # walk when this mixin is instantiated outside an IInstance chain
-        # (e.g. in unit tests) so ``super()`` wouldn't resolve the method.
-        try:
-            collected = super()._collect_tool_methods()  # type: ignore[misc]
-        except AttributeError:
-            collected = {}
-            for attr_name in dir(type(self)):
-                attr = getattr(type(self), attr_name, None)
-                if attr is not None and hasattr(attr, '__tool_meta__'):
-                    collected[attr_name] = getattr(self, attr_name)
-
-        server = self._vectordb_server_name()
-
-        # Only namespace methods that actually live on VectorStoreToolMixin —
-        # other @tool_function methods a subclass defines should keep their
-        # own conventions unless the subclass explicitly opts in.
-        owned = set()
-        for attr_name in vars(VectorStoreToolMixin):
-            attr = getattr(VectorStoreToolMixin, attr_name, None)
-            if attr is not None and hasattr(attr, '__tool_meta__'):
-                owned.add(attr_name)
-
-        namespaced: Dict[str, Callable] = {}
-        for name, method in collected.items():
-            if name in owned:
-                namespaced[f'{server}.{name}'] = method
-            else:
-                namespaced[name] = method
-        return namespaced
-
     # --- Tool methods ------------------------------------------------------
 
     @tool_function(
@@ -1074,3 +1033,156 @@ class VectorStoreToolMixin:
 
         store.remove(clean_ids)
         return {'success': True, 'deleted_count': len(clean_ids)}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'parent': {
+                    'type': 'string',
+                    'description': 'Optional parent path filter. Only return paths under this parent.',
+                },
+                'offset': {
+                    'type': 'integer',
+                    'description': 'Number of results to skip (default 0).',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': 'Maximum number of results to return (default 1000).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'paths': {
+                    'type': 'object',
+                    'description': 'Map of unique parent paths to their object IDs.',
+                },
+                'success': {'type': 'boolean'},
+            },
+        },
+        description='List unique document paths stored in this vector database.',
+    )
+    def objdir(self, args):
+        """List unique document paths in this vector store."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        parent = args.get('parent', None)
+        try:
+            offset = int(args.get('offset', 0))
+            limit = int(args.get('limit', 1000))
+        except (TypeError, ValueError):
+            return {'success': False, 'error': 'offset and limit must be valid integers'}
+
+        paths = store.getPaths(parent=parent, offset=offset, limit=limit)
+        return {'success': True, 'paths': paths}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['object_id'],
+            'properties': {
+                'object_id': {
+                    'type': 'string',
+                    'description': 'The objectId of the document to retrieve.',
+                },
+                'offset': {
+                    'type': 'integer',
+                    'description': 'Number of chunks to skip (default 0).',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'description': 'Maximum number of chunks to return (default 100).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'chunks': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'content': {'type': 'string'},
+                            'chunkId': {'type': 'integer'},
+                            'metadata': {'type': 'object'},
+                        },
+                    },
+                },
+                'total': {'type': 'integer'},
+                'success': {'type': 'boolean'},
+            },
+        },
+        description='Retrieve document chunks by objectId from the vector database.',
+    )
+    def get(self, args):
+        """Retrieve document chunks by objectId."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        object_id = (args.get('object_id') or '').strip()
+        if not object_id:
+            return {'success': False, 'error': 'object_id is required'}
+
+        offset = int(args.get('offset', 0))
+        limit = int(args.get('limit', 100))
+
+        doc_filter = DocFilter(
+            objectIds=[object_id],
+            offset=offset,
+            limit=limit,
+            isDeleted=False,
+        )
+        docs = store.get(doc_filter)
+
+        chunks = [
+            {
+                'content': doc.page_content,
+                'chunkId': getattr(doc.metadata, 'chunkId', None)
+                if hasattr(doc.metadata, 'chunkId')
+                else doc.metadata.get('chunkId', 0)
+                if isinstance(doc.metadata, dict)
+                else 0,
+                'metadata': doc.metadata
+                if isinstance(doc.metadata, dict)
+                else vars(doc.metadata)
+                if hasattr(doc.metadata, '__dict__')
+                else {},
+            }
+            for doc in docs
+        ]
+
+        # Sort by chunkId for deterministic pagination order
+        chunks.sort(key=lambda c: c.get('chunkId', 0))
+
+        return {'success': True, 'chunks': chunks, 'total': len(chunks)}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {},
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'count': {'type': 'integer', 'description': 'Total number of documents.'},
+                'model': {'type': 'string', 'description': 'Embedding model name.'},
+                'vector_size': {'type': 'integer', 'description': 'Embedding vector dimension.'},
+                'success': {'type': 'boolean'},
+            },
+        },
+        description='Return statistics about this vector store collection.',
+    )
+    def stats(self, args):
+        """Return collection statistics for this vector store."""
+        store = self._vectordb_store()
+
+        return {
+            'success': True,
+            'count': store.count_documents(),
+            'model': store.modelName,
+            'vector_size': store.vectorSize,
+        }

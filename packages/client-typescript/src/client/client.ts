@@ -140,7 +140,7 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const base = response.message || 'Failed to open a data pipe.';
-			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
 			throw new PipeException({ ...response, message: msg });
 		}
 
@@ -255,6 +255,45 @@ export class DataPipe {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node using this pipe.
+	 *
+	 * The call reuses this pipe's existing pipeline instance, avoiding the
+	 * overhead of borrowing a new one from the pool.
+	 *
+	 * @param tool - Name of the @tool_function to invoke
+	 * @param nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                 tool-lane nodes; the first node that owns the tool handles it.
+	 * @param input - Arguments forwarded to the tool function
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the pipe is not open or no node handles the tool
+	 */
+	async tool<T = any>(tool: string, nodeId = '', input: Record<string, unknown> = {}): Promise<T> {
+		if (!this._opened) {
+			throw new Error('Pipe is not open');
+		}
+
+		const request = this._client.buildRequest('rrext_process', {
+			arguments: {
+				subcommand: 'tool',
+				tool,
+				nodeId,
+				input,
+				pipe_id: this._pipeId,
+			},
+			token: this._token,
+		});
+
+		const response = await this._client.request(request);
+
+		if (this._client.didFail(response)) {
+			const msg = response.message || `Tool "${tool}" invocation failed.`;
+			throw new Error(msg);
+		}
+
+		return (response.body as any)?.result as T;
 	}
 }
 
@@ -834,10 +873,10 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Returns the ID of the user's primary organization.
+	 * Returns the ID of the user's organization.
 	 */
 	getOrgId(): string | undefined {
-		return this._connectResult?.organizations?.[0]?.id;
+		return this._connectResult?.organization?.id;
 	}
 
 	/**
@@ -1457,8 +1496,9 @@ export class RocketRideClient extends DAPClient {
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;
 
-			// Create pipe instance
-			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
+			// Create pipe instance — no provider filter so chat() works with chat, webhook,
+			// and dropper sources. The rocketride-question MIME type routes to the 'questions' lane.
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', undefined, onSSE);
 
 			try {
 				// Open the communication channel to the AI
@@ -1728,6 +1768,41 @@ export class RocketRideClient extends DAPClient {
 		if (refCounts.size === 0) {
 			this._monitorKeys.delete(keyStr);
 		}
+	}
+
+	/**
+	 * Remove all monitor subscriptions from this client.
+	 *
+	 * Sends an empty types list for each active monitor key to unsubscribe
+	 * on the server, then clears the local ref-count map.  Called by the
+	 * shell when an app unmounts so the next app starts with a clean slate.
+	 */
+	async clearAllMonitors(): Promise<void> {
+		const emptyMap = new Map<string, number>();
+		for (const [keyStr] of this._monitorKeys) {
+			const key = this._monitorStringToKey(keyStr);
+			if (key) {
+				try {
+					await this._syncMonitor(key, emptyMap);
+				} catch {
+					// Best-effort — server may have already cleared
+				}
+			}
+		}
+		this._monitorKeys.clear();
+	}
+
+	/**
+	 * Update this connection's display name on the server.
+	 *
+	 * Useful when an app plugin loads and wants the server monitor to show
+	 * a more descriptive name (e.g. "Cloud Shell-UI — rocketride.pipeBuilder")
+	 * instead of the generic client name sent at auth time.
+	 *
+	 * @param clientName - The new display name for this connection.
+	 */
+	async identify(clientName: string): Promise<void> {
+		await this.call('rrext_identify', { clientName });
 	}
 
 	/**
@@ -2345,11 +2420,17 @@ export class RocketRideClient extends DAPClient {
 	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
 	 * @returns Object containing the tree root, total_time, and total_calls.
 	 */
-	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number): Promise<CProfileReportTreeResponse> {
+	async cprofileReportTree(
+		target?: string | null,
+		maxDepth?: number,
+		minPct?: number,
+		includeSystem?: boolean,
+	): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		if (maxDepth !== undefined) args.max_depth = maxDepth;
 		if (minPct !== undefined) args.min_pct = minPct;
+		if (includeSystem !== undefined) args.include_system = includeSystem;
 		return this.call<CProfileReportTreeResponse>('rrext_cprofile_report_tree', args);
 	}
 
@@ -2588,6 +2669,42 @@ export class RocketRideClient extends DAPClient {
 
 		// Unwrap the body envelope
 		return (response.body ?? response) as T;
+	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node.
+	 *
+	 * Sends a `tool` subcommand through the DAP data connection.  The server
+	 * borrows a pipeline instance from the pool, dispatches the tool call
+	 * through the control plane, and returns the result directly — no
+	 * Question, Answer, or SSE overhead.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access
+	 * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
+	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                         tool-lane nodes; the first node that owns the tool handles it.
+	 * @param options.input - Arguments forwarded to the tool function
+	 * @param options.timeout - Optional per-request timeout in ms
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the server signals failure or no node handles the requested tool
+	 */
+	async tool<T = any>(options: {
+		token: string;
+		tool: string;
+		nodeId?: string;
+		input?: Record<string, unknown>;
+		timeout?: number;
+	}): Promise<T> {
+		const result = await this.call<{ result: T }>('rrext_process', {
+			subcommand: 'tool',
+			tool: options.tool,
+			nodeId: options.nodeId ?? '',
+			input: options.input ?? {},
+		}, {
+			token: options.token,
+			timeout: options.timeout,
+		});
+		return result.result;
 	}
 }
 

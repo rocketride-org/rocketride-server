@@ -54,18 +54,16 @@ def _account_info(*, user_id='user-1', team_id='team-1'):
     return SimpleNamespace(
         userId=user_id,
         userToken='token-' + user_id,
-        organizations=[
-            {
-                'id': 'org-1',
-                'permissions': [],
-                'teams': [
-                    {
-                        'id': team_id,
-                        'permissions': ['task.monitor', 'task.data', 'task.control'],
-                    }
-                ],
-            }
-        ],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [
+                {
+                    'id': team_id,
+                    'permissions': ['task.monitor', 'task.data', 'task.control'],
+                }
+            ],
+        },
     )
 
 

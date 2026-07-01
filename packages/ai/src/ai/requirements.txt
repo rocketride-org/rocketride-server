@@ -9,3 +9,4 @@ psutil
 tenacity
 nvidia-ml-py
 croniter
+filetype

@@ -45,18 +45,14 @@ def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=Non
     return conn
 
 
-def _account_info(*, organizations=None, default_team='team-1'):
+def _account_info(*, organization=None, default_team='team-1'):
     """Build an AccountInfo stub."""
     return SimpleNamespace(
         userId='user-1',
         auth='ak_x',
         userToken='token-user-1',
         defaultTeam=default_team,
-        organizations=organizations
-        if organizations is not None
-        else [
-            {'id': 'org-1', 'teams': [{'id': 'team-1'}]},
-        ],
+        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': 'team-1'}]},
     )
 
 
@@ -112,7 +108,7 @@ async def test_on_launch_rejects_when_already_debugging():
 @pytest.mark.asyncio
 async def test_on_launch_rejects_when_default_team_not_in_any_org():
     """If the default team is not part of any org, PermissionError is raised."""
-    account = _account_info(organizations=[{'id': 'org-X', 'teams': [{'id': 'team-other'}]}])
+    account = _account_info(organization={'id': 'org-X', 'teams': [{'id': 'team-other'}]})
     conn = _make_conn(account_info=account)
     with pytest.raises(PermissionError, match='does not belong to any organisation'):
         await DebugCommands.on_launch(conn, {'arguments': {}})

@@ -191,6 +191,19 @@ function registerApp(appRoot) {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
 					readme = `/${APPS_BASE}/${dirName}/README.md`;
+
+					// Copy sibling assets/ directory if it exists (images referenced by the README)
+					const assetsSrc = path.join(path.dirname(readmeSrc), 'assets');
+					const assetsDst = path.join(buildDir, 'assets');
+					if (fs.existsSync(assetsSrc) && fs.statSync(assetsSrc).isDirectory()) {
+						fs.mkdirSync(assetsDst, { recursive: true });
+						for (const file of fs.readdirSync(assetsSrc)) {
+							const srcFile = path.join(assetsSrc, file);
+							if (fs.statSync(srcFile).isFile()) {
+								fs.copyFileSync(srcFile, path.join(assetsDst, file));
+							}
+						}
+					}
 				} catch {
 					task.output = `Warning: readme not found at ${appManifest.readme}`;
 				}
@@ -224,6 +237,12 @@ function registerApp(appRoot) {
 				...(appManifest.public === false ? { public: false } : {}),
 				// Include billing section (plans array) for seed_apps to provision Stripe products
 				...(appManifest.billing ? { billing: appManifest.billing } : {}),
+				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
+				...(Array.isArray(appManifest.requiredPermissions)
+					&& appManifest.requiredPermissions.length
+					&& appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
+					? { requiredPermissions: appManifest.requiredPermissions }
+					: {}),
 			};
 
 			// Upsert into build/apps.json (dev server publicDir)

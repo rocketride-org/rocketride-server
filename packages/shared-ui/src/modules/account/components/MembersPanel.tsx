@@ -114,6 +114,8 @@ export interface MembersPanelProps {
 	onChangeRole: (m: MemberRecord) => void;
 	/** Opens the remove/cancel-invite confirmation modal for the given member. */
 	onRemove: (m: MemberRecord) => void;
+	/** Resends the initialization email for a pending member. */
+	onResendInvite: (m: MemberRecord) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
 }
@@ -128,9 +130,11 @@ export interface MembersPanelProps {
  * Lists all organization members with their avatar, name, email, role badge,
  * and status. Includes a top search bar and a right-side A-Z letter selector.
  */
-export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profile, onInvite, onChangeRole, onRemove, isOrgAdmin }) => {
+export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profile, onInvite, onChangeRole, onRemove, onResendInvite, isOrgAdmin }) => {
 	const [search, setSearch] = useState('');
 	const [activeLetter, setActiveLetter] = useState<string | null>(null);
+	const [resendingUserId, setResendingUserId] = useState<string | null>(null);
+	const [resentUserId, setResentUserId] = useState<string | null>(null);
 
 	// Determine which letters have at least one matching member.
 	const availableLetters = useMemo(() => {
@@ -211,13 +215,35 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 									// Current user: show role badge only, no edit/remove.
 									<Badge variant={m.role === 'admin' ? 'admin' : 'member'}>{m.role}</Badge>
 								) : m.status === 'pending' ? (
-									// Pending invitation: show badge and cancel button (admin only).
+									// Pending invitation: show badge, resend, and cancel buttons (admin only).
 									<div style={S.rowActions}>
 										<Badge variant="pending">Pending</Badge>
 										{isOrgAdmin && (
-											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRemove(m)}>
-												Cancel
-											</button>
+											<>
+												{resentUserId === m.userId ? (
+													<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>Sent!</span>
+												) : (
+													<button
+														style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton, ...(resendingUserId === m.userId ? commonStyles.buttonDisabled : {}) } as CSSProperties}
+														disabled={resendingUserId === m.userId}
+														onClick={async () => {
+															setResendingUserId(m.userId);
+															try {
+																await onResendInvite(m);
+																setResentUserId(m.userId);
+																setTimeout(() => setResentUserId(null), 3000);
+															} finally {
+																setResendingUserId(null);
+															}
+														}}
+													>
+														{resendingUserId === m.userId ? 'Sending...' : 'Resend'}
+													</button>
+												)}
+												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onRemove(m)}>
+													Cancel
+												</button>
+											</>
 										)}
 									</div>
 								) : (

@@ -24,7 +24,7 @@ endif()
 # Triplet: use value from cache (set by toolchain or by caller), or detect from platform
 if(NOT DEFINED VCPKG_TARGET_TRIPLET OR VCPKG_TARGET_TRIPLET STREQUAL "")
     if(WIN32)
-        set(VCPKG_TARGET_TRIPLET "x64-windows-vc-rocketride" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "x64-windows-msvc-rocketride" CACHE STRING "" FORCE)
     elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
         if(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64)$")
             set(VCPKG_TARGET_TRIPLET "arm64-osx-appleclang-rocketride" CACHE STRING "" FORCE)
@@ -47,11 +47,11 @@ else()
     message(FATAL_ERROR "Failed to find vcpkg installed directory")
 endif()
 
-# Include triplet for compiler/flags (ROCKETRIDE_* definitions)
-set(TRIPLET_PATH "${CMAKE_CURRENT_LIST_DIR}/triplets/${VCPKG_TARGET_TRIPLET}.cmake")
-include(${TRIPLET_PATH} RESULT_VARIABLE RES)
+# Include compiler flags
+set(FLAGS_PATH "${CMAKE_CURRENT_LIST_DIR}/flags/${VCPKG_TARGET_TRIPLET}.cmake")
+include(${FLAGS_PATH} RESULT_VARIABLE RES)
 if(RES STREQUAL "NOTFOUND")
-    message(FATAL_ERROR "Failed to include triplet: ${TRIPLET_PATH}")
+    message(FATAL_ERROR "Failed to include flags: ${FLAGS_PATH}")
 endif()
 
 # Binary cache

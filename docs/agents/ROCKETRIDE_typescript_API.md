@@ -389,7 +389,7 @@ Check if the client is currently connected to the server.
 
 #### Auth & Connection Lifecycle
 
-Lower-level lifecycle primitives that `connect()`/`disconnect()` build on: open a transport, authenticate, and tear down independently. `connect()` itself is the high-level convenience — it attaches and logs in for you, and its `credential` may be either an API key/token string or an OAuth PKCE object `{ code, verifier, redirectUri }`.
+Lower-level lifecycle primitives that `connect()`/`disconnect()` build on: open a transport, authenticate, and tear down independently. `connect()` itself is the high-level convenience: it attaches and logs in for you, and its `credential` may be either an API key/token string or an OAuth PKCE object `{ code, verifier, redirectUri }`.
 
 ##### `attach(uri?: string, options?: { timeout?: number }): Promise<void>`
 
@@ -407,7 +407,7 @@ Deauthenticate (sends `deauth`) and clear client auth state. The transport stays
 
 Close the WebSocket transport entirely.
 
-**Example — manual attach/login/logout/detach:**
+**Example: manual attach/login/logout/detach:**
 
 ```typescript
 const client = new RocketRideClient({ uri: 'https://api.rocketride.ai' });
@@ -447,7 +447,7 @@ Get the current status of a running pipeline.
 
 ##### `validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult>`
 
-Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Returns a `ValidationResult` with `errors` and `warnings` arrays (plus any extra engine fields). A pipeline will not execute while it has `errors`; `warnings` are non-fatal.
+Validate a pipeline configuration without starting it: a pre-flight check before `use()`. Returns a `ValidationResult` with `errors` and `warnings` arrays (plus any extra engine fields). A pipeline will not execute while it has `errors`; `warnings` are non-fatal.
 
 ```typescript
 const result = await client.validate({ pipeline });
@@ -476,7 +476,7 @@ const token = await client.getTaskToken({ projectId: 'proj-123', source: 'input'
 
 ##### `getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>`
 
-Return the unresolved pipeline configuration for a running task. The pipeline is returned exactly as stored — `${ROCKETRIDE_*}` placeholders are **not** substituted, so no secrets are included. Returns `undefined` if the task is not found.
+Return the unresolved pipeline configuration for a running task. The pipeline is returned exactly as stored: `${ROCKETRIDE_*}` placeholders are **not** substituted, so no secrets are included. Returns `undefined` if the task is not found.
 
 ```typescript
 const pipeline = await client.getTaskPipeline(token);
@@ -526,7 +526,7 @@ It is the last positional parameter on `pipe()` and `send()`, and a field on the
 - `pipe(token, objinfo?, mimeType?, provider?, onSSE?)`
 - `chat({ token, question, onSSE? })`
 
-**Example — stream a chat answer:**
+**Example: stream a chat answer:**
 
 ```typescript
 const response = await client.chat({
@@ -618,7 +618,7 @@ Question builder for AI chat operations.
 
 #### Methods
 
-> The `add*` builder methods mutate the `Question` in place and return `void` — they do **not** support chaining (e.g. `q.addQuestion(...).addContext(...)` will not compile).
+> The `add*` builder methods mutate the `Question` in place and return `void`: they do **not** support chaining (e.g. `q.addQuestion(...).addContext(...)` will not compile).
 
 ##### `addQuestion(text: string): void`
 
@@ -1058,8 +1058,8 @@ import {
 
 **Which methods throw what:**
 
-- `AuthenticationException` — thrown by `login()` (and therefore `connect()`) on auth failure. In persist mode the client catches it, calls `onConnectError`, and does **not** retry, so the app can fix credentials and reconnect.
-- `ConnectionException` — `attach()`/`connect()` transport failures; also delivered to the `onConnectError` constructor callback (whose argument is typed `ConnectionException`).
+- `AuthenticationException`: thrown by `login()` (and therefore `connect()`) on auth failure. In persist mode the client catches it, calls `onConnectError`, and does **not** retry, so the app can fix credentials and reconnect.
+- `ConnectionException`: `attach()`/`connect()` transport failures; also delivered to the `onConnectError` constructor callback (whose argument is typed `ConnectionException`).
 
 Catch the most specific type first, then fall back to a broader one:
 

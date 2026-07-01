@@ -1,0 +1,227 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Mem0",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_mem0://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.tool_mem0",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
+	"prefix": "mem0",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "mem0.svg",
+	"documentation": "https://docs.mem0.ai",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
+	"description": ["Long-term, shared agent memory exposed as tools, backed by the hosted Mem0 Platform.", "Exposes two agent tools: 'remember' stores conversation turns and 'recall' returns the relevant memories. Set your API key and a user id and it works; point several agents at the same project (and ids) to share one memory."],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
+	"tile": ["User: ${parameters.mem0.user_id}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Mem0",
+				"api_key": "",
+				"user_id": "",
+				"show_advanced": false,
+				"base_url": "https://api.mem0.ai",
+				"agent_id": "",
+				"run_id": "",
+				"app_id": "",
+				"infer": true,
+				"wait": true,
+				"ingest_timeout": 30,
+				"search_limit": 10
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		Only api_key is required; the rest are optional and revealed by the
+	//		"Advanced settings" toggle. "secure: true" fields are encrypted at rest
+	//		and masked in the UI.
+	//
+	"fields": {
+		"mem0.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Mem0 Platform API key (m0-...). Get it from the <b>Mem0 dashboard</b>: <a href='https://app.mem0.ai' target='_blank'>app.mem0.ai</a> → API Keys.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"mem0.user_id": {
+			"type": "string",
+			"optional": true,
+			"title": "User id",
+			"description": "Who this memory belongs to (used to store and recall). Can be passed by the agent per call. At least one scope (user id, or an advanced agent/run/app id) is required.",
+			"default": ""
+		},
+		// Toggle: when on, reveals the advanced fields listed in `conditional`.
+		"mem0.show_advanced": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Advanced settings",
+			"description": "Show advanced options. The defaults work for most cases, leave off for a simple setup.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["mem0.base_url", "mem0.agent_id", "mem0.run_id", "mem0.app_id", "mem0.infer", "mem0.wait", "mem0.ingest_timeout", "mem0.search_limit"]
+				}
+			]
+		},
+		// --- Advanced fields (hidden unless "Advanced settings" is on) ---
+		"mem0.base_url": {
+			"type": "string",
+			"optional": true,
+			"title": "Base URL",
+			"description": "Mem0 REST API base URL. Defaults to the hosted endpoint; override for self-hosted / enterprise deployments.",
+			"default": "https://api.mem0.ai"
+		},
+		"mem0.agent_id": {
+			"type": "string",
+			"optional": true,
+			"title": "Agent id",
+			"description": "Optional agent scope. Caution: on the hosted Mem0 platform an agent_id is not reliably stored on the memory but still narrows recall, so setting it can make recalls come back empty. Prefer scoping by user id; leave this empty unless you have verified it works.",
+			"default": ""
+		},
+		"mem0.run_id": {
+			"type": "string",
+			"optional": true,
+			"title": "Run id",
+			"description": "Optional session/run scope stamped on stored memories and used to narrow recall. Can be passed by the agent per call.",
+			"default": ""
+		},
+		"mem0.app_id": {
+			"type": "string",
+			"optional": true,
+			"title": "App id",
+			"description": "Optional app scope. Same caveat as Agent id: it narrows recall but is not reliably stored on the hosted platform, so setting it can hide memories. Prefer scoping by user id.",
+			"default": ""
+		},
+		"mem0.infer": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Infer memories",
+			"description": "When on (default), Mem0 runs LLM extraction to derive salient facts from the turns. When off, the raw messages are stored verbatim.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"mem0.wait": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Synchronous store",
+			"description": "When on (default), 'remember' polls Mem0 until background extraction finishes, so a following 'recall' can see the new memory. When off, 'remember' returns immediately and extraction runs in the background.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"mem0.ingest_timeout": {
+			"type": "integer",
+			"optional": true,
+			"title": "Store timeout (s)",
+			"description": "Max seconds 'remember' waits/polls for background extraction to finish before returning a 'queued' result.",
+			"default": 30,
+			"minimum": 1,
+			"maximum": 120
+		},
+		"mem0.search_limit": {
+			"type": "integer",
+			"optional": true,
+			"title": "Recall limit",
+			"description": "Maximum number of memory rows to retrieve per recall.",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 100
+		}
+	},
+	//
+	// Optional:
+	//		Test configuration for automated node testing. Credentials are
+	//		placeholders: config validation is tested here, not live API calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Mem0",
+			"properties": ["type", "mem0.api_key", "mem0.user_id", "mem0.show_advanced"]
+		}
+	]
+}

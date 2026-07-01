@@ -129,7 +129,7 @@
 			"type": "boolean",
 			"title": "Use TLS",
 			"default": false,
-			"description": "Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific — MySQL/PostgreSQL nodes do not expose this."
+			"description": "Connect over TLS. Required for managed services such as ClickHouse Cloud (native TLS port 9440 is assumed when the host has no explicit port). Leave OFF for a plaintext local server on port 9000. ClickHouse-specific, MySQL/PostgreSQL nodes do not expose this."
 		},
 		"clickhouse.table": {
 			"type": "string",
@@ -141,7 +141,7 @@
 			"type": "string",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

@@ -45,6 +45,7 @@ import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
+import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import type { ShellConfig } from '../../workspace/types';
 import { commonStyles } from 'shared/themes/styles';
@@ -218,11 +219,26 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
 	const authGateTriggeredRef = useRef<string | null>(null);
+	const prevIdentityRef = useRef(identity);
+	const suppressGateRef = useRef(false);
 
 	useEffect(() => {
+		// Detect a logout transition (had an identity, now none). On logout the
+		// shell switches the active app back to home via shell:switchApp, but that
+		// event is delivered on a microtask, so the workspace's activeAppId flips a
+		// tick AFTER identity clears. During that gap the check below would see
+		// "no identity + auth-required app still active" and fire shell:loginRequest
+		// → startOAuth, bouncing a signing-out user to the Zitadel login screen
+		// instead of leaving them on the logged-out home. Suppress the gate from the
+		// moment identity drops until the active app settles back on the default.
+		const wasLoggedIn = !!prevIdentityRef.current;
+		prevIdentityRef.current = identity;
+		if (wasLoggedIn && !identity) suppressGateRef.current = true;
+		if (identity || activeAppId === defaultAppId) suppressGateRef.current = false;
+
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
-		if (!identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		if (!suppressGateRef.current && !identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
 			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
@@ -256,7 +272,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Derived layout info -------------------------------------------------
 	const hasSidebar = !!activeApp?.components?.Sidebar;
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
-	const showStatusBar = activeManifest?.showStatusBar !== false;
+	// Only show the status bar once the app has actually loaded. During the app-load gap the
+	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
+	// blink in and then get covered by home-ui's AuthTransitionPage overlay — a one-frame
+	// "flash" between the otherwise-identical loading/transition screens.
+	const showStatusBar = activeManifest?.showStatusBar !== false && !!activeApp?.components?.App;
 
 	// --- Render --------------------------------------------------------------
 	return (
@@ -277,9 +297,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
 					<div style={styles.clientArea}>
-						{subGateActive ? (
-							<div style={styles.appLoading}>Subscription required</div>
-						) : activeApp?.components?.App ? (
+						{activeApp?.components?.App ? (
 							<AppErrorBoundary key={activeAppId} appName={appName}>
 								<activeApp.components.App
 									isConnected={isConnected}
@@ -297,7 +315,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 								</button>
 							</div>
 						) : appLoading || !activeApp ? (
-							<div style={styles.appLoading}>Loading...</div>
+							// Same bobbing rocket as the boot LoadingScreen and home-ui's
+							// AuthTransitionPage (all phase-anchored) so the post-login
+							// boot → app-load → transition handoff is one continuous animation
+							// with no "Loading…" text frame flashing between them.
+							<LoadingScreen />
 						) : null}
 					</div>
 				</div>

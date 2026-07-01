@@ -298,7 +298,7 @@ async def test_broadcast_server_event_calls_each_connection():
     await TaskServer.broadcast_server_event(ts, type='etype', event=payload, user_id='user-1')
 
     for conn in (a, b, c):
-        conn.send_server_event.assert_awaited_once_with('etype', event=payload, user_id='user-1')
+        conn.send_server_event.assert_awaited_once_with('etype', event=payload, user_id='user-1', org_id=None)
 
 
 @pytest.mark.asyncio
@@ -628,3 +628,28 @@ async def test_push_account_update_swallows_send_errors(monkeypatch):
     await TaskServer.push_account_update(ts, 'u1')
     target.send_event.assert_not_awaited()
     ts.debug_message.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_task_account_info — pk_/tk_ permission resolution
+# ---------------------------------------------------------------------------
+
+
+def test_build_task_account_info_populates_organization():
+    """The synthesized account for pk_/tk_ auth must carry a populated
+    ``organization`` so team permissions resolve. Regression: a plural
+    ``organizations=`` value was silently dropped by pydantic, leaving
+    ``organization`` None and breaking the chat SSE subscribe with
+    'Access denied: no permissions for this task'.
+    """
+    from ai.account.models import resolve_task_permissions
+
+    ts = _make_server()
+    control = SimpleNamespace(userId='user-1', teamId='team-1', orgId='org-1')
+
+    info = ts._build_task_account_info('pk_abc', control, ['task.data'])
+
+    assert info.organization is not None
+    # The task's own team is present with the granted permissions, so a pk_
+    # subscriber resolves to a non-empty permission list for its own task.
+    assert resolve_task_permissions(info, 'team-1') == ['task.data']

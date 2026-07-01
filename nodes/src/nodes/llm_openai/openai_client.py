@@ -29,13 +29,17 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from langchain_openai import ChatOpenAI
-from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
+from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
 
 class Chat(ChatBase):
     """
     Create an OpenAI chat bot.
     """
+
+    # Reasoning-capable models route through the OpenAI Responses API so we can
+    # stream the reasoning summary as well as the answer.
+    SUPPORTS_REASONING_STREAMING = True
 
     _llm: ChatOpenAI
 
@@ -51,9 +55,25 @@ class Chat(ChatBase):
 
         # Get the api key, don't save it
         apikey = config.get('apikey')
+        self._apikey = apikey
 
-        # Get the llm
-        self._llm = ChatOpenAI(model=self._model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
+        # Reasoning models stream via the Responses API + max_completion_tokens.
+        if self._is_reasoning:
+            # Raw client for the Responses API path (reasoning models).
+            self._raw_client = OpenAI(api_key=apikey)
+            self._llm = ChatOpenAI(
+                model=self._model,
+                api_key=apikey,
+                model_kwargs={'max_completion_tokens': self._modelOutputTokens},
+            )
+        else:
+            self._raw_client = None
+            self._llm = ChatOpenAI(
+                model=self._model,
+                api_key=apikey,
+                temperature=0,
+                max_tokens=self._modelOutputTokens,
+            )
 
         # Save our chat class into the bag
         bag['chat'] = self
