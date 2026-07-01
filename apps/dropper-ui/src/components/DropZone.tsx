@@ -163,7 +163,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
 							<button
 								type="button"
 								className="browse-files-btn"
-								onClick={(e) => { e.stopPropagation(); onBrowse(); }}
+								onClick={(e) => { e.stopPropagation(); openFilePicker(); }}
 							>
 								Browse files
 							</button>
