@@ -21,7 +21,7 @@ Uses `ai.common.models.SentenceTransformer` (the same local loader as `embedding
 
 The node sits on both the `questions` and `answers` lanes, around an LLM:
 
-```
+```text
 ... → cache → llm → cache → response
 ```
 

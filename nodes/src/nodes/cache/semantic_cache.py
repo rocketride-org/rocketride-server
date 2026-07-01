@@ -122,7 +122,9 @@ class SemanticCache:
         if self.ttl_seconds <= 0:
             return
         cutoff = now - self.ttl_seconds
-        expired = [key for key, entry in self._entries.items() if entry.created_at < cutoff]
+        # Expire at the boundary too: an entry created at t=0 with ttl=10 is
+        # considered stale at exactly t=10 (age == ttl), not only past it.
+        expired = [key for key, entry in self._entries.items() if entry.created_at <= cutoff]
         for key in expired:
             del self._entries[key]
 

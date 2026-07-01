@@ -19,7 +19,7 @@ cache logic is unit-testable without the C++ engine or a downloaded model.
 
 Wire it on both lanes around an LLM (same shape as `memory_persistent`):
 
-```
+```text
 ... → cache → llm → cache → response
 ```
 
@@ -39,6 +39,7 @@ context correctly produces a miss.
 Run: `pytest nodes/test/cache/`
 
 ### `nodes/test/cache/test_semantic_cache.py` (18) — pure cache core
+
 exact hit + counters · similar-above-threshold hit · below-threshold miss ·
 empty-cache miss · zero-vector add rejected · empty-answer rejected · zero-query
 miss · TTL expiry · TTL-zero never expires · LRU eviction by size · LRU hit
@@ -47,6 +48,7 @@ threshold clamped to [0,1] · mixed hit-rate · clear keeps counters · most-sim
 entry wins · **8-thread concurrent add/lookup safety**.
 
 ### `nodes/test/cache/test_cache_instance.py` (8) — real IInstance/IGlobal
+
 miss→store→hit-skips-LLM full cycle · dissimilar question misses & forwards ·
 empty question passthrough (not embedded) · passthrough when uninitialised · hit
 leaves no `_pending` (no double-store) · context change → different key · CONFIG

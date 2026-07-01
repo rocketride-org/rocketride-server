@@ -87,6 +87,14 @@ def test_ttl_zero_never_expires():
     assert c.lookup([1.0, 0.0], now=10_000_000.0) == 'a'
 
 
+def test_ttl_expires_exactly_at_boundary():
+    c = SemanticCache(threshold=0.9, ttl_seconds=10.0)
+    c.add([1.0, 0.0], 'q', 'a', now=0.0)
+    assert c.lookup([1.0, 0.0], now=9.999) == 'a'  # just before boundary -> hit
+    c.add([1.0, 0.0], 'q', 'a', now=0.0)
+    assert c.lookup([1.0, 0.0], now=10.0) is None  # age == ttl -> expired
+
+
 def test_lru_eviction_by_size():
     c = SemanticCache(threshold=0.5, max_entries=2)
     c.add([1.0, 0.0, 0.0], 'qA', 'A', now=0.0)
