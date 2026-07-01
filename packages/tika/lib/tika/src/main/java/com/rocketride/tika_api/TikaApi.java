@@ -69,6 +69,11 @@ public final class TikaApi {
 	public static final String MIME_TYPE_VIDEO = "video/";
 	public static final String MIME_TYPE_EMAIL = "message/rfc822";
 
+	// The native input stream can only rewind within an 8 MB buffer
+	// (NativeInputStream). Larger inputs are spooled to a temp file so type
+	// detection and parsing can seek freely (e.g. archives read to their end).
+	private static final long NATIVE_STREAM_REWIND_LIMIT = 8L * 1024 * 1024;
+
 
 	/**
 	 * <not supported>
@@ -406,6 +411,16 @@ public final class TikaApi {
 		}
 		
 		try {
+			// Inputs larger than the native rewind buffer must be spooled to a temp
+			// file first, so type detection and parsing can seek back over the whole
+			// stream (archives read their central directory at the end). Small inputs
+			// stay on the in-memory native buffer. Unknown size (<= 0) -> spool to be safe.
+			String contentLength = metadata.get(Metadata.CONTENT_LENGTH);
+			long size = contentLength != null ? Long.parseLong(contentLength) : -1;
+			if (size < 0 || size > NATIVE_STREAM_REWIND_LIMIT) {
+				stream.getPath();
+			}
+
 			// Detect the media type
 			Detector detector = parser.getDetector();
 			MediaType mediaType = detector.detect(stream, metadata);
