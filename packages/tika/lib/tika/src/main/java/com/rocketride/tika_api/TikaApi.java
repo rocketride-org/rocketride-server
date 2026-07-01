@@ -441,22 +441,27 @@ public final class TikaApi {
 				// Wrap with duplicator to safely reuse the stream
 				Util.StreamDuplicator duplicator = new Util.StreamDuplicator(stream);
 				logger.log(Level.INFO, "Buffered stream size: " + duplicator.size());
-				
-				long bytesBefore = duplicator.getParserStream().available();
 
-				logger.log(Level.INFO, "Bytes available BEFORE parser.parse(): " + bytesBefore);
-				logger.log(Level.INFO, "\nInvoke parse() method (standalone " + mimeType + " type)\n");
+				// Best-effort metadata: a parser failure here must not skip the media
+				// streaming below (else standalone media yields no frames).
+				try {
+					long bytesBefore = duplicator.getParserStream().available();
 
-				// Perform metadata extraction
-				parser.parse(duplicator.getParserStream(), filter, metadata, context);
+					logger.log(Level.INFO, "Bytes available BEFORE parser.parse(): " + bytesBefore);
+					logger.log(Level.INFO, "\nInvoke parse() method (standalone " + mimeType + " type)\n");
 
-				long bytesAfter = duplicator.getParserStream().available();
-				logger.log(Level.INFO, "Bytes available AFTER parser.parse(): " + bytesAfter);
-				
-				// Send media stream to native layer
+					parser.parse(duplicator.getParserStream(), filter, metadata, context);
+
+					long bytesAfter = duplicator.getParserStream().available();
+					logger.log(Level.INFO, "Bytes available AFTER parser.parse(): " + bytesAfter);
+				} catch (Exception e) {
+					logger.log(Level.WARNING, "Metadata extraction failed for standalone " + mimeType
+							+ " (continuing to stream media): " + e.getMessage());
+				}
+
 				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
 				extractor.processEmbeddedMediaStream(duplicator.getBinaryStream(), mimeType);
-				
+
 			} else {
 				// Configure the parse context and encoding config
 				context.set(Parser.class, parser);
