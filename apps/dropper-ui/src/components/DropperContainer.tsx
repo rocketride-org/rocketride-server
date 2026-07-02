@@ -252,17 +252,6 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	}, [addFiles, isConnected]);
 
 	/**
-	 * Opens VS Code's native file dialog via the extension host.
-	 * Primary upload method for Cursor on macOS where drag-and-drop
-	 * is intercepted by the Cocoa layer before reaching the webview.
-	 */
-	const isVSCode = window.parent !== window;
-	const requestNativeFileDialog = useCallback(() => {
-		if (!isVSCode) return;
-		window.parent.postMessage({ type: 'requestFileDialog' }, '*');
-	}, [isVSCode]);
-
-	/**
 	 * Clears all uploaded files and resets state
 	 * Returns to default results tab and disables compare mode
 	 */
@@ -318,7 +307,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 								onDragLeave={handleDragLeave}
 								onDrop={handleDrop}
 								disabled={!isConnected}
-								onBrowse={isVSCode ? requestNativeFileDialog : undefined}
+								showBrowseButton={window.parent !== window}
 							/>
 
 							{/* List of uploaded files */}
