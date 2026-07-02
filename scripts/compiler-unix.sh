@@ -35,6 +35,7 @@ command_exists() {
 # Setup the global required packages
 REQUIRES=()
 COMMANDS=()
+FEDORA_REQUIRES=()
 
 # =============================================================================
 # Linux Distribution Detection
@@ -209,6 +210,141 @@ select_linux_triplet() {
     fi
 
     TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+}
+
+# =============================================================================
+# Fedora / RHEL-family (dnf) support
+# =============================================================================
+# Kept as a SEPARATE path from the Debian/Ubuntu (apt) code above so the
+# existing apt flow stays byte-for-byte unchanged. Fedora ships an
+# UNVERSIONED clang (`clang`, not `clang-18`) and its libc++ stack is
+# `libcxx`/`libcxx-devel` — so the versioned apt logic does not map here.
+
+select_fedora_triplet() {
+    # Detect a usable clang; Fedora's default is recent and unversioned.
+    INSTALLED_CLANG=$(detect_installed_clang) || true
+
+    # x64 triplet only: arm64-linux is a local-only override, not part of
+    # the Fedora support feature.
+    TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+    export CC=clang
+    export CXX=clang++
+
+    if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
+        CLANG_VERSION="$INSTALLED_CLANG"
+        echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
+        rpm -q --whatprovides libcxx-devel    >/dev/null 2>&1 || FEDORA_REQUIRES+=("libcxx-devel")
+        rpm -q --whatprovides libcxxabi-devel >/dev/null 2>&1 || FEDORA_REQUIRES+=("libcxxabi-devel")
+        rpm -q --whatprovides lld             >/dev/null 2>&1 || FEDORA_REQUIRES+=("lld")
+    else
+        echo "✗ Compiler: clang not found or too old (requires clang 12+)"
+        echo "→ Will install clang (Fedora unversioned)"
+        FEDORA_REQUIRES+=("clang" "lld" "libcxx-devel" "libcxxabi-devel")
+    fi
+
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+}
+
+check_fedora_dependencies() {
+    # dnf package names. Comments map each back to the apt name used by the
+    # Debian path so the two lists stay auditable side by side.
+    local FEDORA_PKGS=(
+        sudo
+        curl
+        wget
+        dos2unix
+        ca-certificates
+        gnupg2               # gnupg
+        python3
+        python3-pip
+        python3-devel        # needed by cffi/cryptography/Cython sdist builds
+        make
+        ninja-build
+        cmake
+        git
+        gcc                  # sdist C extensions
+        gcc-c++              # sdist C++ extensions
+        perl-core            # vcpkg openssl Configure needs core Perl modules (IPC::Cmd, FindBin, ...); Fedora modularizes them (all in perl base on Debian)
+        autoconf
+        autoconf-archive
+        automake
+        libtool
+        zip
+        unzip
+        libuuid-devel        # uuid-dev
+        pkgconf-pkg-config   # pkg-config
+        libffi-devel         # libffi-dev
+        openssl-devel        # libssl-dev
+        kernel-headers       # linux-libc-dev: vcpkg openssl needs <linux/*>/<asm/*> headers
+        sqlite-devel         # libsqlite3-dev
+        bzip2-devel          # libbz2-dev
+        readline-devel       # libreadline-dev
+        expat-devel          # libexpat1-dev
+        ncurses-devel        # libncurses-dev
+        gdbm-devel           # libgdbm-dev
+        libdb-devel          # libdb-dev
+        xz-devel             # liblzma-dev
+        xmlsec1-devel        # libxmlsec1-dev
+        xmlsec1-openssl-devel
+        zlib-devel           # zlib1g-dev
+        python3-build        # python3-build
+        python3-wheel        # python3-wheel
+        # Runtime .so libs the prebuilt/compiled engine links against.
+        libcxx               # libc++1
+        libcxxabi            # libc++abi1
+        llvm-libunwind       # libunwind (clang/libc++ unwinder, packaged by tasks.js)
+        libgomp              # libgomp1
+        mesa-libGLES         # libgles2   (libGLESv2.so.2, MediaPipe dlopen)
+        libglvnd-egl         # libegl1    (libEGL.so.1)
+    )
+    # Compiler packages resolved by select_fedora_triplet().
+    FEDORA_PKGS+=("${FEDORA_REQUIRES[@]}")
+
+    local MISSING=()
+    local p
+    for p in "${FEDORA_PKGS[@]}"; do
+        # --whatprovides resolves virtual provides: on Fedora 41 wget is
+        # wget2-wget, zlib-devel is zlib-ng-compat-devel, mesa-libGLES is
+        # libglvnd-gles. Plain `rpm -q <name>` would false-negative on those
+        # and re-trigger installs / abort the builder's check pass.
+        if rpm -q --whatprovides "$p" >/dev/null 2>&1; then
+            echo "✓ $p"
+        else
+            echo "✗ $p"
+            MISSING+=("$p")
+        fi
+    done
+
+    if [ ${#MISSING[@]} -ne 0 ]; then
+        if [ "$AUTOINSTALL" == "1" ]; then
+            echo "Auto-installing missing dependencies with dnf..."
+            $SUDO dnf install -y "${MISSING[@]}"
+            echo ""
+            echo "Dependencies installed successfully."
+            echo ""
+        else
+            echo "=========================================="
+            echo "ERROR: Missing required dependencies - install with:"
+            echo ""
+            echo "    $SUDO dnf install -y ${MISSING[*]}"
+            echo ""
+            echo "Or run with --autoinstall to install them automatically:"
+            echo "  ./scripts/compiler-unix.sh --autoinstall"
+            echo "=========================================="
+            exit 1
+        fi
+    fi
+
+    # vcpkg's linux toolchain (detect_compiler) compiles via cc/c++, but the
+    # rocketride triplet passes clang-only flags (-stdlib=libc++). On Fedora
+    # cc/c++ point at gcc, which rejects them ("unrecognized option
+    # -stdlib=libc++"). Point cc/c++ at clang via /usr/local/bin (ahead of
+    # /usr/bin in PATH). Debian does the equivalent through update-alternatives.
+    if [ "$AUTOINSTALL" == "1" ] && command_exists clang && command_exists clang++; then
+        $SUDO ln -sf "$(command -v clang)" /usr/local/bin/cc
+        $SUDO ln -sf "$(command -v clang++)" /usr/local/bin/c++
+        echo "✓ cc/c++ -> clang (/usr/local/bin)"
+    fi
 }
 
 select_macos_triplet() {
@@ -679,9 +815,20 @@ done
 echo "Checking build prerequisites..."
 echo ""
 
-if [[ "$OSTYPE" == "linux-gnu" ]]; then
-    select_linux_triplet
-    check_linux_dependencies
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Branch by package manager. Fedora / RHEL-family use dnf+rpm; everything
+    # else stays on the original apt+dpkg path (unchanged).
+    detect_linux_distro
+    case "$DISTRO" in
+        fedora|rhel|centos|rocky|almalinux)
+            select_fedora_triplet
+            check_fedora_dependencies
+            ;;
+        *)
+            select_linux_triplet
+            check_linux_dependencies
+            ;;
+    esac
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     select_macos_triplet
     check_mac_dependencies
