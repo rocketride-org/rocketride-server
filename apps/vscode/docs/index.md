@@ -50,7 +50,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Connection manager** - Connect to a local engine (one click, no setup) or your own on-premises server.
 - **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
-Need inspiration? Check out our [example pipelines](https://github.com/rocketride-org/rocketride-server/tree/develop/examples):
+Need inspiration? Check out our [example pipelines](https://github.com/rocketride-org/awesome-rocketride):
 
 - [RAG Pipeline](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/rag-pipeline.pipe)
 - [Document Processor](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/document-processor.pipe)
