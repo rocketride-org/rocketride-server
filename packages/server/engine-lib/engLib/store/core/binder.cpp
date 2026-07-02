@@ -343,6 +343,63 @@ Error Binder::writeJson(const json::Value &jsonData) noexcept {
 }
 
 /**
+ * @brief Kill-switch for the media stream-descriptor auto-attach.
+ *
+ * Default ON; set ROCKETRIDE_STREAM_DESCRIPTOR=0|false|off to disable the hook
+ * without a rebuild if a consumer misbehaves. Read once (thread-safe static).
+ */
+static bool isStreamDescriptorEnabled() noexcept {
+    static const bool enabled = [] {
+        const char *v = std::getenv("ROCKETRIDE_STREAM_DESCRIPTOR");
+        if (!v) return true;
+        return !(std::strcmp(v, "0") == 0 || std::strcmp(v, "false") == 0 ||
+                 std::strcmp(v, "off") == 0);
+    }();
+    return enabled;
+}
+
+/**
+ * @brief Builds the media BEGIN payload carrying the stream descriptor.
+ *
+ * Producer side of the descriptor wire contract (consumer: descriptor_from_payload()
+ * in ai/common/avi/descriptor.py; see stream_descriptor.hpp). Fault-tolerant: on any
+ * failure or missing currentEntry it returns the original streamData, so the media
+ * flow is never broken. Holds the GIL and runs only on BEGIN, not the hot WRITE path.
+ *
+ * @param streamIndexCounter The per-object index for this lane.
+ * @param streamData The original BEGIN payload (empty, or a partial enrichment JSON).
+ * @return The descriptor bytes, or streamData on failure.
+ */
+static pybind11::bytes buildBeginPayload(IServiceFilterInstance *pInstance,
+                                         const char *streamType, Text &mimeType,
+                                         uint32_t &streamIndexCounter,
+                                         const pybind11::bytes &streamData) {
+    engine::python::LockPython lock;
+    try {
+        if (!pInstance || !pInstance->currentEntry) return streamData;
+
+        // nodeId matches the Python side (jobConfig["nodeId"]).
+        Text nodeId = pInstance->endpoint->config.jobConfig.text("nodeId");
+        uint32_t idx = streamIndexCounter++;
+
+        // A non-empty payload is partial enrichment to merge.
+        json::Value enrich;
+        if (PyBytes_GET_SIZE(streamData.ptr()) > 0) {
+            std::string in = streamData;
+            enrich.parse(in);  // best-effort; a bad payload just skips enrichment
+        }
+
+        json::Value desc = buildStreamDescriptor(
+            *pInstance->currentEntry, streamType, mimeType, nodeId, idx, enrich);
+        Text jsonStr = desc.stringify(false);
+        return pybind11::bytes(jsonStr.data(), jsonStr.length());
+    } catch (...) {
+        // Descriptor is an enhancement; its failure degrades to "no descriptor".
+        return streamData;
+    }
+}
+
+/**
  * @brief Writes audio data to all bound service filter instances.
  *
  * @param action The action to perform on the audio.
@@ -352,8 +409,19 @@ Error Binder::writeJson(const json::Value &jsonData) noexcept {
  */
 Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
+    // Forward streamData as-is, except on BEGIN where we swap in the descriptor.
+    // The optional only ever *moves* in the built bytes (GIL-safe); it is never
+    // default-constructed, avoiding a py::bytes alloc without the GIL.
+    const pybind11::bytes *payload = &streamData;
+    std::optional<pybind11::bytes> descriptor;
+    if (action == AVI_ACTION::BEGIN && isStreamDescriptorEnabled()) {
+        descriptor.emplace(buildBeginPayload(m_pInstance, "AudioStream", mimeType,
+                                             m_pInstance->audioStreamIndex, streamData));
+        payload = &*descriptor;
+    }
+
     auto call = localfcn(auto pInstance)->Error {
-        return pInstance->writeAudio(action, mimeType, streamData);
+        return pInstance->writeAudio(action, mimeType, *payload);
     };
 
     auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
@@ -362,7 +430,7 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
             out["mimeType"] = mimeType;
 
             engine::python::LockPython lock;
-            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(payload->ptr());
         }
     };
 
@@ -379,8 +447,19 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
  */
 Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
+    // Forward streamData as-is, except on BEGIN where we swap in the descriptor.
+    // The optional only ever *moves* in the built bytes (GIL-safe); it is never
+    // default-constructed, avoiding a py::bytes alloc without the GIL.
+    const pybind11::bytes *payload = &streamData;
+    std::optional<pybind11::bytes> descriptor;
+    if (action == AVI_ACTION::BEGIN && isStreamDescriptorEnabled()) {
+        descriptor.emplace(buildBeginPayload(m_pInstance, "VideoStream", mimeType,
+                                             m_pInstance->videoStreamIndex, streamData));
+        payload = &*descriptor;
+    }
+
     auto call = localfcn(auto pInstance)->Error {
-        return pInstance->writeVideo(action, mimeType, streamData);
+        return pInstance->writeVideo(action, mimeType, *payload);
     };
 
     auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
@@ -389,7 +468,7 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
             out["mimeType"] = mimeType;
 
             engine::python::LockPython lock;
-            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(payload->ptr());
         }
     };
 

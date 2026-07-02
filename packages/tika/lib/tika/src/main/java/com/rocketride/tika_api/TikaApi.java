@@ -475,7 +475,10 @@ public final class TikaApi {
 				}
 
 				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
-				extractor.processEmbeddedMediaStream(duplicator.getBinaryStream(), mimeType);
+				// Standalone media: the dropped file IS the source (origin=ingested); the
+				// BEGIN carries the descriptor enrichment (source_mime + media detail).
+				byte[] beginPayload = EmbeddedContentExtractor.buildMediaDescriptorPayload(metadata, "ingested", mimeType, null);
+				extractor.processEmbeddedMediaStream(duplicator.getBinaryStream(), mimeType, beginPayload);
 
 			} else {
 				// Configure the parse context and encoding config
