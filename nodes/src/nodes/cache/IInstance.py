@@ -89,7 +89,13 @@ class IInstance(IInstanceBase):
             self.instance.writeQuestions(question)
             return
 
-        vector = embedder.embed(text)
+        try:
+            vector = embedder.embed(text)
+        except Exception as e:
+            debug(f'cache embedder failed: {e} — falling back to LLM')
+            self.instance.writeQuestions(question)
+            return
+
         cached = cache.lookup(vector, time.time())
 
         if cached is not None:
