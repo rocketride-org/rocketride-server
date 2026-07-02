@@ -59,7 +59,7 @@ struct BlobConfig {
     Text endpointSuffix = DefaultEndpointSuffix;
     std::vector<Text> containers;
     bool deleted = false;
-    bool scanAllContainers = false;
+    bool hasWildcardContainer = false;
 
     //---------------------------------------------------------------------
     /// @details
@@ -93,13 +93,12 @@ struct BlobConfig {
                     return ccode;
                 if (!path.empty()) {
                     Path includePath{path};
-                    auto firstSegment = includePath[0];
-                    // Wildcard in the container segment means "scan all
-                    // containers" — skip registering a specific container
-                    if (firstSegment.find('*') != string::npos ||
-                        firstSegment.find('?') != string::npos ||
-                        firstSegment.find('[') != string::npos) {
-                        blobConfig.scanAllContainers = true;
+                    Text firstSegment = includePath[0];
+                    // A wildcard container segment has no concrete container to
+                    // validate; Selections::resolve() strips it and
+                    // scanObjects() scans all containers for the account.
+                    if (ap::globber::containsWildcard(firstSegment)) {
+                        blobConfig.hasWildcardContainer = true;
                         continue;
                     }
                     Path container{includePath[0]};
@@ -119,7 +118,7 @@ struct BlobConfig {
         if (res.hasCcode()) return res.ccode();
         blobConfig.deleted = res.value();
 
-        if (!blobConfig.deleted && !blobConfig.scanAllContainers &&
+        if (!blobConfig.deleted && !blobConfig.hasWildcardContainer &&
             blobConfig.containers.empty())
             return APERR(Ec::InvalidParam, "Missing required container name");
 
