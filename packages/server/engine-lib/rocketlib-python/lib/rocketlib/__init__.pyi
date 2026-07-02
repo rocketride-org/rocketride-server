@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Prot
 
 class Ec:
     """Standard engine error codes (backed by C++ enum)."""
+
     NoErr: int
     AccessDenied: int
     AlreadyOpened: int
@@ -109,23 +110,23 @@ class Ec:
     Retry: int
     InvalidFilename: int
 
-
 class APERR(Exception):
     """Raised when an engine error occurs."""
+
     ec: Ec
     msg: str
 
-    def __init__(self, ec: Ec = ..., msg: str = "") -> None: ...
+    def __init__(self, ec: Ec = ..., msg: str = '') -> None: ...
     def check_raise(self) -> None: ...
     def toDict(self) -> Dict[str, str]: ...
     @staticmethod
-    def fromDict(data: Dict[str, str]) -> "APERR": ...
-
+    def fromDict(data: Dict[str, str]) -> 'APERR': ...
 
 # ---- types.py ----
 
 class PROTOCOL_CAPS:
     """Protocol capability flags (backed by C++ enum)."""
+
     SECURITY: int
     FILESYSTEM: int
     SUBSTREAM: int
@@ -145,9 +146,9 @@ class PROTOCOL_CAPS:
     @staticmethod
     def getProtocolCaps(protocol: str) -> int: ...
 
-
 class FLAGS:
     """Entry.flags bitmask values."""
+
     NONE: int
     INDEX: int
     CLASSIFY: int
@@ -158,9 +159,9 @@ class FLAGS:
     PERMISSIONS: int
     VECTORIZE: int
 
-
 class OPEN_MODE:
     """IEndpoint.openMode values."""
+
     NONE: int
     TARGET: int
     SOURCE: int
@@ -178,24 +179,24 @@ class OPEN_MODE:
     PIPELINE: int
     PIPELINE_CONFIG: int
 
-
 class SERVICE_MODE:
     """IEndpoint.serviceMode values."""
+
     NONE: int
     SOURCE: int
     TARGET: int
     NEITHER: int
 
-
 class ENDPOINT_MODE:
     """IEndpoint.endpointMode values."""
+
     NONE: int
     SOURCE: int
     TARGET: int
 
-
 class TAG_ID(Enum):
     """Stream tag identifiers."""
+
     INVALID = ...
     OBEG = ...
     OMET = ...
@@ -210,9 +211,9 @@ class TAG_ID(Enum):
     CMPR = ...
     HASH = ...
 
-
 class TAG:
     """Represents a binary stream tag."""
+
     tagId: str
     asBytes: bytes
     size: int
@@ -220,21 +221,21 @@ class TAG:
     value: str
 
     @staticmethod
-    def fromBytes(data: bytes) -> "TAG": ...
-
+    def fromBytes(data: bytes) -> 'TAG': ...
 
 class AVI_ACTION:
     """Action codes for media (audio/video/image) calls."""
+
     BEGIN: int
     WRITE: int
     END: int
-
 
 class IJson:
     """
     C++ json::Value wrapper exposed to Python via PyBind11.
     Supports dict-like and list-like access patterns.
     """
+
     @overload
     def __init__(self) -> None: ...
     @overload
@@ -242,7 +243,7 @@ class IJson:
     @overload
     def __init__(self, data: List[Any]) -> None: ...
     @overload
-    def __init__(self, data: "IJson") -> None: ...
+    def __init__(self, data: 'IJson') -> None: ...
     def keys(self) -> List[str]: ...
     def values(self) -> List[Any]: ...
     def items(self) -> List[tuple[str, Any]]: ...
@@ -262,17 +263,17 @@ class IJson:
     def clear(self) -> None: ...
     def toDict(self) -> Dict[str, Any] | List[Any] | Any: ...
 
-
 class IDict(dict[str, Any]):
     """Engine-managed dictionary (subclass of Python dict)."""
-    ...
 
+    ...
 
 class Entry:
     """
     Metadata record for a single object passing through the pipe.
     The actual runtime type is the C++ Entry exposed via PyBind11.
     """
+
     accessTime: int
     attrib: int
     changeKey: str
@@ -344,7 +345,6 @@ class Entry:
     def toDict(self) -> Dict[str, Any]: ...
     def fromDict(self, data: Dict[str, Any]) -> None: ...
 
-
 def getObject(
     filename: Optional[str] = None,
     defaultUrl: Optional[str] = None,
@@ -353,25 +353,24 @@ def getObject(
     """Create a fully-initialised Entry object ready to inject into a pipe."""
     ...
 
-
 # ---- Pydantic control-plane models ----
 
 class IControl:
     """Base model for engine control-channel messages."""
+
     control: str
     result: Any
 
-
 class IInvokeOp:
     """Base class for invoke operation inner classes."""
+
     lane: str
     type: str  # computed from __qualname__
 
-
 class IInvoke(IControl):
     """Envelope for invoke control-plane messages."""
-    control: str
 
+    control: str
 
 class IInvokeLLM(IInvoke):
     """LLM invoke operations namespace."""
@@ -392,7 +391,6 @@ class IInvokeLLM(IInvoke):
     class GetTokenCounter(IInvokeOp):
         lane: str
         op: str
-
 
 class IInvokeTool(IInvoke):
     """Tool invoke operations namespace."""
@@ -415,7 +413,6 @@ class IInvokeTool(IInvoke):
         tool_name: str
         input: Any
 
-
 class IInvokeMemory(IInvokeTool):
     """Memory invoke operations namespace (routes through tool lane)."""
 
@@ -435,7 +432,6 @@ class IInvokeMemory(IInvokeTool):
         lane: str
         tool_name: str
 
-
 class IInvokeCrew(IInvoke):
     """Crew/multi-agent invoke operations namespace."""
 
@@ -454,7 +450,6 @@ class IInvokeCrew(IInvoke):
         node_id: str
         invoke: Any
 
-
 class IInvokeDeepagent(IInvoke):
     """DeepAgent invoke operations namespace."""
 
@@ -471,21 +466,19 @@ class IInvokeDeepagent(IInvoke):
         node_id: str
         invoke: Any
 
-
 # ---- filters.py ----
 
 class ToolDescriptor(TypedDict, total=False):
     """Canonical tool descriptor returned by tool.query."""
+
     name: str
     description: str
     inputSchema: Dict[str, Any]
     outputSchema: Dict[str, Any]
 
-
 def invoke_function(fn: Callable) -> Callable:
     """Decorator: mark a method as an invoke handler (op name = method name)."""
     ...
-
 
 def tool_function(
     *,
@@ -496,36 +489,34 @@ def tool_function(
     """Decorator: mark a method as a tool entry point discoverable by agents."""
     ...
 
-
 def normalize_tool_input(
     input_obj: Any,
     *,
     extra_envelope_keys: Iterable[str] = (),
-    strip_keys: Iterable[str] = ("security_context",),
+    strip_keys: Iterable[str] = ('security_context',),
     parse_json_strings: bool = True,
     unwrap_pydantic: bool = True,
-    tool_name: str = "tool",
+    tool_name: str = 'tool',
 ) -> Dict[str, Any]:
     """Coerce agent-supplied tool input to a plain args dict."""
     ...
 
-
-def require_str(args: Dict[str, Any], key: str, *, tool_name: str = "") -> str: ...
+def require_str(args: Dict[str, Any], key: str, *, tool_name: str = '') -> str: ...
 def require_int(
     args: Dict[str, Any],
     key: str,
     *,
     lo: Optional[int] = None,
     hi: Optional[int] = None,
-    tool_name: str = "",
+    tool_name: str = '',
 ) -> int: ...
-def require_bool(args: Dict[str, Any], key: str, *, tool_name: str = "") -> bool: ...
+def require_bool(args: Dict[str, Any], key: str, *, tool_name: str = '') -> bool: ...
 def optional_str(
     args: Dict[str, Any],
     key: str,
     *,
     default: Any = None,
-    tool_name: str = "",
+    tool_name: str = '',
 ) -> Any: ...
 def optional_int(
     args: Dict[str, Any],
@@ -534,22 +525,21 @@ def optional_int(
     default: Any = None,
     lo: Optional[int] = None,
     hi: Optional[int] = None,
-    tool_name: str = "",
+    tool_name: str = '',
 ) -> Any: ...
 def optional_bool(
     args: Dict[str, Any],
     key: str,
     *,
     default: Any = None,
-    tool_name: str = "",
+    tool_name: str = '',
 ) -> Any: ...
 def validate_tool_input_schema(
     input_schema: Dict[str, Any],
     args: Dict[str, Any],
     *,
-    tool_name: str = "",
+    tool_name: str = '',
 ) -> None: ...
-
 
 class IServiceEndpoint(Protocol):
     """Engine-side endpoint interface (C++ side, accessed via self.endpoint)."""
@@ -582,20 +572,21 @@ class IServiceEndpoint(Protocol):
     commonTargetPath: str
     exportUpdateBehavior: int
     exportUpdateBehaviorName: str
-    jobConfig: "IServiceEndpoint.IServiceEndpoint_JobConfig"
+    jobConfig: 'IServiceEndpoint.IServiceEndpoint_JobConfig'
     taskConfig: Dict[str, Any]
-    serviceConfig: "IServiceEndpoint.IServiceEndpoint_ServiceConfig"
+    serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig'
     parameters: Dict[str, Any]
     bag: Dict[str, Any]
     target: Any
     debugger: Any
 
     def insertFilter(self, filterName: str, filterConfig: Dict[str, Any]) -> None: ...
-    def getToken(self, serviceConfig: "IServiceEndpoint.IServiceEndpoint_ServiceConfig", key: str) -> str: ...
-    def setToken(self, serviceConfig: "IServiceEndpoint.IServiceEndpoint_ServiceConfig", key: str, value: str) -> None: ...
-    def getPipe(self) -> "IServiceFilterPipe": ...
-    def putPipe(self, pipe: "IServiceFilterPipe") -> None: ...
-
+    def getToken(self, serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig', key: str) -> str: ...
+    def setToken(
+        self, serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig', key: str, value: str
+    ) -> None: ...
+    def getPipe(self) -> 'IServiceFilterPipe': ...
+    def putPipe(self, pipe: 'IServiceFilterPipe') -> None: ...
 
 class IServiceFilterPipe(Protocol):
     """Full engine filter-pipe interface (source + target combined)."""
@@ -608,9 +599,9 @@ class IServiceFilterPipe(Protocol):
         connConfig: Dict[str, Any]
 
     currentObject: Entry
-    pipeType: "IServiceFilterPipe.IServiceFilterInstance_PipeType"
+    pipeType: 'IServiceFilterPipe.IServiceFilterInstance_PipeType'
     pipeId: int
-    next: Optional["IServiceFilterPipe"]
+    next: Optional['IServiceFilterPipe']
     targetObjectPath: str
     targetObjectUrl: str
 
@@ -647,7 +638,7 @@ class IServiceFilterPipe(Protocol):
     def hasListener(self, lane: str) -> bool: ...
     def getListeners(self) -> List[str]: ...
     def getControllerNodeIds(self, classType: str) -> List[str]: ...
-    def control(self, filter: str, control: IControl, nodeId: str = "") -> None: ...
+    def control(self, filter: str, control: IControl, nodeId: str = '') -> None: ...
     def open(self, obj: Entry) -> None: ...
     def writeTag(self, tag: Any) -> None: ...
     def writeTagBeginObject(self) -> None: ...
@@ -674,12 +665,12 @@ class IServiceFilterPipe(Protocol):
     def close(self) -> None: ...
 
     # Monkey-patched by _patch_classes() in filters.py
-    def invoke(self, param: Any, component_id: str = "") -> Any: ...
+    def invoke(self, param: Any, component_id: str = '') -> Any: ...
     def sendSSE(self, type: str, **data: Any) -> None: ...
-
 
 class IEndpointBase:
     """Base class for all Python endpoint implementations."""
+
     endpoint: IServiceEndpoint
 
     def preventDefault(self) -> None: ...
@@ -690,9 +681,9 @@ class IEndpointBase:
     def scanObjects(self, path: str, callback: Callable[[Dict[str, Any]], int]) -> None: ...
     def endEndpoint(self) -> None: ...
 
-
 class IGlobalBase:
     """Base class for all Python global driver implementations."""
+
     IEndpoint: IEndpointBase
     glb: Any  # IFilterGlobal Protocol — logicalType, physicalType, connConfig
 
@@ -700,9 +691,9 @@ class IGlobalBase:
     def beginGlobal(self) -> None: ...
     def endGlobal(self) -> None: ...
 
-
 class IInstanceBase:
     """Base class for all Python instance driver implementations."""
+
     IEndpoint: IEndpointBase
     IGlobal: IGlobalBase
     instance: IServiceFilterPipe
@@ -745,24 +736,23 @@ class IInstanceBase:
     def _tool_invoke_dynamic(self, *, tool_name: str, input_obj: Any) -> Any: ...
     def _tool_config_description(self) -> str: ...
 
-
 class ILoader(Protocol):
     """Creates / destroys pipes; used for loading operations."""
+
     target: IEndpointBase
 
     def beginLoad(self, pipeConfig: Dict[str, Any]) -> None: ...
     def endLoad(self) -> None: ...
 
-
 # ---- engine.py ----
 
 class Lvl(Enum):
     """Engine trace/logging levels."""
+
     Python = ...
     Remoting = ...
     DebugOut = ...
     DebugProtocol = ...
-
 
 def args() -> List[str]:
     """Return the original command-line arguments."""
@@ -864,41 +854,38 @@ def outputException() -> None:
     """Log the current exception in human-readable form."""
     ...
 
-
 # ---- C++ engLib classes (imported directly in __init__.py) ----
 
 class IPipeType:
     """Pipeline node metadata (C++ class exposed via PyBind11)."""
+
     id: str
     logicalType: str
     physicalType: str
     connConfig: IJson
 
-
 class IOBuffer:
     """Target-mode I/O buffer (C++ class exposed via PyBind11)."""
+
     name: str
     segmentId: int
     data: bytes
 
-
 class Paths:
     """Static configuration paths (C++ class exposed via PyBind11)."""
+
     DATA: str
     CACHE: str
     CONTROL: str
     LOG: str
-
-
-
 
 class Filters:
     """
     C++ Filters helper class exposed by engLib.
     Provides utility methods for operating on filter pipelines.
     """
-    ...
 
+    ...
 
 # ---- Public re-export declarations (mirrors __all__) ----
 
