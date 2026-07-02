@@ -53,6 +53,7 @@ from ai.constants import (
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.modules.task.pipeflow import apply_pipeflow_event
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
@@ -1070,25 +1071,21 @@ class Task(DAPBase):
 
             self._status.pipeflow.totalPipes = total_pipes
 
-            if pipe_index not in self._status.pipeflow.byPipe:
-                self._status.pipeflow.byPipe[pipe_index] = []
+            # Update the per-pipe execution stack and get a stable snapshot chain.
+            # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
+            # snapshot is copied (reentrant sub-invocations share one pipe_index and
+            # interleave across threads).
+            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_index, operation, component_name)
 
-            # Update execution stack
-            if operation == 'begin':
-                self._status.pipeflow.byPipe[pipe_index] = [component_name]
-            elif operation == 'enter':
-                self._status.pipeflow.byPipe[pipe_index].append(component_name)
-            elif operation == 'leave':
-                if self._status.pipeflow.byPipe[pipe_index]:
-                    self._status.pipeflow.byPipe[pipe_index].pop()
-            elif operation == 'end':
-                self._status.pipeflow.byPipe[pipe_index] = []
-
-            # Build the flow event
+            # Build the flow event. `component` names the component this op refers to
+            # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
+            # rather than assuming strict LIFO order — reentrant agent sub-invocations
+            # interleave under one pipe_index. `pipes` remains the current component stack.
             body = {
                 'id': pipe_index,
                 'op': operation,
-                'pipes': self._status.pipeflow.byPipe[pipe_index],
+                'pipes': pipes,
+                'component': component_name,
                 'trace': trace or {},
                 'project_id': self.project_id,
                 'source': self.source,

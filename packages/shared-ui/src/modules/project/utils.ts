@@ -54,6 +54,7 @@ export function parseServerEvent(event: unknown, projectId: string): ParsedServe
 			pipelineId: body.id ?? 0,
 			op: body.op || 'enter',
 			pipes: body.pipes || [],
+			component: body.component,
 			trace: body.op === 'end' ? {} : body.trace || {},
 			source: body.source,
 			...(body.op === 'end' && body.trace && Object.keys(body.trace).length > 0 ? { pipelineResult: body.trace } : {}),
