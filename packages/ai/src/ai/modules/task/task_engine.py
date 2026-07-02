@@ -1543,6 +1543,14 @@ class Task(DAPBase):
                         child_args.append(arg)
                         break
 
+            # Inherit parent engine's --node_path so workspace-local nodes load
+            # in the task subprocess too (Opt reads argv only, not the env).
+            if not any(a.startswith('--node_path=') for a in child_args):
+                for arg in startup_args():
+                    if arg.startswith('--node_path='):
+                        child_args.append(arg)
+                        break
+
             await self._send_status_update()
 
             # Launch subprocess - pass environment with account context for store access

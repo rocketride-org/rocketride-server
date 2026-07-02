@@ -237,9 +237,20 @@
 			"title": "Tokens",
 			"description": "Total Tokens"
 		},
+		"temperature": {
+			"type": "number",
+			"title": "Temperature",
+			"description": "Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior."
+		},
+		"reasoning_effort": {
+			"type": "string",
+			"title": "Reasoning Effort",
+			"description": "Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models.",
+			"enum": ["low", "medium", "high"]
+		},
 		"ollama.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.local.serverbase"]
+			"properties": ["model", "modelTotalTokens", "temperature", "reasoning_effort", "llm.local.serverbase"]
 		},
 		"ollama.llama3_3": {
 			"object": "llama3_3",

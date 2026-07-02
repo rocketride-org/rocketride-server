@@ -291,19 +291,26 @@ When extending the engine with Python (custom nodes, filter callbacks), Pydantic
 
 ### Tika Media Parsing: External Tool Requirements
 
-Tika's `CompositeExternalParser` (auto-registered via `tika-parsers-standard-package`) shells out to external command-line tools for media metadata extraction. These tools must be installed and available on `PATH`:
+Media files work out of the box: the engine's built-in Java parsers (`Mp4Parser`/`Mp3Parser`/`AudioParser`) extract basic metadata (duration, codec, sample rate, dimensions) and deliver the media stream, with **no external tools required**.
 
-| Tool         | Handles                                                   | Required for      |
-| ------------ | --------------------------------------------------------- | ----------------- |
-| **ffmpeg**   | `video/avi`, `video/mpeg`, `video/x-msvideo`              | AVI/MPEG metadata |
-| **exiftool** | `video/mp4`, `video/avi`, `video/mpeg`, `video/x-msvideo` | MP4 metadata      |
-| **sox**      | `audio/*` (mp3, wav, ogg, and others)                     | Audio metadata    |
+For **extended** metadata, Tika can additionally use external command-line tools via `CompositeExternalParser`. These are **optional** — install all three (and ensure `env` is on `PATH`, non-Windows) to enable them:
 
-**If these tools are absent, `CompositeExternalParser` throws a `TikaException` that aborts the entire file extraction, including the media stream delivery to Python nodes.** No warning is shown in the engine UI; the exception is caught and silently logged by the Java layer.
+| Tool         | Provides extended metadata for                            |
+| ------------ | --------------------------------------------------------- |
+| **ffmpeg**   | `video/avi`, `video/mpeg`, `video/x-msvideo`              |
+| **exiftool** | `video/mp4`, `video/avi`, `video/mpeg`, `video/x-msvideo` |
+| **sox**      | `audio/*` (mp3, wav, ogg, and others)                     |
 
-When a required tool is missing, the OS fails to start the process, producing an `IOException` which Tika wraps into a `TikaException`. Note that `ExternalParser.check()` is a static utility method and is **not** automatically invoked during parsing, the failure surfaces at process-launch time, not during a pre-flight check.
+The external parsers shell out via the Unix `env` shim; if `env` or a required tool is missing, the process fails to launch and Tika raises a `TikaException`. Historically that aborted the entire extraction — **including media stream delivery**, so a standalone video/audio file produced no frames at all (the exception was caught and only logged).
 
-**To disable external parsers** (when the tools are not installed), add the following to `tika-config.xml`:
+**This is now handled automatically — no configuration required.** The engine's Tika layer does two things:
+
+1. **Auto-detect + fallback (`ConfigBuilder.getConfig`).** At config-build time the engine probes for the external tools. It keeps the external parsers **only when the full toolchain is present** — `env` **and** `ffmpeg` **and** `exiftool` **and** `sox`; if **any** is missing it excludes `ExternalParser`/`CompositeExternalParser` and falls back to the built-in parsers for everything. This all-or-nothing rule avoids a mixed state where a kept external parser throws for a file whose specific tool is absent. The tools launch via the Unix `env` shim on **every** platform, so `env` is probed everywhere (not just Windows); on Windows `env` is absent, so the built-in parsers are always used there.
+2. **Decoupled streaming (`TikaApi.extractInformation`).** Metadata extraction for a standalone media file runs in its own `try/catch`, so even if a parser throws, the media bytes are still streamed. Media delivery no longer depends on metadata-parse success.
+
+**To get extended file metadata:** install `ffmpeg`, `exiftool`, and `sox` (all three) on `PATH`, on a non-Windows host (so `env` resolves). Otherwise the built-in parsers are used, which still provide solid basic metadata and always deliver the media stream.
+
+**Manual override** is still honored: an explicit `<parser-exclude>` in `tika-config.xml` is respected as-is (the auto-detect skips its probe for any parser already excluded):
 
 ```xml
 <properties>
@@ -315,8 +322,6 @@ When a required tool is missing, the OS fails to start the process, producing an
   </parsers>
 </properties>
 ```
-
-This causes Tika to fall back to its built-in Java parsers (e.g. `Mp4Parser`) which handle media streams without any external tools.
 
 ---
 

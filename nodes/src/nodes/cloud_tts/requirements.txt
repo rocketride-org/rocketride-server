@@ -1,0 +1,3 @@
+# Cloud TTS (OpenAI / ElevenLabs): direct HTTPS calls to the vendor endpoints.
+# Declares the dependency only; uses the requests already present in the project.
+requests
