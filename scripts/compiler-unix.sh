@@ -60,7 +60,7 @@ LINUX_DEPS=(
     "|python3-devel"                        # fedora: cffi/cryptography/Cython sdist builds
     "make"
     "ninja-build"
-    "cmake"                                 # supported distros ship cmake >= 3.19
+    "cmake"                                 # version gated (>= 3.19) by check_linux_cmake
     "git"
     "|gcc"                                  # fedora: sdist C extensions
     "|gcc-c++"                              # fedora: sdist C++ extensions
@@ -364,6 +364,29 @@ check_linux_python() {
     fi
 }
 
+check_linux_cmake() {
+    # Version gate only (mirrors check_linux_python): a cmake already on the
+    # system that is older than 3.19 can't be upgraded by the package manager on
+    # older distros (Ubuntu 20.04 ships 3.16), so fail fast with a clear message
+    # instead of a confusing configure-time error. If cmake is absent it's
+    # installed via the dependency list.
+    command_exists cmake || return 0
+
+    local CMAKE_VERSION CMAKE_MAJOR CMAKE_MINOR
+    CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
+    CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
+    CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
+    if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
+        echo ""
+        echo "=========================================="
+        echo "ERROR: CMake version $CMAKE_VERSION is too old!"
+        echo "Minimum required version: CMake 3.19"
+        echo "=========================================="
+        echo ""
+        exit 1
+    fi
+}
+
 # apt and dnf share ALL the dependency machinery below. The ONLY per-distro
 # inputs are the package LIST (apt|dnf columns of LINUX_DEPS) and three tiny
 # primitives: test-installed, install-set, point-cc-at-clang. The loop,
@@ -452,7 +475,8 @@ setup_cc_alternatives() {
 # The one general check: same flow for every distro; only the list + primitives differ.
 check_dependencies() {
     local mgr="$1"
-    check_linux_python  # hard version gate (>=3.10), distro-agnostic
+    check_linux_python  # hard version gate (python >= 3.10), distro-agnostic
+    check_linux_cmake   # hard version gate (cmake >= 3.19), distro-agnostic
 
     # Package set = shared LINUX_DEPS column + the compiler packages the
     # select_*_triplet chose. This list is the ONLY per-distro input.
